@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use super::{ExecutionBound, ExecutionBounds, RlmAbilities, RlmLanguageFeatures};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -18,11 +16,6 @@ pub struct RlmProtocolPluginConfig {
     pub max_output_chars: usize,
     #[serde(default = "default_continue_as_soft_warn_tokens")]
     pub continue_as_soft_warn_tokens: Option<usize>,
-    /// Host-local roots removed from model-visible execution errors at capture
-    /// time. `None` captures the factory process's cwd and HOME once;
-    /// `Some([])` explicitly disables path redaction.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub redaction_roots: Option<Vec<PathBuf>>,
 }
 
 fn default_max_output_chars() -> usize {
@@ -48,7 +41,6 @@ impl RlmProtocolPluginConfig {
             lashlang_language_features: RlmLanguageFeatures::default(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
-            redaction_roots: None,
         }
     }
 
@@ -66,12 +58,6 @@ impl RlmProtocolPluginConfig {
         language_features: impl Into<RlmLanguageFeatures>,
     ) -> Self {
         self.lashlang_language_features = language_features.into();
-        self
-    }
-
-    /// Use explicit, deployment-stable roots for capture-time error redaction.
-    pub fn with_redaction_roots(mut self, roots: Vec<PathBuf>) -> Self {
-        self.redaction_roots = Some(roots);
         self
     }
 }

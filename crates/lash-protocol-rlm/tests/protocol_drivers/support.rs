@@ -42,7 +42,7 @@ pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> T
 /// hold in a session that is not the default dialect.
 pub(crate) fn test_config_with_dialect(language: &str) -> TurnMachineConfig {
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
-        Arc::new(RlmDriver::for_language(Arc::from([]), language));
+        Arc::new(RlmDriver::for_language(language));
     TurnMachineConfig {
         protocol_driver,
         ..test_config()
@@ -989,8 +989,7 @@ pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
                 lashlang::ExecutionBound::Unbounded,
                 lashlang::ExecutionBound::Unbounded,
                 lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
-            )
-            .with_redaction_roots(Vec::new()),
+            ),
             lashlang::global_in_memory_lashlang_artifact_store(),
         )
         .with_process_lifecycle(false),

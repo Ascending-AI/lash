@@ -1,7 +1,6 @@
 use lash_sansio::sync::RwLockExt;
 pub(crate) mod history;
 
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 #[cfg(test)]
@@ -38,7 +37,6 @@ pub struct RlmProjectorConfig {
     pub last_prompt_usage: SharedPromptUsage,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub lashlang_surface: LashlangSurface,
-    pub redaction_roots: Arc<[PathBuf]>,
 }
 
 pub(crate) struct RlmPreambleConfig {
@@ -46,7 +44,6 @@ pub(crate) struct RlmPreambleConfig {
     pub(crate) max_budget_tokens: Option<usize>,
     pub(crate) last_prompt_usage: SharedPromptUsage,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
-    pub(crate) redaction_roots: Arc<[PathBuf]>,
 }
 
 impl Default for RlmProjectorConfig {
@@ -57,7 +54,6 @@ impl Default for RlmProjectorConfig {
             last_prompt_usage: Arc::new(RwLock::new(None)),
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_surface: LashlangSurface::default(),
-            redaction_roots: Arc::from([]),
         }
     }
 }
@@ -91,7 +87,6 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
             max_budget_tokens: config.max_budget_tokens,
             last_prompt_usage: config.last_prompt_usage,
             prompt_features: config.prompt_features,
-            redaction_roots: config.redaction_roots,
         },
         bound_variables_prompt,
         dialect,
@@ -117,10 +112,9 @@ pub(crate) fn build_rlm_preamble_with_dialect(
     let turn_limit_dialect = Arc::clone(&dialect);
     TurnDriverPreamble {
         config: TurnDriverConfig {
-            protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(
-                Arc::clone(&config.redaction_roots),
-                Arc::clone(&dialect),
-            )),
+            protocol: Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
+                &dialect,
+            ))),
             projector: Arc::new(RlmContextProjector {
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,

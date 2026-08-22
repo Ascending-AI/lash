@@ -6392,7 +6392,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::event_type", "lash_core::TurnCause::event_type"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1200#event_type: \"process.wake\".to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1194#event_type: \"process.wake\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6402,7 +6402,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::id", "lash_core::TurnCause::id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1199#id: \"wake:abc\".to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1193#id: \"wake:abc\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6412,7 +6412,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::origin", "lash_core::TurnCause::origin"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1201#origin: lash_core::MessageOrigin::Process {"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1195#origin: lash_core::MessageOrigin::Process {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -6422,7 +6422,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnCause::text", "lash_core::TurnCause::text"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:1208#text: \"Background process wake\\nProcess: process-1\\nEvent: process.wake #7\\nWake input:\\nblue button pressed\".to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:1202#text: \"Background process wake\\nProcess: process-1\\nEvent: process.wake #7\\nWake input:\\nblue button pressed\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -45200,14 +45200,6 @@ disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::prompt_features to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::rlm::RlmProtocolPluginConfig::redaction_roots"
-kind = "field"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add explicit RLM redaction roots to the agent-workbench plugin setup example and assert that captured model-visible errors omit only those roots."
-
-[[api]]
 symbol = "lash::rlm::RlmProtocolPluginConfig::with_lashlang_abilities"
 kind = "function"
 availability = "all-features"
@@ -45222,14 +45214,6 @@ availability = "all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::with_lashlang_language_features to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::rlm::RlmProtocolPluginConfig::with_redaction_roots"
-kind = "function"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add the RLM redaction-root builder to the agent-workbench plugin setup example and assert its capture-time projection result."
 
 [[api]]
 symbol = "lash::rlm::RlmProtocolPluginFactory"
@@ -68518,7 +68502,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/driver.rs:306#fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {"
+usage = "crates/lash-protocol-rlm/src/driver.rs:300#fn project(&self, ctx: ProjectorContext<'_>) -> Arc<LlmRequest> {"
 
 [[api]]
 symbol = "lash_core::PromptSlotLayer"
@@ -68638,7 +68622,7 @@ kind = "field"
 availability = "default+all-features"
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:200#trigger_events: Default::default(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:194#trigger_events: Default::default(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70845,7 +70829,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:573#id: id.to_string(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:567#id: id.to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70854,7 +70838,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:576#origin: None,"
+usage = "crates/lash-protocol-rlm/src/driver.rs:570#origin: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70863,7 +70847,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:575#parts: vec![Part::text(format!(\"{id}.p0\"), text.to_string(), None)].into(),"
+usage = "crates/lash-protocol-rlm/src/driver.rs:569#parts: vec![Part::text(format!(\"{id}.p0\"), text.to_string(), None)].into(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70872,7 +70856,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/driver.rs:574#role: MessageRole::User,"
+usage = "crates/lash-protocol-rlm/src/driver.rs:568#role: MessageRole::User,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -72948,7 +72932,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:737#DriverAction::Emit(SessionStreamEvent::Error {"
+usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:718#DriverAction::Emit(SessionStreamEvent::Error {"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::Error::envelope"
@@ -73087,7 +73071,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:502#actions.push(DriverAction::Emit(SessionStreamEvent::Message {"
+usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:493#actions.push(DriverAction::Emit(SessionStreamEvent::Message {"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::Message::kind"
@@ -73103,7 +73087,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:503#text: cell.code.clone(),"
+usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:494#text: cell.code.clone(),"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::PluginEvent"
@@ -73248,7 +73232,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:926#SessionStreamEvent::ToolCall {"
+usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:907#SessionStreamEvent::ToolCall {"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::ToolCall::args"
@@ -73273,7 +73257,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:931#duration_ms: record.duration_ms,"
+usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:912#duration_ms: record.duration_ms,"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::ToolCall::name"
@@ -73281,7 +73265,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:928#name: record.tool,"
+usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:909#name: record.tool,"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::ToolCall::output"
@@ -73289,7 +73273,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:930#output: record.output,"
+usage = "crates/lash-protocol-rlm/src/protocol/driver.rs:911#output: record.output,"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::ToolCallStart"
@@ -91835,7 +91819,7 @@ kind = "function"
 availability = "all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/driver.rs:393#let termination = options.effective_termination();"
+usage = "crates/lash-protocol-rlm/src/driver.rs:387#let termination = options.effective_termination();"
 reason = "Resolves the absent-means-Natural default at the point of use, consumed by the RLM driver's prompt projection; a host reads the recorded value through RlmSessionConfig instead."
 
 [[api]]

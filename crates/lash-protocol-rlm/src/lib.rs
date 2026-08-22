@@ -12,7 +12,6 @@ mod feedback;
 mod plugin;
 mod projection;
 mod protocol;
-mod public_error;
 mod rlm_support;
 pub mod scenario_contracts;
 mod stream_mask;

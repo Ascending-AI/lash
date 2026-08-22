@@ -23,12 +23,6 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
                 last_prompt_usage: Arc::clone(&self.last_prompt_usage),
                 prompt_features: self.config.prompt_features,
-                redaction_roots: self
-                    .config
-                    .redaction_roots
-                    .clone()
-                    .unwrap_or_default()
-                    .into(),
             },
             Arc::clone(&self.bound_variables_prompt),
             Arc::clone(&self.dialect),
