@@ -118,6 +118,15 @@ pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> 
         err @ crate::store::StoreError::RecordEncodingFailed { .. } => {
             RuntimeError::new(RuntimeErrorCode::RecordEncodingFailed, err.to_string())
         }
+        // ADR 0069 §5(d): a driver that settled the row it accepted without a
+        // claim, and found that row held or already settled, ceded at the head
+        // CAS. Nothing durable was written: a stand-down, not a commit fault.
+        err @ crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. } => {
+            RuntimeError::new(
+                RuntimeErrorCode::TurnInputSettlementSuperseded,
+                err.to_string(),
+            )
+        }
         crate::store::StoreError::SessionExecutionLeaseExpired { session_id } => RuntimeError::new(
             RuntimeErrorCode::SessionExecutionLeaseLost,
             format!("session execution lease for session `{session_id}` was lost before commit"),

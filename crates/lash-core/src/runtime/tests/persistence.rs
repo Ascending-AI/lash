@@ -1078,6 +1078,17 @@ async fn in_memory_direct_turn_acceptance_mints_no_idempotency_key() {
 }
 
 #[tokio::test]
+async fn in_memory_unclaimed_settlement_loser_yields_to_the_successor() {
+    Box::pin(
+        crate::testing::conformance::unclaimed_settlement_loser_yields_to_the_successor(
+            "in-memory",
+            Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+        ),
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn in_memory_unclaimed_turn_input_settlement_is_a_conditional_write() {
     Box::pin(
         crate::testing::conformance::unclaimed_turn_input_settlement_is_a_conditional_write(

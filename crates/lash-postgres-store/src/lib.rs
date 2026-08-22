@@ -774,6 +774,8 @@ mod support;
 pub mod testing;
 #[path = "postgres/trigger_store.rs"]
 mod trigger_store;
+#[path = "postgres/turn_input_settlement.rs"]
+mod turn_input_settlement;
 
 pub use effect_replay::{
     PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
@@ -788,7 +790,10 @@ pub use schema_shape::{
     ColumnShape, ColumnValueSource, ForeignKeyAction, ForeignKeyShape, SchemaCheck, SchemaFinding,
     SchemaProvisioning, SchemaReport, UniqueGuard,
 };
-use {process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*};
+use {
+    process_helpers::*, runtime_persistence::*, schema::*, session_factory::*, support::*,
+    turn_input_settlement::*,
+};
 
 /// Extracts the schema-gate knobs one open should use from a store config.
 fn schema_open_options(config: &PostgresStoreConfig) -> SchemaOpenOptions {

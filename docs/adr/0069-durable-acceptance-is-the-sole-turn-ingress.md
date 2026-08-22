@@ -209,16 +209,38 @@ of a settlement is the session and the rows, which is what it always was.
 Introducing an "unclaimed" marker into the intent would change replay hashing for
 every commit, including the ones that never had a choice of regime.
 
-**(d) Supersession.** ADR 0029's recovered-settlement drop rule keys on lease
-generation: a settlement whose claim generation has been superseded is dropped
-and retried under the current one. An unclaimed settlement has **no generation**,
-so it has no generation to be superseded at, and the rule does not apply to it.
-Its semantics are therefore *lose, do not retry*: it is a distinct typed error,
-and the losing driver retires its turn at its **first** commit attempt rather
-than looping. This is what decides the recovery-claim-versus-live-driver race —
-if an ActiveTurn-mode recovery claims the row while a lane-less driver is mid
-turn, the CAS decides at the loser's first commit and the loser reports failure.
+**(d) Supersession, and what the loser does about it.** ADR 0029's
+recovered-settlement drop rule keys on lease generation: a settlement whose claim
+generation has been superseded is dropped and retried under the current one. An
+unclaimed settlement has **no generation**, so it has no generation to be
+superseded at, and the rule does not apply to it. Its semantics are therefore
+*lose, do not retry*: it is a distinct typed error, and the losing driver retires
+its turn at its **first** commit attempt rather than looping. This is what decides
+the recovery-claim-versus-live-driver race — if a recovery claims the row while a
+lane-less driver is mid turn, the CAS decides at the loser's first commit.
 Liveness is never guessed.
+
+Losing is not failing. The loser **cedes**, and ceding has a defined shape:
+
+* it does **not** retry the settlement, and it does **not** re-commit the turn's
+  content under any other authority — the settlement is attempted once, and once
+  only, per drive attempt;
+* nothing durable was written, so the row is left exactly as its holder expects
+  to find it and the session's record is untouched;
+* the whole drive attempt is retired as **superseded**, surfaced as one typed
+  runtime outcome — `turn_input_settlement_superseded` — and never as a generic
+  commit fault.
+
+That outcome is **retryable by contract**, and the two words together are the
+point. The drive attempt is over; the *admission* is not, because acceptance is
+durable and journaled (section 6). So re-running the identical turn is explicitly
+safe and is how a durable engine obtains the result: replay re-derives the same
+acceptance identity, and from there either drives the row or finds it settled and
+replays the original commit's receipt. A host that treats this outcome as a
+terminal failure turns ordinary failover — where the accepted row is momentarily
+held by a driver that has gone away — into a user-visible fault, which is exactly
+what this section exists to prevent. The `Restate + Postgres + MinIO Workers`
+failover scenario is the behavioural witness.
 
 ### 6. Acceptance is journaled, so engine replay re-derives it
 
@@ -233,14 +255,33 @@ call. On first execution the engine journals the acceptance and its result; on
 replay the engine returns the journaled result and lash re-derives the admission
 instead of re-performing it. The algebra is the same one the effect host already
 uses for provisioned effects: the acceptance identity is provisioned and stable
-across replays, an already-settled identity is skipped, the committed successor
-result is the predicate that prevents a second redemption, and an intent is
-fulfilled if and only if its result exists.
+across replays, the committed successor result is the predicate that prevents a
+second redemption, and an intent is fulfilled if and only if its result exists.
 
-This is the second regime's replay story and it introduces no third one. There is
-no lease-generation fencing for direct turns — that would be a third authority
-beside the claim predicate and the head CAS, and the point of section 5 is that
-there are exactly two regimes with one authority.
+"An already-settled identity is skipped" is the *effect* the replay delivers, not
+the mechanism, and the difference matters. Lash has no way to hand a caller back
+a turn it never ran, so a replay whose acceptance is already settled **redrives**
+the turn and lets the commit-identity receipt recognise it: the re-derived commit
+hashes to the same `turn_commit_hash`, and the store replays the original result
+instead of writing a second one. The redrive therefore has to re-derive the same
+turn, which means the same rows — a first execution that held the lane may have
+absorbed every earlier claimed row into one turn, and the replay reconstructs
+that set from the durable applications the first execution wrote rather than
+naming its own row alone. Where the set cannot be reconstructed, the replay fails
+loudly on the commit-identity conflict rather than quietly committing a different
+turn under the same identity.
+
+A loser that cedes (section 5(d)) reaches the same place from the other side: its
+drive attempt is retired, and the re-run that follows lands in this paragraph.
+
+This is the second regime's replay story and it introduces no third one.
+Acceptance replay adds **no third authority** beside the claim predicate and the
+head CAS. To be precise about what that does and does not say: a direct turn
+that takes the advisory lane claims its row through the same generation-fenced
+`claim_next_turn_inputs` a drain uses, so it *is* lease-generation fenced —
+that is the claimed regime, unchanged. What section 6 rules out is a *separate*
+generation fence attached to acceptance replay itself, on top of the two
+regimes section 5 defines.
 
 ### The residual duplicate-execution window
 

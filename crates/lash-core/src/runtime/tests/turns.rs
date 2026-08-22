@@ -5031,6 +5031,17 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         .await
         .expect("retained lease chain succeeds");
     assert_eq!(run.turns.len(), 2);
+    // ADR 0069: one acceptance admitted this run, and it admitted exactly the
+    // physical turn it was accepted for. The follow-on frames of the same run
+    // were never separately admitted, so they must not restate the identity.
+    assert!(
+        run.turns[0].turn_input_acceptance.is_some(),
+        "the admitted turn carries the acceptance it was admitted under"
+    );
+    assert!(
+        run.turns[1].turn_input_acceptance.is_none(),
+        "a follow-on frame of the same run was not separately admitted"
+    );
     assert_eq!(
         store.load_session_count(),
         0,
