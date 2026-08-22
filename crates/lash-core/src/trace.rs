@@ -822,9 +822,9 @@ mod span_identity_tests {
         assign_span_identity(
             &mut context,
             &TraceEvent::TurnCompleted {
-                status: "completed".to_string(),
-                done_reason: "modelstop".to_string(),
-                agent_frame_switch: None,
+                outcome: lash_trace::TraceTurnOutcome::Completed {
+                    done_reason: lash_trace::TraceTurnCompletionReason::AssistantMessage,
+                },
             },
         );
         assert_eq!(context.graph_node_id.as_deref(), Some("turn:sess:turn-1"));

@@ -37,7 +37,7 @@ reconciled them:
   one committed copy survives either way — but **which id holds it depends on the
   termination**, and this runbook must never assume one:
 
-  | trace `done_reason` | reached by | the single committed assistant id | part kinds |
+  | trace `outcome.done_reason` | reached by | the single committed assistant id | part kinds |
   |---|---|---|---|
   | `assistant_message` | a queued/wake turn, which runs without `require_finish` and answers as bare prose | `m_turn_<turn_id>_assistant` (runtime) | `Prose` |
   | `assistant_message` with reasoning | the same turn when the model also returned reasoning | `m_rlm_<turn_id>_<iteration>_assistant_response` (RLM protocol) | `Reasoning` + `Prose` |
@@ -372,7 +372,7 @@ messages from `/api/state` and the store before anything else: the id shapes nam
 writers (`m_turn_<turn>_assistant` = runtime terminal commit;
 `workbench-assistant:<turn>` = the workbench's `commit_assistant_transcript`), which is the
 whole RCA. Record each surplus message's `part_kinds` (the runtime copy carries a `Prose`
-part, the workbench copy a `Text` part) and the wake turn's `done_reason`. Save
+part, the workbench copy a `Text` part) and the wake turn's `outcome.done_reason`. Save
 `03-red-press-{dom,state,store,trace}.json` and the duplicate ids as
 `03-duplicate-ids.json`.
 

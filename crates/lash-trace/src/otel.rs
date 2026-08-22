@@ -801,7 +801,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 effect_kind.clone(),
             ));
             if let TraceEvent::JournaledEffectSettled { status, .. } = &record.event {
-                attrs.push(KeyValue::new("lash.durable.status", status.clone()));
+                attrs.push(KeyValue::new("lash.durable.status", status.wire_tag()));
             }
         }
         TraceEvent::DurableWaitParked { wait_kind } => {
@@ -812,7 +812,10 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             resolution,
         } => {
             attrs.push(KeyValue::new("lash.durable.wait_kind", wait_kind.clone()));
-            attrs.push(KeyValue::new("lash.durable.resolution", resolution.clone()));
+            attrs.push(KeyValue::new(
+                "lash.durable.resolution",
+                resolution.wire_tag(),
+            ));
         }
         TraceEvent::DurableTimerStarted { duration_ms }
         | TraceEvent::DurableTimerResolved { duration_ms, .. } => {
@@ -821,7 +824,7 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 *duration_ms as i64,
             ));
             if let TraceEvent::DurableTimerResolved { status, .. } = &record.event {
-                attrs.push(KeyValue::new("lash.durable.status", status.clone()));
+                attrs.push(KeyValue::new("lash.durable.status", status.wire_tag()));
             }
         }
         TraceEvent::DurableSegmentBoundary {
@@ -878,18 +881,45 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 event,
             );
         }
-        TraceEvent::TurnCompleted {
-            status,
-            done_reason,
-            agent_frame_switch,
-        } => {
-            attrs.push(KeyValue::new("lash.turn.status", status.clone()));
-            attrs.push(KeyValue::new("lash.turn.done_reason", done_reason.clone()));
-            if let Some(agent_frame_switch) = agent_frame_switch {
-                attrs.push(KeyValue::new(
-                    "lash.turn.agent_frame_switch.frame_key",
-                    agent_frame_switch.frame_key.clone(),
-                ));
+        TraceEvent::TurnCompleted { outcome } => {
+            attrs.push(KeyValue::new("lash.turn.status", outcome.status_tag()));
+            match outcome {
+                crate::TraceTurnOutcome::Completed { done_reason } => {
+                    attrs.push(KeyValue::new(
+                        "lash.turn.done_reason",
+                        done_reason.wire_tag(),
+                    ));
+                }
+                crate::TraceTurnOutcome::Failed { done_reason } => {
+                    attrs.push(KeyValue::new(
+                        "lash.turn.done_reason",
+                        done_reason.wire_tag(),
+                    ));
+                }
+                crate::TraceTurnOutcome::AgentFrameSwitch { frame_switch } => {
+                    attrs.push(KeyValue::new(
+                        "lash.turn.agent_frame_switch.frame_key",
+                        frame_switch.frame_key.clone(),
+                    ));
+                }
+                crate::TraceTurnOutcome::Cancelled { evidence } => {
+                    attrs.push(KeyValue::new(
+                        "lash.turn.cancellation.request_id",
+                        evidence.request_id.clone(),
+                    ));
+                    if let Some(origin) = &evidence.origin {
+                        attrs.push(KeyValue::new(
+                            "lash.turn.cancellation.origin",
+                            origin.clone(),
+                        ));
+                    }
+                    if let Some(reason) = &evidence.reason {
+                        attrs.push(KeyValue::new(
+                            "lash.turn.cancellation.reason",
+                            reason.clone(),
+                        ));
+                    }
+                }
             }
         }
         TraceEvent::Custom { name, payload } => {
@@ -1249,7 +1279,12 @@ fn error_status(record: &TraceRecord) -> Status {
         TraceEvent::ToolCallCompleted { name, .. } => {
             Status::error(format!("tool call failed: {name}"))
         }
-        TraceEvent::TurnCompleted { status, .. } => Status::error(status.clone()),
+        TraceEvent::TurnCompleted { outcome } => match outcome {
+            crate::TraceTurnOutcome::Failed { done_reason } => {
+                Status::error(format!("turn failed: {}", done_reason.wire_tag()))
+            }
+            _ => Status::error(outcome.status_tag()),
+        },
         TraceEvent::EffectEnvelopeDiff { event } => Status::error(format!(
             "effect envelope hash mismatch at {} paths",
             event.divergent_paths.len()
@@ -1279,230 +1314,4 @@ fn error_status(record: &TraceRecord) -> Status {
 }
 
 #[cfg(test)]
-mod tests {
-    use opentelemetry::trace::noop::NoopTracerProvider;
-
-    use super::*;
-    use crate::{TraceLlmRequest, TraceRecord};
-
-    #[test]
-    fn protocol_step_exec_diagnostics_get_distinct_span_names() {
-        let diagnostic =
-            |phase: &str| serde_json::json!({ "diagnostic": { "phase": phase, "payload": {} } });
-        // Exec-code diagnostics collapse into the lash.exec_code family, with
-        // the precise phase available as an attribute; other diagnostics keep a
-        // phase-scoped name; plain protocol steps stay lash.protocol_step.
-        assert_eq!(
-            protocol_step_span_name(&diagnostic("exec_code_started")),
-            "lash.exec_code"
-        );
-        assert_eq!(
-            protocol_step_span_name(&diagnostic("exec_code_completed")),
-            "lash.exec_code"
-        );
-        assert_eq!(
-            protocol_step_span_name(&diagnostic("observation_projection")),
-            "lash.observation_projection"
-        );
-        assert_eq!(
-            protocol_step_span_name(&serde_json::json!({ "code": "print 1" })),
-            "lash.protocol_step"
-        );
-        assert_eq!(
-            protocol_step_diagnostic_phase(&diagnostic("exec_code_completed")),
-            Some("exec_code_completed")
-        );
-    }
-
-    #[test]
-    fn composition_change_projects_fingerprint_counts_and_opt_in_full_payload() {
-        let record = TraceRecord::new(
-            TraceContext::default().for_session("session-1"),
-            TraceEvent::CompositionChanged {
-                fingerprint: "composition-sha".to_string(),
-                rendered_system_prompt: "system policy".to_string(),
-                tool_schemas: vec![crate::TraceToolSpec {
-                    name: "search".to_string(),
-                    description: "Search documents".to_string(),
-                    input_schema: serde_json::json!({ "type": "object" }),
-                    output_schema: serde_json::json!({ "type": "array" }),
-                }],
-            },
-        );
-        let attrs = event_attributes(
-            &record,
-            &OtelTraceOptions {
-                include_payload_json: true,
-                ..OtelTraceOptions::default()
-            },
-        );
-        let attribute = |key: &str| {
-            attrs
-                .iter()
-                .find(|attribute| attribute.key.as_str() == key)
-                .map(|attribute| &attribute.value)
-                .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
-        };
-
-        assert_eq!(
-            attribute("lash.composition.fingerprint"),
-            &OtelValue::String("composition-sha".into())
-        );
-        assert_eq!(
-            attribute("lash.composition.prompt_chars"),
-            &OtelValue::I64(13)
-        );
-        assert_eq!(attribute("lash.composition.tool_count"), &OtelValue::I64(1));
-        assert!(
-            attribute("lash.composition.rendered_system_prompt_json")
-                .to_string()
-                .contains("system policy")
-        );
-        assert!(
-            attribute("lash.composition.tool_schemas_json")
-                .to_string()
-                .contains("search")
-        );
-    }
-
-    #[test]
-    fn otel_sink_accepts_turn_and_llm_lifecycle() {
-        let tracer = NoopTracerProvider::new().tracer("test");
-        let sink = OtelTraceSink::new(tracer);
-        let context = TraceContext::default()
-            .for_session("session-1")
-            .for_llm_call("llm-1");
-        let turn_context = TraceContext {
-            turn_id: Some("turn-1".to_string()),
-            ..context.clone()
-        };
-
-        sink.append(&TraceRecord::new(
-            turn_context.clone(),
-            TraceEvent::TurnStarted {
-                metadata: Default::default(),
-            },
-        ))
-        .unwrap();
-        sink.append(&TraceRecord::new(
-            turn_context.clone(),
-            TraceEvent::LlmCallStarted {
-                request: TraceLlmRequest {
-                    model: "gpt-test".to_string(),
-                    model_variant: Default::default(),
-                    messages: Vec::new(),
-                    attachments: Vec::new(),
-                    tools: Vec::new(),
-                    tool_choice: "auto".to_string(),
-                    output_spec: None,
-                    stream: true,
-                },
-            },
-        ))
-        .unwrap();
-        sink.append(&TraceRecord::new(
-            turn_context.clone(),
-            TraceEvent::LlmCallFailed {
-                error: crate::TraceError {
-                    message: "boom".to_string(),
-                    retryable: false,
-                    terminal_reason: None,
-                    code: Some("test".to_string()),
-                    raw: None,
-                },
-                stream_summary: None,
-                attempts: None,
-            },
-        ))
-        .unwrap();
-        sink.append(&TraceRecord::new(
-            turn_context,
-            TraceEvent::TurnCompleted {
-                status: "failed".to_string(),
-                done_reason: "error".to_string(),
-                agent_frame_switch: None,
-            },
-        ))
-        .unwrap();
-
-        assert!(sink.active.lock_recover().is_empty());
-    }
-
-    #[test]
-    fn failed_language_execution_yields_error_span() {
-        use crate::{
-            TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
-            TraceLanguageExecutionStatus, TraceRuntimeScope, TraceRuntimeSubject,
-        };
-        use opentelemetry_sdk::trace::{
-            InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor,
-        };
-
-        let exporter = InMemorySpanExporter::default();
-        let provider = SdkTracerProvider::builder()
-            .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
-            .build();
-        let tracer = provider.tracer("test");
-        let sink = OtelTraceSink::new(tracer);
-
-        let identity = TraceLanguageExecutionIdentity {
-            scope: TraceRuntimeScope::new("s1"),
-            subject: TraceRuntimeSubject::Process {
-                process_id: "p1".to_string(),
-            },
-            module_ref: "module".to_string(),
-            entry_kind: "process".to_string(),
-            entry_ref: Some("component:0".to_string()),
-            entry_name: "main".to_string(),
-        };
-
-        // 1. Failed node execution
-        let failed_node = TraceRecord::new(
-            TraceContext::default().for_session("s1"),
-            TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
-                event: TraceLanguageExecution {
-                    event_key: "process:p1:node:n1:1:failed".to_string(),
-                    identity: identity.clone(),
-                    payload: TraceLanguageExecutionPayload::NodeFailed {
-                        node_id: "n1".to_string(),
-                        node_kind: "resource_operation".to_string(),
-                        label: "eval".to_string(),
-                        occurrence: 1,
-                        error: "syntax error".to_string(),
-                    },
-                },
-            },
-        );
-        sink.append(&failed_node).unwrap();
-
-        // 2. Failed execution finished
-        let failed_execution = TraceRecord::new(
-            TraceContext::default().for_session("s1"),
-            TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
-                event: TraceLanguageExecution {
-                    event_key: "process:p1:finished".to_string(),
-                    identity,
-                    payload: TraceLanguageExecutionPayload::ExecutionFinished {
-                        status: TraceLanguageExecutionStatus::Failed,
-                        error: Some("execution crashed".to_string()),
-                    },
-                },
-            },
-        );
-        sink.append(&failed_execution).unwrap();
-
-        let spans = exporter.get_finished_spans().unwrap();
-        assert_eq!(spans.len(), 2);
-
-        assert_eq!(
-            spans[0].status,
-            opentelemetry::trace::Status::error("syntax error")
-        );
-        assert_eq!(
-            spans[1].status,
-            opentelemetry::trace::Status::error("execution crashed")
-        );
-    }
-}
+mod tests;

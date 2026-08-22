@@ -64,7 +64,15 @@ pub use lashlang_graph::{
 /// Version 7 renames the Lashlang execution records to language-tagged ones:
 /// `language_execution` carries the language id, and the graph, identity, node
 /// and status payloads lose their Lashlang-specific names.
-pub const TRACE_SCHEMA_VERSION: u32 = 7;
+/// Version 8 types the remaining free-form outcome strings: the
+/// `journaled_effect_settled`, `durable_wait_resolved` and
+/// `durable_timer_resolved` statuses become closed enums, `turn_completed`
+/// replaces its `status`/`done_reason`/`agent_frame_switch` triple with one
+/// [`TraceTurnOutcome`] whose variants own the done reason, the frame switch
+/// and the cancellation evidence, and the language execution map drops the
+/// four identity fields already carried by
+/// [`TraceLanguageExecutionIdentity`].
+pub const TRACE_SCHEMA_VERSION: u32 = 8;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -358,7 +366,7 @@ pub enum TraceEvent {
     JournaledEffectSettled {
         effect_name: String,
         effect_kind: String,
-        status: String,
+        status: TraceJournaledEffectStatus,
     },
     /// A Restate durable wait has issued its park command.
     DurableWaitParked {
@@ -367,7 +375,7 @@ pub enum TraceEvent {
     /// A Restate durable wait resumed with a terminal resolution.
     DurableWaitResolved {
         wait_kind: String,
-        resolution: String,
+        resolution: TraceDurableWaitResolution,
     },
     /// A Restate durable timer has been issued.
     DurableTimerStarted {
@@ -376,7 +384,7 @@ pub enum TraceEvent {
     /// A Restate durable timer resumed or was cancelled.
     DurableTimerResolved {
         duration_ms: u64,
-        status: String,
+        status: TraceDurableTimerStatus,
     },
     /// The durable controller requested a quiescent handler-segment handover.
     DurableSegmentBoundary {
@@ -405,10 +413,7 @@ pub enum TraceEvent {
         event: TraceLanguageExecution,
     },
     TurnCompleted {
-        status: String,
-        done_reason: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        agent_frame_switch: Option<TraceAgentFrameSwitch>,
+        outcome: TraceTurnOutcome,
     },
     Custom {
         name: String,
@@ -455,11 +460,11 @@ impl TraceEvent {
             Self::LlmCallFailed { .. }
             | Self::EffectEnvelopeDiff { .. }
             | Self::StoreErrorObserved { .. } => true,
-            Self::JournaledEffectSettled { status, .. }
-            | Self::DurableTimerResolved { status, .. } => status == "failed",
-            Self::DurableWaitResolved { resolution, .. } => resolution == "failed",
+            Self::JournaledEffectSettled { status, .. } => status.is_failed(),
+            Self::DurableTimerResolved { status, .. } => status.is_failed(),
+            Self::DurableWaitResolved { resolution, .. } => resolution.is_failed(),
             Self::ToolCallCompleted { output, .. } => !output.is_success(),
-            Self::TurnCompleted { status, .. } => status == "failed",
+            Self::TurnCompleted { outcome, .. } => outcome.is_failed(),
             Self::LanguageExecution { event, .. } => match &event.payload {
                 TraceLanguageExecutionPayload::NodeFailed { .. } => true,
                 TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => {
@@ -823,6 +828,218 @@ pub struct TraceAgentFrameSwitch {
     pub frame_key: String,
 }
 
+/// The snake_case wire tag serde writes for a unit-variant trace enum.
+///
+/// Reading the tag back from serde keeps one spelling per variant: a
+/// `#[serde(rename_all)]` change or a variant rename moves the wire tag and
+/// every reader of it at once, instead of leaving a hand-written copy behind
+/// to drift.
+fn wire_tag<T: Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(Value::String(tag)) => tag,
+        _ => String::new(),
+    }
+}
+
+/// Durable evidence that the traced turn was cancelled. Mirrors the runtime's
+/// `TurnCancellationEvidence`, which only [`TurnStop::Cancelled`] can carry, so
+/// a cancelled trace outcome can never be stated without saying which request
+/// produced it.
+///
+/// [`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceTurnCancellationEvidence {
+    pub request_id: String,
+    /// Opaque host-domain data. Lash records and returns it unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The single terminal outcome of a traced turn.
+///
+/// One closed shape replaces the former `status` / `done_reason` /
+/// `agent_frame_switch` triple: each variant owns exactly the data its state
+/// can carry, so an agent-frame switch cannot be reported without a frame key
+/// and a cancellation cannot be reported without its evidence. Cancellation is
+/// its own variant rather than a failure reason — [`Self::is_failed`] is
+/// `false` for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum TraceTurnOutcome {
+    /// The turn reached a terminal result the caller asked for.
+    Completed {
+        done_reason: TraceTurnCompletionReason,
+    },
+    /// The turn ended by handing control to another agent frame.
+    AgentFrameSwitch { frame_switch: TraceAgentFrameSwitch },
+    /// The turn was cancelled. Not a failure.
+    Cancelled {
+        evidence: TraceTurnCancellationEvidence,
+    },
+    /// The turn stopped short of a result.
+    Failed { done_reason: TraceTurnFailureReason },
+}
+
+impl TraceTurnOutcome {
+    /// Returns `true` only for [`Self::Failed`]. A cancelled turn is a
+    /// deliberate stop, not a failure.
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
+
+    /// The `status` tag serde writes for this variant, read back from serde
+    /// rather than restated by hand so a rename cannot leave a second,
+    /// drifting spelling behind.
+    pub fn status_tag(&self) -> String {
+        self.string_field("status").unwrap_or_default()
+    }
+
+    /// The reason tag for this outcome, in the spelling the pre-v8 flat
+    /// `done_reason` string carried: the completion or failure reason for
+    /// [`Self::Completed`] and [`Self::Failed`], and the status tag itself
+    /// (`agent_frame_switch`, `cancelled`) for the two variants that carry no
+    /// separate reason. Read back from serde like [`Self::status_tag`], so the
+    /// spelling cannot drift from the wire.
+    pub fn done_reason_tag(&self) -> String {
+        self.string_field("done_reason")
+            .unwrap_or_else(|| self.status_tag())
+    }
+
+    fn string_field(&self, field: &str) -> Option<String> {
+        match serde_json::to_value(self).ok()? {
+            Value::Object(mut map) => match map.remove(field) {
+                Some(Value::String(tag)) => Some(tag),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+/// Why a [`TraceTurnOutcome::Completed`] turn finished.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceTurnCompletionReason {
+    AssistantMessage,
+    FinalValue,
+    ToolValue,
+}
+
+impl TraceTurnCompletionReason {
+    /// The snake_case tag serde writes for this variant.
+    pub fn wire_tag(&self) -> String {
+        wire_tag(self)
+    }
+}
+
+/// Why a [`TraceTurnOutcome::Failed`] turn stopped. Mirrors the non-cancelled
+/// `TurnStop` reasons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceTurnFailureReason {
+    Incomplete,
+    InvalidInput,
+    MaxTurns,
+    ToolFailure,
+    ProviderError,
+    PluginAbort,
+    RuntimeError,
+    SubmittedError,
+    ToolError,
+}
+
+impl TraceTurnFailureReason {
+    /// The snake_case tag serde writes for this variant.
+    pub fn wire_tag(&self) -> String {
+        wire_tag(self)
+    }
+}
+
+/// Terminal status of a journaled `ctx.run` effect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceJournaledEffectStatus {
+    Completed,
+    Failed,
+}
+
+impl TraceJournaledEffectStatus {
+    /// Whether this outcome is a failure. The shared failure predicate matches
+    /// on the variant; no status string is compared anywhere.
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    /// The snake_case tag serde writes for this variant.
+    pub fn wire_tag(&self) -> String {
+        wire_tag(self)
+    }
+}
+
+/// How a durable wait left its park.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceDurableWaitResolution {
+    /// The awaited event delivered a value.
+    Ok,
+    /// The awaited event delivered a host-domain error value.
+    Error,
+    /// The wait reached its deadline.
+    Timeout,
+    /// The wait itself was cancelled.
+    Cancelled,
+    /// A parked process command completed.
+    Resolved,
+    /// The enclosing turn was cancelled while the wait was parked.
+    TurnCancelled,
+    /// The session was revoked while the wait was parked.
+    SessionRevoked,
+    /// The controller could not complete the wait.
+    Failed,
+}
+
+impl TraceDurableWaitResolution {
+    /// Whether this outcome is a failure. The shared failure predicate matches
+    /// on the variant; no status string is compared anywhere.
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    /// The snake_case tag serde writes for this variant.
+    pub fn wire_tag(&self) -> String {
+        wire_tag(self)
+    }
+}
+
+/// How a durable timer left its sleep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceDurableTimerStatus {
+    /// The timer elapsed.
+    Resolved,
+    /// The enclosing turn was cancelled while the timer was pending.
+    Cancelled,
+    /// The session was revoked while the timer was pending.
+    SessionRevoked,
+    /// The controller could not complete the sleep.
+    Failed,
+}
+
+impl TraceDurableTimerStatus {
+    /// Whether this outcome is a failure. The shared failure predicate matches
+    /// on the variant; no status string is compared anywhere.
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    /// The snake_case tag serde writes for this variant.
+    pub fn wire_tag(&self) -> String {
+        wire_tag(self)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRuntimeScope {
     pub session_id: String,
@@ -968,13 +1185,12 @@ pub enum TraceBranchSelection {
     Else,
 }
 
+/// The static graph of an execution, carried once on
+/// [`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity
+/// (`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the
+/// enclosing [`TraceLanguageExecutionIdentity`]; the map never restates it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLanguageExecutionMap {
-    pub module_ref: String,
-    pub entry_kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_ref: Option<String>,
-    pub entry_name: String,
     #[serde(default)]
     pub nodes: Vec<TraceLanguageExecutionMapNode>,
     #[serde(default)]
@@ -1196,362 +1412,4 @@ pub fn json_hash(value: &Value) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A sink that fails every call, standing in for a closed stderr.
-    struct FailingSink;
-
-    impl TraceSink for FailingSink {
-        fn append(&self, _record: &TraceRecord) -> Result<(), TraceSinkError> {
-            Err(TraceSinkError::Write {
-                path: PathBuf::from("<failing>"),
-                source: io::Error::from(io::ErrorKind::BrokenPipe),
-            })
-        }
-
-        fn flush(&self) -> Result<(), TraceSinkError> {
-            Err(TraceSinkError::Write {
-                path: PathBuf::from("<failing>"),
-                source: io::Error::from(io::ErrorKind::BrokenPipe),
-            })
-        }
-    }
-
-    #[test]
-    fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
-        // The bot tees stderr first and its durable JSONL file second, so a
-        // supervisor closing stderr must not cost the run its trace file.
-        let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("trace.jsonl");
-        let tee = TeeTraceSink::new([
-            Arc::new(FailingSink) as Arc<dyn TraceSink>,
-            Arc::new(JsonlTraceSink::new(&path)),
-        ]);
-
-        let append = tee.append(&TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::Custom {
-                name: "test.event".to_string(),
-                payload: serde_json::json!({"ok": true}),
-            },
-        ));
-
-        assert!(
-            append.is_err(),
-            "the first sink's failure is still reported"
-        );
-        assert!(tee.flush().is_err(), "a failing flush is reported too");
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(
-            text.contains("\"type\":\"custom\""),
-            "the later sink still received the record"
-        );
-    }
-
-    #[test]
-    fn jsonl_sink_writes_record() {
-        let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("trace.jsonl");
-        let sink = JsonlTraceSink::new(&path);
-        sink.append(&TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::Custom {
-                name: "test.event".to_string(),
-                payload: serde_json::json!({"ok": true}),
-            },
-        ))
-        .unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"type\":\"custom\""));
-        assert!(text.contains("\"session_id\":\"root\""));
-    }
-
-    #[test]
-    fn tool_start_and_frame_switch_records_are_jsonl_shaped() {
-        let started = TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::ToolCallStarted {
-                call_id: Some("call-1".to_string()),
-                name: "read_file".to_string(),
-                args: serde_json::json!({"path": "README.md"}),
-            },
-        );
-        let completed = TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::TurnCompleted {
-                status: "completed".to_string(),
-                done_reason: "modelstop".to_string(),
-                agent_frame_switch: Some(TraceAgentFrameSwitch {
-                    frame_key: "frame-key/v1/example".to_string(),
-                }),
-            },
-        );
-
-        let started_json = serde_json::to_value(started).unwrap();
-        assert_eq!(started_json["type"], "tool_call_started");
-        assert_eq!(started_json["call_id"], "call-1");
-
-        let completed_json = serde_json::to_value(completed).unwrap();
-        assert_eq!(completed_json["type"], "turn_completed");
-        assert_eq!(
-            completed_json["agent_frame_switch"]["frame_key"],
-            "frame-key/v1/example"
-        );
-    }
-
-    #[test]
-    fn language_execution_records_are_jsonl_shaped() {
-        let identity = TraceLanguageExecutionIdentity {
-            scope: TraceRuntimeScope::new("s1"),
-            subject: TraceRuntimeSubject::Process {
-                process_id: "p1".to_string(),
-            },
-            module_ref: "module".to_string(),
-            entry_kind: "process".to_string(),
-            entry_ref: Some("component:0".to_string()),
-            entry_name: "main".to_string(),
-        };
-        let event = TraceLanguageExecution {
-            event_key: "process:p1:node:n1:1:started".to_string(),
-            identity,
-            payload: TraceLanguageExecutionPayload::NodeStarted {
-                node_id: "n1".to_string(),
-                node_kind: "resource_operation".to_string(),
-                label: "read_file".to_string(),
-                occurrence: 1,
-            },
-        };
-        let record = TraceRecord::new(
-            TraceContext::default().for_session("s1"),
-            TraceEvent::LanguageExecution {
-                language: "lashlang".to_string(),
-                event,
-            },
-        );
-
-        let json = serde_json::to_value(&record).expect("serialize language execution");
-        assert_eq!(json["type"], "language_execution");
-        assert_eq!(json["language"], "lashlang");
-        assert_eq!(json["event"]["kind"], "node_started");
-        assert_eq!(json["event"]["event_key"], "process:p1:node:n1:1:started");
-
-        let round_trip =
-            serde_json::from_value::<TraceRecord>(json).expect("deserialize language execution");
-        assert!(matches!(
-            round_trip.event,
-            TraceEvent::LanguageExecution {
-                language,
-                event: TraceLanguageExecution {
-                    payload: TraceLanguageExecutionPayload::NodeStarted { .. },
-                    ..
-                }
-            } if language == "lashlang"
-        ));
-    }
-
-    #[test]
-    fn tool_completion_serializes_typed_failure_output() {
-        let record = TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::ToolCallCompleted {
-                call_id: Some("call-1".to_string()),
-                name: "read_file".to_string(),
-                args: serde_json::json!({"path": "missing"}),
-                output: TraceToolCallOutput {
-                    outcome: TraceToolCallOutcome::Failure(serde_json::json!({
-                        "class": "invalid_request",
-                        "code": "invalid_tool_args",
-                        "message": "bad args",
-                        "source": "runtime",
-                        "retry": { "type": "never" },
-                        "raw": { "path": "missing" }
-                    })),
-                    control: None,
-                },
-                duration_ms: 3,
-                attempts: None,
-            },
-        );
-
-        let json = serde_json::to_value(record).unwrap();
-        assert_eq!(json["type"], "tool_call_completed");
-        assert_eq!(json["output"]["outcome"]["status"], "failure");
-        assert_eq!(
-            json["output"]["outcome"]["payload"]["code"],
-            "invalid_tool_args"
-        );
-        assert_eq!(
-            json["output"]["outcome"]["payload"]["raw"]["path"],
-            "missing"
-        );
-    }
-
-    #[test]
-    fn event_kind_matches_serialized_type_tag() {
-        let events = [
-            TraceEvent::SessionStarted {
-                metadata: Default::default(),
-            },
-            TraceEvent::TurnStarted {
-                metadata: Default::default(),
-            },
-            TraceEvent::ToolCallStarted {
-                call_id: None,
-                name: "read_file".to_string(),
-                args: Value::Null,
-            },
-            TraceEvent::Custom {
-                name: "x".to_string(),
-                payload: Value::Null,
-            },
-        ];
-        for event in events {
-            let kind = event.kind();
-            let json = serde_json::to_value(&event).expect("serialize event");
-            assert_eq!(json["type"], kind, "kind() disagrees with serde tag");
-        }
-    }
-
-    #[test]
-    fn event_is_failed_identifies_all_failure_outcomes() {
-        let ok_turn = TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::TurnCompleted {
-                status: "completed".to_string(),
-                done_reason: "modelstop".to_string(),
-                agent_frame_switch: None,
-            },
-        );
-        let failed_turn = TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::TurnCompleted {
-                status: "failed".to_string(),
-                done_reason: "error".to_string(),
-                agent_frame_switch: None,
-            },
-        );
-        assert!(!ok_turn.event.is_failed());
-        assert!(failed_turn.event.is_failed());
-
-        let lang_started = TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event: TraceLanguageExecution {
-                event_key: "key1".to_string(),
-                identity: TraceLanguageExecutionIdentity {
-                    scope: TraceRuntimeScope::new("s1"),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: "p1".to_string(),
-                    },
-                    module_ref: "m".to_string(),
-                    entry_kind: "p".to_string(),
-                    entry_ref: None,
-                    entry_name: "main".to_string(),
-                },
-                payload: TraceLanguageExecutionPayload::NodeStarted {
-                    node_id: "n1".to_string(),
-                    node_kind: "op".to_string(),
-                    label: "lbl".to_string(),
-                    occurrence: 1,
-                },
-            },
-        };
-        let lang_node_failed = TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event: TraceLanguageExecution {
-                event_key: "key2".to_string(),
-                identity: TraceLanguageExecutionIdentity {
-                    scope: TraceRuntimeScope::new("s1"),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: "p1".to_string(),
-                    },
-                    module_ref: "m".to_string(),
-                    entry_kind: "p".to_string(),
-                    entry_ref: None,
-                    entry_name: "main".to_string(),
-                },
-                payload: TraceLanguageExecutionPayload::NodeFailed {
-                    node_id: "n1".to_string(),
-                    node_kind: "op".to_string(),
-                    label: "lbl".to_string(),
-                    occurrence: 1,
-                    error: "err".to_string(),
-                },
-            },
-        };
-        let lang_exec_failed = TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event: TraceLanguageExecution {
-                event_key: "key3".to_string(),
-                identity: TraceLanguageExecutionIdentity {
-                    scope: TraceRuntimeScope::new("s1"),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: "p1".to_string(),
-                    },
-                    module_ref: "m".to_string(),
-                    entry_kind: "p".to_string(),
-                    entry_ref: None,
-                    entry_name: "main".to_string(),
-                },
-                payload: TraceLanguageExecutionPayload::ExecutionFinished {
-                    status: TraceLanguageExecutionStatus::Failed,
-                    error: Some("err".to_string()),
-                },
-            },
-        };
-        let lang_exec_ok = TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event: TraceLanguageExecution {
-                event_key: "key4".to_string(),
-                identity: TraceLanguageExecutionIdentity {
-                    scope: TraceRuntimeScope::new("s1"),
-                    subject: TraceRuntimeSubject::Process {
-                        process_id: "p1".to_string(),
-                    },
-                    module_ref: "m".to_string(),
-                    entry_kind: "p".to_string(),
-                    entry_ref: None,
-                    entry_name: "main".to_string(),
-                },
-                payload: TraceLanguageExecutionPayload::ExecutionFinished {
-                    status: TraceLanguageExecutionStatus::Completed,
-                    error: None,
-                },
-            },
-        };
-        assert!(!lang_started.is_failed());
-        assert!(lang_node_failed.is_failed());
-        assert!(lang_exec_failed.is_failed());
-        assert!(!lang_exec_ok.is_failed());
-    }
-
-    #[test]
-    fn jsonl_sink_creates_parent_directories() {
-        let dir = std::env::temp_dir().join(format!("lash-trace-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("nested").join("trace.jsonl");
-        let sink = JsonlTraceSink::new(&path);
-        sink.append(&TraceRecord::new(
-            TraceContext::default().for_session("root"),
-            TraceEvent::RuntimeStreamEvent {
-                event: TraceRuntimeStreamEvent {
-                    sequence: 1,
-                    elapsed_ms: 0,
-                    event_name: "delta".to_string(),
-                    raw_text: Some("hello".to_string()),
-                    visible_text: Some("hello".to_string()),
-                    item_id: None,
-                    output_index: None,
-                    call_id: None,
-                    tool_name: None,
-                    input_json: None,
-                    usage: None,
-                },
-            },
-        ))
-        .unwrap();
-        assert!(path.exists());
-        let _ = std::fs::remove_dir_all(dir);
-    }
-}
+mod tests;

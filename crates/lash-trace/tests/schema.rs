@@ -9,26 +9,28 @@
 use std::collections::BTreeSet;
 
 use lash_trace::{
-    TraceBranchSelection, TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
-    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLanguageChildExecution,
+    TraceBranchSelection, TraceContext, TraceDurableTimerStatus, TraceDurableWaitResolution,
+    TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
+    TraceError, TraceEvent, TraceJournaledEffectStatus, TraceLanguageChildExecution,
     TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
     TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse, TraceProviderReplayDropEvent,
     TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
     TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope,
     TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome,
-    TraceToolCallOutput,
+    TraceToolCallOutput, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
+    TraceTurnFailureReason, TraceTurnOutcome,
 };
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_7() {
+fn trace_schema_version_is_pinned_at_8() {
     // Tripwire. This is the current on-disk trace schema version. Every reader
     // (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level rustdoc and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 7);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
 }
 
 #[test]
@@ -37,7 +39,7 @@ fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
         lash_trace::ensure_trace_schema_version(3),
         Err(lash_trace::TraceSchemaVersionError {
             actual: 3,
-            expected: 7,
+            expected: 8,
         })
     );
 }
@@ -49,7 +51,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("schema-3 trace records must be refused during typed decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 7"
+        "unsupported trace schema version 3; expected 8"
     );
 
     let stale_and_malformed = r#"{"schema_version":3,"payload":"not a current event"}"#;
@@ -57,7 +59,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("the version refusal must precede current-shape validation");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 7"
+        "unsupported trace schema version 3; expected 8"
     );
 }
 
@@ -71,7 +73,7 @@ fn new_records_stamp_the_schema_version() {
     );
     assert_eq!(record.schema_version, lash_trace::TRACE_SCHEMA_VERSION);
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["schema_version"], 7);
+    assert_eq!(json["schema_version"], 8);
 }
 
 fn token_usage_sample() -> TraceTokenUsage {
@@ -271,19 +273,19 @@ fn event_samples() -> Vec<TraceEvent> {
         TraceEvent::JournaledEffectSettled {
             effect_name: "lash:turn:llm:1".to_string(),
             effect_kind: "llm_call".to_string(),
-            status: "completed".to_string(),
+            status: TraceJournaledEffectStatus::Completed,
         },
         TraceEvent::DurableWaitParked {
             wait_kind: "await_event".to_string(),
         },
         TraceEvent::DurableWaitResolved {
             wait_kind: "await_event".to_string(),
-            resolution: "ok".to_string(),
+            resolution: TraceDurableWaitResolution::Ok,
         },
         TraceEvent::DurableTimerStarted { duration_ms: 250 },
         TraceEvent::DurableTimerResolved {
             duration_ms: 250,
-            status: "resolved".to_string(),
+            status: TraceDurableTimerStatus::Resolved,
         },
         TraceEvent::DurableSegmentBoundary {
             reason: "journal_budget".to_string(),
@@ -315,9 +317,9 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::TurnCompleted {
-            status: "completed".to_string(),
-            done_reason: "modelstop".to_string(),
-            agent_frame_switch: None,
+            outcome: TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::AssistantMessage,
+            },
         },
         TraceEvent::Custom {
             name: "x.event".to_string(),
@@ -431,7 +433,7 @@ fn composition_change_is_a_complete_snapshot_at_schema_version_five() {
     );
     let mut json = serde_json::to_value(&record).expect("serialize composition snapshot");
 
-    assert_eq!(json["schema_version"], 7);
+    assert_eq!(json["schema_version"], 8);
     json["schema_version"] = json!(5);
     assert_eq!(json["schema_version"], 5);
     assert_eq!(json["type"], "composition_changed");
@@ -506,7 +508,7 @@ fn historical_v4_reader_refuses_v5_before_interpreting_new_closed_enum_variant()
         },
     );
     let current_wire = serde_json::to_string(&record).expect("serialize composition event");
-    let wire = current_wire.replacen("\"schema_version\":7", "\"schema_version\":5", 1);
+    let wire = current_wire.replacen("\"schema_version\":8", "\"schema_version\":5", 1);
     assert_eq!(
         read_with_historical_v4_reader(&wire),
         Err(HistoricalV4ReadError::UnsupportedVersion {
@@ -578,7 +580,7 @@ fn historical_v5_reader_refuses_v6_provider_replay_dropped_before_interpreting_v
         },
     );
     let current_wire = serde_json::to_string(&record).expect("serialize replay-drop event");
-    let wire = current_wire.replacen("\"schema_version\":7", "\"schema_version\":6", 1);
+    let wire = current_wire.replacen("\"schema_version\":8", "\"schema_version\":6", 1);
     assert_eq!(
         read_with_historical_v5_reader(&wire),
         Err(HistoricalV5ReadError::UnsupportedVersion {
@@ -658,7 +660,9 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
             },
         },
     );
-    let wire = serde_json::to_string(&record).expect("serialize v7 language-execution event");
+    let current_wire =
+        serde_json::to_string(&record).expect("serialize v8 language-execution event");
+    let wire = current_wire.replacen("\"schema_version\":8", "\"schema_version\":7", 1);
     assert_eq!(
         read_with_historical_v6_reader(&wire),
         Err(HistoricalV6ReadError::UnsupportedVersion {
@@ -674,6 +678,430 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
     assert!(
         matches!(error, HistoricalV6ReadError::Payload(message) if message.contains("unknown variant"))
     );
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HistoricalV7ReadError {
+    UnsupportedVersion { actual: u32, expected: u32 },
+    Payload(String),
+}
+
+fn read_with_historical_v7_reader(input: &str) -> Result<(), HistoricalV7ReadError> {
+    let value: serde_json::Value = serde_json::from_str(input)
+        .map_err(|error| HistoricalV7ReadError::Payload(error.to_string()))?;
+    let actual = value["schema_version"]
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(|| HistoricalV7ReadError::Payload("missing schema_version".to_string()))?;
+    if actual != 7 {
+        return Err(HistoricalV7ReadError::UnsupportedVersion {
+            actual,
+            expected: 7,
+        });
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum HistoricalV7Event {
+        SessionStarted,
+        // v7 spread one turn outcome over three free-form fields. v8 replaces
+        // them with a single closed `outcome`, which is why a v7 reader must
+        // not reach this decoder for a v8 record.
+        TurnCompleted {
+            #[allow(dead_code)]
+            status: String,
+            #[allow(dead_code)]
+            done_reason: String,
+        },
+    }
+
+    serde_json::from_value::<HistoricalV7Event>(value)
+        .map(|_| ())
+        .map_err(|error| HistoricalV7ReadError::Payload(error.to_string()))
+}
+
+/// FIG-1758: the v8 bump retypes `turn_completed`. A v7 reader must refuse a
+/// v8 record on its version gate, before its decoder can trip over the
+/// reshaped payload.
+#[test]
+fn historical_v7_reader_refuses_v8_turn_outcome_before_interpreting_payload() {
+    let record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::TurnCompleted {
+            outcome: TraceTurnOutcome::Cancelled {
+                evidence: TraceTurnCancellationEvidence {
+                    request_id: "cancel-1".to_string(),
+                    origin: None,
+                    reason: None,
+                },
+            },
+        },
+    );
+    let wire = serde_json::to_string(&record).expect("serialize v8 turn_completed");
+    assert_eq!(
+        read_with_historical_v7_reader(&wire),
+        Err(HistoricalV7ReadError::UnsupportedVersion {
+            actual: 8,
+            expected: 7,
+        }),
+        "the v7 reader's typed version gate must run before its payload decoder"
+    );
+
+    let forced_v7 = wire.replacen("\"schema_version\":8", "\"schema_version\":7", 1);
+    let error = read_with_historical_v7_reader(&forced_v7)
+        .expect_err("without the version gate, the retyped payload is undecodable");
+    assert!(
+        matches!(&error, HistoricalV7ReadError::Payload(message) if message.contains("status")),
+        "expected the missing `status` field to break a v7 decoder, got: {error:?}"
+    );
+}
+
+/// FIG-1758: the other direction of the same gate — the current v8 decoder must
+/// refuse a stored v7 record on its version, before the old flat
+/// `status`/`done_reason` payload reaches the typed event decoder.
+#[test]
+fn current_reader_refuses_a_stored_v7_turn_completed_record() {
+    let stored_v7 = r#"{"schema_version":7,"id":"v7-turn","timestamp":"2026-08-19T09:12:33.101+00:00","context":{},"type":"turn_completed","status":"failed","done_reason":"cancelled"}"#;
+    let error = serde_json::from_str::<TraceRecord>(stored_v7)
+        .expect_err("v7 trace records must be refused by the v8 decoder");
+    assert_eq!(
+        error.to_string(),
+        "unsupported trace schema version 7; expected 8",
+        "the version refusal must precede payload interpretation"
+    );
+
+    // The same bytes at the current version are undecodable for a second,
+    // independent reason: v8 has no flat `status`/`done_reason` pair. The
+    // version gate is what keeps that shape error from ever being the message a
+    // stale reader sees.
+    let forced_v8 = stored_v7.replacen("\"schema_version\":7", "\"schema_version\":8", 1);
+    let error = serde_json::from_str::<TraceRecord>(&forced_v8)
+        .expect_err("without the version gate, the v7 payload shape is undecodable");
+    assert!(
+        error.to_string().contains("outcome"),
+        "expected the missing `outcome` field to break the v8 decoder, got: {error}"
+    );
+}
+
+/// FIG-1758: `turn_completed` carries exactly one closed outcome. Each variant
+/// owns only the data its state can hold, so no combination can state an
+/// agent-frame switch without a frame key or a cancellation without evidence.
+#[test]
+fn turn_completed_outcome_pins_the_closed_variant_vocabulary() {
+    let cases = [
+        (
+            TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::AssistantMessage,
+            },
+            json!({ "status": "completed", "done_reason": "assistant_message" }),
+        ),
+        (
+            TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::FinalValue,
+            },
+            json!({ "status": "completed", "done_reason": "final_value" }),
+        ),
+        (
+            TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::ToolValue,
+            },
+            json!({ "status": "completed", "done_reason": "tool_value" }),
+        ),
+        (
+            TraceTurnOutcome::AgentFrameSwitch {
+                frame_switch: lash_trace::TraceAgentFrameSwitch {
+                    frame_key: "frame-key/v1/example".to_string(),
+                },
+            },
+            json!({
+                "status": "agent_frame_switch",
+                "frame_switch": { "frame_key": "frame-key/v1/example" },
+            }),
+        ),
+        (
+            TraceTurnOutcome::Cancelled {
+                evidence: TraceTurnCancellationEvidence {
+                    request_id: "cancel-1".to_string(),
+                    origin: Some("host-console".to_string()),
+                    reason: Some("operator stopped the turn".to_string()),
+                },
+            },
+            json!({
+                "status": "cancelled",
+                "evidence": {
+                    "request_id": "cancel-1",
+                    "origin": "host-console",
+                    "reason": "operator stopped the turn",
+                },
+            }),
+        ),
+        (
+            TraceTurnOutcome::Failed {
+                done_reason: TraceTurnFailureReason::ProviderError,
+            },
+            json!({ "status": "failed", "done_reason": "provider_error" }),
+        ),
+    ];
+
+    for (outcome, expected) in cases {
+        let event = TraceEvent::TurnCompleted {
+            outcome: outcome.clone(),
+        };
+        let wire = serde_json::to_value(&event).expect("serialize turn_completed");
+        assert_eq!(wire["type"], "turn_completed");
+        assert_eq!(wire["outcome"], expected, "wire shape for {outcome:?}");
+        let decoded: TraceEvent = serde_json::from_value(wire).expect("round trip turn_completed");
+        assert_eq!(decoded, event);
+    }
+
+    // Every failure reason keeps a distinct snake_case tag.
+    let failure_tags = [
+        TraceTurnFailureReason::Incomplete,
+        TraceTurnFailureReason::InvalidInput,
+        TraceTurnFailureReason::MaxTurns,
+        TraceTurnFailureReason::ToolFailure,
+        TraceTurnFailureReason::ProviderError,
+        TraceTurnFailureReason::PluginAbort,
+        TraceTurnFailureReason::RuntimeError,
+        TraceTurnFailureReason::SubmittedError,
+        TraceTurnFailureReason::ToolError,
+    ]
+    .map(|reason| {
+        let wire = serde_json::to_value(reason).expect("serialize failure reason");
+        assert_eq!(wire, json!(reason.wire_tag()));
+        reason.wire_tag()
+    });
+    assert_eq!(
+        failure_tags.iter().collect::<BTreeSet<_>>().len(),
+        failure_tags.len(),
+        "failure reasons must not collide"
+    );
+}
+
+/// FIG-1758: `done_reason_tag()` reproduces exactly the spelling the pre-v8
+/// flat `done_reason` string carried, so a host that read it as text keeps a
+/// supported way to do so after the retyping.
+#[test]
+fn done_reason_tag_reproduces_the_pre_v8_reason_spellings() {
+    let cases = [
+        (
+            TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::AssistantMessage,
+            },
+            "assistant_message",
+        ),
+        (
+            TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::FinalValue,
+            },
+            "final_value",
+        ),
+        (
+            TraceTurnOutcome::Completed {
+                done_reason: TraceTurnCompletionReason::ToolValue,
+            },
+            "tool_value",
+        ),
+        (
+            // v7 reported a frame switch as done_reason="agent_frame_switch".
+            TraceTurnOutcome::AgentFrameSwitch {
+                frame_switch: lash_trace::TraceAgentFrameSwitch {
+                    frame_key: "frame-key/v1/example".to_string(),
+                },
+            },
+            "agent_frame_switch",
+        ),
+        (
+            // v7 reported a cancellation as done_reason="cancelled".
+            TraceTurnOutcome::Cancelled {
+                evidence: TraceTurnCancellationEvidence {
+                    request_id: "cancel-1".to_string(),
+                    origin: None,
+                    reason: None,
+                },
+            },
+            "cancelled",
+        ),
+        (
+            TraceTurnOutcome::Failed {
+                done_reason: TraceTurnFailureReason::ProviderError,
+            },
+            "provider_error",
+        ),
+    ];
+
+    for (outcome, expected) in cases {
+        assert_eq!(
+            outcome.done_reason_tag(),
+            expected,
+            "done_reason tag for {outcome:?}"
+        );
+    }
+}
+
+/// FIG-1758: only a `failed` outcome satisfies the shared failure predicate.
+/// A cancelled turn is a deliberate stop and must not be counted as a failure.
+#[test]
+fn cancelled_turn_outcome_is_not_a_failure() {
+    let cancelled = TraceEvent::TurnCompleted {
+        outcome: TraceTurnOutcome::Cancelled {
+            evidence: TraceTurnCancellationEvidence {
+                request_id: "cancel-1".to_string(),
+                origin: None,
+                reason: None,
+            },
+        },
+    };
+    assert!(!cancelled.is_failed());
+    assert!(
+        !TraceEvent::TurnCompleted {
+            outcome: TraceTurnOutcome::AgentFrameSwitch {
+                frame_switch: lash_trace::TraceAgentFrameSwitch {
+                    frame_key: "frame-key/v1/example".to_string(),
+                },
+            },
+        }
+        .is_failed()
+    );
+    assert!(
+        TraceEvent::TurnCompleted {
+            outcome: TraceTurnOutcome::Failed {
+                done_reason: TraceTurnFailureReason::RuntimeError,
+            },
+        }
+        .is_failed()
+    );
+}
+
+/// FIG-1758: the three durable outcome payloads are closed enums, and the
+/// shared failure predicate matches on the variants rather than on a `"failed"`
+/// string.
+#[test]
+fn durable_outcome_statuses_are_closed_enums() {
+    for (status, tag, failed) in [
+        (TraceJournaledEffectStatus::Completed, "completed", false),
+        (TraceJournaledEffectStatus::Failed, "failed", true),
+    ] {
+        let event = TraceEvent::JournaledEffectSettled {
+            effect_name: "lash:turn:llm:1".to_string(),
+            effect_kind: "llm_call".to_string(),
+            status,
+        };
+        let wire = serde_json::to_value(&event).expect("serialize settled effect");
+        assert_eq!(wire["status"], tag);
+        assert_eq!(event.is_failed(), failed);
+    }
+
+    for (resolution, tag, failed) in [
+        (TraceDurableWaitResolution::Ok, "ok", false),
+        (TraceDurableWaitResolution::Error, "error", false),
+        (TraceDurableWaitResolution::Timeout, "timeout", false),
+        (TraceDurableWaitResolution::Cancelled, "cancelled", false),
+        (TraceDurableWaitResolution::Resolved, "resolved", false),
+        (
+            TraceDurableWaitResolution::TurnCancelled,
+            "turn_cancelled",
+            false,
+        ),
+        (
+            TraceDurableWaitResolution::SessionRevoked,
+            "session_revoked",
+            false,
+        ),
+        (TraceDurableWaitResolution::Failed, "failed", true),
+    ] {
+        let event = TraceEvent::DurableWaitResolved {
+            wait_kind: "await_event".to_string(),
+            resolution,
+        };
+        let wire = serde_json::to_value(&event).expect("serialize resolved wait");
+        assert_eq!(wire["resolution"], tag);
+        assert_eq!(event.is_failed(), failed);
+    }
+
+    for (status, tag, failed) in [
+        (TraceDurableTimerStatus::Resolved, "resolved", false),
+        (TraceDurableTimerStatus::Cancelled, "cancelled", false),
+        (
+            TraceDurableTimerStatus::SessionRevoked,
+            "session_revoked",
+            false,
+        ),
+        (TraceDurableTimerStatus::Failed, "failed", true),
+    ] {
+        let event = TraceEvent::DurableTimerResolved {
+            duration_ms: 250,
+            status,
+        };
+        let wire = serde_json::to_value(&event).expect("serialize resolved timer");
+        assert_eq!(wire["status"], tag);
+        assert_eq!(event.is_failed(), failed);
+    }
+}
+
+/// FIG-1635: the execution map no longer restates the identity fields. After
+/// the removal, the graph's identity is readable only from `identity`, so the
+/// two copies can never diverge in a durable record.
+#[test]
+fn execution_started_map_carries_no_identity_copy() {
+    let event = TraceEvent::LanguageExecution {
+        language: "lashlang".to_string(),
+        event: TraceLanguageExecution {
+            event_key: "process:p1:started".to_string(),
+            identity: lashlang_identity(),
+            payload: TraceLanguageExecutionPayload::ExecutionStarted {
+                execution_map: TraceLanguageExecutionMap {
+                    nodes: vec![TraceLanguageExecutionMapNode {
+                        id: "n1".to_string(),
+                        kind: "resource_operation".to_string(),
+                        label: "read_file".to_string(),
+                        label_metadata: None,
+                    }],
+                    edges: Vec::new(),
+                },
+            },
+        },
+    };
+    let wire = serde_json::to_value(&event).expect("serialize execution_started");
+    assert_eq!(
+        wire,
+        json!({
+            "type": "language_execution",
+            "language": "lashlang",
+            "event": {
+                "kind": "execution_started",
+                "event_key": "process:p1:started",
+                "identity": {
+                    "scope": { "session_id": "s1" },
+                    "subject": { "type": "process", "process_id": "p1" },
+                    "module_ref": "module",
+                    "entry_kind": "process",
+                    "entry_ref": "component:0",
+                    "entry_name": "main",
+                },
+                "execution_map": {
+                    "nodes": [{
+                        "id": "n1",
+                        "kind": "resource_operation",
+                        "label": "read_file",
+                    }],
+                    "edges": [],
+                },
+            },
+        })
+    );
+
+    let map = &wire["event"]["execution_map"];
+    for field in ["module_ref", "entry_kind", "entry_ref", "entry_name"] {
+        assert!(
+            map.get(field).is_none(),
+            "the execution map must not restate `{field}`; identity owns it"
+        );
+        assert!(
+            wire["event"]["identity"].get(field).is_some(),
+            "identity must remain the single home of `{field}`"
+        );
+    }
 }
 
 #[test]
@@ -865,7 +1293,7 @@ fn retry_attempts_are_optional_additive_event_fields() {
     );
     assert!(json["attempts"][1].get("reason").is_none());
     assert!(json["attempts"][1].get("delay_ms").is_none());
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 7);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
 }
 
 #[test]
@@ -938,10 +1366,6 @@ fn language_execution_all_seven_payload_variants_round_trip() {
     let variants = vec![
         TraceLanguageExecutionPayload::ExecutionStarted {
             execution_map: TraceLanguageExecutionMap {
-                module_ref: "module".to_string(),
-                entry_kind: "process".to_string(),
-                entry_ref: Some("component:0".to_string()),
-                entry_name: "main".to_string(),
                 nodes: vec![TraceLanguageExecutionMapNode {
                     id: "n1".to_string(),
                     kind: "resource_operation".to_string(),
@@ -1093,9 +1517,9 @@ fn jsonl_round_trip_preserves_records() {
         TraceRecord::new(
             TraceContext::default().for_session("root"),
             TraceEvent::TurnCompleted {
-                status: "completed".to_string(),
-                done_reason: "modelstop".to_string(),
-                agent_frame_switch: None,
+                outcome: TraceTurnOutcome::Completed {
+                    done_reason: TraceTurnCompletionReason::AssistantMessage,
+                },
             },
         ),
     ];
@@ -1114,7 +1538,7 @@ fn jsonl_round_trip_preserves_records() {
 
     assert_eq!(parsed, records, "JSONL round-trip must preserve records");
     for record in &parsed {
-        assert_eq!(record.schema_version, 7);
+        assert_eq!(record.schema_version, 8);
     }
 
     // Pin the diagnostic's `tool_calls` entry fields explicitly on the parsed
@@ -1142,19 +1566,19 @@ fn durable_step_events_round_trip_at_schema_version_six() {
         TraceEvent::JournaledEffectSettled {
             effect_name: "lash:turn:llm:1".to_string(),
             effect_kind: "llm_call".to_string(),
-            status: "completed".to_string(),
+            status: TraceJournaledEffectStatus::Completed,
         },
         TraceEvent::DurableWaitParked {
             wait_kind: "await_event".to_string(),
         },
         TraceEvent::DurableWaitResolved {
             wait_kind: "await_event".to_string(),
-            resolution: "ok".to_string(),
+            resolution: TraceDurableWaitResolution::Ok,
         },
         TraceEvent::DurableTimerStarted { duration_ms: 250 },
         TraceEvent::DurableTimerResolved {
             duration_ms: 250,
-            status: "resolved".to_string(),
+            status: TraceDurableTimerStatus::Resolved,
         },
         TraceEvent::DurableSegmentBoundary {
             reason: "journal_budget".to_string(),
@@ -1173,7 +1597,7 @@ fn durable_step_events_round_trip_at_schema_version_six() {
         let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 7);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
         assert_eq!(json["type"], expected_kind);
         let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
         assert_eq!(decoded.event.kind(), expected_kind);
