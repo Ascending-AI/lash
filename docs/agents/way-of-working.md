@@ -98,6 +98,8 @@ Gate merges on the local battery (`just push-gate`, plus the confidence-gate lan
 
 Heavy gates are serial within a lane and capped across the box: build width comes from the environment the checkout was prepared with (`CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`), and the build-heavy legs of `push-gate.sh` run through the `heavy-slot` semaphore when the machine provides it, so concurrent lanes queue instead of thrashing. Both are feature-detected and inert on CI. Do not override either without a measured need; the mechanics are in `CONTRIBUTING.md` under "Concurrent local gates".
 
+A battery may consult `python3 scripts/gate_scope.py --base origin/main` to skip gate families no touched path can reach — a prose-only change does not need the compile battery. The classifier only ever skips what it can prove is unaffected: a shared input (manifests, lockfile, toolchain, `scripts/`, `.github/`), an unrecognised path, an empty path set, or its own failure runs everything. Its decision line must be printed verbatim into the gate log next to the gate table, so a reviewer can audit every skip rather than take it on trust; a battery result reported without that line is reported as if nothing was skipped.
+
 ### Expect tests versus conformance assertions
 
 Use an inline expect test when the review artifact is a short, deterministic behavior transcript and a changed ordering or rendered state should be judged as one coherent diff. Keep conformance suites assertion-based: they prove backend-independent invariants across implementations, where pinning one example interleaving would narrow the contract instead of strengthening it. Never bless an expect diff until its durable-write lines still distinguish the defect the test is meant to catch.
