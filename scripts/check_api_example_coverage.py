@@ -340,7 +340,13 @@ DISPOSITION_TIERS = {
 #: change would otherwise fail the gate is the thing this constant exists to
 #: catch; the honest move there is to record the row's consumer in prose under
 #: an `unused-*` disposition and leave the pin.
-EXAMPLE_TEST_TIER_RATCHET = 1955
+#:
+#: FIG-1635 lowered it 1955 -> 1951: the trace execution map's four duplicate
+#: identity fields (`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) were
+#: deleted from the public surface, taking their four example-test-anchored
+#: rows with them.  A deletion lowering the pin is the ratchet tightening, not
+#: bleeding.
+EXAMPLE_TEST_TIER_RATCHET = 1951
 #: Module paths that put an item behind the `testing` feature, which is what
 #: makes a test-only consumer a home rather than an excuse.  `test_support` is
 #: the doc-hidden one lash-core relocates cross-crate test-only items into;

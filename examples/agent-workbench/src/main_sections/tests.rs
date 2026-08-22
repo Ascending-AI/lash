@@ -178,14 +178,7 @@ mod tests {
                         event_key: format!("{}:start", graph.graph_key),
                         identity,
                         payload: TraceLanguageExecutionPayload::ExecutionStarted {
-                            execution_map: TraceLanguageExecutionMap {
-                                module_ref: graph.module_ref.clone(),
-                                entry_kind: graph.entry_kind.clone(),
-                                entry_ref: graph.entry_ref.clone(),
-                                entry_name: graph.entry_name.clone(),
-                                nodes: Vec::new(),
-                                edges: Vec::new(),
-                            },
+                            execution_map: TraceLanguageExecutionMap::default(),
                         },
                     },
                 },
@@ -303,10 +296,6 @@ mod tests {
             identity: identity.clone(),
             payload: TraceLanguageExecutionPayload::ExecutionStarted {
                 execution_map: TraceLanguageExecutionMap {
-                    module_ref: "m1".to_string(),
-                    entry_kind: "process".to_string(),
-                    entry_ref: Some("r1:0".to_string()),
-                    entry_name: "main".to_string(),
                     nodes: vec![TraceLanguageExecutionMapNode {
                         id: "branch".to_string(),
                         kind: "branch".to_string(),

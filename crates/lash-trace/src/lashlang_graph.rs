@@ -483,10 +483,6 @@ mod tests {
             identity: identity(),
             payload: TraceLanguageExecutionPayload::ExecutionStarted {
                 execution_map: LanguageExecutionMap {
-                    module_ref: "module-1".to_string(),
-                    entry_kind: "main".to_string(),
-                    entry_ref: None,
-                    entry_name: "main".to_string(),
                     nodes: vec![
                         TraceLanguageExecutionMapNode {
                             id: "branch".to_string(),

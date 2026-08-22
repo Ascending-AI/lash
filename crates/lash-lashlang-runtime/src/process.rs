@@ -1072,11 +1072,7 @@ impl LashlangProcessExecutionTrace {
             event_key: self.event_key("started"),
             identity: self.identity(),
             payload: TraceLanguageExecutionPayload::ExecutionStarted {
-                execution_map: trace_lashlang_process_map(
-                    artifact,
-                    &self.process_ref,
-                    &self.process_name,
-                ),
+                execution_map: trace_lashlang_process_map(artifact, &self.process_name),
             },
         });
     }
@@ -1245,7 +1241,6 @@ impl LashlangProcessExecutionTrace {
 
 fn trace_lashlang_process_map(
     artifact: &lashlang::ModuleArtifact,
-    process_ref: &lashlang::ProcessRef,
     process_name: &str,
 ) -> TraceLanguageExecutionMap {
     let source = lashlang::canonical_program_source_with_requirements(
@@ -1256,14 +1251,7 @@ fn trace_lashlang_process_map(
         .ok()
         .and_then(|source| lashlang::workflow_graph_from_source(&source).ok());
     let Some(process) = graph.as_ref().and_then(|graph| graph.process(process_name)) else {
-        return TraceLanguageExecutionMap {
-            module_ref: artifact.module_ref.to_string(),
-            entry_kind: "process".to_string(),
-            entry_ref: Some(lashlang::process_ref_key(process_ref)),
-            entry_name: process_name.to_string(),
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        };
+        return TraceLanguageExecutionMap::default();
     };
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
@@ -1275,14 +1263,7 @@ fn trace_lashlang_process_map(
         &mut edges,
         &mut primary_runtime_ids,
     );
-    TraceLanguageExecutionMap {
-        module_ref: artifact.module_ref.to_string(),
-        entry_kind: "process".to_string(),
-        entry_ref: Some(lashlang::process_ref_key(process_ref)),
-        entry_name: process_name.to_string(),
-        nodes,
-        edges,
-    }
+    TraceLanguageExecutionMap { nodes, edges }
 }
 
 /// Builds the trace runtime's read-only foreground skeleton from the workflow graph.
@@ -1294,14 +1275,7 @@ pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLang
     .ok()
     .and_then(|source| lashlang::workflow_graph_from_source(&source).ok());
     let Some(graph) = graph else {
-        return TraceLanguageExecutionMap {
-            module_ref: artifact.module_ref.to_string(),
-            entry_kind: "main".to_string(),
-            entry_ref: None,
-            entry_name: "main".to_string(),
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        };
+        return TraceLanguageExecutionMap::default();
     };
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
@@ -1313,14 +1287,7 @@ pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLang
         &mut edges,
         &mut primary_runtime_ids,
     );
-    TraceLanguageExecutionMap {
-        module_ref: artifact.module_ref.to_string(),
-        entry_kind: "main".to_string(),
-        entry_ref: None,
-        entry_name: "main".to_string(),
-        nodes,
-        edges,
-    }
+    TraceLanguageExecutionMap { nodes, edges }
 }
 
 fn append_trace_workflow_subgraph(

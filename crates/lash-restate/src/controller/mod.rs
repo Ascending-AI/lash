@@ -610,7 +610,7 @@ where
                     self.emit_trace(Some(&invocation), || {
                         lash_trace::TraceEvent::DurableWaitResolved {
                             wait_kind: wait_kind.to_string(),
-                            resolution: resolution.to_string(),
+                            resolution,
                         }
                     });
                 },
@@ -683,7 +683,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableTimerResolved {
                                 duration_ms,
-                                status: "session_revoked".to_string(),
+                                status: lash_trace::TraceDurableTimerStatus::SessionRevoked,
                             }
                         });
                         cancellation.cancel();
@@ -695,7 +695,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableTimerResolved {
                                 duration_ms,
-                                status: "cancelled".to_string(),
+                                status: lash_trace::TraceDurableTimerStatus::Cancelled,
                             }
                         });
                         cancellation.cancel();
@@ -708,7 +708,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableTimerResolved {
                                 duration_ms,
-                                status: "failed".to_string(),
+                                status: lash_trace::TraceDurableTimerStatus::Failed,
                             }
                         });
                         tracing_sleep_error(&invocation, &err);
@@ -721,7 +721,7 @@ where
                 self.emit_trace(Some(&invocation), || {
                     lash_trace::TraceEvent::DurableTimerResolved {
                         duration_ms,
-                        status: "resolved".to_string(),
+                        status: lash_trace::TraceDurableTimerStatus::Resolved,
                     }
                 });
                 Ok(RuntimeEffectOutcome::Sleep)
@@ -769,7 +769,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableWaitResolved {
                                 wait_kind: "await_event".to_string(),
-                                resolution: resolution_trace_label(&resolution).to_string(),
+                                resolution: resolution_trace_label(&resolution),
                             }
                         });
                         Ok(RuntimeEffectOutcome::AwaitEvent { resolution })
@@ -778,7 +778,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableWaitResolved {
                                 wait_kind: "await_event".to_string(),
-                                resolution: "session_revoked".to_string(),
+                                resolution: lash_trace::TraceDurableWaitResolution::SessionRevoked,
                             }
                         });
                         cancellation.cancel();
@@ -790,7 +790,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableWaitResolved {
                                 wait_kind: "await_event".to_string(),
-                                resolution: "turn_cancelled".to_string(),
+                                resolution: lash_trace::TraceDurableWaitResolution::TurnCancelled,
                             }
                         });
                         cancellation.cancel();
@@ -802,7 +802,7 @@ where
                         self.emit_trace(Some(&invocation), || {
                             lash_trace::TraceEvent::DurableWaitResolved {
                                 wait_kind: "await_event".to_string(),
-                                resolution: "failed".to_string(),
+                                resolution: lash_trace::TraceDurableWaitResolution::Failed,
                             }
                         });
                         Err(RuntimeEffectControllerError::new(
@@ -850,7 +850,7 @@ where
                             lash_trace::TraceEvent::JournaledEffectSettled {
                                 effect_name: restate_effect_name(&invocation),
                                 effect_kind: trace_effect_kind(&invocation).to_string(),
-                                status: "failed".to_string(),
+                                status: lash_trace::TraceJournaledEffectStatus::Failed,
                             }
                         });
                         return Err(RuntimeEffectControllerError::new(
@@ -871,7 +871,7 @@ where
                             lash_trace::TraceEvent::JournaledEffectSettled {
                                 effect_name: restate_effect_name(&invocation),
                                 effect_kind: trace_effect_kind(&invocation).to_string(),
-                                status: "failed".to_string(),
+                                status: lash_trace::TraceJournaledEffectStatus::Failed,
                             }
                         });
                         return Err(error);
@@ -882,11 +882,10 @@ where
                         effect_name: restate_effect_name(&invocation),
                         effect_kind: trace_effect_kind(&invocation).to_string(),
                         status: if outcome.is_ok() {
-                            "completed"
+                            lash_trace::TraceJournaledEffectStatus::Completed
                         } else {
-                            "failed"
-                        }
-                        .to_string(),
+                            lash_trace::TraceJournaledEffectStatus::Failed
+                        },
                     }
                 });
                 outcome
@@ -895,12 +894,13 @@ where
     }
 }
 
-fn resolution_trace_label(resolution: &Resolution) -> &'static str {
+fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWaitResolution {
+    use lash_trace::TraceDurableWaitResolution as Resolved;
     match resolution {
-        Resolution::Ok(_) => "ok",
-        Resolution::Err(_) => "error",
-        Resolution::Timeout => "timeout",
-        Resolution::Cancelled => "cancelled",
+        Resolution::Ok(_) => Resolved::Ok,
+        Resolution::Err(_) => Resolved::Error,
+        Resolution::Timeout => Resolved::Timeout,
+        Resolution::Cancelled => Resolved::Cancelled,
     }
 }
 
@@ -941,7 +941,7 @@ async fn execute_restate_process_command<'ctx, C>(
     command: ProcessCommand,
     local_executor: RuntimeEffectLocalExecutor<'_>,
     trace_park: impl Fn(&'static str),
-    trace_resolve: impl Fn(&'static str, &'static str),
+    trace_resolve: impl Fn(&'static str, lash_trace::TraceDurableWaitResolution),
 ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
@@ -1067,7 +1067,7 @@ where
             let first_wait = match first_wait {
                 Ok(outcome) => outcome,
                 Err(err) => {
-                    trace_resolve("process", "failed");
+                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Failed);
                     return Err(RuntimeEffectControllerError::new(
                         RuntimeErrorCode::RestateProcessAwait,
                         err.to_string(),
@@ -1076,11 +1076,14 @@ where
             };
             let output = match first_wait {
                 RestateTurnCancelRaceOutcome::Completed(output) => {
-                    trace_resolve("process", "resolved");
+                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Resolved);
                     *output
                 }
                 RestateTurnCancelRaceOutcome::TurnCancelled => {
-                    trace_resolve("process", "turn_cancelled");
+                    trace_resolve(
+                        "process",
+                        lash_trace::TraceDurableWaitResolution::TurnCancelled,
+                    );
                     let Some(turn_cancellation) = turn_cancellation.as_ref() else {
                         return Err(RuntimeEffectControllerError::new(
                             RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
@@ -1101,11 +1104,17 @@ where
                     trace_park("process_after_turn_cancel");
                     match context.await_process_terminal(process_id.clone()).await {
                         Ok(output) => {
-                            trace_resolve("process_after_turn_cancel", "resolved");
+                            trace_resolve(
+                                "process_after_turn_cancel",
+                                lash_trace::TraceDurableWaitResolution::Resolved,
+                            );
                             output
                         }
                         Err(err) => {
-                            trace_resolve("process_after_turn_cancel", "failed");
+                            trace_resolve(
+                                "process_after_turn_cancel",
+                                lash_trace::TraceDurableWaitResolution::Failed,
+                            );
                             return Err(RuntimeEffectControllerError::new(
                                 RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
                                 err.to_string(),
@@ -1114,7 +1123,10 @@ where
                     }
                 }
                 RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                    trace_resolve("process", "session_revoked");
+                    trace_resolve(
+                        "process",
+                        lash_trace::TraceDurableWaitResolution::SessionRevoked,
+                    );
                     return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
                 }
             };

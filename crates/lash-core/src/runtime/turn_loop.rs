@@ -189,42 +189,67 @@ pub enum SelectedQueuedWorkDrainError {
     },
 }
 
-fn trace_fields_from_outcome(
-    outcome: &TurnOutcome,
-) -> (
-    &'static str,
-    &'static str,
-    Option<lash_trace::TraceAgentFrameSwitch>,
-) {
+/// Projects a terminal turn outcome onto the closed trace outcome.
+///
+/// Cancellation is its own trace variant carrying the evidence
+/// [`TurnStop::Cancelled`] already holds, so a cancelled turn is never traced
+/// as a failure.
+fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
+    use lash_trace::{TraceTurnCompletionReason as Reason, TraceTurnOutcome as Outcome};
     match outcome {
-        TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => {
-            ("completed", "assistant_message", None)
-        }
-        TurnOutcome::Finished(TurnFinish::FinalValue { .. }) => ("completed", "final_value", None),
-        TurnOutcome::Finished(TurnFinish::ToolValue { .. }) => ("completed", "tool_value", None),
-        TurnOutcome::AgentFrameSwitch { frame_key, .. } => (
-            "completed",
-            "agent_frame_switch",
-            Some(lash_trace::TraceAgentFrameSwitch {
+        TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => Outcome::Completed {
+            done_reason: Reason::AssistantMessage,
+        },
+        TurnOutcome::Finished(TurnFinish::FinalValue { .. }) => Outcome::Completed {
+            done_reason: Reason::FinalValue,
+        },
+        TurnOutcome::Finished(TurnFinish::ToolValue { .. }) => Outcome::Completed {
+            done_reason: Reason::ToolValue,
+        },
+        TurnOutcome::AgentFrameSwitch { frame_key, .. } => Outcome::AgentFrameSwitch {
+            frame_switch: lash_trace::TraceAgentFrameSwitch {
                 frame_key: frame_key.as_str().to_string(),
-            }),
-        ),
-        TurnOutcome::Stopped(stop) => ("failed", trace_stop_reason(stop), None),
-    }
-}
-
-fn trace_stop_reason(stop: &TurnStop) -> &'static str {
-    match stop {
-        TurnStop::Cancelled { .. } => "cancelled",
-        TurnStop::Incomplete => "incomplete",
-        TurnStop::InvalidInput => "invalid_input",
-        TurnStop::MaxTurns => "max_turns",
-        TurnStop::ToolFailure => "tool_failure",
-        TurnStop::ProviderError => "provider_error",
-        TurnStop::PluginAbort => "plugin_abort",
-        TurnStop::RuntimeError => "runtime_error",
-        TurnStop::SubmittedError { .. } => "submitted_error",
-        TurnStop::ToolError { .. } => "tool_error",
+            },
+        },
+        TurnOutcome::Stopped(stop) => {
+            use lash_trace::TraceTurnFailureReason as Failure;
+            match stop {
+                TurnStop::Cancelled { evidence } => Outcome::Cancelled {
+                    evidence: lash_trace::TraceTurnCancellationEvidence {
+                        request_id: evidence.request_id.clone(),
+                        origin: evidence.origin.clone(),
+                        reason: evidence.reason.clone(),
+                    },
+                },
+                TurnStop::Incomplete => Outcome::Failed {
+                    done_reason: Failure::Incomplete,
+                },
+                TurnStop::InvalidInput => Outcome::Failed {
+                    done_reason: Failure::InvalidInput,
+                },
+                TurnStop::MaxTurns => Outcome::Failed {
+                    done_reason: Failure::MaxTurns,
+                },
+                TurnStop::ToolFailure => Outcome::Failed {
+                    done_reason: Failure::ToolFailure,
+                },
+                TurnStop::ProviderError => Outcome::Failed {
+                    done_reason: Failure::ProviderError,
+                },
+                TurnStop::PluginAbort => Outcome::Failed {
+                    done_reason: Failure::PluginAbort,
+                },
+                TurnStop::RuntimeError => Outcome::Failed {
+                    done_reason: Failure::RuntimeError,
+                },
+                TurnStop::SubmittedError { .. } => Outcome::Failed {
+                    done_reason: Failure::SubmittedError,
+                },
+                TurnStop::ToolError { .. } => Outcome::Failed {
+                    done_reason: Failure::ToolError,
+                },
+            }
+        }
     }
 }
 
@@ -1709,7 +1734,7 @@ impl LashRuntime {
             return;
         }
 
-        let (status, done_reason, agent_frame_switch) = trace_fields_from_outcome(outcome);
+        let trace_outcome = trace_outcome(outcome);
         crate::trace::emit_trace(
             &self.host.core.tracing.trace_sink,
             &self.host.core.tracing.trace_context,
@@ -1718,9 +1743,7 @@ impl LashRuntime {
                 .for_turn_index(state.turn_index)
                 .for_turn(trace_turn_id.to_string()),
             lash_trace::TraceEvent::TurnCompleted {
-                status: status.to_string(),
-                done_reason: done_reason.to_string(),
-                agent_frame_switch,
+                outcome: trace_outcome,
             },
             self.host.core.clock.as_ref(),
         );
