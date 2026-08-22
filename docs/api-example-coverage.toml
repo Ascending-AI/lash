@@ -2360,7 +2360,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::InputItem::Text", "lash_core::InputItem::Text"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:289#items: vec![InputItem::Text { text: prompt_text }],"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:293#items: vec![InputItem::Text { text: prompt_text }],"
 
 [[api]]
 symbol = "lash::InputItem::Text::text"
@@ -2369,7 +2369,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::InputItem::Text::text", "lash_core::InputItem::Text::text"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:289#items: vec![InputItem::Text { text: prompt_text }],"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:293#items: vec![InputItem::Text { text: prompt_text }],"
 
 [[api]]
 symbol = "lash::InputItem::attachment"
@@ -5594,7 +5594,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::SessionStartPoint::Snapshot", "lash_core::SessionStartPoint::Snapshot"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:251#SessionStartPoint::Snapshot {"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:255#SessionStartPoint::Snapshot {"
 
 [[api]]
 symbol = "lash::SessionStartPoint::Snapshot::snapshot"
@@ -5603,7 +5603,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::SessionStartPoint::Snapshot::snapshot", "lash_core::SessionStartPoint::Snapshot::snapshot"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:252#snapshot: Box::new(snapshot.to_snapshot()),"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:256#snapshot: Box::new(snapshot.to_snapshot()),"
 
 [[api]]
 symbol = "lash::SessionTriggerAdmin"
@@ -7222,7 +7222,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnInput::items", "lash_core::TurnInput::items"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:289#items: vec![InputItem::Text { text: prompt_text }],"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:293#items: vec![InputItem::Text { text: prompt_text }],"
 
 [[api]]
 symbol = "lash::TurnInput::protocol_extension"
@@ -16091,7 +16091,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeSessionState::policy"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:238#snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:242#snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);"
 
 [[api]]
 symbol = "lash::persistence::RuntimeSessionState::protocol_turn_options"
@@ -23483,7 +23483,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAppendNode::Message"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:990#let lash_core::SessionAppendNode::Message { message, .. } = &compaction.initial_nodes[0]"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:1059#let lash_core::SessionAppendNode::Message { message, .. } = &compaction.initial_nodes[0]"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -23493,7 +23493,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAppendNode::Message::message"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:990#let lash_core::SessionAppendNode::Message { message, .. } = &compaction.initial_nodes[0]"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:1059#let lash_core::SessionAppendNode::Message { message, .. } = &compaction.initial_nodes[0]"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -23892,7 +23892,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStateService::turn_scope"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:277#.turn_scope(&handle.session_id, &turn_id)"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:281#.turn_scope(&handle.session_id, &turn_id)"
 
 [[api]]
 symbol = "lash::plugins::StaticPluginFactory"
@@ -51588,7 +51588,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::controller"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:281#scoped_effect_controller.controller(),"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:285#scoped_effect_controller.controller(),"
 
 [[api]]
 symbol = "lash::runtime::ScopedEffectController::scope_id"
@@ -51597,7 +51597,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::scope_id"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:275#let turn_id = compaction_turn_id(scoped_effect_controller.scope_id());"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:279#let turn_id = compaction_turn_id(scoped_effect_controller.scope_id());"
 
 [[api]]
 symbol = "lash::runtime::ScopedEffectController::shared"
@@ -69370,7 +69370,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:258#.with_context_overlay(SessionContextOverlay {"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:262#.with_context_overlay(SessionContextOverlay {"
 
 [[api]]
 symbol = "lash_core::SessionContextOverlay::include_base_tools"
@@ -73228,7 +73228,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:285#let request = lash_core::facade_support::SessionTurnRequest::new("
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:289#let request = lash_core::facade_support::SessionTurnRequest::new("
 
 [[api]]
 symbol = "lash_core::facade_support::SessionTurnRequest::input"
@@ -73252,7 +73252,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:285#let request = lash_core::facade_support::SessionTurnRequest::new("
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:289#let request = lash_core::facade_support::SessionTurnRequest::new("
 
 [[api]]
 symbol = "lash_core::facade_support::SessionTurnRequest::session_id"
@@ -79190,7 +79190,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnInput::items", "lash_core::TurnInput::items"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-standard-plugins/src/rolling_history.rs:289#items: vec![InputItem::Text { text: prompt_text }],"
+usage = "crates/lash-standard-plugins/src/rolling_history.rs:293#items: vec![InputItem::Text { text: prompt_text }],"
 
 [[api]]
 symbol = "lash::attachments::AttachmentRef::media_type"
