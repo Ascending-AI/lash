@@ -144,8 +144,10 @@ mod tests {
     fn turn_input_completion_json_keeps_the_pre_unification_shape() {
         let completion = crate::TurnInputCompletion {
             session_id: "session".to_string(),
-            claim_id: "claim".to_string(),
-            lease_token: "lease".to_string(),
+            claim: Some(crate::TurnInputSettlementClaim {
+                claim_id: "claim".to_string(),
+                lease_token: "lease".to_string(),
+            }),
             data: crate::TurnInputCompletionData {
                 input_ids: vec!["input".to_string()],
                 applications: vec![crate::TurnInputApplication {
@@ -161,5 +163,31 @@ mod tests {
             serde_json::to_string(&completion).expect("serialize turn-input completion"),
             r#"{"session_id":"session","claim_id":"claim","lease_token":"lease","input_ids":["input"],"applications":[{"input_id":"input","turn_id":"turn","committed_message_id":"message"}]}"#
         );
+        let restored: crate::TurnInputCompletion =
+            serde_json::from_str(&serde_json::to_string(&completion).expect("serialize"))
+                .expect("round-trip a claimed turn-input completion");
+        assert_eq!(restored, completion);
+    }
+
+    /// An unclaimed settlement (ADR 0069 §5) carries no claim authority at all,
+    /// and the absent claim keys must round-trip as `None` rather than as a
+    /// deserialization failure.
+    #[test]
+    fn unclaimed_turn_input_completion_omits_claim_authority() {
+        let completion = crate::TurnInputCompletion {
+            session_id: "session".to_string(),
+            claim: None,
+            data: crate::TurnInputCompletionData {
+                input_ids: vec!["input".to_string()],
+                applications: Vec::new(),
+            },
+        };
+        let encoded =
+            serde_json::to_string(&completion).expect("serialize unclaimed turn-input completion");
+        assert_eq!(encoded, r#"{"session_id":"session","input_ids":["input"]}"#);
+        let restored: crate::TurnInputCompletion =
+            serde_json::from_str(&encoded).expect("round-trip an unclaimed turn-input completion");
+        assert_eq!(restored, completion);
+        assert_eq!(restored.settlement_identity(), "unclaimed:input");
     }
 }

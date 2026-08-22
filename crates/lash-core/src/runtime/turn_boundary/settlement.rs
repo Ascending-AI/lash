@@ -19,7 +19,13 @@ pub(super) fn drop_turn_input_settlement_row(
     row_id: &str,
 ) -> bool {
     let mut removed = false;
-    for claim in claims.iter_mut().filter(|claim| claim.claim_id == claim_id) {
+    // Unclaimed settlements carry no claim id and are never dropped: they have
+    // no lease generation that a successor could have superseded, so a lost
+    // head CAS retires the driver instead of being retried (ADR 0069 §5).
+    for claim in claims
+        .iter_mut()
+        .filter(|claim| claim.claim_id() == Some(claim_id))
+    {
         let prior = claim.input_ids.len();
         claim.input_ids.retain(|input_id| input_id != row_id);
         claim
@@ -117,7 +123,7 @@ pub(super) fn drop_superseded_recovered_turn_input_settlement(
             .is_some_and(|current| *stale_generation < current);
         let drop_completed = recovered
             && completed_claims.iter().any(|claim| {
-                claim.claim_id == *claim_id
+                claim.claim_id() == Some(claim_id.as_str())
                     && claim
                         .input_ids
                         .iter()
@@ -125,7 +131,7 @@ pub(super) fn drop_superseded_recovered_turn_input_settlement(
             });
         let drop_originating = recovered
             && originating_claims.iter().any(|claim| {
-                claim.claim_id == *claim_id
+                claim.claim_id() == Some(claim_id.as_str())
                     && claim
                         .input_ids
                         .iter()
@@ -186,8 +192,10 @@ mod tests {
     fn turn_input_completion() -> crate::TurnInputCompletion {
         crate::TurnInputCompletion {
             session_id: "fig905".to_string(),
-            claim_id: "stale-claim".to_string(),
-            lease_token: "stale-token".to_string(),
+            claim: Some(crate::TurnInputSettlementClaim {
+                claim_id: "stale-claim".to_string(),
+                lease_token: "stale-token".to_string(),
+            }),
             data: crate::TurnInputCompletionData {
                 input_ids: vec!["fig905-row".to_string()],
                 applications: Vec::new(),
@@ -236,8 +244,10 @@ mod tests {
     fn foreign_row_turn_input_completion() -> crate::TurnInputCompletion {
         crate::TurnInputCompletion {
             session_id: "fig905".to_string(),
-            claim_id: "stale-claim".to_string(),
-            lease_token: "stale-token".to_string(),
+            claim: Some(crate::TurnInputSettlementClaim {
+                claim_id: "stale-claim".to_string(),
+                lease_token: "stale-token".to_string(),
+            }),
             data: crate::TurnInputCompletionData {
                 input_ids: vec!["fig905-other-row".to_string()],
                 applications: Vec::new(),

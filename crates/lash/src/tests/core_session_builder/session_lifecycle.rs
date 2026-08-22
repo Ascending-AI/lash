@@ -2421,6 +2421,7 @@ fn turn_result_total_usage_sums_parent_and_children() {
     };
 
     let result = TurnReport {
+        acceptance: None,
         state: SessionSnapshot {
             session_id: "s".to_string(),
             policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),

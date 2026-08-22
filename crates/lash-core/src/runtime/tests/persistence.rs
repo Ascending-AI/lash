@@ -1040,3 +1040,61 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
     assert_eq!(turn.token_usage.output_tokens, 4);
     assert_eq!(turn.token_usage.cache_read_input_tokens, 1);
 }
+
+// ADR 0069: direct turns enter through the same durable acceptance the queued
+// ingress uses, so the in-memory store owes the same laws the durable backends
+// do.
+#[tokio::test]
+async fn in_memory_direct_turn_accepts_before_driving() {
+    Box::pin(
+        crate::testing::conformance::direct_turn_accepts_before_driving(
+            "in-memory",
+            Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+        ),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn in_memory_orphaned_direct_turn_input_is_drivable_by_another_worker() {
+    Box::pin(
+        crate::testing::conformance::orphaned_direct_turn_input_is_drivable_by_another_worker(
+            "in-memory",
+            Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+        ),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn in_memory_direct_turn_acceptance_mints_no_idempotency_key() {
+    Box::pin(
+        crate::testing::conformance::direct_turn_acceptance_mints_no_idempotency_key(
+            "in-memory",
+            Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+        ),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn in_memory_unclaimed_settlement_loser_yields_to_the_successor() {
+    Box::pin(
+        crate::testing::conformance::unclaimed_settlement_loser_yields_to_the_successor(
+            "in-memory",
+            Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+        ),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn in_memory_unclaimed_turn_input_settlement_is_a_conditional_write() {
+    Box::pin(
+        crate::testing::conformance::unclaimed_turn_input_settlement_is_a_conditional_write(
+            "in-memory",
+            Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+        ),
+    )
+    .await;
+}

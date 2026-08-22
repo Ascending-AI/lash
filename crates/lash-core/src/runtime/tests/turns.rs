@@ -971,17 +971,23 @@ async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_tea
     let pending = crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), session_id)
         .await
         .expect("list pending turn inputs");
-    assert_eq!(pending.len(), 1, "the routed input is still queued");
     assert_eq!(
-        pending[0].state,
-        crate::TurnInputState::DeferredNextTurn,
-        "the teardown of a turn that cannot commit must re-defer its pinned input"
+        pending.len(),
+        2,
+        "the routed input is still queued, and so is the fenced turn's own acceptance (ADR 0069)"
     );
-    assert_eq!(
-        pending[0].ingress,
-        crate::TurnInputIngress::NextTurn,
-        "the repaired row must be addressable by the next turn, not by the dead turn id"
-    );
+    for row in &pending {
+        assert_eq!(
+            row.state,
+            crate::TurnInputState::DeferredNextTurn,
+            "the teardown of a turn that cannot commit must re-defer every input it held"
+        );
+        assert_eq!(
+            row.ingress,
+            crate::TurnInputIngress::NextTurn,
+            "the repaired rows must be addressable by the next turn, not by the dead turn id"
+        );
+    }
 }
 
 #[tokio::test]
@@ -2911,18 +2917,27 @@ async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application
         "checkpoint rejection must stop the turn: {:?}",
         turn.outcome
     );
+    // The turn's own input is an acceptance too (ADR 0069), so it is applied
+    // and reported; what must not appear is application evidence for the input
+    // this checkpoint failed to admit.
     assert!(
-        turn_events.snapshot().iter().all(|activity| !matches!(
-            activity.event,
-            crate::TurnEvent::QueuedInputAccepted { .. }
-        )),
+        turn_events
+            .snapshot()
+            .iter()
+            .all(|activity| match &activity.event {
+                crate::TurnEvent::QueuedInputAccepted { applications } => applications
+                    .iter()
+                    .all(|application| application.input_id != admitted.input_id),
+                _ => true,
+            }),
         "a rejected checkpoint must not emit live application evidence"
     );
     assert!(
         crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
             .await
             .expect("list rejected checkpoint applications")
-            .is_empty(),
+            .iter()
+            .all(|application| application.input_id != admitted.input_id),
         "a rejected checkpoint must not persist application evidence"
     );
     assert!(
@@ -3042,18 +3057,27 @@ async fn checkpoint_attachment_failure_leaves_active_input_pending_without_appli
         "checkpoint attachment failure must stop the turn: {:?}",
         turn.outcome
     );
+    // The turn's own input is an acceptance too (ADR 0069), so it is applied
+    // and reported; what must not appear is application evidence for the input
+    // this checkpoint failed to admit.
     assert!(
-        turn_events.snapshot().iter().all(|activity| !matches!(
-            activity.event,
-            crate::TurnEvent::QueuedInputAccepted { .. }
-        )),
+        turn_events
+            .snapshot()
+            .iter()
+            .all(|activity| match &activity.event {
+                crate::TurnEvent::QueuedInputAccepted { applications } => applications
+                    .iter()
+                    .all(|application| application.input_id != admitted.input_id),
+                _ => true,
+            }),
         "a failed checkpoint attachment must not emit live application evidence"
     );
     assert!(
         crate::store::TurnInputStore::list_turn_input_applications(store.as_ref(), "root")
             .await
             .expect("list attachment-failed checkpoint applications")
-            .is_empty(),
+            .iter()
+            .all(|application| application.input_id != admitted.input_id),
         "a failed checkpoint attachment must not persist application evidence"
     );
     assert!(
@@ -3189,12 +3213,26 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
                 && message.parts.iter().any(|part| part.content == "hello")
         })
         .expect("committed opening input");
+    // The opening input entered the same way (ADR 0069): its own acceptance,
+    // its own durable id, distinct from the one injected at the checkpoint.
+    let crate::MessageOrigin::TurnInput {
+        turn_id: opening_turn_id,
+        input_id: opening_input_id,
+    } = opening
+        .origin
+        .as_ref()
+        .expect("committed opening input carries turn-input provenance")
+    else {
+        panic!("the opening input must use the normal user-message representation");
+    };
+    assert_eq!(opening_turn_id, "injection-accepted-turn");
+    let opening_input_id = opening_input_id
+        .as_deref()
+        .expect("a direct turn is admitted durably before it drives");
+    assert_ne!(opening_input_id, input_id);
     assert_eq!(
-        opening.origin,
-        Some(crate::MessageOrigin::TurnInput {
-            turn_id: "injection-accepted-turn".to_string(),
-            input_id: None,
-        })
+        opening.id,
+        crate::runtime::ingress_message_id(opening_input_id)
     );
 }
 
@@ -4993,6 +5031,17 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         .await
         .expect("retained lease chain succeeds");
     assert_eq!(run.turns.len(), 2);
+    // ADR 0069: one acceptance admitted this run, and it admitted exactly the
+    // physical turn it was accepted for. The follow-on frames of the same run
+    // were never separately admitted, so they must not restate the identity.
+    assert!(
+        run.turns[0].turn_input_acceptance.is_some(),
+        "the admitted turn carries the acceptance it was admitted under"
+    );
+    assert!(
+        run.turns[1].turn_input_acceptance.is_none(),
+        "a follow-on frame of the same run was not separately admitted"
+    );
     assert_eq!(
         store.load_session_count(),
         0,
@@ -6178,6 +6227,12 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
 // `LashRuntime` lease acquisition, public scheduling, turn phase probes, and
 // provider suspension. Runtime Scenarios own persistence-level head-CAS and
 // queue/input claim invariants; these tests own the facade scheduler response.
+/// A foreground turn proceeds while a foreign executor holds the session lane:
+/// the lane is advisory for a direct turn. Under ADR 0069 the turn still
+/// drives a durable acceptance, but a lane-less driver settles that row itself
+/// at the head commit CAS (ADR 0069 §5) rather than under a generation-fenced
+/// claim. Two settlement regimes, one authority — so a held lane costs the
+/// caller its claim, never its turn.
 #[tokio::test]
 async fn foreground_turn_proceeds_when_advisory_session_lane_is_held() {
     let transport = mock_provider(vec![MockCall {
@@ -6216,6 +6271,13 @@ async fn foreground_turn_proceeds_when_advisory_session_lane_is_held() {
         .expect("an advisory lease holder must not select a durable error branch");
 
     assert_eq!(assembled.assistant_output.safe_text, "foreground proceeded");
+    assert!(
+        crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
+            .await
+            .expect("read pending turn inputs after the unclaimed drive")
+            .is_empty(),
+        "an unclaimed settlement retires its own accepted row at the head CAS"
+    );
     crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
         store.as_ref(),
         &held_lease.completion(),

@@ -24,7 +24,7 @@ worktree's assigned PostgreSQL service. It runs every phase on SQLite always, an
 PostgreSQL as well when `LASH_POSTGRES_DATABASE_URL` names one. Session ids carry a
 per-run suffix (a session id is single-use, ADR 0049), so a shared database needs no
 truncation and repeated runs never collide. It emits
-`session-lease-triage e2e passed: scenarios=3` only after every phase assertion holds on
+`session-lease-triage e2e passed: scenarios=4` only after every phase assertion holds on
 every configured backend. Its `0*`-prefixed artifacts are the truth for this judged
 runbook.
 
@@ -70,7 +70,11 @@ the case that used to go unreported.
    one collision has not evidenced the diagnosis that prescribes an identity fix.
 5. **Diagnostics never authorize an action.** No phase may use the reading to fence, cancel,
    or kill anything. If a step needs the lease to decide behavior, the step is wrong.
-6. **Docs claims are assertions.** Each documented statement about triage is scored against
+6. **A killed worker's turn is recoverable only if it was accepted first.** The direct-turn
+   phase must find the request durable while its provider is still parked, and an unrelated
+   worker must drive it to a commit through the ordinary queued drain. A run in which the
+   drain finds nothing has not proved recovery; it has proved the request was never admitted.
+7. **Docs claims are assertions.** Each documented statement about triage is scored against
    an artifact. A claim with no evidence behind it is a finding against the docs, not a pass
    by default.
 
@@ -183,6 +187,35 @@ commit CAS fails, `lane_held` is truthfully `true`.
 livelock), a rejection reports `lease_lost = true` or `lane_held = false`, the head revisions
 do not show the head moving on, or a handoff event appears alongside.
 
+## Phase 3b — Direct-turn recovery: a killed worker's `run()` finishes anyway
+
+**Setup.** `08-direct-turn-recovery.jsonl`. One committed direct turn materializes the
+session and reports the acceptance identity it was admitted under. A second direct turn is
+then parked inside a provider that never returns, and its worker is killed: the in-flight
+future is aborted and the core dropped, so no lane release, no claim abandonment, and no
+cancellation of the accepted row ever runs. A separate core under a different owner then
+drains the session, told nothing about the abandoned request.
+
+**Action.** Read `seed_acceptance_input_id`/`seed_acceptance_source_key` and
+`seed_acceptance_settled`, `claimable_while_parked`, then `drain_ran`,
+`recovered_input_id`, `recovered_application_turn_id`, and `pending_after_recovery`.
+
+**Expected observable evidence.** The seeded direct turn reports an acceptance whose
+`input_id` is what settled, and no `source_key`: direct ingress admits, it does not
+deduplicate. While the second turn's provider is parked, the session offers *nothing*
+claimable: the accepted row is held by the parked turn's own claim, and the pending listing
+deliberately hides rows a live claim owns. The row's durability is proved by what happens
+after the kill — the peer's ordinary queued drain, told nothing about the request, runs a
+turn, commits it, and settles a `ti:`-prefixed input under a turn id that is *not* the
+abandoned driver's; no pending row survives.
+
+**Judgment — FAIL if:** the drain finds nothing claimable after the kill (then the turn was
+driven before it was admitted, or post-acceptance recovery is not unified and direct turns
+need a repair path of their own), an input is claimable *while* the drive is parked (then a
+peer could double-drive the running turn's own input), the successor re-commits under the
+abandoned turn id, a `source_key` appears, or the row is still pending after a committed
+recovery.
+
 ## Phase 4 — Score the documented procedure against the observed run
 
 Serve `docs/` on loopback and open `/operations.html`. Poll until the **Triaging A Stuck
@@ -201,6 +234,7 @@ rendered section text as `06-docs-claims.txt`.
 | A Busy turn claimant proceeds lane-less under the head CAS rather than using the durable queued-drain wait/give-up policy | `04-commit-cas-livelock.jsonl` (`busy_advisory`, zero `busy_wait`/`busy_gave_up`) |
 | One rejection is contention; *repeated* rejections with `lease_lost = false` are livelock, and the fix is worker identity | `04-commit-cas-livelock.jsonl` (per-round records) |
 | Only `commit_cas_rejected` proves a turn did not publish | `03-lease-takeover.jsonl` versus `04-commit-cas-livelock.jsonl` |
+| A turn accepted by a worker that then dies is finished by its peer, whichever ingress admitted it | `08-direct-turn-recovery.jsonl` (`claimable_while_parked`, `drain_ran`, `recovered_application_turn_id`) |
 | Lease churn is trace telemetry, not durable session history | absence of any lease entry in session events; the events exist only in the captured timeline |
 
 A page that promises a reading the companion never produced, or a companion observation the
@@ -215,7 +249,7 @@ triples would indicate unintended reentry and must fail the scorecard.
 ## Phase 5 — Teardown and score
 
 Stop the static docs server and confirm its loopback port is closed. Require the companion's
-final `panic gate: clean` and `session-lease-triage e2e passed: scenarios=3` lines, and
+final `panic gate: clean` and `session-lease-triage e2e passed: scenarios=4` lines, and
 confirm no container or host port was left behind (the companion owns none).
 
 | Item | Objective gate | Verdict | Evidence |
@@ -228,18 +262,24 @@ confirm no container or host port was left behind (the companion owns none).
 | Lease loss is not failure | the sweeping turn's fate recorded and self-consistent | | `03-lease-takeover.jsonl` |
 | CAS livelock recurs | every round: one commit, one rejection with `lease_lost = false` and `lane_held = true` from a different executor under the same host owner | | `04-commit-cas-livelock.jsonl` |
 | Executor recovery dispositions | renewal-backed `current` becomes `unheld`; a lapsed dead holder is named by one winner-emitted `taken_over` with no loser event and a committed successor; Busy proceeds lane-less without wait/give-up and head CAS decides | | `07-executor-recovery-law.json` |
+| Direct-turn acceptance precedes the drive | one pending `ti:` input for the session while the provider is parked; the reported acceptance is the one that settled, with no source key | | `08-direct-turn-recovery.jsonl` |
+| Direct-turn recovery is the ordinary drain | an unrelated worker's queued drain commits the orphaned input under its own turn id and leaves no pending row | | `08-direct-turn-recovery.jsonl` |
 | Backend agreement | every phase and normalized recovery disposition reported the same verdicts on each configured backend | | all phase artifacts, `07-executor-recovery-law.json` |
 | Docs agreement | every scored claim matched an artifact | | `06-docs-claims.txt` |
 | Teardown | panic gate clean; no owned containers or ports remain | | `session-lease-triage-e2e.log` |
 
 **Aggregate:** would an operator who followed only the published procedure have reached the
-right conclusion in all three situations, and would that operator have been correctly
-stopped from killing a worker whose turn was about to commit?
+right conclusion in all three situations, would that operator have been correctly stopped
+from killing a worker whose turn was about to commit, and — when a worker really was gone —
+would the request it had accepted have been finished by its peer rather than lost?
 
 ---
 
 ## History
 
+- **FIG-1671**: Added Phase 3b, extending the killed-worker recovery case to a turn that
+  entered through `TurnBuilder::run`. Direct ingress accepts before it drives (ADR 0069), so
+  the abandoned request is a pending input the ordinary queued drain recovers.
 - **FIG-1402**: Fixed Phase 3 livelock answer key and golden rule to expect `lane_held = true`
   on `commit_cas_rejected`, matching the truthful semantics where the rejection is emitted by
   the lease-holding parked executor when raced by the lane-less busy claimant.

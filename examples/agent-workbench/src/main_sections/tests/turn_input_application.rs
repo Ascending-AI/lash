@@ -54,8 +54,14 @@ async fn assert_typed_turn_input_application(
         .remote_turn_input_applications()
         .await
         .expect("durable workbench applications");
-    assert_eq!(durable.len(), 1);
-    assert_eq!(durable[0].input_id, admission.input_id);
+    // The turn that drained this admission was itself admitted first
+    // (ADR 0069), so the session settles that acceptance too; what this test
+    // pins is the queued admission's own settled evidence.
+    let settled = durable
+        .iter()
+        .find(|application| application.input_id == admission.input_id)
+        .expect("the queued admission settles as durable application evidence");
+    assert_eq!(settled.turn_id.as_str(), "workbench-queued-turn");
     assert!(
         session
             .pending_turn_inputs()

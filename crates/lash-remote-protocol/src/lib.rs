@@ -101,7 +101,12 @@ pub use usage_activity::*;
 // `RemoteTurnReport` has no probe-first decoder: exact-version negotiation in
 // `validate` refuses a version 43 report that decodes, and the removed status
 // value is refused by serde before that (FIG-1757).
-pub const REMOTE_PROTOCOL_VERSION: u32 = 44;
+//
+// Bumped to 45: remote runtime effects carry an `accept_turn_input` kind for
+// the journaled turn-input acceptance. A version 44 peer rejects the new
+// variant outright, so the two sides must agree before it can appear on the
+// wire (FIG-1671).
+pub const REMOTE_PROTOCOL_VERSION: u32 = 45;
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {

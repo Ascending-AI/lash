@@ -791,6 +791,9 @@ impl TurnAssembler {
             llm_calls: self.llm_calls,
             tool_calls: self.tool_calls,
             errors: issues,
+            // Stamped by the ingress that accepted this turn's input, which
+            // owns the acceptance identity assembly never sees.
+            turn_input_acceptance: None,
         }
     }
 

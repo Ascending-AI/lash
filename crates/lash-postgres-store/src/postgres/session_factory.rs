@@ -1503,61 +1503,6 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
     }
 }
 
-pub(crate) async fn ensure_turn_input_completion_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    completed: &lash_core::TurnInputCompletion,
-) -> Result<(), StoreError> {
-    for input_id in &completed.input_ids {
-        let authority: Option<(Option<String>, Option<String>, i64)> = sqlx::query_as(
-            "SELECT claim_id, claim_token, claim_session_lease_generation
-             FROM lash_pending_turn_inputs
-             WHERE session_id = $1
-               AND input_id = $2
-             LIMIT 1
-             FOR UPDATE",
-        )
-        .bind(&completed.session_id)
-        .bind(input_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let authority = authority
-            .map(|(claim_id, claim_token, generation)| {
-                Ok((
-                    claim_id,
-                    claim_token,
-                    u64_from_sql(
-                        "PendingTurnInput",
-                        "claim_session_lease_generation",
-                        generation,
-                    )?,
-                ))
-            })
-            .transpose()?;
-        let owns_row = authority
-            .as_ref()
-            .is_some_and(|(claim_id, claim_token, _)| {
-                claim_id.as_deref() == Some(completed.claim_id.as_str())
-                    && claim_token.as_deref() == Some(completed.lease_token.as_str())
-            });
-        if !owns_row {
-            return Err(StoreError::TurnInputClaimSuperseded {
-                session_id: completed.session_id.clone(),
-                claim_id: completed.claim_id.clone(),
-                row_id: Some(input_id.clone().into_boxed_str()),
-                superseding_claim_id: authority
-                    .as_ref()
-                    .and_then(|(claim_id, _, _)| claim_id.clone())
-                    .map(String::into_boxed_str),
-                superseding_session_lease_generation: authority.as_ref().and_then(
-                    |(claim_id, _, generation)| claim_id.as_ref().map(|_| Box::new(*generation)),
-                ),
-            });
-        }
-    }
-    Ok(())
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct TurnInputClaimLease {
     pub(crate) claim_id: String,

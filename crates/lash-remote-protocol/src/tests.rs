@@ -1333,7 +1333,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 44,
+            "protocol_version": 45,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1348,7 +1348,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 44,
+            actual: 45,
             expected: 41,
         }
     ));
@@ -1374,7 +1374,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 44, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 45, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
@@ -1783,7 +1783,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         ensure_protocol_version(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 44,
+            expected: 45,
         })
     ));
 }
@@ -1823,7 +1823,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             ensure_protocol_version(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 44,
+                expected: 45,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1859,7 +1859,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             ensure_protocol_version(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 44,
+                expected: 45,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1915,7 +1915,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             ensure_protocol_version(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 44,
+                expected: 45,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1947,7 +1947,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             ensure_protocol_version(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 44,
+                expected: 45,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"

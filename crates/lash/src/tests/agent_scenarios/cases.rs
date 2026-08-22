@@ -277,6 +277,7 @@ finish result"#,
         .await?;
         insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
+        root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
         root         exec      cell.ok                 calls=1
@@ -428,6 +429,7 @@ finish result"#,
         .await?;
         insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
+        root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
         root         exec      cell.ok                 calls=1
@@ -489,6 +491,7 @@ finish result"#,
         .await?;
         insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
+        root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
         root         exec      cell.ok                 calls=1
@@ -549,6 +552,7 @@ finish result"#,
         // parent's processes still folded to a terminal state.
         insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
+        root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
         root         tool      tool.start              name="spawn_agent" call=call-001
@@ -637,6 +641,7 @@ finish { joined: [left_value, right_value] }"#,
         // shape is easier to judge than the first assertion that trips on it.
         insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
         root         ingress   turn.start
+        root         ingress   queued_input.accepted   inputs=1
         root         provider  model.request           iteration=0
         root         exec      cell.start              lang="lashlang"
         root         exec      cell.ok                 calls=2

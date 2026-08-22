@@ -91,6 +91,19 @@ pub enum TurnFinish {
           </div>
         </div>
 
+        <div class="section" id="turn-admission">
+          <div class="section-header">
+            <h2>Turn Admission</h2>
+            <p>A turn is admitted before it is driven. <code>TurnBuilder::run</code> and <code>stream_to</code> commit the input as a pending turn input on any store-backed session, then claim and drive it, so a direct turn and a queued one enter through the same durable ingress.</p>
+          </div>
+          <div class="two-col">
+            <article class="panel"><h3>The handle names the admission</h3><p><code>TurnReport.acceptance</code> carries the <code>input_id</code> the turn was admitted under. Persist it beside the product message to reconcile later; it is the same identity <code>session.pending_turn_inputs()</code> and the settled turn report expose. A store-less session has nowhere to record an acceptance and reports none.</p></article>
+            <article class="panel"><h3>The caller is the first driver, not the owner</h3><p>Dropping the future does not cancel the turn: the input is already durable, so a peer worker can claim and finish it. Withdraw a turn by cancelling its pending input, never by dropping the future. Durable backends pay one extra store commit per direct turn for this.</p></article>
+            <article class="panel"><h3>Whatever is queued joins the turn</h3><p>The claim takes the head of the pending next-turn queue exactly as a drain does, so inputs enqueued before this call are folded into the same turn rather than waiting for another one.</p></article>
+            <article class="panel"><h3>Resubmitting is a new turn</h3><p>Direct ingress mints no idempotency key. If a worker dies after admitting a turn but before the caller sees a result, resubmitting the same text admits it a second time. A host that needs at-most-once submission names its own <code>source_key</code> through <code>session.enqueue(...).id(...)</code> instead.</p></article>
+          </div>
+        </div>
+
         <div class="section" id="semantic-events">
           <div class="section-header">
             <h2>Semantic Events</h2>

@@ -1008,3 +1008,73 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
     }
     Ok(())
 }
+
+/// ADR 0069: a direct turn is admitted through the same durable acceptance the
+/// queue uses, and the handle it returns names that admission.
+#[tokio::test]
+async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("direct-turn-acceptance").open().await?;
+
+    let first = session.turn(TurnInput::text("same words")).run().await?;
+    let acceptance = first
+        .result
+        .acceptance
+        .as_ref()
+        .expect("a store-backed direct turn is admitted through a durable acceptance");
+    assert_eq!(acceptance.session_id, "direct-turn-acceptance");
+    assert!(!acceptance.input_id.is_empty());
+    assert_eq!(
+        acceptance.ingress,
+        lash_core::runtime::TurnInputIngress::next_turn()
+    );
+    assert_eq!(
+        acceptance.source_key, None,
+        "direct ingress admits, it does not mint an identity to deduplicate by"
+    );
+    assert!(
+        session.pending_turn_inputs().await?.is_empty(),
+        "a committed turn settles the row it was admitted under"
+    );
+
+    // The documented double-submit window: resubmitting the same content after
+    // an unacknowledged crash is a second admission, not a deduplicated retry,
+    // because the caller named no identity Lash could recognise it by.
+    let second = session.turn(TurnInput::text("same words")).run().await?;
+    assert_ne!(
+        acceptance.input_id,
+        second
+            .result
+            .acceptance
+            .as_ref()
+            .expect("the second direct turn is admitted too")
+            .input_id
+    );
+    Ok(())
+}
+
+/// The one carve-out: a session with no store has nowhere to record an
+/// acceptance, so its turns report none and remain caller-owned.
+#[tokio::test]
+async fn store_less_direct_turn_reports_no_acceptance() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("store-less-acceptance").open().await?;
+
+    let output = session.turn(TurnInput::text("ephemeral")).run().await?;
+
+    assert!(
+        output.result.acceptance.is_none(),
+        "a store-less session has no durable ingress to be admitted through"
+    );
+    Ok(())
+}

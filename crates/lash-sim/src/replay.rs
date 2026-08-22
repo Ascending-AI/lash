@@ -91,8 +91,8 @@ pub fn replay_trace(
         let delivered = scheduler
             .deliver_boundary(&expected.boundary_id, observed)
             .ok_or_else(|| ReplayError::MissingBoundary(expected.boundary_id.clone()))?;
-        let actual_observed = normalize(&delivered.observed);
-        let expected_observed = normalize(&expected.observed);
+        let actual_observed = normalize(event.kind, &delivered.observed);
+        let expected_observed = normalize(event.kind, &expected.observed);
         if actual_observed != expected_observed {
             return Err(ReplayError::Divergence(format!(
                 "boundary `{}` observed payload changed; expected={}; actual={}",
@@ -296,8 +296,26 @@ fn require_invariants_flag(
     Ok(())
 }
 
-fn normalize(value: &Value) -> Value {
+fn normalize(kind: BoundaryKind, value: &Value) -> Value {
     let mut value = value.clone();
+    if kind == BoundaryKind::QueuedIngress
+        && let Some(object) = value.as_object_mut()
+        && object.get("input_id").and_then(Value::as_str).is_some()
+    {
+        // Pending-turn-input ids are handed out by the backend in the order it
+        // accepts admissions, and every turn — direct or queued — now enters
+        // through one acceptance commit (ADR 0069). Which id a queued admission
+        // gets therefore depends on how many turns the runtime had already
+        // accepted inside a boundary the abstract stream models as one event, so
+        // the model cannot predict it. Identity is compared where it is owned:
+        // the cross-backend replays mask it the same way, and the admission
+        // contract itself is pinned by the store conformance suites. Source key,
+        // ingress mode, and input state stay compared here.
+        object.insert(
+            "input_id".to_string(),
+            Value::String("<backend-assigned>".to_string()),
+        );
+    }
     if let Some(object) = value.as_object_mut() {
         // A completed provider future is harvested on the first host scheduler
         // pass that observes its join handle as finished. Re-running an identical
