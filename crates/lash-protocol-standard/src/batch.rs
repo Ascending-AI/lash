@@ -21,7 +21,7 @@ pub fn batch_tool_definition() -> ToolDefinition {
                         "required": ["tool", "parameters"],
                         "additionalProperties": false
                     },
-                    "description": "Array of 1-25 objects like { tool: \"read_file\", parameters: { path: \"src/main.rs\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error."
+                    "description": "Array of 1-25 objects like { tool: \"fetch_url\", parameters: { url: \"https://example.com\" } }. Use only for independent calls. Do not include another batch call. More than 25 calls is rejected as a tool error."
                 }
             }),
             &["tool_calls"],
@@ -29,7 +29,7 @@ pub fn batch_tool_definition() -> ToolDefinition {
         batch_output_schema(),
     )
     .with_examples(vec![
-            r#"await tools.batch({ tool_calls: [{ tool: "read_file", parameters: { path: "src/main.rs" } }, { tool: "grep", parameters: { query: "ToolProvider crates/lash/src/" } }] })?"#.to_string(),
+            r#"await tools.batch({ tool_calls: [{ tool: "fetch_url", parameters: { url: "https://example.com" } }, { tool: "search_web", parameters: { query: "Lash ToolProvider" } }] })?"#.to_string(),
         ])
     .with_tool_binding(ToolBinding::new(["tools"], "batch"))
 }
@@ -83,5 +83,30 @@ mod tests {
         );
         let rendered = definition.compact_contract().render_signature();
         assert!(rendered.contains("results"), "{rendered}");
+    }
+
+    #[test]
+    fn batch_contract_uses_only_surviving_tool_examples() {
+        let definition = batch_tool_definition();
+        let description =
+            definition.contract.input_schema.canonical["properties"]["tool_calls"]["description"]
+                .as_str()
+                .expect("batch tool_calls description");
+        let model_facing_text =
+            format!("{} {}", description, definition.contract.examples.join(" "));
+
+        for removed_tool in [
+            "read_file",
+            r#"tool: "edit""#,
+            r#"tool: "write""#,
+            r#"tool: "glob""#,
+        ] {
+            assert!(
+                !model_facing_text.contains(removed_tool),
+                "batch contract should not mention removed tool `{removed_tool}`"
+            );
+        }
+        assert!(model_facing_text.contains("fetch_url"));
+        assert!(model_facing_text.contains("search_web"));
     }
 }

@@ -6,7 +6,6 @@ use lash_core::plugin::{PluginSpec, StaticPluginFactory};
 use lash_core::{ToolProvider, facade_support::PluginStack};
 use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
 use lash_plugin_tool_output_budget::{ToolOutputBudgetPluginFactory, tool_output_budget_stack};
-use lash_tools::files::{edit_provider, glob_provider, read_file_provider, write_provider};
 use lash_tools::shell::StandardShellPluginFactory;
 use lash_tools::web::{fetch_url_provider, web_search_provider};
 use rolling_history::RollingHistoryPluginFactory;
@@ -93,23 +92,6 @@ fn push_local_runtime_tools(stack: &mut PluginStack, include_cancel_process: boo
     };
     stack.push(Arc::new(processes));
     stack.push(Arc::new(StandardShellPluginFactory::new()));
-    stack.push(Arc::new(StaticPluginFactory::new(
-        "edit",
-        PluginSpec::new().with_tool_provider(Arc::new(edit_provider()) as Arc<dyn ToolProvider>),
-    )));
-    stack.push(Arc::new(StaticPluginFactory::new(
-        "write",
-        PluginSpec::new().with_tool_provider(Arc::new(write_provider()) as Arc<dyn ToolProvider>),
-    )));
-    stack.push(Arc::new(StaticPluginFactory::new(
-        "read_file",
-        PluginSpec::new()
-            .with_tool_provider(Arc::new(read_file_provider()) as Arc<dyn ToolProvider>),
-    )));
-    stack.push(Arc::new(StaticPluginFactory::new(
-        "glob",
-        PluginSpec::new().with_tool_provider(Arc::new(glob_provider()) as Arc<dyn ToolProvider>),
-    )));
 }
 
 fn push_web_tools(stack: &mut PluginStack, tavily_api_key: String) {
@@ -199,18 +181,16 @@ mod tests {
     }
 
     #[test]
-    fn standard_stack_exposes_glob_and_read_without_ls() {
+    fn standard_stack_does_not_install_host_filesystem_tools() {
         let names = tool_names_for_stack(
             lash_core::testing::test_standard_protocol_factories(),
             None,
             true,
         );
 
-        assert!(names.contains(&"glob".to_string()));
-        assert!(names.contains(&"read_file".to_string()));
-        assert!(names.contains(&"edit".to_string()));
-        assert!(names.contains(&"write".to_string()));
-        assert!(!names.contains(&"ls".to_string()));
+        for name in ["edit", "write", "read_file", "glob", "ls"] {
+            assert!(!names.contains(&name.to_string()));
+        }
     }
 
     #[test]

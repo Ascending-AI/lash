@@ -33,6 +33,8 @@ EXPECTED_ENTRYPOINTS = {
     Path("crates/lash-protocol-standard/src/lib.rs"): 1,
     Path("crates/lash-subagents/src/rlm.rs"): 1,
 }
+RAW_STRING_PREFIX = re.compile(r"b?r(#*)\"")
+IDENTIFIER_CHAR = re.compile(r"[A-Za-z0-9_]")
 USE = re.compile(r"\buse\s+([^;]+);")
 ALIAS = re.compile(r"\b(SystemTime|Instant|Uuid|HashMap|HashSet|spawn|thread_rng)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)")
 
@@ -59,6 +61,18 @@ def code_only(source: str) -> str:
                     end += 2
                 else:
                     end += 1
+            for offset in range(index, end):
+                if chars[offset] != "\n":
+                    chars[offset] = " "
+            index = end
+        elif (
+            chars[index] in ("r", "b")
+            and (index == 0 or not IDENTIFIER_CHAR.match(chars[index - 1]))
+            and (raw := RAW_STRING_PREFIX.match(source, index)) is not None
+        ):
+            terminator = '"' + raw.group(1)
+            end = source.find(terminator, raw.end())
+            end = len(chars) if end == -1 else end + len(terminator)
             for offset in range(index, end):
                 if chars[offset] != "\n":
                     chars[offset] = " "

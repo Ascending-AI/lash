@@ -16396,7 +16396,7 @@ availability = "default+all-features"
 aliases = ["lash_core::attachments::SessionAttachmentStore", "lash_core::facade_support::SessionAttachmentStore"]
 area = "attachments"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::persistence::SessionAttachmentStore` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input` because its canonical identity is the lash-core one. Consumer class: the first-party tool crates and core runtime internals -- this type is exercised in-repo at crates/lash-tools/src/files/read_file.rs::tests::test_read_image_returns_attachment_value#`let store = Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory());`, crates/lash-tools/src/shell/tests.rs::tests::context_with_processes#`Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: `lash::persistence::SessionAttachmentStore` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input` because its canonical identity is the lash-core one. Consumer class: the Standard protocol crate and the shell tool crate -- this type is exercised in-repo at crates/lash-protocol-standard/src/lib.rs::tests::standard_batch_is_runtime_owned_orchestration_without_an_enclosing_attempt#`lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(`, crates/lash-tools/src/shell/tests.rs::tests::context_with_processes#`Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::SessionAttachmentStore::backend"
@@ -16432,7 +16432,7 @@ availability = "default+all-features"
 aliases = ["lash_core::attachments::SessionAttachmentStore::get", "lash_core::facade_support::SessionAttachmentStore::get"]
 area = "attachments"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionAttachmentStore::get` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input`. Consumer class: the `lash` facade itself and the first-party tool crates -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drop#`if let Some(drivers) = self.drivers.get()`, crates/lash-tools/src/files/read_file.rs::tests::test_read_image_returns_attachment_value#`assert_eq!(store.get(&attachment_ref.id).await.unwrap().bytes, data);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionAttachmentStore::get` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input`. Consumer class: the `lash` facade and RLM protocol internals -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drop#`if let Some(drivers) = self.drivers.get()`, crates/lash-protocol-rlm/src/executor/host_bridge.rs::collect_printed_images_inner#`attachment_store.get(&id).await.map_err(|_| {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::SessionAttachmentStore::in_memory"
@@ -16478,7 +16478,7 @@ availability = "default+all-features"
 aliases = ["lash_core::attachments::SessionAttachmentStore::put", "lash_core::facade_support::SessionAttachmentStore::put"]
 area = "attachments"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionAttachmentStore::put` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input`. Consumer class: the first-party tool crates and the Restate durable effect-host adapter -- this function is exercised in-repo at crates/lash-tools/src/files/read_file.rs::store_attachment#`.put(`, crates/lash-restate/src/tests.rs::DurableMemoryAttachmentStore::put#`self.inner.put(bytes, meta).await`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionAttachmentStore::put` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input`. Consumer class: core tool-provider internals and the Restate durable effect-host adapter -- this function is exercised in-repo at crates/lash-core/src/tool_provider/attachments.rs::ToolAttachmentClient::put#`self.store.put(data, meta).await`, crates/lash-restate/src/tests.rs::DurableMemoryAttachmentStore::put#`self.inner.put(bytes, meta).await`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::SessionAttachmentStore::session_id"
@@ -73601,15 +73601,6 @@ disposition = "internal-consumed"
 usage = "crates/lash/src/turn.rs:1221#opts.with_turn_events(turn_events)"
 
 [[api]]
-symbol = "lash_core::test_support::UnavailableProcessService"
-kind = "struct"
-availability = "all-features"
-area = "processes"
-disposition = "internal-test-only"
-usage = "crates/lash-tools/src/files/read_file.rs:934#Arc::new(lash_core::test_support::UnavailableProcessService),"
-reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
-
-[[api]]
 symbol = "lash_core::facade_support::append_assistant_text_part"
 kind = "function"
 availability = "default+all-features"
@@ -75804,15 +75795,6 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash-restate/src/controller/mod.rs#`facade_support::refuse_unhonored_group_membership,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
-
-[[api]]
-symbol = "lash_core::test_support::validate_tool_input"
-kind = "function"
-availability = "all-features"
-area = "triggers"
-disposition = "internal-test-only"
-usage = "crates/lash-tools/src/files/edit.rs:586#let error = lash_core::test_support::validate_tool_input("
-reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
 symbol = "lash_core::facade_support::validate_trigger_occurrence_request"
