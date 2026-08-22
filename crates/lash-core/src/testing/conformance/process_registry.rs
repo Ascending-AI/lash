@@ -1,6 +1,7 @@
 //! Cross-backend conformance for the durable process registry.
 
 use super::process_change_feed::process_change_feed_never_misses_concurrent_terminal_writers;
+use super::process_event_append_arms::process_event_append_arms_are_ordered;
 use super::process_filters::list_processes_filters_by_enriched_fields;
 use super::process_references::{
     ProcessCountConservation, assert_process_count_conservation,
@@ -9,10 +10,13 @@ use super::process_references::{
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
-// The shared registry fixture performs 51 successful registrations and four
-// prunes; the cold refold fixture below adds the 52nd registration.
-const REOPEN_BASELINE_SPAWNS: usize = 52;
-const REOPEN_BASELINE_PRUNED: usize = 4;
+// The shared registry fixture performs 54 successful registrations and six
+// prunes; the cold refold fixture below adds the 55th registration. Three of
+// those registrations and two of those prunes come from the append-arm
+// contract, whose two completed rows are terminal and prune-eligible by the
+// time retention runs.
+const REOPEN_BASELINE_SPAWNS: usize = 55;
+const REOPEN_BASELINE_PRUNED: usize = 6;
 
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
@@ -395,6 +399,7 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     process_attempt_budget_is_typed(Arc::clone(&registry)).await;
     tombstones_make_pruned_processes_distinguishable(Arc::clone(&registry)).await;
     lifecycle_transition_refusals_are_backend_invariant(Arc::clone(&registry)).await;
+    process_event_append_arms_are_ordered(Arc::clone(&registry)).await;
     caller_departure_state_machine(Arc::clone(&registry)).await;
     caller_departed_rows_are_reclaimed_by_retention(Arc::clone(&registry)).await;
     terminal_completion_atomically_retains_parent_end_plan(registry).await;

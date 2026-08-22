@@ -1,6 +1,6 @@
 //! Atomic, lease-fenced terminal process completion.
 
-use super::process_registry::tx_outcome;
+use super::process_registry::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
 use super::*;
 
 /// Unleased terminal completion, validated and appended as one atomic unit.
@@ -43,95 +43,23 @@ pub(super) async fn complete_process(
                     &await_output,
                     Some(&authority),
                 );
-                let replay_lookup = request
-                    .replay
-                    .as_ref()
-                    .map(|replay| {
-                        SqliteProcessRegistry::load_event_by_key_conn(
-                            tx,
-                            &process_id,
-                            replay.key.as_str(),
-                        )
-                    })
-                    .transpose()?
-                    .flatten();
-                let wake_session_id = SqliteProcessRegistry::wake_session_id_conn(tx, &process_id)?;
-                let (last_sequence, sequence) = SqliteProcessRegistry::next_event_sequence_conn(
+                let (_, arm) = SqliteProcessRegistry::apply_process_event_append_conn(
                     tx,
-                    &process_id,
-                    wake_session_id.as_deref(),
-                )?;
-                let prepared = prepare_process_event_append(
-                    &record,
+                    &mut record,
                     request,
-                    sequence,
-                    last_sequence,
-                    replay_lookup,
                     now,
-                    wake_session_id.as_deref(),
+                    wake_delivery_config,
+                    ProcessEventWriteAuthorization::Preauthorized,
+                    &parent_end_actions,
                 )?;
-                match prepared {
-                    lash_core::facade_support::ProcessEventAppendPlan::Replay {
-                        repair_record,
-                        wake_delivery,
-                        ..
-                    } => {
-                        SqliteProcessRegistry::insert_wake_delivery_conn(
-                            tx,
-                            wake_delivery.as_ref(),
-                            wake_delivery_config,
-                        )?;
-                        if let Some(repaired) = repair_record {
-                            record = repaired;
-                            SqliteProcessRegistry::save_process_conn(tx, &record)?;
-                        }
-                        Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record })
+                Ok(match arm {
+                    ProcessEventAppendArm::Replayed { .. } => {
+                        lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record }
                     }
-                    lash_core::facade_support::ProcessEventAppendPlan::Insert {
-                        event,
-                        projected_record,
-                        occurred_at_ms,
-                        wake_delivery,
-                    } => {
-                        tx.execute(
-                            "INSERT INTO process_events (
-                                process_id, sequence, event_type, idempotency_key,
-                                occurred_at_ms, event_json
-                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                            params![
-                                process_id,
-                                sequence as i64,
-                                event.event_type.as_str(),
-                                event.invocation.replay_key(),
-                                occurred_at_ms as i64,
-                                process_encode_json(&event)?,
-                            ],
-                        )
-                        .map_err(process_sqlite_error)?;
-                        record = projected_record;
-                        SqliteProcessRegistry::save_process_conn(tx, &record)?;
-                        if !parent_end_actions.is_empty() {
-                            tx.execute(
-                                "INSERT INTO process_parent_end_plans (process_id, actions_json)
-                                 VALUES (?1, ?2)",
-                                params![process_id, process_encode_json(&parent_end_actions)?],
-                            )
-                            .map_err(process_sqlite_error)?;
-                        }
-                        SqliteProcessRegistry::insert_wake_delivery_conn(
-                            tx,
-                            wake_delivery.as_ref(),
-                            wake_delivery_config,
-                        )?;
-                        SqliteProcessRegistry::advance_wake_allocation_floor_conn(
-                            tx,
-                            wake_session_id.as_deref(),
-                            &process_id,
-                            sequence,
-                        )?;
-                        Ok(lash_core::ProcessCompletionOutcome::Committed(record))
+                    ProcessEventAppendArm::Inserted => {
+                        lash_core::ProcessCompletionOutcome::Committed(record)
                     }
-                }
+                })
             })()))
         })
         .await
@@ -164,108 +92,24 @@ pub(super) async fn complete_process_with_lease(
                     &await_output,
                     None,
                 );
-                let replay_lookup = request
-                    .replay
-                    .as_ref()
-                    .map(|replay| {
-                        SqliteProcessRegistry::load_event_by_key_conn(
-                            tx,
-                            process_id,
-                            replay.key.as_str(),
-                        )
-                    })
-                    .transpose()?
-                    .flatten();
-                let wake_session_id = SqliteProcessRegistry::wake_session_id_conn(tx, process_id)?;
-                let (last_sequence, sequence) = SqliteProcessRegistry::next_event_sequence_conn(
-                    tx,
-                    process_id,
-                    wake_session_id.as_deref(),
-                )?;
                 // A successful prior terminal append is replay-idempotent even
-                // though that transaction already cleared the lease.
-                let prepared = prepare_process_event_append(
-                    &record,
+                // though that transaction already cleared the lease, so the
+                // lease fence is re-checked inside the append sequence on the
+                // insert arm only.
+                let (_, arm) = SqliteProcessRegistry::apply_process_event_append_conn(
+                    tx,
+                    &mut record,
                     request,
-                    sequence,
-                    last_sequence,
-                    replay_lookup,
                     now,
-                    wake_session_id.as_deref(),
+                    wake_delivery_config,
+                    ProcessEventWriteAuthorization::Lease(&lease),
+                    &parent_end_actions,
                 )?;
-                if let lash_core::facade_support::ProcessEventAppendPlan::Replay {
-                    repair_record,
-                    wake_delivery,
-                    ..
-                } = prepared
-                {
-                    SqliteProcessRegistry::insert_wake_delivery_conn(
-                        tx,
-                        wake_delivery.as_ref(),
-                        wake_delivery_config,
-                    )?;
-                    if let Some(repaired) = repair_record {
-                        record = repaired;
-                        SqliteProcessRegistry::save_process_conn(tx, &record)?;
-                    }
+                if matches!(arm, ProcessEventAppendArm::Replayed { .. }) {
                     return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
                         stored: record,
                     });
                 }
-
-                let current = SqliteProcessRegistry::load_process_lease_conn(tx, process_id)?;
-                registry_transitions::authorize_process_lease_write(
-                    process_id,
-                    &lease,
-                    current.as_ref(),
-                    now,
-                )?;
-
-                let lash_core::facade_support::ProcessEventAppendPlan::Insert {
-                    event,
-                    projected_record,
-                    occurred_at_ms,
-                    wake_delivery,
-                } = prepared
-                else {
-                    unreachable!("replay returned above")
-                };
-                tx.execute(
-                    "INSERT INTO process_events (
-                        process_id, sequence, event_type, idempotency_key,
-                        occurred_at_ms, event_json
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        process_id,
-                        sequence as i64,
-                        event.event_type.as_str(),
-                        event.invocation.replay_key(),
-                        occurred_at_ms as i64,
-                        process_encode_json(&event)?,
-                    ],
-                )
-                .map_err(process_sqlite_error)?;
-                record = projected_record;
-                SqliteProcessRegistry::save_process_conn(tx, &record)?;
-                if !parent_end_actions.is_empty() {
-                    tx.execute(
-                        "INSERT INTO process_parent_end_plans (process_id, actions_json)
-                         VALUES (?1, ?2)",
-                        params![process_id, process_encode_json(&parent_end_actions)?],
-                    )
-                    .map_err(process_sqlite_error)?;
-                }
-                SqliteProcessRegistry::insert_wake_delivery_conn(
-                    tx,
-                    wake_delivery.as_ref(),
-                    wake_delivery_config,
-                )?;
-                SqliteProcessRegistry::advance_wake_allocation_floor_conn(
-                    tx,
-                    wake_session_id.as_deref(),
-                    process_id,
-                    sequence,
-                )?;
                 tx.execute(
                     "UPDATE process_leases
                      SET lease_owner_id = NULL,
