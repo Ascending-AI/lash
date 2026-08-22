@@ -4671,6 +4671,293 @@ async fn fig1464_over_budget_tool_batch_replay_under_a_larger_budget_never_runs_
     );
 }
 
+/// FIG-1767: both eager effect arms (durable process command and durable tool batch)
+/// emit byte-identical journal records before and after collapsing into the shared helper.
+#[tokio::test]
+async fn fig1767_journal_entry_byte_sequence_equality() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let controller = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
+    );
+
+    // Arm 1: Durable Process Command
+    let process_invocation = RuntimeInvocation::effect(
+        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+        "fig1767-process-cmd",
+        RuntimeEffectKind::Process,
+        "fig1767-process-cmd",
+    );
+    let process_envelope = RuntimeEffectEnvelope::new(
+        process_invocation,
+        RuntimeEffectCommand::Process {
+            command: Box::new(ProcessCommand::ParentEnd {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: "fig1767".to_string(),
+                    execution_scope_id: "scope".to_string(),
+                    tool_call_id: "call".to_string(),
+                    intent_index: 0,
+                    replay_key: "key".to_string(),
+                },
+                process_id: "fig1767-proc".to_string(),
+                policy: lash_core::ProcessParentEndPolicy::Cancel,
+                reason: "fig1767-test".to_string(),
+            }),
+        },
+    );
+    controller
+        .execute_effect(
+            process_envelope.clone(),
+            RuntimeEffectLocalExecutor::processes(process_registry(), None),
+        )
+        .await
+        .expect("process command effect execution");
+
+    // Retrieve records produced for DurableProcessCommand. These bytes are the
+    // golden serialization captured from main before the helper extraction.
+
+    {
+        let process_verdict_key = "lash:fig1767-process-cmd.journal-budget";
+        let process_record_key = "lash:fig1767-process-cmd";
+
+        let records = context.records.lock_recover();
+        let process_verdict_bytes = records
+            .get(process_verdict_key)
+            .expect("process budget verdict journal entry");
+        let process_record_bytes = records
+            .get(process_record_key)
+            .expect("process effect record journal entry");
+
+        // Pin verdict entry byte sequence: JournaledBudgetVerdict::Proceed serializes as "Proceed"
+        assert_eq!(
+            process_verdict_bytes.as_slice(),
+            b"\"Proceed\"",
+            "process command budget verdict byte sequence mismatch"
+        );
+        assert_eq!(
+            process_record_bytes,
+            br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-process-cmd\",\"kind\":\"process\"},\"replay\":{\"key\":\"fig1767-process-cmd\"}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"c282f7946c2d914f62cc9d3494999c640754549700179d2df1dd31a78450da5e"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"plugin session error: unknown process `fig1767-proc`"}}}}}"##,
+            "process command recorded effect golden bytes changed"
+        );
+    }
+
+    // Arm 2: Durable Tool Batch
+    let batch_invocation = RuntimeInvocation::effect(
+        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+        "fig1767-tool-batch",
+        RuntimeEffectKind::ToolBatch,
+        "fig1767-tool-batch",
+    );
+    let batch_envelope = RuntimeEffectEnvelope::new(
+        batch_invocation,
+        RuntimeEffectCommand::ToolBatch {
+            batch: lash_core::PreparedToolBatch::new("fig1767-batch", vec![prepared_tool_call()]),
+        },
+    );
+    controller
+        .execute_effect(
+            batch_envelope.clone(),
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(RuntimeEffectOutcome::ToolBatch {
+                    launches: vec![],
+                    triggers: vec![],
+                    settlement_order: vec![],
+                })
+            }),
+        )
+        .await
+        .expect("tool batch effect execution");
+
+    // Retrieve records produced for DurableToolBatch
+    let batch_verdict_key = "lash:fig1767-tool-batch.journal-budget";
+    let batch_record_key = "lash:fig1767-tool-batch";
+
+    let records = context.records.lock_recover();
+    let batch_verdict_bytes = records
+        .get(batch_verdict_key)
+        .expect("batch budget verdict journal entry");
+    let batch_record_bytes = records
+        .get(batch_record_key)
+        .expect("batch effect record journal entry");
+
+    assert_eq!(
+        batch_verdict_bytes.as_slice(),
+        b"\"Proceed\"",
+        "tool batch budget verdict byte sequence mismatch"
+    );
+    assert_eq!(
+        batch_record_bytes,
+        br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-tool-batch\",\"kind\":\"tool_batch\"},\"replay\":{\"key\":\"fig1767-tool-batch\"}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"fig1767-batch\",\"calls\":[{\"call\":{\"call_id\":\"call-1\",\"tool_id\":\"tool:tool\",\"tool_name\":\"tool\",\"args\":{}},\"replay_suffix\":\"child:0:call-1\"}]}}}","hash":"053953e6fdac9aa935e9ca8c4b79bb6d7457792445c864505ca308bfffe7a3c6"},"outcome":{"Ok":{"type":"tool_batch","launches":[],"settlement_order":[]}}}"##,
+        "tool batch recorded effect golden bytes changed"
+    );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        [
+            "lash:fig1767-process-cmd.journal-budget",
+            "lash:fig1767-process-cmd",
+            "lash:fig1767-tool-batch.journal-budget",
+            "lash:fig1767-tool-batch"
+        ],
+        "each eager effect must journal its budget verdict before its recorded effect"
+    );
+}
+
+/// FIG-1767: redriving an eager effect (both durable process command and durable tool batch)
+/// whose journaled budget verdict is a give-up executes nothing — the run future reaches
+/// the helper unpolled and is never executed.
+#[tokio::test]
+async fn fig1767_give_up_verdict_redrive_executes_nothing() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+
+    // 1. Durable Process Command over budget
+    let process_invocation = RuntimeInvocation::effect(
+        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+        "fig1767-over-budget-proc",
+        RuntimeEffectKind::Process,
+        "fig1767-over-budget-proc",
+    );
+    let process_envelope = RuntimeEffectEnvelope::new(
+        process_invocation,
+        RuntimeEffectCommand::Process {
+            command: Box::new(ProcessCommand::ParentEnd {
+                identity: lash_core::ToolIntentIdentity {
+                    session_id: "fig1767".to_string(),
+                    execution_scope_id: "scope".to_string(),
+                    tool_call_id: "call".to_string(),
+                    intent_index: 0,
+                    replay_key: "key".to_string(),
+                },
+                process_id: "fig1767-proc".to_string(),
+                policy: lash_core::ProcessParentEndPolicy::Cancel,
+                reason: "fig1767-test".to_string(),
+            }),
+        },
+    );
+
+    let recorded_proc_err = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    )
+    .execute_effect(
+        process_envelope.clone(),
+        RuntimeEffectLocalExecutor::processes(process_registry(), None),
+    )
+    .await
+    .expect_err("process command over budget must give up");
+
+    assert_eq!(
+        recorded_proc_err.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
+
+    // Redrive process command under a larger budget — must read journaled verdict and execute nothing.
+    // Use a real process executor: if the gate moved after the work, its outcome observer would
+    // witness the ParentEnd operation before the missing effect record fails the redrive.
+    context.replaying.store(true, Ordering::SeqCst);
+    let replay_registry = process_registry();
+    replay_registry
+        .register_process(external_registration("fig1767-proc"))
+        .await
+        .expect("register process for redrive witness");
+    let process_executed = Arc::new(AtomicBool::new(false));
+    let ran_proc = Arc::clone(&process_executed);
+    let process_observer: lash_core::ProcessOutcomeObserver = Arc::new(move |_| {
+        ran_proc.store(true, Ordering::SeqCst);
+    });
+
+    let replayed_proc_err = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
+    )
+    .execute_effect(
+        process_envelope,
+        RuntimeEffectLocalExecutor::processes(replay_registry, None)
+            .with_process_outcome_observer(process_observer),
+    )
+    .await
+    .expect_err("replayed give-up verdict must return poisoned error");
+
+    assert_eq!(
+        replayed_proc_err.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
+    assert!(
+        !process_executed.load(Ordering::SeqCst),
+        "redriving a process command give-up verdict must execute nothing"
+    );
+
+    // 2. Durable Tool Batch over budget
+    context.replaying.store(false, Ordering::SeqCst);
+    let batch_invocation = RuntimeInvocation::effect(
+        RuntimeScope::for_turn("fig1767-session", "fig1767-turn", 1, 0),
+        "fig1767-over-budget-batch",
+        RuntimeEffectKind::ToolBatch,
+        "fig1767-over-budget-batch",
+    );
+    let batch_envelope = RuntimeEffectEnvelope::new(
+        batch_invocation,
+        RuntimeEffectCommand::ToolBatch {
+            batch: lash_core::PreparedToolBatch::new("fig1767-batch", vec![prepared_tool_call()]),
+        },
+    );
+
+    let recorded_batch_err = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+    )
+    .execute_effect(
+        batch_envelope.clone(),
+        RuntimeEffectLocalExecutor::testing(|_| async {
+            panic!("tool batch initial attempt must give up before running work");
+        }),
+    )
+    .await
+    .expect_err("tool batch over budget must give up");
+
+    assert_eq!(
+        recorded_batch_err.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
+
+    // Redrive tool batch under a larger budget — must read journaled verdict and execute nothing
+    context.replaying.store(true, Ordering::SeqCst);
+    let batch_executed = Arc::new(AtomicBool::new(false));
+    let ran_batch = Arc::clone(&batch_executed);
+
+    let replayed_batch_err = RestateRuntimeEffectController::with_options(
+        Arc::clone(&context),
+        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
+    )
+    .execute_effect(
+        batch_envelope,
+        RuntimeEffectLocalExecutor::testing(move |_| async move {
+            ran_batch.store(true, Ordering::SeqCst);
+            panic!("tool batch work closure must never be executed on give-up redrive");
+        }),
+    )
+    .await
+    .expect_err("replayed give-up verdict must return poisoned error");
+
+    assert_eq!(
+        replayed_batch_err.code,
+        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
+    );
+    assert!(
+        !batch_executed.load(Ordering::SeqCst),
+        "redriving a tool batch give-up verdict must execute nothing"
+    );
+    assert_eq!(
+        context.runs.lock_recover().as_slice(),
+        [
+            "lash:fig1767-over-budget-proc.journal-budget",
+            "lash:fig1767-over-budget-proc.journal-budget",
+            "lash:fig1767-over-budget-batch.journal-budget",
+            "lash:fig1767-over-budget-batch.journal-budget"
+        ],
+        "a give-up redrive must consume only the verdict slot before the next effect"
+    );
+}
+
 #[tokio::test]
 async fn journaled_cancel_peeks_replay_while_live_watcher_observes_later_cancel() {
     let context = Arc::new(ReplayableRecordingContext::default());
