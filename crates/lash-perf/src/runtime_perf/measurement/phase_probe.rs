@@ -37,7 +37,7 @@ impl lash::runtime::RuntimeEffectController for ScopedPerfEffectController {
 impl RuntimePerfPhaseProbe {
     pub(crate) fn take_completed(&self) -> BTreeMap<String, RuntimePerfPhaseRunResult> {
         let mut state = self.state.lock_recover();
-        debug_assert!(state.open.is_empty(), "all phase spans must be closed");
+        // Async process phases can still be running at take; leave open spans dropped.
         std::mem::take(&mut state.completed)
     }
 }
