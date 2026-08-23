@@ -29,7 +29,7 @@ programmatic-only: their names serialize for diagnostics and configuration ident
 deserializing any unknown name fails loudly and explains that a host must attach the encoder
 programmatically. A name is the encoder's equality identity, so hosts must assign unique names.
 
-This follows ADR 0026 and ADR 0034: model capability is host-supplied data and providers consume
+This follows ADR 0026 and ADR 0070: model capability is host-supplied data and providers consume
 it rather than rediscovering it. It also follows ADR 0036: wire-protocol differences are
 explicit dialect policy, not inference or optimistic fallback.
 

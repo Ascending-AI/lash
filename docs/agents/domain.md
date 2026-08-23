@@ -37,4 +37,4 @@ If your output contradicts an existing ADR, surface it explicitly rather than si
 
 > _Contradicts ADR-0045 (services are stateless, substrates own continuation), but worth reopening because…_
 
-Duplicate ADR numbers exist for 0034, 0036, 0037, and 0038. Cite those by full filename so the reference is unambiguous ([way-of-working.md](way-of-working.md) has the numbering rules).
+ADR numbers are unique. Cite an ADR by full filename when a reference needs the slug ([way-of-working.md](way-of-working.md) has the numbering rules).

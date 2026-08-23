@@ -215,7 +215,7 @@ impl VmRootView for VmContinuation {
 
 /// Enumerates every heap root held by active execution or a parked caller.
 ///
-/// Durable roots own their objects for ADR-0059 forest validation. Once a call
+/// Durable roots own their objects for ADR-0076 forest validation. Once a call
 /// is active, the saved root frame remains the durable owner while active and
 /// saved function frames are transient borrowers. This deliberately permits a
 /// named function's `self_slot` to alias the closure still owned by its caller.

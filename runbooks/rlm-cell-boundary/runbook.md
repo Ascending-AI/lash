@@ -109,4 +109,4 @@ Stop everything started by this run and confirm teardown. Record PASS/FAIL for:
   `suppressed_protocol_owned` (since the Workbench exposes no caller stop-sequence controls),
   gated on `body_len` + `body_sha256` and size-limit omission rather than requiring full
   request JSON when exceeding `MAX_PROVIDER_REQUEST_BODY_JSON_BYTES`, and delegated caller-stop
-  suppression to deterministic laws per ADR 0047 disposition honesty.
+  suppression to deterministic laws per ADR 0074 disposition honesty.

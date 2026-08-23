@@ -1,5 +1,5 @@
 // Consume the derived, read-only TYPE FACETS the backend attaches to each node
-// (ADR 0038). These are host-supplied and non-authoritative: we NEVER re-parse
+// (ADR 0073). These are host-supplied and non-authoritative: we NEVER re-parse
 // Lashlang client-side — we only read the facet shapes the lens already emitted.
 //
 // Serialized shapes (see examples/workflow-graph-roundtrip/src/contract.rs):

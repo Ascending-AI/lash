@@ -116,7 +116,7 @@ pub struct OpenAiProvider {
 
 impl OpenAiCompatibleProvider {
     pub(crate) fn resolved_compat(&self, endpoint: CompletionEndpoint) -> OpenAiResolvedCompat {
-        // ADR 0037 ratifies this exact direct-OpenAI equality as the sole
+        // ADR 0072 ratifies this exact direct-OpenAI equality as the sole
         // URL-derived compatibility choice.
         let direct_openai = self.base_url.trim_end_matches('/') == OPENAI_BASE_URL;
 

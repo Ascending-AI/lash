@@ -46,5 +46,5 @@ The URL heuristic is deleted. `OpenAiCompat::local()` is the explicit host-selec
 sets `request_fields`, `store`, and `streaming_usage` to `false`, and it works for every base URL.
 Without that preset (or the equivalent individual fields), all three remain enabled even for a
 localhost URL. A strict local server can therefore reject an undeclared field loudly, and the
-host fixes the mismatch by selecting the preset. The direct OpenAI equality retained by ADR 0037
+host fixes the mismatch by selecting the preset. The direct OpenAI equality retained by ADR 0072
 is unchanged and remains the sole URL-derived compatibility choice.

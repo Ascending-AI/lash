@@ -1,4 +1,4 @@
-# 0038 — Gradual value types through to the workflow editor
+# 0073 — Gradual value types through to the workflow editor
 
 - Status: Proposed
 - Date: 2026-07-17

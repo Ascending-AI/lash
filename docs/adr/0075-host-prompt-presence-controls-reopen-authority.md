@@ -23,11 +23,11 @@ literal historical head fixture used by
 `legacy_promptless_head_with_host_prompt_renders_host_prompt_in_memory` and
 `legacy_promptless_head_with_host_prompt_renders_host_prompt_sqlite`.
 
-This ADR explicitly supersedes ADR 0047's sentence that host configuration
+This ADR explicitly supersedes ADR 0074's sentence that host configuration
 wins on reopen "for the model and the prompt" for the session-prompt field.
 The rule is refined by presence: an explicit host session prompt wins, while a
 present persisted session prompt wins when the host leaves that field absent.
-ADR 0047's model and generation authority is unchanged.
+ADR 0074's model and generation authority is unchanged.
 
 ## Decision
 
