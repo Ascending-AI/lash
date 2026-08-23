@@ -701,6 +701,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exec_command_reader_death_wins_timeout_classification() {
+        let shell = shell_provider(StandardShell {
+            runtime: ShellRuntime::new()
+                .with_cwd("/")
+                .with_aborted_pipe_reader(),
+        });
+        let result = run(
+            &shell,
+            "exec_command",
+            &json!({"cmd": "sleep 5", "timeout_ms": 50}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!(
+                "reader death must beat the timeout record: {}",
+                result.value_for_projection()
+            );
+        };
+        assert_eq!(failure.code, "shell_reader_died");
+        assert_eq!(result.value_for_projection()["reader_died"], true);
+        assert_ne!(result.value_for_projection()["status"], "timed_out");
+    }
+
+    #[tokio::test]
+    async fn exec_command_exit_wins_expired_deadline_race() {
+        let gate = Arc::new(tokio::sync::Barrier::new(2));
+        let shell = shell_provider(StandardShell {
+            runtime: ShellRuntime::new()
+                .with_cwd("/")
+                .with_pipe_loop_gate(Arc::clone(&gate)),
+        });
+        let run_task = tokio::spawn(async move {
+            run(
+                &shell,
+                "exec_command",
+                &json!({"cmd": "exit 23", "timeout_ms": 20}),
+            )
+            .await
+        });
+
+        gate.wait().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        gate.wait().await;
+        let result = run_task.await.expect("deadline-race run task");
+
+        assert!(result.is_success(), "{}", result.value_for_projection());
+        assert_eq!(result.value_for_projection()["status"], "completed");
+        assert_eq!(result.value_for_projection()["exit_code"], 23);
+        assert_ne!(result.value_for_projection()["status"], "timed_out");
+    }
+
+    #[tokio::test]
     async fn exec_command_timeout_kills_process_group_children() {
         let shell = test_shell();
         let marker = std::env::temp_dir().join(format!(
