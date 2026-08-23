@@ -81,7 +81,7 @@ impl ToolRegistry {
             sources: Arc::new(RwLock::new(BTreeMap::new())),
             state: Arc::new(RwLock::new(ToolRegistryState {
                 generation: 0,
-                tools: BTreeMap::new(),
+                surface: ToolSurface::default(),
                 next_live_source_id: 0,
             })),
             hidden_tool_names: Arc::new(hidden_tool_names),
@@ -97,7 +97,7 @@ impl ToolRegistry {
     pub(crate) fn is_orchestrating_tool(&self, tool_id: &ToolId) -> bool {
         self.state
             .read_recover()
-            .tools
+            .surface
             .get(tool_id)
             .is_some_and(|entry| {
                 entry.registration_kind() == ToolRegistrationKind::Orchestrating
@@ -108,7 +108,7 @@ impl ToolRegistry {
         let state = self
             .state
             .read_recover();
-        ToolState::new(state.generation, export_tool_state_entries(&state.tools))
+        ToolState::new(state.generation, export_tool_state_entries(&state.surface))
     }
 
     pub(crate) fn apply_state(&self, next: ToolState) -> Result<u64, ReconfigureError> {
@@ -140,7 +140,8 @@ impl ToolRegistry {
                 actual: state.generation,
             });
         }
-        state.tools = rebound.tools;
+        state.surface = rebound.surface;
+        state.surface.debug_assert_invariant();
         state.generation += 1;
         Ok(state.generation)
     }
@@ -187,7 +188,8 @@ impl ToolRegistry {
         let mut state = self
             .state
             .write_recover();
-        state.tools = rebound.tools;
+        state.surface = rebound.surface;
+        state.surface.debug_assert_invariant();
         state.generation = reconciled_generation(snapshot.generation(), rebound.changed)?;
         Ok(ToolRestoreReport {
             generation: state.generation,
@@ -231,9 +233,17 @@ impl ToolRegistry {
         let mut state = self
             .state
             .write_recover();
-        state
-            .tools
-            .retain(|_, entry| entry.binding.source_key() != Some(&source_key));
+        let removed_ids = state
+            .surface
+            .by_id
+            .iter()
+            .filter(|(_, entry)| entry.binding.source_key() == Some(&source_key))
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        for id in removed_ids {
+            state.surface.remove(&id);
+        }
+        state.surface.debug_assert_invariant();
         state.generation += 1;
         Ok(state.generation)
     }
@@ -282,7 +292,8 @@ impl ToolRegistry {
         let mut state = self
             .state
             .write_recover();
-        state.tools = reconciled.tools;
+        state.surface = reconciled.surface;
+        state.surface.debug_assert_invariant();
         if reconciled.changed {
             state.generation = reconciled_generation(state.generation, true)?;
         }
@@ -307,7 +318,8 @@ impl ToolRegistry {
         let mut state = self
             .state
             .write_recover();
-        state.tools = reconciled.tools;
+        state.surface = reconciled.surface;
+        state.surface.debug_assert_invariant();
         if reconciled.changed {
             state.generation = reconciled_generation(state.generation, true)?;
         }
@@ -333,7 +345,7 @@ impl ToolRegistry {
             sources: Arc::new(RwLock::new(sources)),
             state: Arc::new(RwLock::new(ToolRegistryState {
                 generation,
-                tools: rebound.tools,
+                surface: rebound.surface,
                 next_live_source_id: 0,
             })),
             hidden_tool_names: Arc::clone(&self.hidden_tool_names),

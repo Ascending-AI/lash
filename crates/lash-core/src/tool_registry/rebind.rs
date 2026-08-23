@@ -43,9 +43,10 @@ fn manifest_with_compact_contract(
 }
 
 fn export_tool_state_entries(
-    entries: &BTreeMap<ToolId, ToolRegistryEntry>,
+    surface: &ToolSurface,
 ) -> BTreeMap<ToolId, ToolStateEntry> {
-    entries
+    surface
+        .by_id
         .iter()
         .map(|(id, entry)| (id.clone(), entry.export()))
         .collect()
@@ -64,7 +65,7 @@ enum ReconcileMode {
 }
 
 struct ReconciledTools {
-    tools: BTreeMap<ToolId, ToolRegistryEntry>,
+    surface: ToolSurface,
     orphaned: Vec<ToolId>,
     changed: bool,
 }
@@ -83,16 +84,16 @@ fn reconcile_tool_state_entries(
 ) -> Result<ReconciledTools, ReconfigureError> {
     validate_snapshot_entries(entries)?;
 
-    let mut reconciled = match mode {
+    let mut surface = match mode {
         ReconcileMode::LiveSurface => {
             advertised_tool_entries(sources, preferred_source_key, hidden_tool_names)?
         }
-        ReconcileMode::SnapshotSurface => BTreeMap::new(),
+        ReconcileMode::SnapshotSurface => ToolSurface::default(),
     };
     let mut orphaned = Vec::new();
 
     for (id, stored) in entries {
-        if let Some(live) = reconciled.get_mut(id) {
+        if let Some(live) = surface.get_mut(id) {
             live.member = stored.member && !hidden_tool_names.contains(&live.manifest.name);
             continue;
         }
@@ -102,7 +103,7 @@ fn reconcile_tool_state_entries(
             Some((source_key, manifest, kind)) => {
                 let mut entry = bound_tool_entry(manifest, source_key, kind, hidden_tool_names);
                 entry.member &= stored.member;
-                insert_result_entry(&mut reconciled, id.clone(), entry)?;
+                insert_result_entry(&mut surface, id.clone(), entry)?;
             }
             None if mode == ReconcileMode::SnapshotSurface && !stored.orphaned => {
                 return Err(ReconfigureError::Validation(format!(
@@ -114,9 +115,7 @@ fn reconcile_tool_state_entries(
                 // The old authority grant is not transferred and its orphan is
                 // superseded, while the new id remains a default member.
                 if mode == ReconcileMode::LiveSurface
-                    && reconciled
-                        .values()
-                        .any(|entry| entry.manifest.name == stored.manifest.name)
+                    && surface.get_by_name(&stored.manifest.name).is_some()
                 {
                     continue;
                 }
@@ -127,14 +126,14 @@ fn reconcile_tool_state_entries(
                 );
                 orphan.member =
                     stored.member && !hidden_tool_names.contains(&orphan.manifest.name);
-                insert_result_entry(&mut reconciled, id.clone(), orphan)?;
+                insert_result_entry(&mut surface, id.clone(), orphan)?;
             }
         }
     }
 
-    let changed = export_tool_state_entries(&reconciled) != *entries;
+    let changed = export_tool_state_entries(&surface) != *entries;
     Ok(ReconciledTools {
-        tools: reconciled,
+        surface,
         orphaned,
         changed,
     })
@@ -144,8 +143,8 @@ fn advertised_tool_entries(
     sources: &BTreeMap<ToolSourceKey, Arc<dyn ToolSourceExecutor>>,
     preferred_source_key: Option<&ToolSourceKey>,
     hidden_tool_names: &BTreeSet<String>,
-) -> Result<BTreeMap<ToolId, ToolRegistryEntry>, ReconfigureError> {
-    let mut advertised = BTreeMap::new();
+) -> Result<ToolSurface, ReconfigureError> {
+    let mut advertised = ToolSurface::default();
     for (source_key, source) in sources {
         let manifests = source
             .advertised_tools()
@@ -168,13 +167,14 @@ fn advertised_tool_entries(
 }
 
 fn insert_advertised_entry(
-    advertised: &mut BTreeMap<ToolId, ToolRegistryEntry>,
+    advertised: &mut ToolSurface,
     source_key: &ToolSourceKey,
     kind: ToolRegistrationKind,
     manifest: ToolManifest,
     preferred_source_key: Option<&ToolSourceKey>,
     hidden_tool_names: &BTreeSet<String>,
 ) -> Result<(), ReconfigureError> {
+    let manifest_id = manifest.id.clone();
     let id_conflict = advertised.get(&manifest.id).map(|entry| {
         (
             manifest.id.clone(),
@@ -186,17 +186,15 @@ fn insert_advertised_entry(
             entry.registration_kind(),
         )
     });
-    let name_conflict = advertised.iter().find_map(|(id, entry)| {
-        (entry.manifest.name == manifest.name).then(|| {
-            (
-                id.clone(),
-                entry
-                    .binding
-                    .source_key()
-                    .expect("advertised entries are bound")
-                    .clone(),
-            )
-        })
+    let name_conflict = advertised.get_by_name(&manifest.name).map(|(id, entry)| {
+        (
+            id.clone(),
+            entry
+                .binding
+                .source_key()
+                .expect("advertised entries are bound")
+                .clone(),
+        )
     });
 
     if let Some((tool_id, owner, existing_kind)) = id_conflict.as_ref()
@@ -214,38 +212,51 @@ fn insert_advertised_entry(
     }
 
     let conflicts = [
-        id_conflict.as_ref().map(|(id, owner, _)| (id, owner)),
-        name_conflict.as_ref().map(|(id, owner)| (id, owner)),
+        id_conflict.as_ref().map(|(id, _owner, _)| id.clone()),
+        name_conflict.as_ref().map(|(id, _owner)| id.clone()),
     ]
         .into_iter()
         .flatten()
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
     if !conflicts.is_empty() {
         if preferred_source_key == Some(source_key) {
-            for (id, _) in conflicts {
-                advertised.remove(id);
+            for id in conflicts {
+                advertised.remove(&id);
             }
         } else if conflicts
             .iter()
-            .any(|(_, owner)| preferred_source_key == Some(*owner))
+            .any(|id| {
+                id_conflict
+                    .as_ref()
+                    .is_some_and(|(conflict_id, owner, _)| {
+                        conflict_id == id && preferred_source_key == Some(owner)
+                    })
+                    || name_conflict.as_ref().is_some_and(|(conflict_id, owner)| {
+                        conflict_id == id && preferred_source_key == Some(owner)
+                    })
+            })
         {
             return Ok(());
-        } else if let Some((_, owner, _)) = id_conflict {
-            return Err(ReconfigureError::Validation(format!(
-                "duplicate tool id `{}` from source `{source_key}` conflicts with source `{owner}`",
-                manifest.id
-            )));
-        } else if let Some((id, owner)) = name_conflict {
-            return Err(ReconfigureError::Validation(format!(
-                "duplicate tool name `{}` from source `{source_key}` conflicts with tool id `{id}` from source `{owner}`",
-                manifest.name
-            )));
         }
     }
 
     let entry = bound_tool_entry(manifest, source_key.clone(), kind, hidden_tool_names);
-    advertised.insert(entry.manifest.id.clone(), entry);
-    Ok(())
+    match advertised.insert(entry) {
+        Ok(()) => Ok(()),
+        Err(ToolSurfaceInsertError::DuplicateId) => {
+            let (_, owner, _) = id_conflict.expect("surface id conflict was indexed");
+            Err(ReconfigureError::Validation(format!(
+                "duplicate tool id `{}` from source `{source_key}` conflicts with source `{owner}`",
+                manifest_id
+            )))
+        }
+        Err(ToolSurfaceInsertError::DuplicateName { name }) => {
+            let (id, owner) = name_conflict.expect("surface name conflict was indexed");
+            Err(ReconfigureError::Validation(format!(
+                "duplicate tool name `{name}` from source `{source_key}` conflicts with tool id `{id}` from source `{owner}`"
+            )))
+        }
+    }
 }
 
 fn bound_tool_entry(
@@ -315,7 +326,7 @@ fn resolve_snapshot_id(
 }
 
 fn insert_result_entry(
-    reconciled: &mut BTreeMap<ToolId, ToolRegistryEntry>,
+    surface: &mut ToolSurface,
     id: ToolId,
     entry: ToolRegistryEntry,
 ) -> Result<(), ReconfigureError> {
@@ -325,21 +336,21 @@ fn insert_result_entry(
             entry.manifest.id
         )));
     }
-    if let Some((existing_id, existing)) = reconciled
-        .iter()
-        .find(|(_, existing)| existing.manifest.name == entry.manifest.name)
-    {
-        return Err(ReconfigureError::Validation(format!(
-            "duplicate tool name `{}` for tool ids `{existing_id}` and `{id}`",
-            existing.manifest.name
-        )));
+    let name_conflict = surface
+        .get_by_name(&entry.manifest.name)
+        .map(|(existing_id, _)| existing_id.clone());
+    match surface.insert(entry) {
+        Ok(()) => Ok(()),
+        Err(ToolSurfaceInsertError::DuplicateId) => Err(ReconfigureError::Validation(
+            format!("duplicate tool id `{id}` in reconciled surface"),
+        )),
+        Err(ToolSurfaceInsertError::DuplicateName { name }) => {
+            let existing_id = name_conflict.expect("surface name conflict was indexed");
+            Err(ReconfigureError::Validation(format!(
+                "duplicate tool name `{name}` for tool ids `{existing_id}` and `{id}`"
+            )))
+        }
     }
-    if reconciled.insert(id.clone(), entry).is_some() {
-        return Err(ReconfigureError::Validation(format!(
-            "duplicate tool id `{id}` in reconciled surface"
-        )));
-    }
-    Ok(())
 }
 
 fn validate_snapshot_entries(
