@@ -27,12 +27,15 @@
 //! keys, so the suite is safe against a shared substrate.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use lash_sansio::sync::MutexExt;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
@@ -800,14 +803,17 @@ async fn cancel_stops_the_losers_and_closes_the_caller_out<F: Fn() -> Host>(
         .await
         .expect("the winner settles");
     let replayed = EffectGroupHandle::restored(key.as_str(), 3, 1).expect("the cursor restores");
+    loser.wait_until_waiting().await;
     close(&scoped, handle, LoserPolicy::Cancel)
         .await
         .expect("the caller closes under the declared disposition");
 
     // The release arrives after the cancellation and must not resurrect the
-    // child: a cancelled child's terminal is its cancellation.
+    // child: a cancelled child's terminal is its cancellation. Wait for the
+    // host-owned child future to exit first, so the late signal cannot race the
+    // cancellation decision.
+    loser.wait_until_exited().await;
     loser.release();
-    tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(
         loser.finished(),
         0,
@@ -861,6 +867,7 @@ async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &
         vec![slow],
     )
     .await;
+    loser.wait_until_waiting().await;
     close(&scoped, handle, RUN)
         .await
         .expect("closing as declared releases the caller's interest");
@@ -869,8 +876,10 @@ async fn a_close_may_narrow_but_never_widen<F: Fn() -> Host>(make: &F, prefix: &
     close(&scoped, replayed, LoserPolicy::Cancel)
         .await
         .expect("a caller that has learned it no longer wants the losers may narrow");
+    // The late release is delivered only after the host-owned child future has
+    // observed cancellation and exited; it cannot race the cancellation path.
+    loser.wait_until_exited().await;
     loser.release();
-    tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(
         loser.finished(),
         0,
@@ -1073,6 +1082,14 @@ const RUN: LoserPolicy = LoserPolicy::RunToCompletion;
 
 /// Hang detector for the entire conformance law, not a latency expectation.
 const AWAIT_BUDGET: Duration = Duration::from_secs(60);
+
+/// Bound for the explicit child-lifecycle barriers below. This is a failure
+/// bound, not a sleep used to guess when the scheduler has caught up; it
+/// matches AWAIT_BUDGET so a saturated runner cannot trip it before the law's
+/// own hang detector. The barriers also make "the child future is polled at
+/// open and dropped on cancel-close" a requirement every backend of this
+/// shared suite must satisfy.
+const CHILD_EXIT_BUDGET: Duration = AWAIT_BUDGET;
 
 fn scope(prefix: &str, label: &str) -> ExecutionScope {
     ExecutionScope::runtime_operation(format!("{prefix}-{label}"))
@@ -1278,10 +1295,23 @@ fn never() -> RuntimeEffectLocalExecutor<'static> {
 }
 
 /// An executor gated on a release signal, plus the handle a law releases it and
-/// observes it through.
+/// observes it through. The lifecycle notifications make cancellation
+/// synchronization independent of scheduler timing: `waiting` proves the
+/// release receiver is actually pending before the host cancels it, and `exited`
+/// fires when the executor future is either completed or dropped.
 struct Gate {
     release: std::sync::Mutex<Option<oneshot::Sender<()>>>,
+    waiting: Arc<Notify>,
+    exited: Arc<Notify>,
     finished: Arc<AtomicUsize>,
+}
+
+struct NotifyOnDrop(Arc<Notify>);
+
+impl Drop for NotifyOnDrop {
+    fn drop(&mut self) {
+        self.0.notify_one();
+    }
 }
 
 impl Gate {
@@ -1293,19 +1323,57 @@ impl Gate {
         }
     }
 
+    async fn wait_until_waiting(&self) {
+        tokio::time::timeout(CHILD_EXIT_BUDGET, self.waiting.notified())
+            .await
+            .expect("the gated child waits for its release");
+    }
+
+    async fn wait_until_exited(&self) {
+        tokio::time::timeout(CHILD_EXIT_BUDGET, self.exited.notified())
+            .await
+            .expect("the gated child exits after cancellation");
+    }
+
     fn finished(&self) -> usize {
         self.finished.load(Ordering::SeqCst)
     }
 }
 
+struct ReleaseWait {
+    receiver: oneshot::Receiver<()>,
+    waiting: Arc<Notify>,
+}
+
+impl Future for ReleaseWait {
+    type Output = Result<(), oneshot::error::RecvError>;
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        this.waiting.notify_one();
+        Pin::new(&mut this.receiver).poll(context)
+    }
+}
+
 fn gated(position: usize) -> (RuntimeEffectLocalExecutor<'static>, Arc<Gate>) {
     let (release, released) = oneshot::channel();
+    let waiting = Arc::new(Notify::new());
+    let exited = Arc::new(Notify::new());
     let finished = Arc::new(AtomicUsize::new(0));
+    let child_waiting = Arc::clone(&waiting);
+    let child_exited = Arc::clone(&exited);
     let counter = Arc::clone(&finished);
     let executor = RuntimeEffectLocalExecutor::testing(move |_| async move {
+        let _exit = NotifyOnDrop(child_exited);
         // A dropped sender means the child was cancelled before its release,
         // which must not be reported as a completion.
-        if released.await.is_err() {
+        if (ReleaseWait {
+            receiver: released,
+            waiting: child_waiting,
+        })
+        .await
+        .is_err()
+        {
             std::future::pending::<()>().await;
         }
         counter.fetch_add(1, Ordering::SeqCst);
@@ -1315,6 +1383,8 @@ fn gated(position: usize) -> (RuntimeEffectLocalExecutor<'static>, Arc<Gate>) {
         executor,
         Arc::new(Gate {
             release: std::sync::Mutex::new(Some(release)),
+            waiting,
+            exited,
             finished,
         }),
     )
