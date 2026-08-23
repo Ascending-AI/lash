@@ -79,6 +79,7 @@ const GOLDEN_TRACE: &str = include_str!("turn_crash_trace.json");
 const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
 const RECOVERY_TTL: Duration = Duration::from_millis(300);
 const RECOVERY_RENEW: Duration = Duration::from_millis(100);
+const NOMINAL_RECOVERY_TTL: Duration = Duration::from_secs(5);
 const HIT_TIMEOUT: Duration = Duration::from_secs(60);
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -1172,6 +1173,15 @@ fn recovery_timings() -> crate::LeaseTimings {
         .expect("300ms TTL / 100ms renew satisfies ttl >= 3x renew")
 }
 
+fn nominal_recovery_timings() -> crate::LeaseTimings {
+    // The scripted provider deliberately awaits the first completed renewal.
+    // Keep that nominal successor turn's lease window independent from the
+    // short TTL used by the explicit starved-renewal case: a loaded runner may
+    // delay the renewal task past 300ms without changing the awaited condition.
+    crate::LeaseTimings::new(NOMINAL_RECOVERY_TTL, RECOVERY_RENEW)
+        .expect("5s TTL / 100ms renew tolerates the nominal renewal barrier")
+}
+
 fn runtime_policy() -> crate::SessionPolicy {
     crate::SessionPolicy {
         provider_id: "turn-crash-script".to_string(),
@@ -1209,7 +1219,26 @@ async fn build_runtime(
     control: SeamControl,
     executions: Arc<std::sync::atomic::AtomicUsize>,
     identity: &ReferenceIdentity,
+    trace_tool: TraceTool,
+) -> crate::LashRuntime {
+    build_runtime_with_lease_timings(
+        store,
+        control,
+        executions,
+        identity,
+        trace_tool,
+        recovery_timings(),
+    )
+    .await
+}
+
+async fn build_runtime_with_lease_timings(
+    store: Arc<dyn RuntimePersistence>,
+    control: SeamControl,
+    executions: Arc<std::sync::atomic::AtomicUsize>,
+    identity: &ReferenceIdentity,
     mut trace_tool: TraceTool,
+    lease_timings: crate::LeaseTimings,
 ) -> crate::LashRuntime {
     super::bind_conformance_session(&store, &identity.session_id).await;
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
@@ -1224,7 +1253,7 @@ async fn build_runtime(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     )
-    .with_lease_timings(recovery_timings());
+    .with_lease_timings(lease_timings);
     trace_tool.control = control.clone();
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider_handle(control)));
@@ -1530,12 +1559,13 @@ where
     let identity = ReferenceIdentity::for_scenario("trace-drift");
     seed_reference_ingress(&raw, &identity, "trace-drift").await;
     let decorated = SeamStore::wrap(raw, control.clone());
-    let runtime = Box::pin(build_runtime(
+    let runtime = Box::pin(build_runtime_with_lease_timings(
         decorated,
         control.clone(),
         Arc::clone(&executions),
         &identity,
         TraceTool::default(),
+        nominal_recovery_timings(),
     ))
     .await;
     control.clear();
@@ -1762,12 +1792,17 @@ async fn run_crash_matrix_case<F>(
     wait_for_recovery_lease(make, scenario, &entry.point, predecessor_claimed).await;
     let successor_control = SeamControl::default();
     let successor_store = SeamStore::wrap(make(scenario), successor_control.clone());
-    let successor = Box::pin(build_runtime(
+    let successor_timings = match pressure {
+        RenewalPressure::Nominal => nominal_recovery_timings(),
+        RenewalPressure::Starved => recovery_timings(),
+    };
+    let successor = Box::pin(build_runtime_with_lease_timings(
         Arc::clone(&successor_store),
         successor_control.clone(),
         Arc::clone(&executions),
         &identity,
         TraceTool::default(),
+        successor_timings,
     ))
     .await;
     successor_control.clear();
@@ -1903,12 +1938,13 @@ async fn drive_drain_turn<F>(
     let identity = &identity;
     let control = SeamControl::default();
     let store = SeamStore::wrap(make(scenario), control.clone());
-    let runtime = Box::pin(build_runtime(
+    let runtime = Box::pin(build_runtime_with_lease_timings(
         store,
         control.clone(),
         Arc::clone(executions),
         identity,
         TraceTool::default(),
+        nominal_recovery_timings(),
     ))
     .await;
     control.clear();
