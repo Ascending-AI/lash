@@ -44,6 +44,7 @@ mod index;
 mod operations;
 mod persistence;
 mod plugins;
+mod plugins_contexts;
 mod plugins_operations;
 mod plugins_runtime;
 mod plugins_tools;
@@ -62,8 +63,9 @@ mod worker_capacity;
 /// reappearance would mean the facade lost a piece of the authoring surface.
 #[cfg(test)]
 mod facade_only_plugin_authoring {
-    const PLUGIN_MODULES: [(&str, &str); 4] = [
+    const PLUGIN_MODULES: [(&str, &str); 5] = [
         ("plugins.rs", include_str!("plugins.rs")),
+        ("plugins_contexts.rs", include_str!("plugins_contexts.rs")),
         (
             "plugins_operations.rs",
             include_str!("plugins_operations.rs"),

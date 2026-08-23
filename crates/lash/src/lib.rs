@@ -303,11 +303,12 @@ pub mod plugins {
     pub use lash_core::facade_support::SessionLifecycleService;
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
-        AssistantResponseTransform, AssistantStreamHook, AssistantStreamHookContext,
-        AssistantStreamTransform, BeforeToolCallHook, BeforeTurnHook, CheckpointHook,
-        CheckpointHookContext, CompactionContext, ContextCompaction, ContextCompactor,
-        ContextError, PluginExtensionContribution, PluginSpecBuilder, StaticPluginFactory,
-        ToolCallHookContext, ToolResultHookContext,
+        AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
+        AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform,
+        BeforeToolCallHook, BeforeTurnHook, CheckpointHook, CheckpointHookContext,
+        CompactionContext, ContextCompaction, ContextCompactor, ContextError,
+        PluginExtensionContribution, PluginSpecBuilder, StaticPluginFactory, ToolCallHookContext,
+        ToolCatalogContext, ToolResultHookContext, ToolResultProjectionContext,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus
@@ -325,9 +326,10 @@ pub mod plugins {
     /// This is authoring surface in full: writing a plugin that carries
     /// operations needs no `lash-core` dependency (ADR 0051).
     pub use lash_core::plugin::{
-        PluginCommand, PluginCommandContext, PluginOperation, PluginOperationFailure,
-        PluginOperationInvokeError, PluginOperationOutcome, PluginOperationReceipt, PluginOwned,
-        PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
+        PluginCommand, PluginCommandContext, PluginOperation, PluginOperationDef,
+        PluginOperationFailure, PluginOperationInvokeError, PluginOperationKind,
+        PluginOperationOutcome, PluginOperationReceipt, PluginOwned, PluginQuery,
+        PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
         ProcessReadService, SessionParam, SessionReadService,
     };
     /// Durable plugin state: what [`SessionPlugin::snapshot`] writes and
@@ -344,8 +346,8 @@ pub mod plugins {
     /// ([`SessionGraphService`]), plus the append request/result vocabulary.
     /// Both are runtime-implemented — a plugin receives one, never writes one.
     pub use lash_core::{
-        AppendSessionNodesOutcome, AppendSessionNodesRequest, SessionAppendNode,
-        SessionGraphService, SessionStateService,
+        AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
+        SessionGraphService, SessionStateService, SessionToolAccess, SubagentSessionContext,
     };
     pub use lash_core::{
         PluginError, PluginMessage, PluginRuntimeEvent, ToolCatalog, facade_support::PluginFactory,

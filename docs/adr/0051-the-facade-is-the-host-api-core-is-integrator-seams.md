@@ -127,39 +127,36 @@ These plugin-namespace items are **integrator seams and stay core-only**:
   `ProtocolLlmCallAction`, `ProtocolSessionMaterialization`,
   `ExecutionStateSnapshot`, `ExecutionStateComponentSnapshot`,
   `HydratedExecutionState`, `ProcessEngineContributionContext`.
-- **Runtime embedding**: `RuntimeServices`, `SessionAuthorityContext`,
-  `PluginExtensions`. A plugin is handed services; it never assembles the set.
+- **Runtime embedding**: `RuntimeServices`, `SessionAuthorityContext`. A plugin
+  is handed services; it never assembles the set.
+- **Catalog assembly alias**: `ToolContractResolver` remains core-only. A
+  catalog hook receives it only as a field of `ToolCatalogContext`, and the
+  alias expands entirely through the facade-nameable
+  `lash::tools::ToolContract`; plugin authors can call it without naming the
+  alias.
 - **Runtime-side turn composition**: `PrepareTurnRequest`, `TurnPreparation`,
   `TurnFinalization`, `CheckpointApplication`, `PluginAbort`. These are how the
   runtime drives the registered hooks, not what a hook receives.
-- **`ToolCatalogContext`, core-only for now and not because it is a seam.** It
-  is the argument of the `ToolCatalogContributor` hook a plugin registers
-  through `PluginRegistrar::tool_catalog().contribute(..)`, so by the rule it is authoring
-  surface. It stays on `lash-core` in this round because its fields transitively
-  drag `SessionToolAccess`, `SubagentSessionContext` and `PluginExtensions` onto
-  the facade, and those are seams; exporting the context without them would put
-  a type on `lash::plugins` whose fields a plugin cannot name.
 - **Plugin-session internals**: `PluginOperationRegistrations`,
   `SessionContextOverlay`,
-  `SessionPluginSource`, `SessionRelation`, `SessionToolAccess`,
-  `SubagentSessionContext`, `AgentFrameAssignment`, `AgentFrameId`,
-  `AgentFrameReason`, `AgentFrameRecord`, `OpenAgentFrameRequest`,
-  `OpenAgentFrameResult`, `SessionObservedProcessOutcome`,
-  `SessionObservedProcessReceipt`.
+  `SessionPluginSource`, `SessionRelation`, `AgentFrameAssignment`,
+  `AgentFrameId`, `AgentFrameReason`, `AgentFrameRecord`,
+  `OpenAgentFrameRequest`, `OpenAgentFrameResult`,
+  `SessionObservedProcessOutcome`, `SessionObservedProcessReceipt`.
 - **The persisted snapshot aggregate**: `PluginSessionSnapshot`,
   `PluginSnapshotEntry`, `PluginSnapshotArtifact`. A plugin writes blobs and
   returns its own `PluginSnapshotMeta`; the collection those land in is the
   runtime's, and no plugin names it.
 
-**Known residual gap, follow-up owed.** Four items are authoring surface by the
-rule and still have no facade path: the three hook-argument types
-`ToolCatalogContext`, `ToolResultProjectionContext` and
-`AssistantStreamFinishedContext` — each one is what a hook a plugin registers
-receives — and `PluginSession::plugin_operations()`, which returns
-`Vec<PluginOperationDef>` with `PluginOperationDef` unnameable from `lash`. Each
-needs its own decision: export the type together with the seams its fields name,
-narrow the type first, or narrow the signature. They are listed here as debt,
-not as seams, so the next round starts from an honest inventory.
+FIG-1929 closed the remaining authoring gap by exporting the three registered
+hook arguments (`ToolCatalogContext`, `ToolResultProjectionContext`, and
+`AssistantStreamFinishedContext`), the stream-finished reason it carries
+(`AssistantStreamFinishReason`), and the operation definition returned by
+`PluginSession::plugin_operations()` (`PluginOperationDef` and
+`PluginOperationKind`). `ToolCatalogContext`'s readable field closure —
+`SessionToolAccess`, `SubagentSessionContext`, and `PluginExtensions` — follows
+it onto `lash::plugins`; exposing those values a plugin is handed does not
+expose the runtime-only services or session-authority assembly path.
 
 The rule is enforced, not asserted:
 `facade_only_plugin_authoring::example_plugins_need_no_lash_core_import` in
