@@ -227,7 +227,7 @@ impl Store {
                 .map_err(sqlite_error)?;
             for row in rows {
                 let (hash, bytes) = row.map_err(sqlite_error)?;
-                let body = decode_artifact_blob(&bytes)?.unwrap_or(bytes);
+                let body = decode_artifact_blob(&bytes)?;
                 bodies.insert(hash, body);
             }
         }
@@ -246,9 +246,7 @@ impl Store {
             )
             .optional()
             .map_err(sqlite_error)?;
-        bytes
-            .map(|bytes| decode_artifact_blob(&bytes).map(|decoded| decoded.unwrap_or(bytes)))
-            .transpose()
+        bytes.map(|bytes| decode_artifact_blob(&bytes)).transpose()
     }
 
     pub(crate) fn get_checkpoint_conn(
@@ -294,16 +292,17 @@ impl Store {
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(params![session_id], |row| {
+                let usage = lash_core::TokenUsage {
+                    input_tokens: row.get(2)?,
+                    output_tokens: row.get(3)?,
+                    cache_read_input_tokens: row.get(4)?,
+                    cache_write_input_tokens: row.get(5)?,
+                    reasoning_output_tokens: row.get(6)?,
+                };
                 Ok(lash_core::TokenLedgerEntry {
                     source: row.get(0)?,
                     model: row.get(1)?,
-                    usage: lash_core::TokenUsage {
-                        input_tokens: row.get(2)?,
-                        output_tokens: row.get(3)?,
-                        cache_read_input_tokens: row.get(4)?,
-                        cache_write_input_tokens: row.get(5)?,
-                        reasoning_output_tokens: row.get(6)?,
-                    },
+                    usage,
                 })
             })
             .map_err(sqlite_error)?;

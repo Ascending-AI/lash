@@ -95,26 +95,27 @@ async fn absent_rows_remain_honest_successful_outcomes() {
             .expect("list attachment refs")
             .is_empty()
     );
+}
 
-    let raw_bytes = b"legacy non-enveloped blob";
-    let raw_blob_ref = BlobRef(format!("{:x}", Sha256::digest(raw_bytes)));
-    let raw_hash = raw_blob_ref.as_str().to_string();
-    let raw_content = raw_bytes.to_vec();
+#[tokio::test]
+async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
+    let store = Store::memory().await.expect("open store");
+    let blob_ref = BlobRef("corrupt-non-msgpack-blob".to_string());
+    let blob_hash = blob_ref.as_str().to_string();
+    let raw_content = b"bare blob body is not an artifact envelope".to_vec();
     store
         .conn
         .call(move |conn| {
             conn.execute(
                 "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",
-                params![raw_hash, raw_content],
+                params![blob_hash, raw_content],
             )?;
             Ok(())
         })
         .await
-        .expect("seed legacy raw blob");
-    assert_eq!(
-        store.get_blob(&raw_blob_ref).await.expect("read raw blob"),
-        Some(raw_bytes.to_vec())
-    );
+        .expect("seed corrupt blob");
+
+    assert_corrupt(store.get_blob(&blob_ref).await, "artifact blob envelope");
 }
 
 #[tokio::test]
@@ -160,11 +161,11 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         store
             .get_typed_blob::<serde_json::Value>(&corrupt_blob)
             .await,
-        "typed blob",
+        "artifact blob envelope",
     );
     assert_corrupt(
         store.get_checkpoint(&corrupt_blob).await,
-        "SessionCheckpoint",
+        "artifact blob envelope",
     );
     raw.execute(
         "INSERT INTO blobs (hash, content) VALUES ('corrupt-compressed', ?1)",
