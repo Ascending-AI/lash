@@ -50,9 +50,7 @@ wraps each callback in guest `try`/`catch`, so a rejection becomes that input's
 chaining, synthetic promises, `race`, and `any` remain named rejects.
 Tool calls require `await` and use explicit `typescript.tool` module paths;
 their prompt signatures return `Promise<T>`. Unknown module paths participate
-in the executor's deferred tool-resolution path. Await permission stops at
-every function boundary: an async IIFE or async `map` callback must await its
-own tool calls, `sleep`, `waitSignal`, and `registerTrigger` operations.
+in the executor's deferred tool-resolution path.
 
 Durable work has the static shape
 `const worker = defineProcess({ name: "worker", signals: {}, run: async (...) => { ... } })`.
@@ -188,6 +186,9 @@ language semantics:
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- Await permission stops at every function boundary: an async IIFE or async
+  `map` callback must await its own tool calls, `sleep`, `waitSignal`, and
+  `registerTrigger` operations.
 - Durable state is a value *tree*. A cycle is usable inside a cell —
   `JSON.stringify` throws Node's catchable
   `TypeError: Converting circular structure to JSON` — but a durable binding
