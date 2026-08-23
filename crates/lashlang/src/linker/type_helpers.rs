@@ -256,6 +256,10 @@ fn union_type(items: Vec<TypeExpr>) -> TypeExpr {
         }
     }
     match unique.as_slice() {
+        // `lower_list` reaches this path for an empty list. Its element type
+        // is therefore the empty-list sentinel `Null`; the JSON-Schema
+        // importer deliberately differs because it normalizes a different
+        // domain (FIG-1878).
         [] => TypeExpr::Null,
         [one] => one.clone(),
         _ => TypeExpr::Union(unique),

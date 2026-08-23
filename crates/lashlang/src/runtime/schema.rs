@@ -31,7 +31,6 @@ struct ValidationFieldPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(usize)]
 /// The single home of Lashlang's JSON-Schema scalar vocabulary.
 pub(crate) enum SchemaScalarKind {
     String,
