@@ -88,11 +88,11 @@ use lash::{TurnInput, plugins::runtime_plugin_stack};
 
 let registry = Arc::new(ProjectionRegistry::new());
 let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::new(
-        lash::rlm::ExecutionBound::instructions(1_000_000),
-        lash::rlm::ExecutionBound::secs(30),
-        lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-    ),
+    lash::rlm::RlmProtocolPluginConfig::builder()
+        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+        .wall_clock(lash::rlm::WallClockBound::secs(30))
+        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+        .build(),
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 )
 .with_projection_resolver(registry.clone());
@@ -319,11 +319,11 @@ impl ToneTurnExt for lash::TurnBuilder {
 }</code></pre>
           <p>Install on the session; use the extension method before each run:</p>
           <pre data-lang="rust" data-snippet="embedding_prompts#tone-session"><code>let factory = lash::rlm::RlmProtocolPluginFactory::new(
-    lash::rlm::RlmProtocolPluginConfig::new(
-        lash::rlm::ExecutionBound::instructions(1_000_000),
-        lash::rlm::ExecutionBound::secs(30),
-        lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-    ),
+    lash::rlm::RlmProtocolPluginConfig::builder()
+        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+        .wall_clock(lash::rlm::WallClockBound::secs(30))
+        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+        .build(),
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)

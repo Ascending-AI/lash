@@ -2570,7 +2570,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::processes"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:429#.processes()"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:433#.processes()"
 reason = "The recorded fluent call executes in the example, but its former assertion anchor observes an unrelated callback or match guard. Add an assertion on this call's result or externally meaningful outcome before restoring used-asserted."
 
 [[api]]
@@ -2804,7 +2804,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1902#.lease_timings(lease_timings)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1914#.lease_timings(lease_timings)"
 assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1655#takeover_latency < default_ttl,"
 
 [[api]]
@@ -2814,8 +2814,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::live_replay_store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:692#.live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new("
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:742#assert!(saw_gap, \"trimmed cursor should emit replay_gap\");"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:696#.live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new("
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:746#assert!(saw_gap, \"trimmed cursor should emit replay_gap\");"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::model"
@@ -2824,7 +2824,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::model"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:423#.model(model)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:427#.model(model)"
 reason = "The recorded fluent call executes in the example, but its former assertion anchor observes an unrelated callback or match guard. Add an assertion on this call's result or externally meaningful outcome before restoring used-asserted."
 
 [[api]]
@@ -2880,7 +2880,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::process_registry"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:425#.process_registry(Arc::clone(&process_registry))"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:429#.process_registry(Arc::clone(&process_registry))"
 reason = "The recorded fluent call executes in the example, but its former assertion anchor observes an unrelated callback or match guard. Add an assertion on this call's result or externally meaningful outcome before restoring used-asserted."
 
 [[api]]
@@ -2926,7 +2926,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::provider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:422#.provider(provider)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:426#.provider(provider)"
 reason = "The recorded fluent call executes in the example, but its former assertion anchor observes an unrelated callback or match guard. Add an assertion on this call's result or externally meaningful outcome before restoring used-asserted."
 
 [[api]]
@@ -2964,7 +2964,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::store_factory"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:424#.store_factory(Arc::clone(&core_store_factory))"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:428#.store_factory(Arc::clone(&core_store_factory))"
 reason = "The recorded fluent call executes in the example, but its former assertion anchor observes an unrelated callback or match guard. Add an assertion on this call's result or externally meaningful outcome before restoring used-asserted."
 
 [[api]]
@@ -5799,7 +5799,7 @@ availability = "default+all-features"
 aliases = ["lash::admin::ToolAdmin::state", "lash::prelude::ToolAdmin::state"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1148#let tool_state = reopened.tools().state().await.expect(\"tool state\");"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1152#let tool_state = reopened.tools().state().await.expect(\"tool state\");"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6017,8 +6017,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TurnAddress::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:195#assert_eq!(ids.current(), new);"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:195#assert_eq!(ids.current(), new);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:199#assert_eq!(ids.current(), new);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:199#assert_eq!(ids.current(), new);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -8362,8 +8362,8 @@ availability = "default+all-features"
 aliases = ["lash::process::SessionProcessAdmin"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1569#.list()"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:1564#.session(snapshot.settings.session_id)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1577#.list()"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:1572#.session(snapshot.settings.session_id)"
 
 [[api]]
 symbol = "lash::admin::SessionProcessAdmin::await_output"
@@ -8417,8 +8417,8 @@ availability = "default+all-features"
 aliases = ["lash::process::SessionProcessAdmin::list"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1569#.list()"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:1564#.session(snapshot.settings.session_id)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1577#.list()"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:1572#.session(snapshot.settings.session_id)"
 
 [[api]]
 symbol = "lash::admin::SessionProcessAdmin::list_all"
@@ -11938,7 +11938,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:692#.live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:696#.live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -11948,7 +11948,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::new"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:692#.live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:696#.live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -11996,8 +11996,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStoreConfig"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:694#max_events_per_session: 1,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:742#assert!(saw_gap, \"trimmed cursor should emit replay_gap\");"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:698#max_events_per_session: 1,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:746#assert!(saw_gap, \"trimmed cursor should emit replay_gap\");"
 
 [[api]]
 symbol = "lash::observe::InMemoryLiveReplayStoreConfig::max_age"
@@ -12015,8 +12015,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStoreConfig::max_events_per_session"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:694#max_events_per_session: 1,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:742#assert!(saw_gap, \"trimmed cursor should emit replay_gap\");"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:698#max_events_per_session: 1,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:746#assert!(saw_gap, \"trimmed cursor should emit replay_gap\");"
 
 [[api]]
 symbol = "lash::observe::LiveReplayGap"
@@ -12527,7 +12527,7 @@ aliases = ["lash_core::facade_support::SessionObservation"]
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:115#cursor: observation_snapshot.cursor,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:730#assert_eq!(observation.cursor, gap.latest_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:734#assert_eq!(observation.cursor, gap.latest_cursor);"
 
 [[api]]
 symbol = "lash::observe::SessionObservation::cursor"
@@ -12537,7 +12537,7 @@ aliases = ["lash_core::facade_support::SessionObservation::cursor"]
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:115#cursor: observation_snapshot.cursor,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:730#assert_eq!(observation.cursor, gap.latest_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:734#assert_eq!(observation.cursor, gap.latest_cursor);"
 
 [[api]]
 symbol = "lash::observe::SessionObservation::read_view"
@@ -30055,7 +30055,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:430#.observer()"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:434#.observer()"
 reason = "The recorded fluent call executes in the example, but its former assertion anchor observes an unrelated callback or match guard. Add an assertion on this call's result or externally meaningful outcome before restoring used-asserted."
 
 [[api]]
@@ -33520,8 +33520,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:725#assert_eq!(gap.requested_cursor, requested_cursor);"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:725#assert_eq!(gap.requested_cursor, requested_cursor);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -33531,7 +33531,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:1311#gap: Box::new(gap),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:725#assert_eq!(gap.requested_cursor, requested_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
 symbol = "lash::recoverable_chat::RecoverableChatUpdate::ReplayGap::snapshot"
@@ -33540,7 +33540,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:1301#Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:725#assert_eq!(gap.requested_cursor, requested_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
 symbol = "lash::recoverable_chat::RecoverableChatUpdate::ResidentReplacement"
@@ -44285,62 +44285,6 @@ disposition = "unused-add"
 reason = "Add lash::remote::usage::RemoteUsage::reasoning_output_tokens to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::rlm::ExecutionBound"
-kind = "enum"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "The RLM setup examples choose bounded execution explicitly; add an outcome-driven configuration example before claiming asserted usage of the bound type itself."
-
-[[api]]
-symbol = "lash::rlm::ExecutionBound::Bounded"
-kind = "variant"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add an RLM example that deliberately exhausts a finite bound and asserts the rendered runtime diagnostic."
-
-[[api]]
-symbol = "lash::rlm::ExecutionBound::Bounded::0"
-kind = "field"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add an RLM example that sets and exhausts a concrete finite bound value, then asserts that value in the diagnostic."
-
-[[api]]
-symbol = "lash::rlm::ExecutionBound::Unbounded"
-kind = "variant"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add an RLM host example that explicitly opts out of one bound and asserts the independent remaining bound."
-
-[[api]]
-symbol = "lash::rlm::ExecutionBound::instructions"
-kind = "function"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add an RLM example that exhausts an instruction bound constructed through the public facade and asserts the typed diagnostic."
-
-[[api]]
-symbol = "lash::rlm::ExecutionBound::millis"
-kind = "function"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add an RLM example that exhausts a millisecond deadline constructed through the public facade and asserts the typed diagnostic."
-
-[[api]]
-symbol = "lash::rlm::ExecutionBound::secs"
-kind = "function"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add an RLM example that configures a seconds-based deadline through the public facade and asserts the resulting configuration."
-
-[[api]]
 symbol = "lash::rlm::ExecutionBounds"
 kind = "struct"
 availability = "all-features"
@@ -44349,15 +44293,7 @@ disposition = "unused-add"
 reason = "Add an RLM host example that supplies execution bounds through the facade and asserts a bounded execution outcome."
 
 [[api]]
-symbol = "lash::rlm::ExecutionBounds::deadline"
-kind = "field"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "Add an RLM host example that inspects the configured deadline and asserts its millisecond wire value."
-
-[[api]]
-symbol = "lash::rlm::ExecutionBounds::instruction_budget"
+symbol = "lash::rlm::ExecutionBounds::instruction_limit"
 kind = "field"
 availability = "all-features"
 area = "plugins"
@@ -44389,12 +44325,52 @@ disposition = "unused-add"
 reason = "Add an RLM host example that opts out of both execution bounds and asserts that independent host safeguards remain active."
 
 [[api]]
+symbol = "lash::rlm::ExecutionBounds::wall_clock"
+kind = "field"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that inspects the configured wall-clock deadline and asserts its millisecond wire value."
+
+[[api]]
 symbol = "lash::rlm::ExecutionBounds::with_memory_limit"
 kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add an RLM host example that sets a finite logical heap limit and asserts a typed memory-exhaustion outcome."
+
+[[api]]
+symbol = "lash::rlm::InstructionBound"
+kind = "struct"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that exhausts a finite instruction budget and asserts the rendered runtime diagnostic."
+
+[[api]]
+symbol = "lash::rlm::InstructionBound::instructions"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that exhausts an instruction budget constructed through the public facade and asserts the typed diagnostic."
+
+[[api]]
+symbol = "lash::rlm::InstructionBound::limit"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that reads the configured instruction budget back off the config and asserts the finite value it chose."
+
+[[api]]
+symbol = "lash::rlm::InstructionBound::unbounded"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that explicitly opts out of the instruction budget and asserts the independent remaining bound."
 
 [[api]]
 symbol = "lash::rlm::LASHLANG_SURFACE_EXTENSION_ID"
@@ -44778,8 +44754,8 @@ kind = "function"
 availability = "all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:261#.resolve_trigger_source(MAIL_RECEIVED_SOURCE_TYPE)"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:263#assert_eq!(binding.event_type_name(), \"mail.Received\");"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:265#.resolve_trigger_source(MAIL_RECEIVED_SOURCE_TYPE)"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:267#assert_eq!(binding.event_type_name(), \"mail.Received\");"
 
 [[api]]
 symbol = "lash::rlm::LashlangHostCatalog::resolve_value_constructor"
@@ -45174,6 +45150,46 @@ disposition = "unused-add"
 reason = "Add lash::rlm::LashlangSurfaceContribution::resources to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::rlm::MemoryBound"
+kind = "struct"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that exhausts a finite logical heap limit and asserts the typed memory-exhaustion outcome."
+
+[[api]]
+symbol = "lash::rlm::MemoryBound::bytes"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that sets a byte-valued logical heap limit and asserts the typed memory-exhaustion outcome."
+
+[[api]]
+symbol = "lash::rlm::MemoryBound::limit"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that reads the configured logical heap limit back off the config and asserts the byte count it chose."
+
+[[api]]
+symbol = "lash::rlm::MemoryBound::mebibytes"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that sets a mebibyte-valued logical heap limit and asserts the typed memory-exhaustion outcome."
+
+[[api]]
+symbol = "lash::rlm::MemoryBound::unbounded"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that explicitly opts out of the logical heap limit and asserts that independent host safeguards remain active."
+
+[[api]]
 symbol = "lash::rlm::ModuleCompileOutput"
 kind = "type_alias"
 availability = "all-features"
@@ -45366,6 +45382,14 @@ disposition = "unused-add"
 reason = "The current example use of lash::rlm::RlmProtocolPluginConfig is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfig::builder"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "The current RLM setup examples assemble their config through the named-bound builder but do not independently assert the configured limits; add a bound-exhaustion example."
+
+[[api]]
 symbol = "lash::rlm::RlmProtocolPluginConfig::continue_as_soft_warn_tokens"
 kind = "field"
 availability = "all-features"
@@ -45374,15 +45398,7 @@ disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::continue_as_soft_warn_tokens to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::rlm::RlmProtocolPluginConfig::deadline"
-kind = "field"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "The RLM setup examples name a VM-only deadline; add an outcome-driven example that exhausts it before claiming asserted usage."
-
-[[api]]
-symbol = "lash::rlm::RlmProtocolPluginConfig::instruction_budget"
+symbol = "lash::rlm::RlmProtocolPluginConfig::instruction_limit"
 kind = "field"
 availability = "all-features"
 area = "plugins"
@@ -45422,20 +45438,20 @@ disposition = "unused-add"
 reason = "Add an RLM protocol example that configures a finite logical heap limit and asserts the public exhaustion result."
 
 [[api]]
-symbol = "lash::rlm::RlmProtocolPluginConfig::new"
-kind = "function"
-availability = "all-features"
-area = "plugins"
-disposition = "unused-add"
-reason = "The current RLM setup examples use the required-bounds constructor but do not independently assert the configured limits; add a bound-exhaustion example."
-
-[[api]]
 symbol = "lash::rlm::RlmProtocolPluginConfig::prompt_features"
 kind = "field"
 availability = "all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::prompt_features to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfig::wall_clock"
+kind = "field"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "The RLM setup examples name a VM-only wall-clock deadline; add an outcome-driven example that exhausts it before claiming asserted usage."
 
 [[api]]
 symbol = "lash::rlm::RlmProtocolPluginConfig::with_lashlang_abilities"
@@ -45452,6 +45468,46 @@ availability = "all-features"
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash::rlm::RlmProtocolPluginConfig::with_lashlang_language_features to the agent-workbench plugin/tool setup example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfigBuilder"
+kind = "struct"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "The RLM setup examples thread their config through this builder as setup only; add an outcome-driven example that exhausts a configured bound before claiming asserted usage."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfigBuilder::build"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "The RLM setup examples finish their config with this call as setup only; add an outcome-driven example that exhausts a configured bound before claiming asserted usage."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfigBuilder::instruction_limit"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that sets the instruction budget through the builder and asserts the resulting bound exhaustion."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfigBuilder::memory_limit"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that sets the logical heap limit through the builder and asserts the typed memory-exhaustion outcome."
+
+[[api]]
+symbol = "lash::rlm::RlmProtocolPluginConfigBuilder::wall_clock"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that sets the wall-clock deadline through the builder and asserts the resulting configuration."
 
 [[api]]
 symbol = "lash::rlm::RlmProtocolPluginFactory"
@@ -45499,7 +45555,7 @@ kind = "function"
 availability = "all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:250#.with_deferred_tool_resolver(deferred_tools.resolver())"
+usage = "examples/agent-workbench/src/main_sections/bootstrap.rs:252#.with_deferred_tool_resolver(deferred_tools.resolver())"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -45822,6 +45878,54 @@ availability = "all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "The current example use of lash::rlm::TypeField::ty is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::rlm::UnsetBound"
+kind = "struct"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that carries a partially configured builder and asserts the bound it finally supplies before claiming asserted usage."
+
+[[api]]
+symbol = "lash::rlm::WallClockBound"
+kind = "struct"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that exhausts a finite wall-clock deadline and asserts the rendered runtime diagnostic."
+
+[[api]]
+symbol = "lash::rlm::WallClockBound::limit"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that reads the configured deadline back off the config and asserts the duration it chose."
+
+[[api]]
+symbol = "lash::rlm::WallClockBound::millis"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that exhausts a millisecond deadline constructed through the public facade and asserts the typed diagnostic."
+
+[[api]]
+symbol = "lash::rlm::WallClockBound::secs"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM example that configures a seconds-based deadline through the public facade and asserts the resulting configuration."
+
+[[api]]
+symbol = "lash::rlm::WallClockBound::unbounded"
+kind = "function"
+availability = "all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add an RLM host example that explicitly opts out of the wall-clock deadline and asserts the independent remaining bound."
 
 [[api]]
 symbol = "lash::rlm::format_type_expr"
@@ -51929,7 +52033,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2291#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2307#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -51967,7 +52071,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::shared"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2291#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2307#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -59738,7 +59842,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolState"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:365#.iter()"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:361#.iter()"
 reason = "The recorded iterator belongs to graph edges and does not observe ToolState; add a direct ToolState outcome assertion before claiming asserted usage."
 
 [[api]]
@@ -59793,8 +59897,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ToolStateEntry", "lash_core::tool_registry::ToolStateEntry"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1155#send_entry.is_orphaned(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:1155#send_entry.is_orphaned(),"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1159#send_entry.is_orphaned(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:1159#send_entry.is_orphaned(),"
 
 [[api]]
 symbol = "lash::tools::ToolStateEntry::is_member"
@@ -59812,8 +59916,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ToolStateEntry::is_orphaned", "lash_core::tool_registry::ToolStateEntry::is_orphaned"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1155#send_entry.is_orphaned(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:1155#send_entry.is_orphaned(),"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1159#send_entry.is_orphaned(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:1159#send_entry.is_orphaned(),"
 
 [[api]]
 symbol = "lash::tools::ToolStateEntry::manifest"
@@ -60284,7 +60388,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TraceBranchSelection::Then"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:329#selected: TraceBranchSelection::Then,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:333#selected: TraceBranchSelection::Then,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -61590,7 +61694,7 @@ kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:368#Some(TraceLashlangEdgeSelection::Rejected)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:372#Some(TraceLashlangEdgeSelection::Rejected)"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -61599,7 +61703,7 @@ kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:360#Some(TraceLashlangEdgeSelection::Selected)"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:364#Some(TraceLashlangEdgeSelection::Selected)"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -61939,8 +62043,8 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -62498,7 +62602,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TraceRecord::new"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:173#.append(&TraceRecord::new("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:177#.append(&TraceRecord::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -62545,7 +62649,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TraceRuntimeScope::new"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:273#scope: TraceRuntimeScope::new(\"s1\"),"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:277#scope: TraceRuntimeScope::new(\"s1\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -73710,7 +73814,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2481#assert_eq!(result.usage.input_tokens, 10);"
+usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:2483#assert_eq!(result.usage.input_tokens, 10);"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -84749,7 +84853,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LanguageExecution"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:175#TraceEvent::LanguageExecution {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:179#TraceEvent::LanguageExecution {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84759,8 +84863,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LanguageExecution::event"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:177#event: TraceLanguageExecution {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:181#event: TraceLanguageExecution {"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::LanguageExecution::language"
@@ -84769,8 +84873,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LanguageExecution::language"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:176#language: \"lashlang\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:180#language: \"lashlang\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageChildExecution"
@@ -84778,7 +84882,7 @@ kind = "struct"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:338#child: TraceLanguageChildExecution {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:342#child: TraceLanguageChildExecution {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84787,8 +84891,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:345#entry_name: Some(\"child\".to_string()),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:349#entry_name: Some(\"child\".to_string()),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageChildExecution::entry_ref"
@@ -84796,8 +84900,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:344#entry_ref: Some(\"r2:1\".to_string()),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:348#entry_ref: Some(\"r2:1\".to_string()),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageChildExecution::graph_key"
@@ -84813,8 +84917,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:343#module_ref: Some(\"m1\".to_string()),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:347#module_ref: Some(\"m1\".to_string()),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageChildExecution::scope"
@@ -84822,8 +84926,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:273#scope: TraceRuntimeScope::new(\"s1\"),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:277#scope: TraceRuntimeScope::new(\"s1\"),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageChildExecution::subject"
@@ -84831,8 +84935,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:274#subject: TraceRuntimeSubject::Process {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:278#subject: TraceRuntimeSubject::Process {"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecution"
@@ -84840,7 +84944,7 @@ kind = "struct"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:177#event: TraceLanguageExecution {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:181#event: TraceLanguageExecution {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84849,8 +84953,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:295#event_key: \"p1:start\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:299#event_key: \"p1:start\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecution::identity"
@@ -84858,8 +84962,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:296#identity: identity.clone(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:300#identity: identity.clone(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecution::payload"
@@ -84867,8 +84971,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:297#payload: TraceLanguageExecutionPayload::ExecutionStarted {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:301#payload: TraceLanguageExecutionPayload::ExecutionStarted {"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload"
@@ -84884,7 +84988,7 @@ kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:325#payload: TraceLanguageExecutionPayload::BranchSelected {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:329#payload: TraceLanguageExecutionPayload::BranchSelected {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84893,8 +84997,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:328#edge_id: \"then-edge\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:332#edge_id: \"then-edge\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::BranchSelected::node_id"
@@ -84902,8 +85006,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:326#node_id: \"branch\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:330#node_id: \"branch\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::BranchSelected::occurrence"
@@ -84911,8 +85015,8 @@ kind = "field"
 availability = "all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:337#occurrence: 1,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:341#occurrence: 1,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::BranchSelected::selected"
@@ -84920,8 +85024,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:329#selected: TraceBranchSelection::Then,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:333#selected: TraceBranchSelection::Then,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::ChildStarted"
@@ -84929,7 +85033,7 @@ kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:335#payload: TraceLanguageExecutionPayload::ChildStarted {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:339#payload: TraceLanguageExecutionPayload::ChildStarted {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84938,8 +85042,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:338#child: TraceLanguageChildExecution {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:342#child: TraceLanguageChildExecution {"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::ChildStarted::occurrence"
@@ -84947,8 +85051,8 @@ kind = "field"
 availability = "all-features"
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:337#occurrence: 1,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:341#occurrence: 1,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::ChildStarted::parent_node_id"
@@ -84956,8 +85060,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:336#parent_node_id: \"branch\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:340#parent_node_id: \"branch\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::ExecutionFinished"
@@ -84989,7 +85093,7 @@ kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:297#payload: TraceLanguageExecutionPayload::ExecutionStarted {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:301#payload: TraceLanguageExecutionPayload::ExecutionStarted {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -84998,8 +85102,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:298#execution_map: TraceLanguageExecutionMap {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:302#execution_map: TraceLanguageExecutionMap {"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionPayload::NodeCompleted"
@@ -85198,7 +85302,7 @@ kind = "struct"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:298#execution_map: TraceLanguageExecutionMap {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:302#execution_map: TraceLanguageExecutionMap {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -85207,8 +85311,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:305#edges: vec!["
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:309#edges: vec!["
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMap::nodes"
@@ -85216,8 +85320,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:299#nodes: vec![TraceLanguageExecutionMapNode {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:303#nodes: vec![TraceLanguageExecutionMapNode {"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapEdge"
@@ -85225,7 +85329,7 @@ kind = "struct"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:312#TraceLanguageExecutionMapEdge {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:310#TraceLanguageExecutionMapEdge {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -85234,8 +85338,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:314#from: \"branch\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:312#from: \"branch\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapEdge::id"
@@ -85243,8 +85347,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:307#id: \"then-edge\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:311#id: \"then-edge\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapEdge::label"
@@ -85252,8 +85356,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:310#label: \"then\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:314#label: \"then\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapEdge::to"
@@ -85261,8 +85365,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:309#to: \"then\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:313#to: \"then\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapNode"
@@ -85270,7 +85374,7 @@ kind = "struct"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:299#nodes: vec![TraceLanguageExecutionMapNode {"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:303#nodes: vec![TraceLanguageExecutionMapNode {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -85279,8 +85383,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:300#id: \"branch\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:304#id: \"branch\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapNode::kind"
@@ -85288,8 +85392,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:301#kind: \"branch\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:305#kind: \"branch\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapNode::label"
@@ -85297,8 +85401,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:302#label: \"if\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:306#label: \"if\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionMapNode::label_metadata"
@@ -85306,8 +85410,8 @@ kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:303#label_metadata: None,"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:351#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:307#label_metadata: None,"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:355#assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);"
 
 [[api]]
 symbol = "lash::tracing::TraceLanguageExecutionStatus"

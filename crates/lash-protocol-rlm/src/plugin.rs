@@ -11,8 +11,11 @@ mod registration;
 mod runtime_state;
 mod tool_args;
 
-pub use config::RlmProtocolPluginConfig;
-pub use config_types::{ExecutionBound, ExecutionBounds, RlmAbilities, RlmLanguageFeatures};
+pub use config::{RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, UnsetBound};
+pub use config_types::{
+    ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures,
+    WallClockBound,
+};
 pub use factory::{
     LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
     LashlangModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory,

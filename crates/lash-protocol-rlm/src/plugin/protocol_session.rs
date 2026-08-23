@@ -553,11 +553,13 @@ mod tests {
 
     #[tokio::test]
     async fn session_projection_extension_rejects_duplicate_names() {
-        let session = test_session(RlmProtocolPluginConfig::new(
-            lashlang::ExecutionBound::Unbounded,
-            lashlang::ExecutionBound::Unbounded,
-            lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
-        ));
+        let session = test_session(
+            RlmProtocolPluginConfig::builder()
+                .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                .wall_clock(crate::plugin::WallClockBound::unbounded())
+                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                .build(),
+        );
         session
             .apply_session_extension(crate::rlm_session_projection_extension(
                 RlmProjectedBindings::new()
@@ -582,11 +584,13 @@ mod tests {
 
     #[tokio::test]
     async fn session_projection_prompt_contribution_lists_names() {
-        let session = test_session(RlmProtocolPluginConfig::new(
-            lashlang::ExecutionBound::Unbounded,
-            lashlang::ExecutionBound::Unbounded,
-            lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
-        ));
+        let session = test_session(
+            RlmProtocolPluginConfig::builder()
+                .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                .wall_clock(crate::plugin::WallClockBound::unbounded())
+                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                .build(),
+        );
         session
             .apply_session_extension(crate::rlm_session_projection_extension(
                 RlmProjectedBindings::new()
@@ -610,11 +614,11 @@ mod tests {
     fn soft_budget_warning_emits_plugin_event_not_user_message() {
         let session = test_session(RlmProtocolPluginConfig {
             continue_as_soft_warn_tokens: Some(100_000),
-            ..RlmProtocolPluginConfig::new(
-                lashlang::ExecutionBound::Unbounded,
-                lashlang::ExecutionBound::Unbounded,
-                lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
-            )
+            ..RlmProtocolPluginConfig::builder()
+                .instruction_limit(crate::plugin::InstructionBound::unbounded())
+                .wall_clock(crate::plugin::WallClockBound::unbounded())
+                .memory_limit(crate::plugin::MemoryBound::mebibytes(64))
+                .build()
         });
         let state = lash_core::SessionSnapshot {
             token_usage: lash_core::TokenUsage {

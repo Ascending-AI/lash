@@ -1011,12 +1011,12 @@ async fn run_seed_probe_inner(
     let factories: Vec<Arc<dyn PluginFactory>> = vec![
         Arc::new(
             lash_protocol_rlm::RlmProtocolPluginFactory::new(
-                lash_protocol_rlm::RlmProtocolPluginConfig::new(
-                    lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
-                    lash_protocol_rlm::ExecutionBound::secs(30),
-                    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-                )
-                .with_lashlang_language_features(language_features),
+                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                    .build()
+                    .with_lashlang_language_features(language_features),
                 Arc::clone(&artifact_store),
             )
             .with_lashlang_execution_trace(execution_sink.clone(), trace_context.clone())

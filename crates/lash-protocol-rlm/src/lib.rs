@@ -29,10 +29,11 @@ pub use lash_lashlang_runtime::{
 };
 pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{
-    ExecutionBound, ExecutionBounds, LashlangCompileSurface, LashlangCompileSurfaceRequest,
-    LashlangModuleCompileError, LashlangModuleCompileRequest, ModuleCompileOutput,
+    ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,
+    LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
     RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmLanguageFeatures, RlmProtocolPluginConfig,
-    RlmProtocolPluginFactory, RlmSessionConfigDecodeError, apply_rlm_session_config_if_unset,
+    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
+    UnsetBound, WallClockBound, apply_rlm_session_config_if_unset,
     apply_rlm_session_config_post_open, rlm_lashlang_surface, rlm_protocol_config,
     rlm_session_config, rlm_session_config_options,
 };

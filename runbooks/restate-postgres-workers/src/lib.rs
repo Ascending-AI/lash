@@ -10,9 +10,9 @@ use lash::plugins::{
 };
 use lash::process::{ProcessRegistry, ProcessWorkDriver};
 use lash::rlm::{
-    LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
-    LashlangLanguageFeatures, LashlangSurfaceContribution, NamedDataType, RlmProtocolPluginConfig,
-    TypeExpr, TypeField,
+    InstructionBound, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
+    LashlangLanguageFeatures, LashlangSurfaceContribution, MemoryBound, NamedDataType,
+    RlmProtocolPluginConfig, TypeExpr, TypeField, WallClockBound,
 };
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolBinding, ToolCall, ToolDefinition,
@@ -634,18 +634,18 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         .into_components(),
     );
     let mut factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        RlmProtocolPluginConfig::new(
-            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
-            lash_protocol_rlm::ExecutionBound::secs(30),
-            lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-        )
-        .with_lashlang_abilities(
-            LashlangAbilities::default()
-                .with_processes()
-                .with_sleep()
-                .with_process_signals()
-                .with_triggers(),
-        ),
+        RlmProtocolPluginConfig::builder()
+            .instruction_limit(InstructionBound::instructions(1_000_000))
+            .wall_clock(WallClockBound::secs(30))
+            .memory_limit(MemoryBound::mebibytes(64))
+            .build()
+            .with_lashlang_abilities(
+                LashlangAbilities::default()
+                    .with_processes()
+                    .with_sleep()
+                    .with_process_signals()
+                    .with_triggers(),
+            ),
         artifact_store,
     );
     if let Some(trace_dir) = config.trace_dir.as_ref() {

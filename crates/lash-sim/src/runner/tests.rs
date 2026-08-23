@@ -85,11 +85,11 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             .with_compat(OpenAiCompat::openrouter())
             .with_transport(capture.clone());
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::new(
-                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
-                lash_protocol_rlm::ExecutionBound::secs(30),
-                lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-            ),
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
             Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
         );
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)

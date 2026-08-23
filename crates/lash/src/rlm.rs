@@ -174,8 +174,9 @@ pub use lash_lashlang_runtime::{
     LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
 };
 pub use lash_protocol_rlm::{
-    ExecutionBound, ExecutionBounds, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
-    RlmProtocolPluginConfig, RlmProtocolPluginFactory, TypeExpr, TypeField, format_type_expr,
+    ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, TypeExpr,
+    TypeField, UnsetBound, WallClockBound, format_type_expr,
 };
 /// Projection vocabulary: register lazy host projections on a
 /// [`ProjectionRegistry`], bind projected values session-wide via

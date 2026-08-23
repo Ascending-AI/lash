@@ -63,3 +63,28 @@ fn store_seam_answers_have_no_defaults() {
     t.compile_fail("tests/ui/attachment_store_head_has_no_default.rs");
     t.compile_fail("tests/ui/session_store_factory_requires_deletion_answer.rs");
 }
+
+/// The three RLM execution bounds are distinct types: a host that hands the
+/// memory limit to `.instruction_limit(..)` does not compile, so the swap that
+/// made `ExecutionBound::instructions(64 * 1024 * 1024)` mean "64 MiB of heap"
+/// is unrepresentable.
+#[test]
+fn rlm_execution_bounds_are_not_swappable() {
+    if !cfg!(feature = "rlm") {
+        return;
+    }
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/ui/rlm_execution_bounds_are_not_swappable.rs");
+}
+
+/// The RLM config builder has no silent defaults: `build()` is absent until
+/// every execution bound has been named, so a host that forgets one does not
+/// compile.
+#[test]
+fn rlm_config_builder_requires_every_bound() {
+    if !cfg!(feature = "rlm") {
+        return;
+    }
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/ui/rlm_config_builder_requires_every_bound.rs");
+}

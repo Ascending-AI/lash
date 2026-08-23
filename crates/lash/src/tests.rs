@@ -2305,11 +2305,11 @@ fn inmem_artifact_store() -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStor
 #[cfg(feature = "rlm")]
 fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::new(
-            lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
-            lash_protocol_rlm::ExecutionBound::secs(30),
-            lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-        ),
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
         inmem_artifact_store(),
     )
 }
