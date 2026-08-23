@@ -44,6 +44,7 @@ mod index;
 mod operations;
 mod persistence;
 mod plugins;
+mod plugins_operations;
 mod plugins_runtime;
 mod plugins_tools;
 mod quickstart;
@@ -53,6 +54,69 @@ mod streaming;
 mod tools;
 mod tracing;
 mod worker_capacity;
+
+/// FIG-1921: plugin authoring is facade-complete, so an in-tree example plugin
+/// is written against `lash` alone. `lash_core` is a *dev*-dependency of this
+/// crate and stays reachable for snippets that document integrator seams
+/// (ADR 0051); this test keeps it out of the plugin-authoring modules, where a
+/// reappearance would mean the facade lost a piece of the authoring surface.
+#[cfg(test)]
+mod facade_only_plugin_authoring {
+    const PLUGIN_MODULES: [(&str, &str); 4] = [
+        ("plugins.rs", include_str!("plugins.rs")),
+        (
+            "plugins_operations.rs",
+            include_str!("plugins_operations.rs"),
+        ),
+        ("plugins_runtime.rs", include_str!("plugins_runtime.rs")),
+        ("plugins_tools.rs", include_str!("plugins_tools.rs")),
+    ];
+
+    #[test]
+    fn example_plugins_need_no_lash_core_import() {
+        for (module, source) in PLUGIN_MODULES {
+            for (offset, line) in source.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                assert!(
+                    !code.contains("lash_core"),
+                    "examples/docs-snippets/src/{module}:{} names lash_core: {}. \
+                     A plugin example must compile against `lash` alone; add the missing \
+                     authoring type to lash::plugins, or record it as an integrator seam \
+                     in ADR 0051.",
+                    offset + 1,
+                    line.trim()
+                );
+            }
+        }
+    }
+
+    /// `PLUGIN_MODULES` is hand-written, so it can silently miss a fifth plugin
+    /// example — which would then be free to import `lash_core`. Hold the list
+    /// to what is actually on disk.
+    #[test]
+    fn the_plugin_module_list_covers_every_plugin_example() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|err| panic!("read {}: {err}", dir.display()))
+            .map(|entry| entry.expect("read dir entry").file_name())
+            .filter_map(|name| name.to_str().map(str::to_owned))
+            .filter(|name| name.starts_with("plugins") && name.ends_with(".rs"))
+            .collect();
+        on_disk.sort();
+
+        let mut listed: Vec<String> = PLUGIN_MODULES
+            .iter()
+            .map(|(module, _)| (*module).to_owned())
+            .collect();
+        listed.sort();
+
+        assert_eq!(
+            listed, on_disk,
+            "PLUGIN_MODULES has drifted from examples/docs-snippets/src: every \
+             plugins*.rs module must be listed so the no-lash_core rule covers it."
+        );
+    }
+}
 
 #[cfg(test)]
 mod test_support {

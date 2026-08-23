@@ -309,6 +309,36 @@ pub mod plugins {
         ContextError, PluginExtensionContribution, PluginSpecBuilder, StaticPluginFactory,
         ToolCallHookContext, ToolResultHookContext,
     };
+    /// Plugin operations: the query / command / task vocabulary. A plugin
+    /// author declares an operation by implementing [`PluginOperation`] plus
+    /// one of [`PluginQuery`], [`PluginCommand`] or [`PluginTask`], registers a
+    /// handler through
+    /// [`PluginRegistrar::operations`](lash_core::plugin::PluginRegistrar::operations)
+    /// or [`PluginSpec`], and receives the matching context
+    /// ([`PluginQueryContext`], [`PluginCommandContext`], [`PluginTaskContext`]).
+    /// Command and task handlers return a [`PluginOperationOutcome`], which is
+    /// how a plugin asks the runtime to do something on its behalf — today one
+    /// [`PluginRuntimeDirective`]. Hosts invoke operations through
+    /// [`PluginOperations`](crate::admin::PluginOperations) and read the
+    /// resulting [`PluginOperationReceipt`].
+    ///
+    /// This is authoring surface in full: writing a plugin that carries
+    /// operations needs no `lash-core` dependency (ADR 0051).
+    pub use lash_core::plugin::{
+        PluginCommand, PluginCommandContext, PluginOperation, PluginOperationFailure,
+        PluginOperationInvokeError, PluginOperationOutcome, PluginOperationReceipt, PluginOwned,
+        PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
+        ProcessReadService, SessionParam, SessionReadService,
+    };
+    /// Durable plugin state: what [`SessionPlugin::snapshot`] writes and
+    /// [`SessionPlugin::restore`] reads back, plus the readiness context a
+    /// plugin is handed once its session exists. The aggregate the runtime
+    /// persists (`PluginSessionSnapshot` and its entries) is an integrator
+    /// seam and stays on `lash-core`: a plugin writes blobs and returns its own
+    /// [`PluginSnapshotMeta`], and never names the collection they land in.
+    pub use lash_core::plugin::{
+        PluginSnapshotMeta, SessionReadyContext, SnapshotReader, SnapshotWriter,
+    };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
     /// ([`SessionGraphService`]), plus the append request/result vocabulary.

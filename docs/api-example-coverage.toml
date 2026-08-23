@@ -35,7 +35,7 @@ removal_verdicts_recorded = 773
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2796
+prose_citations_recorded = 2764
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -8139,31 +8139,31 @@ disposition = "unused-add"
 reason = "Add lash::admin::InjectionAdmin::inject_turn_inputs_for_turn to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::admin::PluginCommand"
+symbol = "lash::plugins::PluginCommand"
 kind = "trait"
 availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginCommand"]
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::admin::PluginCommand to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:69#impl PluginCommand for RecordPlan {}"
 
 [[api]]
-symbol = "lash::admin::PluginQuery"
+symbol = "lash::plugins::PluginQuery"
 kind = "trait"
 availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginQuery"]
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::admin::PluginQuery to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:54#impl PluginQuery for ReadPlan {}"
 
 [[api]]
-symbol = "lash::admin::PluginTask"
+symbol = "lash::plugins::PluginTask"
 kind = "trait"
 availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginTask"]
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::admin::PluginTask to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:83#impl PluginTask for ReviewPlan {}"
 
 [[api]]
 symbol = "lash::admin::ProtocolAdmin"
@@ -67820,44 +67820,53 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::PluginSnapshotMeta"
+symbol = "lash::plugins::PluginSnapshotMeta"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::PluginSnapshotMeta"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:185#Ok(PluginSnapshotMeta {"
 
 [[api]]
-symbol = "lash_core::PluginSnapshotMeta::plugin_id"
+symbol = "lash::plugins::PluginSnapshotMeta::plugin_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PluginSnapshotMeta::plugin_id"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:261#assert_eq!(meta.plugin_id, PLUGIN_ID);"
+assertion = "examples/docs-snippets/src/plugins_operations.rs:261#assert_eq!(meta.plugin_id, PLUGIN_ID);"
 
 [[api]]
-symbol = "lash_core::PluginSnapshotMeta::plugin_version"
+symbol = "lash::plugins::PluginSnapshotMeta::plugin_version"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PluginSnapshotMeta::plugin_version"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:262#assert_eq!(meta.plugin_version, \"1\");"
+assertion = "examples/docs-snippets/src/plugins_operations.rs:262#assert_eq!(meta.plugin_version, \"1\");"
 
 [[api]]
-symbol = "lash_core::PluginSnapshotMeta::revision"
+symbol = "lash::plugins::PluginSnapshotMeta::revision"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PluginSnapshotMeta::revision"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:263#assert_eq!(meta.revision, 1);"
+assertion = "examples/docs-snippets/src/plugins_operations.rs:263#assert_eq!(meta.revision, 1);"
 
 [[api]]
-symbol = "lash_core::PluginSnapshotMeta::state"
+symbol = "lash::plugins::PluginSnapshotMeta::state"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PluginSnapshotMeta::state"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:264#assert!(meta.state.is_none());"
+assertion = "examples/docs-snippets/src/plugins_operations.rs:264#assert!(meta.state.is_none());"
 
 [[api]]
 symbol = "lash_core::PreparedToolBatch"
@@ -70240,7 +70249,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-test-only"
-usage = "examples/docs-snippets/src/plugins_tools.rs:758#let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools("
+usage = "examples/docs-snippets/src/tools.rs:122#let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -71563,36 +71572,41 @@ disposition = "unused-justify"
 reason = "An earlier FIG-1223 round named crates/lash/src/session.rs::ParkedSession::session_id as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationReceipt"
+symbol = "lash::plugins::PluginOperationReceipt"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperationReceipt"]
 area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1319#Ok(lash_core::facade_support::PluginOperationReceipt {"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:315#let receipt: PluginOperationReceipt<PlanView> = operations"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationReceipt::events"
+symbol = "lash::plugins::PluginOperationReceipt::events"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperationReceipt::events"]
 area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1321#events: receipt.events,"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:322#receipt.events.first().expect(\"the command emits an event\");"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationReceipt::output"
+symbol = "lash::plugins::PluginOperationReceipt::output"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperationReceipt::output"]
 area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1320#output: decode_plugin_output::<Op>(receipt.output)?,"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:320#assert_eq!(receipt.output.steps, vec![\"ship the facade\".to_string()]);"
+assertion = "examples/docs-snippets/src/plugins_operations.rs:320#assert_eq!(receipt.output.steps, vec![\"ship the facade\".to_string()]);"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationReceipt::pending_turn_inputs"
+symbol = "lash::plugins::PluginOperationReceipt::pending_turn_inputs"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperationReceipt::pending_turn_inputs"]
 area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1322#pending_turn_inputs: receipt.pending_turn_inputs,"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:329#.pending_turn_inputs"
 
 [[api]]
 symbol = "lash_core::facade_support::PluginLifecycleEventHook"
@@ -71603,69 +71617,284 @@ disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperation"
+symbol = "lash::plugins::PluginQueryContext"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:88#ctx: PluginQueryContext,"
+
+[[api]]
+symbol = "lash::plugins::PluginQueryContext::processes"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:94#let _processes: Arc<dyn ProcessReadService> = Arc::clone(&ctx.processes);"
+
+[[api]]
+symbol = "lash::plugins::PluginQueryContext::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:95#let session_id = ctx.session_id.clone().unwrap_or_default();"
+
+[[api]]
+symbol = "lash::plugins::PluginQueryContext::sessions"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:91#let sessions: Arc<dyn SessionReadService> = Arc::clone(&ctx.sessions);"
+
+[[api]]
+symbol = "lash::plugins::PluginCommandContext"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:116#ctx: PluginCommandContext,"
+
+[[api]]
+symbol = "lash::plugins::PluginCommandContext::processes"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:125#let _processes = Arc::clone(&ctx.processes);"
+
+[[api]]
+symbol = "lash::plugins::PluginCommandContext::session_graph"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:124#let _graph = Arc::clone(&ctx.session_graph);"
+
+[[api]]
+symbol = "lash::plugins::PluginCommandContext::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:119#let session_id = ctx.session_id.clone().unwrap_or_default();"
+
+[[api]]
+symbol = "lash::plugins::PluginCommandContext::session_lifecycle"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:123#let _lifecycle = Arc::clone(&ctx.session_lifecycle);"
+
+[[api]]
+symbol = "lash::plugins::PluginCommandContext::sessions"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:122#let _sessions = Arc::clone(&ctx.sessions);"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:144#ctx: PluginTaskContext,"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext::cancellation_token"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:147#if ctx.cancellation_token.is_cancelled() {"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext::processes"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:156#let _processes = Arc::clone(&ctx.processes);"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext::scoped_effect_controller"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:157#let _scope = ctx.scoped_effect_controller.clone();"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext::session_graph"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:155#let _graph = Arc::clone(&ctx.session_graph);"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:152#let _session_id = ctx.session_id.clone();"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext::session_lifecycle"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:154#let _lifecycle = Arc::clone(&ctx.session_lifecycle);"
+
+[[api]]
+symbol = "lash::plugins::PluginTaskContext::sessions"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:153#let _sessions = Arc::clone(&ctx.sessions);"
+
+[[api]]
+symbol = "lash::plugins::ProcessReadService"
 kind = "trait"
 availability = "default+all-features"
 area = "plugins"
-disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1383#fn encode_plugin_args<Op: lash_core::facade_support::PluginOperation>("
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:94#let _processes: Arc<dyn ProcessReadService> = Arc::clone(&ctx.processes);"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperation::Args"
-kind = "assoc_type"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/admin.rs::encode_plugin_args#`args: Op::Args,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
-
-[[api]]
-symbol = "lash_core::facade_support::PluginOperation::DESCRIPTION"
-kind = "assoc_const"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/tests/control_admin.rs::NonblockingObservationQuery#`const DESCRIPTION: &'static str =` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
-
-[[api]]
-symbol = "lash_core::facade_support::PluginOperation::NAME"
-kind = "assoc_const"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/tests/control_admin.rs::observation_reads_do_not_wait_for_active_turn#`<NonblockingObservationQuery as lash_core::facade_support::PluginOperation>::NAME,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
-
-[[api]]
-symbol = "lash_core::facade_support::PluginOperation::Output"
-kind = "assoc_type"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/admin.rs::decode_plugin_output#`) -> Result<Op::Output> {` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
-
-[[api]]
-symbol = "lash_core::facade_support::PluginOperation::SESSION_PARAM"
-kind = "assoc_const"
-availability = "default+all-features"
-area = "plugins"
-disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash-core/src/plugin/actions.rs::plugin_operation_spec#`session_param: Op::SESSION_PARAM,` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
-
-[[api]]
-symbol = "lash_core::test_support::PluginOperationFailure"
-kind = "struct"
-availability = "all-features"
-area = "plugins"
-disposition = "internal-test-only"
-usage = "crates/lash/src/tests/control_admin.rs:537#Ok::<_, lash_core::test_support::PluginOperationFailure>("
-reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
-
-[[api]]
-symbol = "lash_core::test_support::PluginOperationFailure::new"
+symbol = "lash::plugins::ProcessReadService::list_visible"
 kind = "function"
-availability = "all-features"
+availability = "default+all-features"
 area = "plugins"
-disposition = "unused-justify"
-reason = "An earlier FIG-1223 round named crates/lash/src/tests/control_admin.rs::HideAllProcessTools::narrow#`Vec::new()` as a consumer of this path and the checker cannot tie that citation to the owning type mechanically, so the row records the candidate here rather than a removal verdict: an unresolvable receiver is a gap in the resolver, not evidence that the code is dead. PR 3 reads the line and either anchors the row or removes the path, and never removes on this row alone."
+disposition = "unused-add"
+reason = "Add lash::plugins::ProcessReadService::list_visible to the docs-snippets plugin-operations example and assert its externally observable result. Listing needs a ProcessOpScope, which only a command or task handler holds, so the anchor waits on an example that starts a process from one."
+
+[[api]]
+symbol = "lash::plugins::SessionReadService"
+kind = "trait"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:91#let sessions: Arc<dyn SessionReadService> = Arc::clone(&ctx.sessions);"
+
+[[api]]
+symbol = "lash::plugins::SessionReadService::shared_tool_catalog"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:106#let _shared = sessions.shared_tool_catalog(&session_id).await;"
+
+[[api]]
+symbol = "lash::plugins::SessionReadService::snapshot_current"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:104#let _current = sessions.snapshot_current().await;"
+
+[[api]]
+symbol = "lash::plugins::SessionReadService::snapshot_session"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:105#let _other = sessions.snapshot_session(&session_id).await;"
+
+[[api]]
+symbol = "lash::plugins::SessionReadService::tool_catalog"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:97#.tool_catalog(&session_id)"
+
+[[api]]
+symbol = "lash::plugins::SessionReadService::tool_state"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:107#let _tool_state = sessions.tool_state(&session_id).await;"
+
+[[api]]
+symbol = "lash::plugins::PluginOperation"
+kind = "trait"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperation"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:45#impl PluginOperation for ReadPlan {"
+
+[[api]]
+symbol = "lash::plugins::PluginOperation::Args"
+kind = "assoc_type"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperation::Args"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:50#type Args = PlanArgs;"
+
+[[api]]
+symbol = "lash::plugins::PluginOperation::DESCRIPTION"
+kind = "assoc_const"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperation::DESCRIPTION"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:47#const DESCRIPTION: &'static str = \"Project the plan a session is following.\";"
+
+[[api]]
+symbol = "lash::plugins::PluginOperation::NAME"
+kind = "assoc_const"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperation::NAME"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:46#const NAME: &'static str = \"docs.read_plan\";"
+
+[[api]]
+symbol = "lash::plugins::PluginOperation::Output"
+kind = "assoc_type"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperation::Output"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:51#type Output = PlanView;"
+
+[[api]]
+symbol = "lash::plugins::PluginOperation::SESSION_PARAM"
+kind = "assoc_const"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::PluginOperation::SESSION_PARAM"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:48#const SESSION_PARAM: SessionParam = SessionParam::Optional;"
+
+[[api]]
+symbol = "lash::plugins::PluginOperationFailure"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::test_support::PluginOperationFailure"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:90#) -> Result<PlanView, PluginOperationFailure> {"
+
+[[api]]
+symbol = "lash::plugins::PluginOperationFailure::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::test_support::PluginOperationFailure::new"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:148#return Err(PluginOperationFailure::new(\"review cancelled\"));"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessEventAppendPlan"
@@ -73591,36 +73820,64 @@ disposition = "internal-consumed"
 usage = "crates/lash/src/core.rs:1047#Arc::new(facade_support::SingleProviderResolver::new(provider));"
 
 [[api]]
-symbol = "lash_core::facade_support::SnapshotReader"
+symbol = "lash::plugins::SessionReadyContext"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:211#fn session_ready(&self, _ctx: SessionReadyContext) -> Result<(), PluginError> {"
+
+[[api]]
+symbol = "lash::plugins::SessionReadyContext::host"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::SessionReadyContext::host to the docs-snippets plugin-operations example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::SessionReadyContext::session_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::SessionReadyContext::session_id to the docs-snippets plugin-operations example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::SnapshotReader"
 kind = "trait"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::SnapshotReader"]
 area = "plugins"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:242#impl SnapshotReader for PlanBlobs {"
 
 [[api]]
-symbol = "lash_core::facade_support::SnapshotReader::read_blob"
+symbol = "lash::plugins::SnapshotReader::read_blob"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::SnapshotReader::read_blob"]
 area = "plugins"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:202#let Some(bytes) = reader.read_blob(PLAN_BLOB) else {"
 
 [[api]]
-symbol = "lash_core::facade_support::SnapshotWriter"
+symbol = "lash::plugins::SnapshotWriter"
 kind = "trait"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::SnapshotWriter"]
 area = "plugins"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:236#impl SnapshotWriter for PlanBlobs {"
 
 [[api]]
-symbol = "lash_core::facade_support::SnapshotWriter::write_blob"
+symbol = "lash::plugins::SnapshotWriter::write_blob"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::SnapshotWriter::write_blob"]
 area = "plugins"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:184#writer.write_blob(PLAN_BLOB.to_string(), encoded);"
 
 [[api]]
 symbol = "lash_core::test_support::ToolCatalogBuildInput"
@@ -76121,60 +76378,67 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationOutcome"
+symbol = "lash::plugins::PluginOperationOutcome"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationOutcome"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` and `run_plugin_task_value` hand `PluginOperationOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals and first-party plugin crates -- this type is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command#`Fut: Future<Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>>` and crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task#`Fut: Future<Output = Result<PluginOperationOutcome<Op::Output>, PluginOperationFailure>>`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:118#) -> Result<PluginOperationOutcome<PlanView>, PluginOperationFailure> {"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationOutcome::directives"
+symbol = "lash::plugins::PluginOperationOutcome::directives"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationOutcome::directives"]
 area = "plugins"
 disposition = "unused-add"
 reason = "Add lash_core::plugin::actions::PluginOperationOutcome::directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationOutcome::events"
+symbol = "lash::plugins::PluginOperationOutcome::events"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationOutcome::events"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` and `run_plugin_task_value` hand `PluginOperationOutcome` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_command_value#`events: outcome.events,` and crates/lash-core/src/plugin/session_obj.rs::PluginSession::run_plugin_task_value#`events: outcome.events,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationOutcome::new"
+symbol = "lash::plugins::PluginOperationOutcome::new"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationOutcome::new"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because command and task value handlers wrap plain outputs in one `PluginOperationOutcome`. Consumer class: core plugin registration internals -- this function is exercised at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command_value#`async move { fut.await.map(PluginOperationOutcome::new) }` and crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task_value#`async move { fut.await.map(PluginOperationOutcome::new) }`, not by any example, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:129#Ok(PluginOperationOutcome::new(view)"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationOutcome::output"
+symbol = "lash::plugins::PluginOperationOutcome::output"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationOutcome::output"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `PluginOperationOutcome` hands operation output to hosts (plugin and tool implementers). Consumer class: core plugin registration internals -- this field is exercised in-repo at crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_command#`serde_json::to_value(outcome.output)` and crates/lash-core/src/plugin/registrar.rs::PluginOperationRegistrations::typed_task#`serde_json::to_value(outcome.output)`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationOutcome::with_directives"
+symbol = "lash::plugins::PluginOperationOutcome::with_directives"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationOutcome::with_directives"]
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::PluginOperationOutcome::with_directives to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:135#.with_directives(vec![PluginRuntimeDirective::QueueTurn {"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationOutcome::with_events"
+symbol = "lash::plugins::PluginOperationOutcome::with_events"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationOutcome::with_events"]
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::PluginOperationOutcome::with_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:130#.with_events(vec![PluginRuntimeEvent::Status {"
 
 [[api]]
 symbol = "lash_core::plugin::actions::PluginOperationDef"
@@ -76265,72 +76529,76 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::task#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Task),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_operation_registration_stamps_kind_from_its_constructor#`assert_eq!(task.def().kind(), PluginOperationKind::Task);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginRuntimeDirective"
+symbol = "lash::plugins::PluginRuntimeDirective"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginRuntimeDirective"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`directives: Vec<crate::PluginRuntimeDirective>,`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`crate::PluginRuntimeDirective::QueueTurn { input, source_key } => {`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:135#.with_directives(vec![PluginRuntimeDirective::QueueTurn {"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn"
+symbol = "lash::plugins::PluginRuntimeDirective::QueueTurn"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:135#.with_directives(vec![PluginRuntimeDirective::QueueTurn {"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn::input"
+symbol = "lash::plugins::PluginRuntimeDirective::QueueTurn::input"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn::input"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`value: event,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:136#input: lash::TurnInput::text(format!(\"execute plan: {}\", args.goal)),"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn::source_key"
+symbol = "lash::plugins::PluginRuntimeDirective::QueueTurn::source_key"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginRuntimeDirective::QueueTurn::source_key"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationOutcome::directives` hands `PluginRuntimeDirective` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`.map(|event| crate::PluginOwned {`, crates/lash-core/src/runtime/session_ops.rs::LashRuntime::apply_plugin_operation_effects#`value: event,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:137#source_key: Some(\"docs-plan-queue\".to_string()),"
 
 [[api]]
-symbol = "lash_core::facade_support::SessionParam"
+symbol = "lash::plugins::SessionParam"
 kind = "enum"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::actions::SessionParam"]
+aliases = ["lash_core::facade_support::SessionParam", "lash_core::plugin::actions::SessionParam"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::session_param` hands `SessionParam` to hosts (plugin and tool implementers). Consumer class: core runtime internals and first-party plugin crates -- this type is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`session_param: SessionParam::Optional,`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.session_param, SessionParam::Optional);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:48#const SESSION_PARAM: SessionParam = SessionParam::Optional;"
 
 [[api]]
-symbol = "lash_core::facade_support::SessionParam::Forbidden"
+symbol = "lash::plugins::SessionParam::Forbidden"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::actions::SessionParam::Forbidden"]
+aliases = ["lash_core::facade_support::SessionParam::Forbidden", "lash_core::plugin::actions::SessionParam::Forbidden"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::session_param` hands `SessionParam` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::effective_operation_session#`(SessionParam::Forbidden, Some(_)) => {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::SessionParam::Optional"
+symbol = "lash::plugins::SessionParam::Optional"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::actions::SessionParam::Optional"]
+aliases = ["lash_core::facade_support::SessionParam::Optional", "lash_core::plugin::actions::SessionParam::Optional"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::session_param` hands `SessionParam` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`session_param: SessionParam::Optional,`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.session_param, SessionParam::Optional);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:48#const SESSION_PARAM: SessionParam = SessionParam::Optional;"
 
 [[api]]
-symbol = "lash_core::facade_support::SessionParam::Required"
+symbol = "lash::plugins::SessionParam::Required"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::actions::SessionParam::Required"]
+aliases = ["lash_core::facade_support::SessionParam::Required", "lash_core::plugin::actions::SessionParam::Required"]
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash_core::plugin::actions::SessionParam::Required to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash::plugins::SessionParam::Required to the docs-snippets plugin-operations example and assert its externally observable result."
 
 [[api]]
 symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason"
@@ -76548,130 +76816,131 @@ disposition = "unused-add"
 reason = "Add lash_core::plugin::runtime_impl::SessionAuthorityContext::tool_access to the agent-workbench plugin/tool setup example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError"
+symbol = "lash::plugins::PluginOperationInvokeError"
 kind = "enum"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError", "lash_core::plugin::services::PluginOperationInvokeError"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::plugin_host_unregisters_sessions#`Err(PluginOperationInvokeError::UnknownSession(id)) => assert_eq!(id, \"root\"),`, crates/lash-core/src/plugin/runtime_impl.rs::PluginHost::session#`) -> Result<Arc<PluginSession>, PluginOperationInvokeError> {`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:347#lash::EmbedError::Control(PluginOperationInvokeError::Unknown(ref name))"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::Failed"
+symbol = "lash::plugins::PluginOperationInvokeError::Failed"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::Failed"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::Failed", "lash_core::plugin::services::PluginOperationInvokeError::Failed"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised at crates/lash-core/src/plugin/session_obj.rs::PluginSession::invoke_plugin_operation#`.map_err(|err| PluginOperationInvokeError::Failed(err.to_string()))?;`, not by any example, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::Failed::0"
+symbol = "lash::plugins::PluginOperationInvokeError::Failed::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::Failed::0"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::Failed::0", "lash_core::plugin::services::PluginOperationInvokeError::Failed::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: the workflow-graph example host and the runtime-agnostic sans-io layer -- this field is exercised in-repo at examples/workflow-graph-roundtrip/src/runtime.rs::RunHost::new#`Self {`, examples/workflow-graph-roundtrip/src/runtime.rs::duration_from_value#`Value::String(value) => parse_duration(value),`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::MissingSession"
+symbol = "lash::plugins::PluginOperationInvokeError::MissingSession"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::MissingSession"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::MissingSession", "lash_core::plugin::services::PluginOperationInvokeError::MissingSession"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::effective_operation_session#`return Err(PluginOperationInvokeError::MissingSession(name.to_string()));`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::MissingSession::0"
+symbol = "lash::plugins::PluginOperationInvokeError::MissingSession::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::MissingSession::0"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::MissingSession::0", "lash_core::plugin::services::PluginOperationInvokeError::MissingSession::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised at crates/lash-core/src/plugin/session_obj.rs::PluginSession::snapshot_revision_fingerprint#`hasher.update([0]);`, not by any example, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::UnexpectedSession"
+symbol = "lash::plugins::PluginOperationInvokeError::UnexpectedSession"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::UnexpectedSession"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::UnexpectedSession", "lash_core::plugin::services::PluginOperationInvokeError::UnexpectedSession"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::effective_operation_session#`return Err(PluginOperationInvokeError::UnexpectedSession(`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::UnexpectedSession::0"
+symbol = "lash::plugins::PluginOperationInvokeError::UnexpectedSession::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::UnexpectedSession::0"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::UnexpectedSession::0", "lash_core::plugin::services::PluginOperationInvokeError::UnexpectedSession::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised at crates/lash-core/src/plugin/session_obj.rs::PluginSession::snapshot_revision_fingerprint#`hasher.update([0]);`, not by any example, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::Unknown"
+symbol = "lash::plugins::PluginOperationInvokeError::Unknown"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::Unknown"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::Unknown", "lash_core::plugin::services::PluginOperationInvokeError::Unknown"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::invoke_plugin_operation#`return Err(PluginOperationInvokeError::Unknown(name.to_string()));`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:347#lash::EmbedError::Control(PluginOperationInvokeError::Unknown(ref name))"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::Unknown::0"
+symbol = "lash::plugins::PluginOperationInvokeError::Unknown::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::Unknown::0"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::Unknown::0", "lash_core::plugin::services::PluginOperationInvokeError::Unknown::0"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: the runtime-agnostic sans-io layer and first-party plugin crates -- this field is exercised in-repo at crates/lash-sansio/src/llm/types.rs::NonNegativeFiniteF64::new#`let value = if value == 0.0 { 0.0 } else { value };`, crates/lash-sansio/src/llm/types.rs::NonNegativeFiniteF64::check_finite_non_negative#`if value < 0.0 {`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:347#lash::EmbedError::Control(PluginOperationInvokeError::Unknown(ref name))"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::UnknownSession"
+symbol = "lash::plugins::PluginOperationInvokeError::UnknownSession"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::UnknownSession"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::UnknownSession", "lash_core::plugin::services::PluginOperationInvokeError::UnknownSession"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/runtime_impl.rs::PluginHost::session#`let Some(weak) = sessions.get(session_id).cloned() else {`, crates/lash-core/src/plugin/runtime_impl.rs::PluginHost::session#`sessions.remove(session_id);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOperationInvokeError::UnknownSession::0"
+symbol = "lash::plugins::PluginOperationInvokeError::UnknownSession::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::services::PluginOperationInvokeError::UnknownSession::0"]
+aliases = ["lash_core::facade_support::PluginOperationInvokeError::UnknownSession::0", "lash_core::plugin::services::PluginOperationInvokeError::UnknownSession::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::run_plugin_command_value` hands `PluginOperationInvokeError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised at crates/lash-core/src/plugin/runtime_impl.rs::PluginHost::session#`let Some(weak) = sessions.get(session_id).cloned() else {`, not by any example, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOwned"
+symbol = "lash::plugins::PluginOwned"
 kind = "struct"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::session_types::PluginOwned"]
+aliases = ["lash_core::facade_support::PluginOwned", "lash_core::plugin::session_types::PluginOwned"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::before_turn` hands `PluginOwned` to hosts (plugin and tool implementers). Consumer class: the `lash` facade itself and core runtime internals -- this type is exercised in-repo at crates/lash/src/admin.rs::SessionAdmin::record_plugin_operation_observations#`events: &[lash_core::facade_support::PluginOwned<lash_core::PluginRuntimeEvent>],`, crates/lash-core/src/plugin/session_obj.rs::collect_owned_async#`) -> Result<Vec<PluginOwned<O>>, PluginError>`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:321#let owned: &PluginOwned<PluginRuntimeEvent> ="
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOwned::plugin_id"
+symbol = "lash::plugins::PluginOwned::plugin_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::session_types::PluginOwned::plugin_id"]
+aliases = ["lash_core::facade_support::PluginOwned::plugin_id", "lash_core::plugin::session_types::PluginOwned::plugin_id"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::before_turn` hands `PluginOwned` to hosts (plugin and tool implementers). Consumer class: core runtime internals and the `lash` facade itself -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::snapshot#`plugin_id: self.id().to_string(),`, crates/lash-core/src/plugin/mod.rs::tests::ProjectorPluginFactory::id#`self.plugin_id`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:323#assert_eq!(owned.plugin_id, PLUGIN_ID);"
+assertion = "examples/docs-snippets/src/plugins_operations.rs:323#assert_eq!(owned.plugin_id, PLUGIN_ID);"
 
 [[api]]
-symbol = "lash_core::facade_support::PluginOwned::value"
+symbol = "lash::plugins::PluginOwned::value"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::session_types::PluginOwned::value"]
+aliases = ["lash_core::facade_support::PluginOwned::value", "lash_core::plugin::session_types::PluginOwned::value"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::before_turn` hands `PluginOwned` to hosts (plugin and tool implementers). Consumer class: the `lash` facade itself -- this field is exercised in-repo at crates/lash/src/admin.rs::SessionAdmin::with_writer#`value`, crates/lash/src/admin.rs::SessionAdmin::record_plugin_operation_observations#`event: owned.value.clone(),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_operations.rs:325#&owned.value,"
 
 [[api]]
 symbol = "lash_core::plugin::tool_catalog::CheckpointApplication"
@@ -79140,8 +79409,8 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+usage = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+assertion = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]
 symbol = "lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"
@@ -79150,8 +79419,8 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:773#assert_eq!(leaf_source_id, \"plugins\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:773#assert_eq!(leaf_source_id, \"plugins\");"
+usage = "examples/docs-snippets/src/tools.rs:137#assert_eq!(leaf_source_id, \"plugins\");"
+assertion = "examples/docs-snippets/src/tools.rs:137#assert_eq!(leaf_source_id, \"plugins\");"
 
 [[api]]
 symbol = "lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::tool_id"
@@ -79160,8 +79429,8 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::tool_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
-assertion = "examples/docs-snippets/src/plugins_tools.rs:772#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+usage = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
+assertion = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]
 symbol = "lash_core::facade_support::ReconfigureError::UnknownSource"
@@ -89911,26 +90180,26 @@ reason = "678d567bf internalized this export behind the doc-hidden facade_suppor
 [[removal_verdict]]
 symbol = "lash_core::SessionParam"
 kind = "enum"
-superseded_by = "unused-justify"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::SessionParam."
+superseded_by = "used-unasserted"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash::plugins::SessionParam."
 
 [[removal_verdict]]
 symbol = "lash_core::SessionParam::Forbidden"
 kind = "variant"
 superseded_by = "unused-justify"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::SessionParam::Forbidden."
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash::plugins::SessionParam::Forbidden."
 
 [[removal_verdict]]
 symbol = "lash_core::SessionParam::Optional"
 kind = "variant"
-superseded_by = "unused-justify"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::SessionParam::Optional."
+superseded_by = "used-unasserted"
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash::plugins::SessionParam::Optional."
 
 [[removal_verdict]]
 symbol = "lash_core::SessionParam::Required"
 kind = "variant"
 superseded_by = "unused-add"
-reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash_core::facade_support::SessionParam::Required."
+reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-add at lash::plugins::SessionParam::Required."
 
 [[removal_verdict]]
 symbol = "lash_core::SessionPickerInfo"
@@ -91287,18 +91556,26 @@ kind = "function"
 [[removal_verdict]]
 symbol = "lash_core::facade_support::SnapshotReader"
 kind = "trait"
+superseded_by = "used-unasserted"
+reason = "FIG-1921 gave the plugin snapshot seam a facade home: a plugin that overrides `SessionPlugin::snapshot` or `restore` names this trait in its own signature, so the FIG-1223 sort's 'no consumer can be established' finding no longer holds. The path is retained and the row now anchors examples/docs-snippets/src/plugins_operations.rs."
 
 [[removal_verdict]]
 symbol = "lash_core::facade_support::SnapshotReader::read_blob"
 kind = "function"
+superseded_by = "used-unasserted"
+reason = "FIG-1921 gave the plugin snapshot seam a facade home: a plugin that overrides `SessionPlugin::snapshot` or `restore` names this trait in its own signature, so the FIG-1223 sort's 'no consumer can be established' finding no longer holds. The path is retained and the row now anchors examples/docs-snippets/src/plugins_operations.rs."
 
 [[removal_verdict]]
 symbol = "lash_core::facade_support::SnapshotWriter"
 kind = "trait"
+superseded_by = "used-unasserted"
+reason = "FIG-1921 gave the plugin snapshot seam a facade home: a plugin that overrides `SessionPlugin::snapshot` or `restore` names this trait in its own signature, so the FIG-1223 sort's 'no consumer can be established' finding no longer holds. The path is retained and the row now anchors examples/docs-snippets/src/plugins_operations.rs."
 
 [[removal_verdict]]
 symbol = "lash_core::facade_support::SnapshotWriter::write_blob"
 kind = "function"
+superseded_by = "used-unasserted"
+reason = "FIG-1921 gave the plugin snapshot seam a facade home: a plugin that overrides `SessionPlugin::snapshot` or `restore` names this trait in its own signature, so the FIG-1223 sort's 'no consumer can be established' finding no longer holds. The path is retained and the row now anchors examples/docs-snippets/src/plugins_operations.rs."
 
 [[removal_verdict]]
 symbol = "lash_core::facade_support::ToolResultProjector"

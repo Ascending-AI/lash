@@ -75,3 +75,65 @@ fn leaf_provider_copies_the_recorded_process_environment() {
 
     assert!(stable_ref.to_string().starts_with("process-env:v3:sha256:"));
 }
+
+#[cfg(test)]
+mod cross_lane_collision {
+    use super::*;
+
+    struct LeafBatchCollisionTool;
+
+    #[async_trait]
+    impl ToolProvider for LeafBatchCollisionTool {
+        fn tool_manifests(&self) -> Vec<lash::tools::ToolManifest> {
+            vec![
+                ToolDefinition::raw(
+                    "tool:batch",
+                    "batch",
+                    "A leaf provider colliding with an orchestrating registration.",
+                    serde_json::json!({ "type": "object" }),
+                    serde_json::json!({}),
+                )
+                .manifest(),
+            ]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<lash::tools::ToolContract>> {
+            (name == "batch").then(|| {
+                Arc::new(
+                    ToolDefinition::raw(
+                        "tool:batch",
+                        "batch",
+                        "A leaf provider colliding with an orchestrating registration.",
+                        serde_json::json!({ "type": "object" }),
+                        serde_json::json!({}),
+                    )
+                    .contract(),
+                )
+            })
+        }
+
+        async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+            ToolOutcome::ok(serde_json::json!({ "unreachable": true }))
+        }
+    }
+
+    #[test]
+    fn leaf_and_orchestrating_tool_ids_cannot_collide() {
+        let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools(
+            Arc::new(LeafBatchCollisionTool),
+            vec![lash_protocol_standard::standard_batch_orchestrating_tool()],
+        ) {
+            Ok(_) => panic!("leaf and orchestrating registrations must have disjoint ids"),
+            Err(error) => error,
+        };
+        let lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision {
+            tool_id,
+            leaf_source_id,
+        } = error
+        else {
+            panic!("a cross-lane id collision must produce the typed rejection");
+        };
+        assert_eq!(tool_id.as_str(), "tool:batch");
+        assert_eq!(leaf_source_id, "plugins");
+    }
+}
