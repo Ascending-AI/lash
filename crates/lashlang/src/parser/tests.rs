@@ -20,6 +20,17 @@ mod tests {
     }
 
     #[test]
+    fn hard_keyword_reservation_rows_match_the_lexer() {
+        let table_names = RESERVED_NAME_POSITIONS
+            .iter()
+            .filter_map(|(name, positions)| {
+                (*positions == ALL_IDENTIFIER_POSITIONS).then_some(*name)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(table_names, crate::lexer::hard_keyword_names());
+    }
+
+    #[test]
     fn type_expression_fragment_consumes_the_complete_input() {
         assert_eq!(
             parse_type_expression("list[str | null]").expect("type fragment should parse"),

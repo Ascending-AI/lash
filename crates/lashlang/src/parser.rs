@@ -2048,43 +2048,90 @@ fn static_signal_name_arg(expr: &Expr, call: &'static str) -> Result<AstString, 
     })
 }
 
-/// Whether a bare name is consumed by the parser as a keyword or special form
-/// instead of being returned as an identifier.
-pub(crate) fn is_parser_reserved_name(name: &str) -> bool {
-    is_lexer_hard_keyword(name)
-        || matches!(
-            name,
-            // Contextual statement forms.
-            "let"
-            | "yield"
-            | "wake"
-            | "fail"
-            | "finish"
-            | "break"
-            | "continue"
-            | "while"
-            // Primary-expression special forms.
-            | "parallel"
-            | "sleep"
-            | "start"
-            | "Type"
-            | "wait_signal"
-            | "signal_run"
-        )
+#[derive(Clone, Copy)]
+pub(crate) enum IdentifierPosition {
+    DeclarationLead,
+    StatementLead,
+    LabelTarget,
+    PrimaryExpression,
+    Identifier,
 }
 
-/// Whether a valid bare identifier spelling is tokenized as a hard keyword.
-pub(crate) fn is_lexer_hard_keyword(name: &str) -> bool {
-    matches!(
-        lex(name).as_deref(),
-        Ok([
-            Token { kind, .. },
-            Token {
-                kind: TokenKind::Eof,
-                ..
-            }
-        ]) if !matches!(kind, TokenKind::Ident(_))
-    )
+impl IdentifierPosition {
+    const fn mask(self) -> u8 {
+        match self {
+            Self::DeclarationLead => 1 << 0,
+            Self::StatementLead => 1 << 1,
+            Self::LabelTarget => 1 << 2,
+            Self::PrimaryExpression => 1 << 3,
+            Self::Identifier => 1 << 4,
+        }
+    }
+}
+
+const ALL_IDENTIFIER_POSITIONS: u8 = IdentifierPosition::DeclarationLead.mask()
+    | IdentifierPosition::StatementLead.mask()
+    | IdentifierPosition::LabelTarget.mask()
+    | IdentifierPosition::PrimaryExpression.mask()
+    | IdentifierPosition::Identifier.mask();
+const STATEMENT_FORMS: u8 = IdentifierPosition::DeclarationLead.mask()
+    | IdentifierPosition::StatementLead.mask()
+    | IdentifierPosition::LabelTarget.mask();
+const PRIMARY_FORMS: u8 = STATEMENT_FORMS | IdentifierPosition::PrimaryExpression.mask();
+const DECLARATION_FORMS: u8 =
+    IdentifierPosition::DeclarationLead.mask() | IdentifierPosition::LabelTarget.mask();
+
+/// Bare-name reservations at the identifier-emission positions distinguished
+/// by the canonical printer.
+///
+/// Lexer hard keywords retain their all-position refusal. Contextual rows map
+/// to the parser routine that consumes them, and declaration dispatch plus the
+/// post-label target guard reserve the four declaration names.
+const RESERVED_NAME_POSITIONS: &[(&str, u8)] = &[
+    // Lexer hard keywords: the lexer never produces an identifier token.
+    ("if", ALL_IDENTIFIER_POSITIONS),
+    ("else", ALL_IDENTIFIER_POSITIONS),
+    ("for", ALL_IDENTIFIER_POSITIONS),
+    ("in", ALL_IDENTIFIER_POSITIONS),
+    ("await", ALL_IDENTIFIER_POSITIONS),
+    ("cancel", ALL_IDENTIFIER_POSITIONS),
+    ("submit", ALL_IDENTIFIER_POSITIONS),
+    ("print", ALL_IDENTIFIER_POSITIONS),
+    ("call", ALL_IDENTIFIER_POSITIONS),
+    ("and", ALL_IDENTIFIER_POSITIONS),
+    ("or", ALL_IDENTIFIER_POSITIONS),
+    ("not", ALL_IDENTIFIER_POSITIONS),
+    ("true", ALL_IDENTIFIER_POSITIONS),
+    ("false", ALL_IDENTIFIER_POSITIONS),
+    ("null", ALL_IDENTIFIER_POSITIONS),
+    // Contextual statement forms consumed by `parse_statement_expr`.
+    ("let", STATEMENT_FORMS),
+    ("yield", STATEMENT_FORMS),
+    ("wake", STATEMENT_FORMS),
+    ("fail", STATEMENT_FORMS),
+    ("finish", STATEMENT_FORMS),
+    ("break", STATEMENT_FORMS),
+    ("continue", STATEMENT_FORMS),
+    ("while", STATEMENT_FORMS),
+    // Primary-expression special forms consumed by `parse_primary`.
+    ("parallel", PRIMARY_FORMS),
+    ("sleep", PRIMARY_FORMS),
+    ("start", PRIMARY_FORMS),
+    ("Type", PRIMARY_FORMS),
+    ("wait_signal", PRIMARY_FORMS),
+    ("signal_run", PRIMARY_FORMS),
+    // Module declaration dispatch consumed by `parse_program`.
+    ("type", DECLARATION_FORMS),
+    ("process", DECLARATION_FORMS),
+    ("fn", DECLARATION_FORMS),
+    ("trigger", DECLARATION_FORMS),
+];
+
+pub(crate) fn is_parser_reserved_name(name: &str, position: IdentifierPosition) -> bool {
+    RESERVED_NAME_POSITIONS
+        .iter()
+        .find_map(|(reserved, positions)| (*reserved == name).then_some(*positions))
+        .is_some_and(|positions| positions & position.mask() != 0)
 }
 
 fn token_can_be_key(kind: &TokenKind) -> bool {
