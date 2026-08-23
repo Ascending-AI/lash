@@ -108,9 +108,16 @@ impl ToolProviderIndex {
     }
 
     fn insert(&mut self, manifest: ToolManifest, provider_idx: usize) {
+        let id = manifest.id.clone();
+        if let Some((previous, _)) = self.by_id.get(&id)
+            && previous.name != manifest.name
+            && self.by_name.get(&previous.name) == Some(&id)
+        {
+            self.by_name.remove(&previous.name);
+        }
         self.by_id
-            .insert(manifest.id.clone(), (manifest, provider_idx));
-        self.rebuild_name_index();
+            .insert(id.clone(), (manifest.clone(), provider_idx));
+        self.by_name.entry(manifest.name).or_insert(id);
     }
 
     fn get_by_name(&self, name: &str) -> Option<&(ToolManifest, usize)> {

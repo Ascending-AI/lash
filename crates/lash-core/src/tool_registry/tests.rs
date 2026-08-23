@@ -300,6 +300,37 @@ mod tests {
     }
 
     #[test]
+    fn reconciled_combined_collision_reports_duplicate_name() {
+        let manifest = test_tool("combined", "combined").manifest();
+        let mut surface = ToolSurface::default();
+        surface
+            .insert(ToolRegistryEntry::new(
+                manifest.clone(),
+                ToolSourceKey::Leaf("source".to_string()),
+                ToolRegistrationKind::Leaf,
+            ))
+            .expect("initial tool");
+
+        let error = insert_result_entry(
+            &mut surface,
+            manifest.id.clone(),
+            ToolRegistryEntry::new(
+                manifest,
+                ToolSourceKey::Leaf("source".to_string()),
+                ToolRegistrationKind::Leaf,
+            ),
+        )
+        .expect_err("combined id and name collision");
+
+        // A duplicate name is the more informative diagnosis when both id and
+        // name collide because it identifies the model-facing alias as well.
+        assert_eq!(
+            error.to_string(),
+            "validation error: duplicate tool name `combined` for tool ids `tool:combined` and `tool:combined`"
+        );
+    }
+
+    #[test]
     fn registration_kind_alone_selects_orchestration_dispatch() {
         let leaf = ToolRegistry::from_tool_provider_sources_with_hidden_tools(
             vec![(
