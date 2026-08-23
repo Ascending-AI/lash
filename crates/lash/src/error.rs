@@ -124,10 +124,6 @@ pub enum EmbedError {
     #[error("failed to flush trace sink: {0}")]
     TraceFlush(#[from] lash_trace::TraceSinkError),
     #[error(
-        "configured effect host for {operation} is durable and requires a handler context; use .effects(&controller) and provide .turn_id(...) for replayable foreground requests"
-    )]
-    DurableEffectHostRequiresHandlerContext { operation: &'static str },
-    #[error(
         "pull-style turn streams require an effect host that can create a static scoped controller; use stream_to(...) inside the handler context"
     )]
     StaticTurnStreamRequiresStaticEffectHost,
@@ -228,7 +224,6 @@ impl EmbedError {
             | Self::QueuedWorkExecutionConcurrency(_)
             | Self::MissingSessionStoreFactory
             | Self::MissingPluginTurnInput { .. }
-            | Self::DurableEffectHostRequiresHandlerContext { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(
                 lash_core::StoreError::SessionDeleted { .. }

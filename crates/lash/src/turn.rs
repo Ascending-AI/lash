@@ -308,14 +308,12 @@ impl TurnBuilder {
     ///   [`EnqueueTurnBuilder::id`](crate::EnqueueTurnBuilder::id).
     pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
         let effect_host = Arc::clone(&self.effect_host);
-        reject_controller_owned_replay_host(effect_host.as_ref(), "turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
             .await
     }
 
     pub fn stream(self) -> Result<TurnStream> {
         let effect_host = Arc::clone(&self.effect_host);
-        reject_controller_owned_replay_host(effect_host.as_ref(), "turn stream")?;
         self.stream_with_effect_host(effect_host.as_ref())
     }
 
@@ -717,7 +715,6 @@ impl QueuedTurnBuilder {
         events: &dyn TurnActivitySink,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
         let effect_host = Arc::clone(&self.effect_host);
-        reject_controller_owned_replay_host(effect_host.as_ref(), "queued turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
             .await
     }
@@ -852,7 +849,6 @@ impl SelectedQueuedTurnBuilder {
         events: &dyn TurnActivitySink,
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let effect_host = Arc::clone(&self.builder.effect_host);
-        reject_controller_owned_replay_host(effect_host.as_ref(), "selected queued turn")?;
         self.stream_to_with_effect_host(events, effect_host.as_ref())
             .await
     }
@@ -1115,16 +1111,6 @@ fn trace_turn_id_for_scope(
             .clone()
             .or_else(|| builder.input.trace_turn_id.clone())
     }
-}
-
-fn reject_controller_owned_replay_host(
-    effect_host: &dyn EffectHost,
-    operation: &'static str,
-) -> Result<()> {
-    if effect_host.replay_ownership() == EffectReplayOwnership::Controller {
-        return Err(EmbedError::DurableEffectHostRequiresHandlerContext { operation });
-    }
-    Ok(())
 }
 
 pub(crate) async fn stream_next_queued_prepared_turn(

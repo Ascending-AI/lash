@@ -351,6 +351,7 @@ struct DurableEffectInvocation {
 #[derive(Default)]
 struct RecordingDurableEffectController {
     invocations: StdMutex<Vec<DurableEffectInvocation>>,
+    inline: lash_core::facade_support::InlineRuntimeEffectController,
 }
 
 impl RecordingDurableEffectController {
@@ -359,9 +360,26 @@ impl RecordingDurableEffectController {
     }
 }
 
+#[async_trait]
 impl lash_core::AwaitEventResolver for RecordingDurableEffectController {
     fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
         lash_core::EffectReplayOwnership::Controller
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inline.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inline.resolve_await_event(key, resolution).await
     }
 }
 
@@ -520,7 +538,25 @@ impl lash_core::ProcessExecutionEnvStore for DurableInMemoryProcessEnvStore {
 }
 
 #[derive(Default)]
-struct DurableNoopEffectHost;
+struct DurableNoopEffectHost {
+    selected_scopes: StdMutex<Vec<lash_core::ExecutionScope>>,
+    controller: Arc<RecordingDurableEffectController>,
+}
+
+impl DurableNoopEffectHost {
+    fn selected_scopes(&self) -> Vec<lash_core::ExecutionScope> {
+        self.selected_scopes.lock_recover().clone()
+    }
+
+    fn scoped_for<'run>(
+        &self,
+        scope: lash_core::ExecutionScope,
+    ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        self.selected_scopes.lock_recover().push(scope.clone());
+        let controller: Arc<dyn lash_core::RuntimeEffectController> = self.controller.clone();
+        lash_core::ScopedEffectController::shared(controller, scope)
+    }
+}
 
 impl lash_core::AwaitEventResolver for DurableNoopEffectHost {
     fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
@@ -533,10 +569,7 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         &'run self,
         scope: lash_core::ExecutionScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
-        lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
-            scope,
-        )
+        self.scoped_for(scope)
     }
 
     fn scoped_static(
@@ -546,10 +579,7 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         Option<lash_core::ScopedEffectController<'static>>,
         lash_core::RuntimeError,
     > {
-        Ok(Some(lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
-            scope,
-        )?))
+        Ok(Some(self.scoped_for(scope)?))
     }
 }
 
@@ -902,8 +932,9 @@ async fn turn_run_uses_configured_inline_effect_host_without_explicit_effects() 
 }
 
 #[tokio::test]
-async fn durable_configured_effect_host_requires_explicit_handler_effects() -> Result<()> {
+async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
+    let effect_host = Arc::new(DurableNoopEffectHost::default());
     let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
             dir.path().join("attachments"),
@@ -911,22 +942,96 @@ async fn durable_configured_effect_host_requires_explicit_handler_effects() -> R
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
-        .effect_host(Arc::new(DurableNoopEffectHost))
+        .effect_host(effect_host.clone())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-default-effect-host").open().await?;
+    let events = RecordingEvents::default();
 
-    let err = session
-        .turn(TurnInput::text("should fail before provider"))
+    session
+        .turn(TurnInput::text("stream to"))
+        .turn_id("durable-stream-to")
+        .stream_to(&events)
+        .await?;
+    let run = session
+        .turn(TurnInput::text("run"))
+        .turn_id("durable-run")
         .run()
-        .await
-        .expect_err("durable deployment host should require handler context");
+        .await?;
+    let mut stream = session
+        .turn(TurnInput::text("stream"))
+        .turn_id("durable-stream")
+        .stream()?;
+    while let Some(activity) = stream.next().await {
+        activity?;
+    }
+    stream.finish().await?;
 
-    assert!(matches!(
-        err,
-        EmbedError::DurableEffectHostRequiresHandlerContext { operation: "turn" }
-    ));
+    session
+        .enqueue(TurnInput::text("queued"))
+        .id("durable-queued-input")
+        .send()
+        .await?;
+    session
+        .queued_turn()
+        .drain_id("durable-queue-drain")
+        .run()
+        .await?
+        .expect("queued turn should run");
+
+    assert_eq!(run.assistant_message(), Some("echo: run"));
+    assert_eq!(
+        effect_host.selected_scopes(),
+        vec![
+            lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-stream-to"),
+            lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-run"),
+            lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-stream"),
+            lash_core::ExecutionScope::queue_drain(
+                "durable-default-effect-host",
+                "durable-queue-drain"
+            ),
+        ]
+    );
+    let effect_turn_ids = effect_host
+        .controller
+        .invocations()
+        .into_iter()
+        .filter(|invocation| invocation.kind == lash_core::RuntimeEffectKind::LlmCall)
+        .filter_map(|invocation| invocation.turn_id)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        effect_turn_ids,
+        BTreeSet::from([
+            "durable-stream-to".to_string(),
+            "durable-run".to_string(),
+            "durable-stream".to_string(),
+            "durable-queue-drain".to_string(),
+        ])
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()> {
+    let effect_host = DurableNoopEffectHost::default();
+    let custom_scope = lash_core::ExecutionScope::runtime_operation("custom-foreground-scope");
+    let scoped_effect_controller = effect_host.scoped(custom_scope.clone())?;
+    let core = standard_core();
+    let session = core.session("custom-effect-scope").open().await?;
+
+    let output = session
+        .turn(TurnInput::text("custom"))
+        .advanced()
+        .run_with_scope(scoped_effect_controller)
+        .await?;
+
+    assert_eq!(output.assistant_message(), Some("echo: custom"));
+    assert_eq!(effect_host.selected_scopes(), vec![custom_scope]);
     Ok(())
 }
 

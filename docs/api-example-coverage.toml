@@ -1589,9 +1589,9 @@ kind = "enum"
 availability = "default+all-features"
 aliases = ["lash_core::EffectReplayOwnership"]
 area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:510#lash::EffectReplayOwnership::Runtime,"
-reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_tests.rs:506#let inline_ownership = inline_host.replay_ownership();"
+assertion = "examples/agent-workbench/src/restate_tests.rs:509#lash::EffectReplayOwnership::Runtime,"
 
 [[api]]
 symbol = "lash::EffectReplayOwnership::Controller"
@@ -1599,9 +1599,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::EffectReplayOwnership::Controller"]
 area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:515#lash::EffectReplayOwnership::Controller,"
-reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_tests.rs:512#let durable_ownership = durable_host.replay_ownership();"
+assertion = "examples/agent-workbench/src/restate_tests.rs:515#lash::EffectReplayOwnership::Controller,"
 
 [[api]]
 symbol = "lash::EffectReplayOwnership::Runtime"
@@ -1609,9 +1609,9 @@ kind = "variant"
 availability = "default+all-features"
 aliases = ["lash_core::EffectReplayOwnership::Runtime"]
 area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:510#lash::EffectReplayOwnership::Runtime,"
-reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_tests.rs:506#let inline_ownership = inline_host.replay_ownership();"
+assertion = "examples/agent-workbench/src/restate_tests.rs:509#lash::EffectReplayOwnership::Runtime,"
 
 [[api]]
 symbol = "lash::EmbedError"
@@ -1658,26 +1658,6 @@ aliases = ["lash::prelude::EmbedError::DecodeProtocolTurnOptions::0"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::EmbedError::DecodeProtocolTurnOptions::0 to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::EmbedError::DurableEffectHostRequiresHandlerContext"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash::prelude::EmbedError::DurableEffectHostRequiresHandlerContext"]
-area = "sessions-turns"
-disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:565#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
-reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
-
-[[api]]
-symbol = "lash::EmbedError::DurableEffectHostRequiresHandlerContext::operation"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash::prelude::EmbedError::DurableEffectHostRequiresHandlerContext::operation"]
-area = "sessions-turns"
-disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:565#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
-assertion = "examples/agent-workbench/src/restate_tests.rs:565#lash::EmbedError::DurableEffectHostRequiresHandlerContext { operation: \"turn\" }"
 
 [[api]]
 symbol = "lash::EmbedError::EphemeralSessionIdReused"
@@ -6260,8 +6240,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnBuilder::stream", "lash::turn::TurnBuilder::stream"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::TurnBuilder::stream is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_tests.rs:589#.stream()"
+assertion = "examples/agent-workbench/src/restate_tests.rs:600#Some(&serde_json::json!(\"ownership answer\"))"
 
 [[api]]
 symbol = "lash::TurnBuilder::stream_to"
@@ -7977,8 +7958,9 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash::prelude::TurnStream::finish", "lash::turn::TurnStream::finish"]
 area = "sessions-turns"
-disposition = "unused-add"
-reason = "The current example use of lash::TurnStream::finish is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/restate_tests.rs:595#.finish()"
+assertion = "examples/agent-workbench/src/restate_tests.rs:600#Some(&serde_json::json!(\"ownership answer\"))"
 
 [[api]]
 symbol = "lash::TurnStream::next_activity"
@@ -11976,7 +11958,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::reopen_preserving_history"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3457#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
+usage = "crates/lash/src/tests/turn_streaming.rs:3562#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
 reason = "Relocate: this all-features-only handle is implemented in lash_core::testing and exists solely so the importable replay law can distinguish preserved history from a fresh incarnation."
 
 [[api]]
@@ -12004,7 +11986,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3670#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
+usage = "crates/lash/src/tests/turn_streaming.rs:3775#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
 reason = "Relocate: this all-features-only method is implemented in lash_core::testing and consumed only to pin the distinct replay-visible and pre-notification cuts in the snapshot-subscribe conformance law."
 
 [[api]]
@@ -50836,7 +50818,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RestateAwaitEventResolve"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:653#lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,"
+usage = "examples/agent-workbench/src/restate_tests.rs:660#lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -50918,7 +50900,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::RestateTurnTerminalDecode"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:663#lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,"
+usage = "examples/agent-workbench/src/restate_tests.rs:670#lash::runtime::RuntimeErrorCode::RestateTurnTerminalDecode,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -55983,7 +55965,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3458#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
+usage = "crates/lash/src/tests/turn_streaming.rs:3563#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
 reason = "Importable live-replay law exercised by the runtime's in-memory conformance test; only test code invokes it, which is the purpose of the `testing` feature."
 
 [[api]]
@@ -70875,7 +70857,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1343#) -> Result<lash_core::facade_support::AgentFrameRun> {"
+usage = "crates/lash/src/turn.rs:1329#) -> Result<lash_core::facade_support::AgentFrameRun> {"
 
 [[api]]
 symbol = "lash_core::facade_support::AgentFrameRun::acceptance"
@@ -72440,7 +72422,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:743#.queue_drain_scope(drain_id);"
+usage = "crates/lash/src/turn.rs:740#.queue_drain_scope(drain_id);"
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope"
@@ -73915,7 +73897,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1287#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
+usage = "crates/lash/src/turn.rs:1273#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnContextFacadeOps::replace_prompt_slot"
@@ -73939,7 +73921,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1237#) -> lash_core::facade_support::TurnOptions<'a> {"
+usage = "crates/lash/src/turn.rs:1223#) -> lash_core::facade_support::TurnOptions<'a> {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::new"
@@ -73947,7 +73929,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1238#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
+usage = "crates/lash/src/turn.rs:1224#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_events"
@@ -73955,7 +73937,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1240#opts = opts.with_events(events);"
+usage = "crates/lash/src/turn.rs:1226#opts = opts.with_events(events);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_local_cancel_origin_hint"
@@ -73971,7 +73953,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1242#opts.with_turn_events(turn_events)"
+usage = "crates/lash/src/turn.rs:1228#opts.with_turn_events(turn_events)"
 
 [[api]]
 symbol = "lash_core::facade_support::append_assistant_text_part"
