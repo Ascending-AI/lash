@@ -136,6 +136,50 @@ impl Lowerer {
         Ok(true)
     }
 
+    pub(super) fn with_await<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let outer_depth = self.position.await_depth;
+        self.position.await_depth += 1;
+        let result = lower(self);
+        self.position.await_depth = outer_depth;
+        result
+    }
+
+    pub(super) fn with_iterable_sink<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let outer_depth = self.position.iterable_sink_depth;
+        self.position.iterable_sink_depth += 1;
+        let result = lower(self);
+        self.position.iterable_sink_depth = outer_depth;
+        result
+    }
+
+    pub(super) fn with_loop<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let outer_depth = self.position.loop_depth;
+        self.position.loop_depth += 1;
+        let result = lower(self);
+        self.position.loop_depth = outer_depth;
+        result
+    }
+
+    pub(super) fn with_process<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let outer_depth = self.process_depth;
+        self.process_depth += 1;
+        let result = lower(self);
+        self.process_depth = outer_depth;
+        result
+    }
+
     /// Lowers `value` in a position that materializes an iterable at once.
     ///
     /// There is one such position list, not two, and one counter behind it.
@@ -145,10 +189,7 @@ impl Lowerer {
     /// restriction exists to guarantee. The second counter that tracked the
     /// shorter list is gone with the list it tracked.
     pub(super) fn lower_iterable_sink(&mut self, value: &Expr) -> Result<LashExpr, Diagnostic> {
-        self.iterable_sink_depth += 1;
-        let result = self.lower_expr(value);
-        self.iterable_sink_depth -= 1;
-        result
+        self.with_iterable_sink(|lowerer| lowerer.lower_expr(value))
     }
 
     pub(super) fn temporary(&mut self, label: &str) -> String {
@@ -301,13 +342,20 @@ impl Lowerer {
         } else {
             Self::iterable_copy(source)
         };
-        self.loop_depth += 1;
-        self.continue_epilogues.push(None);
-        let mut expressions =
-            self.lower_pattern(pattern, LashExpr::Variable(iteration.as_str().into()), mode)?;
-        expressions.push(self.lower_stmt_block(body)?);
-        self.continue_epilogues.pop();
-        self.loop_depth -= 1;
+        let expressions = self.with_loop(|lowerer| {
+            lowerer.continue_epilogues.push(None);
+            let expressions = (|| {
+                let mut expressions = lowerer.lower_pattern(
+                    pattern,
+                    LashExpr::Variable(iteration.as_str().into()),
+                    mode,
+                )?;
+                expressions.push(lowerer.lower_stmt_block(body)?);
+                Ok(expressions)
+            })();
+            lowerer.continue_epilogues.pop();
+            expressions
+        })?;
         self.scopes.pop();
         Ok(vec![LashExpr::For {
             binding: iteration.into(),
@@ -369,7 +417,8 @@ impl Lowerer {
                 else_block: Box::new(LashExpr::Undefined),
             });
         }
-        self.switch_breaks.push((broken.clone(), self.loop_depth));
+        self.switch_breaks
+            .push((broken.clone(), self.position.loop_depth));
         for (index, case) in cases.iter().enumerate() {
             let body = LashExpr::Block(self.lower_statements(&case.consequent, false)?);
             output.push(LashExpr::If {

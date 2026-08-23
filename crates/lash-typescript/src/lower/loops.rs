@@ -92,11 +92,12 @@ impl Lowerer {
         let start = self.lower_expr(start)?;
         let condition = self.lower_expr(test.expect("validated classic for condition"))?;
         let update = self.lower_update_statement(declaration_name, *delta)?;
-        self.loop_depth += 1;
-        self.continue_epilogues.push(Some(update.clone()));
-        let body = self.lower_stmt_block(body)?;
-        self.continue_epilogues.pop();
-        self.loop_depth -= 1;
+        let body = self.with_loop(|lowerer| {
+            lowerer.continue_epilogues.push(Some(update.clone()));
+            let body = lowerer.lower_stmt_block(body);
+            lowerer.continue_epilogues.pop();
+            body
+        })?;
         self.scopes.pop();
         Ok(LashExpr::Block(vec![
             LashExpr::Assign {

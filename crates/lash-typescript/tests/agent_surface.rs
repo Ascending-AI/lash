@@ -175,6 +175,27 @@ fn wake_signals_runs_and_process_finish_is_rejected() {
     assert!(error.message.contains("cell-only"));
 }
 
+#[test]
+fn process_membership_reaches_functions_nested_inside_run() {
+    let error = lash_typescript::parse(
+        r#"
+        const worker = defineProcess({
+          name: "worker", signals: {},
+          run: async () => {
+            function stop() { finish(1); }
+            return stop();
+          }
+        });
+        "#,
+    )
+    .expect_err("finish nested inside run must remain cell-only");
+    assert_eq!(
+        error.code,
+        lash_typescript::DiagnosticCode::UnsupportedExpression
+    );
+    assert!(error.message.contains("cell-only"));
+}
+
 #[derive(Default)]
 struct SignalHost {
     signal: std::sync::Mutex<Option<lashlang::ProcessSignal>>,

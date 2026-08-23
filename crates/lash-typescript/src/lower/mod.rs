@@ -137,6 +137,13 @@ struct PendingBinding {
 }
 
 #[derive(Default)]
+struct PositionContext {
+    loop_depth: usize,
+    await_depth: usize,
+    iterable_sink_depth: usize,
+}
+
+#[derive(Default)]
 struct Lowerer {
     /// How deep the program's own root scope is. One when the lowerer stands
     /// alone; two when an ambient scope of live session globals sits beneath
@@ -147,12 +154,10 @@ struct Lowerer {
     functions: Vec<FunctionContext>,
     next_binding: usize,
     next_function: usize,
-    loop_depth: usize,
+    position: PositionContext,
     switch_breaks: Vec<(String, usize)>,
     continue_epilogues: Vec<Option<LashExpr>>,
     process_depth: usize,
-    await_depth: usize,
-    iterable_sink_depth: usize,
     declarations: Vec<Declaration>,
     intrinsic_global_slots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
@@ -688,27 +693,32 @@ impl Lowerer {
                 ),
             }],
             Stmt::While { test, body } => {
-                self.loop_depth += 1;
-                self.continue_epilogues.push(None);
-                let body = self.lower_stmt_block(body)?;
-                self.continue_epilogues.pop();
-                self.loop_depth -= 1;
+                let body = self.with_loop(|lowerer| {
+                    lowerer.continue_epilogues.push(None);
+                    let body = lowerer.lower_stmt_block(body);
+                    lowerer.continue_epilogues.pop();
+                    body
+                })?;
                 vec![LashExpr::While {
                     condition: Box::new(self.lower_expr(test)?),
                     body: Box::new(body),
                 }]
             }
             Stmt::DoWhile { body, test } => {
-                self.loop_depth += 1;
-                let epilogue = LashExpr::If {
-                    condition: Box::new(js_unary(JavaScriptUnaryOp::Not, self.lower_expr(test)?)),
-                    then_block: Box::new(LashExpr::Break),
-                    else_block: Box::new(LashExpr::Undefined),
-                };
-                self.continue_epilogues.push(Some(epilogue.clone()));
-                let body = self.lower_stmt_block(body)?;
-                self.continue_epilogues.pop();
-                self.loop_depth -= 1;
+                let (epilogue, body) = self.with_loop(|lowerer| {
+                    let epilogue = LashExpr::If {
+                        condition: Box::new(js_unary(
+                            JavaScriptUnaryOp::Not,
+                            lowerer.lower_expr(test)?,
+                        )),
+                        then_block: Box::new(LashExpr::Break),
+                        else_block: Box::new(LashExpr::Undefined),
+                    };
+                    lowerer.continue_epilogues.push(Some(epilogue.clone()));
+                    let body = lowerer.lower_stmt_block(body);
+                    lowerer.continue_epilogues.pop();
+                    body.map(|body| (epilogue, body))
+                })?;
                 vec![LashExpr::While {
                     condition: Box::new(LashExpr::Bool(true)),
                     body: Box::new(LashExpr::Block(vec![body, epilogue])),
@@ -756,13 +766,13 @@ impl Lowerer {
             }
             Stmt::Break => {
                 if let Some((flag, switch_loop_depth)) = self.switch_breaks.last()
-                    && self.loop_depth == *switch_loop_depth
+                    && self.position.loop_depth == *switch_loop_depth
                 {
                     vec![LashExpr::Assign {
                         target: AssignTarget::variable(flag.as_str().into()),
                         expr: Box::new(LashExpr::Bool(true)),
                     }]
-                } else if self.loop_depth == 0 {
+                } else if self.position.loop_depth == 0 {
                     return Err(Diagnostic::new(
                         DiagnosticCode::LoopControlOutsideLoop,
                         "break is only valid in a loop or switch",
@@ -773,7 +783,7 @@ impl Lowerer {
                 }
             }
             Stmt::Continue => {
-                if self.loop_depth == 0 {
+                if self.position.loop_depth == 0 {
                     return Err(Diagnostic::new(
                         DiagnosticCode::LoopControlOutsideLoop,
                         "continue is only valid in a loop",
@@ -860,7 +870,17 @@ impl Lowerer {
         function: &Function,
         internal_name: Option<String>,
     ) -> Result<LashExpr, Diagnostic> {
-        let outer_loop_depth = std::mem::take(&mut self.loop_depth);
+        let outer_position = std::mem::take(&mut self.position);
+        let result = self.lower_function_body(function, internal_name);
+        self.position = outer_position;
+        result
+    }
+
+    fn lower_function_body(
+        &mut self,
+        function: &Function,
+        internal_name: Option<String>,
+    ) -> Result<LashExpr, Diagnostic> {
         self.next_function += 1;
         let id = self.next_function;
         self.functions.push(FunctionContext {
@@ -876,7 +896,6 @@ impl Lowerer {
                 if source_name.starts_with(GENERATED_BINDING_PREFIX) {
                     self.scopes.pop();
                     self.functions.pop();
-                    self.loop_depth = outer_loop_depth;
                     return Err(reserved_identifier(source_name));
                 }
                 let generated = self.next_binding;
@@ -975,7 +994,6 @@ impl Lowerer {
         let body = LashExpr::Block(prologue);
         self.scopes.pop();
         let context = self.functions.pop().expect("function context exists");
-        self.loop_depth = outer_loop_depth;
         let function = LashExpr::Function(Box::new(FunctionExpr {
             name: internal_name.map(Into::into),
             params,
@@ -1226,9 +1244,7 @@ impl Lowerer {
             ));
         }
 
-        self.process_depth += 1;
-        let closure = self.lower_function(run, None)?;
-        self.process_depth -= 1;
+        let closure = self.with_process(|lowerer| lowerer.lower_function(run, None))?;
         let function = match &closure {
             LashExpr::Function(function) => function.as_ref(),
             LashExpr::BuiltinCall { args, .. } => {

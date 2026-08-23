@@ -64,19 +64,18 @@ impl Lowerer {
             }
             _ => None,
         };
-        self.await_depth += 1;
-        let (mode, lowered) = if let Some((mode, value)) = promise_kind {
-            let lowered = if mode == "allSettled" && is_async_map(value) {
-                self.lower_all_settled_async_map(value)
+        let (mode, lowered) = self.with_await(|lowerer| {
+            if let Some((mode, value)) = promise_kind {
+                let lowered = if mode == "allSettled" && is_async_map(value) {
+                    lowerer.lower_all_settled_async_map(value)
+                } else {
+                    lowerer.lower_expr(value)
+                }?;
+                Ok((Some(mode), lowered))
             } else {
-                self.lower_expr(value)
-            };
-            (Some(mode), lowered)
-        } else {
-            (None, self.lower_expr(inner))
-        };
-        self.await_depth -= 1;
-        let lowered = lowered?;
+                Ok((None, lowerer.lower_expr(inner)?))
+            }
+        })?;
         if async_helper {
             return Ok(lowered);
         }
