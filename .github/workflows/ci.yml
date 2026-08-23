@@ -836,7 +836,7 @@ jobs:
       # `gh cache delete` on the `perf-duration-history-quick-*` keys.
       - name: Restore runtime perf duration history
         continue-on-error: true
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .benchmarks/perf-history
           key: perf-duration-history-quick-${{ github.run_id }}-${{ github.run_attempt }}
