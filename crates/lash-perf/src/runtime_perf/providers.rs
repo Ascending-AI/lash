@@ -1,9 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{
-        Arc, OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, OnceLock},
 };
 
 use lash_core::llm::types::{
@@ -33,7 +30,6 @@ pub(crate) struct BenchmarkStreamProfile {
 pub(crate) struct BenchmarkProviderControl {
     pub(crate) provider_started: tokio::sync::Notify,
     pub(crate) release_provider: tokio::sync::Notify,
-    provider_calls: AtomicUsize,
 }
 
 impl BenchmarkProviderControl {
@@ -41,7 +37,6 @@ impl BenchmarkProviderControl {
         Self {
             provider_started: tokio::sync::Notify::new(),
             release_provider: tokio::sync::Notify::new(),
-            provider_calls: AtomicUsize::new(0),
         }
     }
 }
@@ -78,28 +73,16 @@ pub(crate) fn benchmark_provider_with_control(
                         .notify_one();
                     return std::future::pending().await;
                 }
-                let ingress_profile =
-                    if matches!(scenario, RuntimePerfScenario::IngressClaimProjection) {
-                        let control = completion_control
-                            .as_ref()
-                            .expect("ingress projection control");
-                        let call_index = control.provider_calls.fetch_add(1, Ordering::SeqCst);
-                        if call_index.is_multiple_of(2) {
-                            control.provider_started.notify_one();
-                            control.release_provider.notified().await;
-                            Some(text_profile(lashlang_block(
-                                r#"print("checkpoint before projection")"#,
-                            )))
-                        } else {
-                            Some(text_profile(lashlang_block(
-                                r#"finish "runtime perf benchmark ok""#,
-                            )))
-                        }
-                    } else {
-                        None
-                    };
-                let profile = ingress_profile
-                    .unwrap_or_else(|| benchmark_stream_profile_for_request(scenario, &req));
+                if matches!(scenario, RuntimePerfScenario::IngressClaimProjection)
+                    && !latest_request_item_contains(&req, "ingress projection marker")
+                {
+                    let control = completion_control
+                        .as_ref()
+                        .expect("ingress projection control");
+                    control.provider_started.notify_one();
+                    control.release_provider.notified().await;
+                }
+                let profile = benchmark_stream_profile_for_request(scenario, &req);
                 let usage = LlmUsage {
                     input_tokens: 1_024,
                     output_tokens: 64,
@@ -1778,7 +1761,7 @@ finish "runtime perf benchmark ok""#,
             text_profile(text)
         }
         RuntimePerfScenario::IngressClaimProjection => {
-            if request_text(request).contains("ingress projection marker") {
+            if latest_request_item_contains(request, "ingress projection marker") {
                 text_profile(lashlang_block(r#"finish "runtime perf benchmark ok""#))
             } else {
                 text_profile(lashlang_block(r#"print("checkpoint before projection")"#))
@@ -1862,6 +1845,41 @@ fn request_has_tool_result(request: &LlmRequest) -> bool {
     })
 }
 
+fn latest_request_item_contains(request: &LlmRequest, needle: &str) -> bool {
+    // RLM appends its synthetic iteration prompt after history. The rolling
+    // cache fence identifies the newest real request item before that suffix.
+    request
+        .messages
+        .iter()
+        .rev()
+        .find(|message| {
+            message.blocks.iter().any(|block| {
+                matches!(
+                    block,
+                    LlmContentBlock::Text {
+                        cache_breakpoint: true,
+                        ..
+                    }
+                )
+            })
+        })
+        .is_some_and(|message| message_contains(message, needle))
+}
+
+fn message_contains(message: &lash_core::llm::types::LlmMessage, needle: &str) -> bool {
+    message.blocks.iter().any(|block| match block {
+        LlmContentBlock::Text { text, .. } => text.contains(needle),
+        LlmContentBlock::ToolResult { content, .. } => content.contains(needle),
+        LlmContentBlock::ToolCall {
+            tool_name,
+            input_json,
+            ..
+        } => tool_name.contains(needle) || input_json.contains(needle),
+        LlmContentBlock::Reasoning { text, .. } => text.contains(needle),
+        LlmContentBlock::Attachment { .. } => false,
+    })
+}
+
 fn request_text(request: &LlmRequest) -> String {
     let mut out = String::new();
     for message in &request.messages {
@@ -1911,7 +1929,11 @@ fn empty_request() -> LlmRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{facade_support::build_tool_catalog, test_support::ToolCatalogBuildInput};
+    use lash_core::{
+        facade_support::build_tool_catalog,
+        llm::types::{LlmMessage, LlmRole},
+        test_support::ToolCatalogBuildInput,
+    };
     use lash_lashlang_runtime::ToolManifestBindingExt;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2047,5 +2069,70 @@ mod tests {
         assert!(profile.deltas[3].starts_with("lang>"));
         assert!(profile.deltas[3].contains("This suffix must be ignored"));
         assert!(profile.parts.is_empty());
+    }
+
+    #[test]
+    fn ingress_claim_projection_profile_uses_latest_request_item_marker() {
+        let mut unmarked_request = empty_request();
+        unmarked_request
+            .messages
+            .push(request_input("continue the ingress projection"));
+        unmarked_request.messages.push(LlmMessage::text(
+            LlmRole::User,
+            "synthetic current iteration suffix",
+        ));
+        let unmarked_profile = benchmark_stream_profile_for_request(
+            RuntimePerfScenario::IngressClaimProjection,
+            &unmarked_request,
+        );
+        assert_eq!(
+            unmarked_profile.full_text,
+            lashlang_block(r#"print("checkpoint before projection")"#)
+        );
+
+        let mut marked_request = empty_request();
+        marked_request
+            .messages
+            .push(request_input("continue with the ingress projection marker"));
+        marked_request.messages.push(LlmMessage::text(
+            LlmRole::User,
+            "synthetic current iteration suffix",
+        ));
+        let marked_profile = benchmark_stream_profile_for_request(
+            RuntimePerfScenario::IngressClaimProjection,
+            &marked_request,
+        );
+        assert_eq!(
+            marked_profile.full_text,
+            lashlang_block(r#"finish "runtime perf benchmark ok""#)
+        );
+
+        let mut historical_marker_request = marked_request;
+        historical_marker_request
+            .messages
+            .push(request_input("start the next ingress projection turn"));
+        historical_marker_request.messages.push(LlmMessage::text(
+            LlmRole::User,
+            "synthetic current iteration suffix",
+        ));
+        let historical_marker_profile = benchmark_stream_profile_for_request(
+            RuntimePerfScenario::IngressClaimProjection,
+            &historical_marker_request,
+        );
+        assert_eq!(
+            historical_marker_profile.full_text,
+            lashlang_block(r#"print("checkpoint before projection")"#)
+        );
+    }
+
+    fn request_input(text: &str) -> LlmMessage {
+        LlmMessage::new(
+            LlmRole::User,
+            vec![LlmContentBlock::Text {
+                text: text.into(),
+                response_meta: None,
+                cache_breakpoint: true,
+            }],
+        )
     }
 }
