@@ -105,6 +105,12 @@ struct OutputSnapshot {
     full_output_path: Option<PathBuf>,
 }
 
+#[derive(Clone, Copy)]
+enum SpillFlush {
+    Flush,
+    KeepBuffered,
+}
+
 impl ShellOutputBuffer {
     pub(crate) fn append(&mut self, id: &str, chunk: &[u8]) {
         if self.bytes.len() + chunk.len() > SPILL_OUTPUT_THRESHOLD {
@@ -273,7 +279,7 @@ pub(crate) fn render_buffer_output(
     max_output_tokens: Option<usize>,
 ) -> (String, Option<usize>, Option<PathBuf>) {
     let snapshot = buffer.lock_recover().render_all();
-    finalize_output(id, buffer, snapshot, max_output_tokens, true)
+    finalize_output(id, buffer, snapshot, max_output_tokens, SpillFlush::Flush)
 }
 
 pub(crate) fn take_buffer_output(
@@ -282,7 +288,13 @@ pub(crate) fn take_buffer_output(
     max_output_tokens: Option<usize>,
 ) -> (String, Option<usize>, Option<PathBuf>) {
     let snapshot = buffer.lock_recover().take_since();
-    finalize_output(id, buffer, snapshot, max_output_tokens, false)
+    finalize_output(
+        id,
+        buffer,
+        snapshot,
+        max_output_tokens,
+        SpillFlush::KeepBuffered,
+    )
 }
 
 fn finalize_output(
@@ -290,16 +302,23 @@ fn finalize_output(
     buffer: &Arc<StdMutex<ShellOutputBuffer>>,
     snapshot: OutputSnapshot,
     max_output_tokens: Option<usize>,
-    flush_spill: bool,
+    spill_flush: SpillFlush,
 ) -> (String, Option<usize>, Option<PathBuf>) {
     let rendered = clean_terminal_output(&snapshot.rendered);
     let (rendered, original_token_count, token_truncated) =
         truncate_exec_output(rendered, max_output_tokens);
     let mut full_output_path = snapshot.full_output_path;
     if token_truncated && full_output_path.is_none() {
+        // Keep terminal cleanup and token truncation outside the buffer lock so
+        // readers are not held behind string processing. Re-acquiring the lock
+        // here is safe: below MAX_OUTPUT, `bytes` is the complete
+        // capture, while an append that crosses that threshold activates
+        // `spill` under the same lock and makes this call return its path.
         let mut buffer = buffer.lock_recover();
         full_output_path = buffer.activate_spill(id);
-        if flush_spill && let Some(spill) = buffer.spill.as_mut() {
+        if matches!(spill_flush, SpillFlush::Flush)
+            && let Some(spill) = buffer.spill.as_mut()
+        {
             let _ = spill.file.flush();
         }
     }
@@ -671,5 +690,34 @@ mod reader_death_tests {
             panic!("reader death must be typed as a failure");
         };
         assert_eq!(failure.code, "shell_reader_died");
+    }
+}
+
+#[cfg(test)]
+mod finalize_output_tests {
+    use super::*;
+
+    #[test]
+    fn token_truncation_spill_seeds_from_current_buffer_after_snapshot() {
+        let buffer = Arc::new(StdMutex::new(ShellOutputBuffer::default()));
+        buffer.lock_recover().append("finalize-race", b"before");
+        let snapshot = buffer.lock_recover().render_all();
+        buffer.lock_recover().append("finalize-race", b"after");
+
+        let (output, _, full_output_path) = finalize_output(
+            "finalize-race",
+            &buffer,
+            snapshot,
+            Some(1),
+            SpillFlush::Flush,
+        );
+
+        assert!(output.ends_with("\n[truncated]"));
+        let full_output_path = full_output_path.expect("token truncation must activate spill");
+        assert_eq!(
+            fs::read(&full_output_path).expect("full output file"),
+            b"beforeafter"
+        );
+        let _ = fs::remove_file(full_output_path);
     }
 }
