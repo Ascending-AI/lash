@@ -1007,7 +1007,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let result = plan.result(checkpoint_ref, manifest, enqueued_queue_batches);
         {
             let receipt = plan.receipt_write(&result);
-            let columns = append_identity_columns(receipt.append_request_identity);
+            let columns = append_identity_columns(receipt.append_request_identity)?;
             sqlx::query(
                 "INSERT INTO lash_runtime_turn_commits (
                     session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
@@ -3848,15 +3848,57 @@ fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Optio
         .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
 }
 
+type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<&'a str>, Option<i32>);
+
 fn append_identity_columns(
     identity: Option<&lash_core::AppendRequestIdentity>,
-) -> (Option<&str>, Option<i64>, Option<&str>, Option<i32>) {
-    identity.map_or((None, None, None, None), |identity| {
-        (
-            Some(identity.request_hash.as_str()),
-            Some(identity.requested_node_count as i64),
-            identity.requested_ancestor_node_id.as_deref(),
-            i32::try_from(identity.encoding_version).ok(),
-        )
-    })
+) -> Result<AppendIdentityColumns<'_>, StoreError> {
+    let Some(identity) = identity else {
+        return Ok((None, None, None, None));
+    };
+    let encoding_version =
+        i32::try_from(identity.encoding_version).map_err(|_| StoreError::RecordEncodingFailed {
+            record_kind: "RuntimeCommitReceipt append identity".to_string(),
+            message: format!(
+                "identity_encoding_version `{}` does not fit PostgreSQL INTEGER",
+                identity.encoding_version
+            ),
+        })?;
+    Ok((
+        Some(identity.request_hash.as_str()),
+        Some(identity.requested_node_count as i64),
+        identity.requested_ancestor_node_id.as_deref(),
+        Some(encoding_version),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn append_identity_columns_refuse_encoding_versions_that_do_not_fit_postgres_integer() {
+        let identity = lash_core::AppendRequestIdentity {
+            encoding_version: i32::MAX as u32 + 1,
+            request_hash: "request-hash".to_string(),
+            requested_node_count: 1,
+            requested_ancestor_node_id: None,
+        };
+
+        let error = append_identity_columns(Some(&identity))
+            .expect_err("out-of-range encoding version must be refused");
+        match error {
+            StoreError::RecordEncodingFailed {
+                record_kind,
+                message,
+            } => {
+                assert_eq!(record_kind, "RuntimeCommitReceipt append identity");
+                assert_eq!(
+                    message,
+                    "identity_encoding_version `2147483648` does not fit PostgreSQL INTEGER"
+                );
+            }
+            other => panic!("expected typed record encoding failure, got {other:?}"),
+        }
+    }
 }

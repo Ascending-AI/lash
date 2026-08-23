@@ -586,6 +586,7 @@ pub struct RuntimeTurnCommitStamp {
     /// or a legacy receipt.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    // No durable JSON path writes this stamp; the column path is the durable one.
     #[serde(default, flatten)]
     pub append_request_identity: Option<AppendRequestIdentity>,
 }
@@ -621,5 +622,30 @@ impl RuntimeTurnCommitStamp {
                 requested_ancestor_node_id: requested_ancestor_node_id.map(str::to_string),
             }),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partial_json_stamp_deserializes_as_absent_identity() {
+        let operation = OperationId::new(
+            crate::ExecutionScope::runtime_operation("partial-json-stamp"),
+            "append-session-nodes",
+        );
+        let mut json =
+            serde_json::to_value(RuntimeTurnCommitStamp::new(operation)).expect("stamp serializes");
+        json.as_object_mut()
+            .expect("stamp serializes as an object")
+            .insert(
+                "identity_encoding_version".to_string(),
+                serde_json::json!(2),
+            );
+
+        let stamp: RuntimeTurnCommitStamp =
+            serde_json::from_value(json).expect("partial JSON stamp remains lenient");
+        assert!(stamp.append_request_identity.is_none());
     }
 }
