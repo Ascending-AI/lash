@@ -12,7 +12,7 @@ use std::io::Write;
 #[cfg(unix)]
 use std::os::fd::FromRawFd;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::{
     Arc, Mutex as StdMutex,
     atomic::{AtomicBool, AtomicI32, Ordering},
@@ -85,6 +85,24 @@ pub(crate) struct PipeExecProcessRequest<'a> {
     pub(crate) timeout: Option<Duration>,
     pub(crate) max_output_tokens: Option<usize>,
     pub(crate) cancel: Option<CancellationToken>,
+}
+
+#[derive(Clone, Copy)]
+enum PollFinish {
+    Cancelled,
+    Exited(i32),
+    Running,
+}
+
+struct PipeProcessState {
+    child_pid: Option<u32>,
+    wait_handle: tokio::task::JoinHandle<std::io::Result<ExitStatus>>,
+    reader_handles: Vec<tokio::task::JoinHandle<()>>,
+    buffer: Arc<StdMutex<Vec<u8>>>,
+    buffer_start: Arc<StdMutex<usize>>,
+    truncated: Arc<AtomicBool>,
+    spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
+    reader_died: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
@@ -173,6 +191,10 @@ pub(crate) struct ShellRuntime {
     next_session_id: Arc<AtomicI32>,
     #[cfg(test)]
     detached_launch_gate: Option<Arc<DetachedLaunchGate>>,
+    #[cfg(test)]
+    abort_pipe_reader: bool,
+    #[cfg(test)]
+    pipe_loop_gate: Option<Arc<tokio::sync::Barrier>>,
 }
 
 #[cfg(test)]
@@ -215,6 +237,10 @@ impl ShellRuntime {
             next_session_id: Arc::new(AtomicI32::new(1)),
             #[cfg(test)]
             detached_launch_gate: None,
+            #[cfg(test)]
+            abort_pipe_reader: false,
+            #[cfg(test)]
+            pipe_loop_gate: None,
         }
     }
 
@@ -226,6 +252,18 @@ impl ShellRuntime {
     #[cfg(test)]
     pub(crate) fn with_detached_launch_gate(mut self, gate: Arc<DetachedLaunchGate>) -> Self {
         self.detached_launch_gate = Some(gate);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_aborted_pipe_reader(mut self) -> Self {
+        self.abort_pipe_reader = true;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_pipe_loop_gate(mut self, gate: Arc<tokio::sync::Barrier>) -> Self {
+        self.pipe_loop_gate = Some(gate);
         self
     }
 
@@ -573,7 +611,7 @@ impl ShellRuntime {
         id: &str,
         max_output_tokens: Option<usize>,
     ) -> ShellResult<(String, Option<usize>, Option<PathBuf>)> {
-        let (buffer, buffer_start, truncated, read_cursor, spill, reader_died) = {
+        let (buffer, buffer_start, truncated, read_cursor, spill) = {
             let procs = self.table.processes.lock_recover();
             let proc = procs.get(id).ok_or_else(|| {
                 shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
@@ -584,13 +622,8 @@ impl ShellRuntime {
                 Arc::clone(&proc.truncated),
                 Arc::clone(&proc.read_cursor),
                 Arc::clone(&proc.spill),
-                Arc::clone(&proc.reader_died),
             )
         };
-
-        if reader_died.load(Ordering::SeqCst) {
-            return Err(shell_reader_died_failure());
-        }
 
         let buf = buffer.lock_recover();
         let start_offset = *buffer_start.lock_recover();
@@ -621,6 +654,49 @@ impl ShellRuntime {
         Ok((rendered, original_token_count, full_output_path))
     }
 
+    async fn finish_tracked_process(
+        &self,
+        id: &str,
+        state: &ProcessState,
+        max_output_tokens: Option<usize>,
+        finish: PollFinish,
+    ) -> ShellResult<PollOutcome> {
+        match finish {
+            PollFinish::Cancelled => {
+                kill_child(state);
+                wait_for_child_exit(state, Duration::from_millis(500)).await;
+            }
+            PollFinish::Exited(_) => {
+                wait_for_buffer_settle(state, Duration::from_millis(OUTPUT_QUIET_PERIOD_MS)).await;
+            }
+            PollFinish::Running => {}
+        }
+
+        if state.reader_died.load(Ordering::SeqCst) {
+            return Err(shell_reader_died_failure());
+        }
+        if matches!(finish, PollFinish::Cancelled) {
+            return Ok(PollOutcome::Cancelled);
+        }
+
+        let (output, original_token_count, full_output_path) =
+            self.take_incremental_output(id, max_output_tokens)?;
+        Ok(match finish {
+            PollFinish::Exited(exit_code) => PollOutcome::Exited {
+                output,
+                original_token_count,
+                exit_code,
+                full_output_path,
+            },
+            PollFinish::Running => PollOutcome::Running {
+                output,
+                original_token_count,
+                full_output_path,
+            },
+            PollFinish::Cancelled => unreachable!("cancelled returned before rendering"),
+        })
+    }
+
     pub(crate) async fn wait_until_exit_or_timeout(
         &self,
         id: &str,
@@ -630,75 +706,43 @@ impl ShellRuntime {
     ) -> ShellResult<PollOutcome> {
         let state = self.process_state(id)?;
         let deadline = timeout.map(|value| tokio::time::Instant::now() + value);
+        let cancel = cancel.unwrap_or_default();
         loop {
             if state.reader_died.load(Ordering::SeqCst) {
                 return Err(shell_reader_died_failure());
             }
-            if let Some(token) = cancel.as_ref()
-                && token.is_cancelled()
-            {
-                kill_child(&state);
-                wait_for_child_exit(&state, Duration::from_millis(500)).await;
-                return Ok(PollOutcome::Cancelled);
+            if cancel.is_cancelled() {
+                return self
+                    .finish_tracked_process(id, &state, max_output_tokens, PollFinish::Cancelled)
+                    .await;
             }
 
-            let exited = state.exit_code.lock_recover().is_some();
-            if exited {
-                wait_for_buffer_settle(&state, Duration::from_millis(OUTPUT_QUIET_PERIOD_MS)).await;
-                let (output, original_token_count, full_output_path) =
-                    self.take_incremental_output(id, max_output_tokens)?;
-                let exit_code = state.exit_code.lock_recover().unwrap_or(-1);
-                return Ok(PollOutcome::Exited {
-                    output,
-                    original_token_count,
-                    exit_code,
-                    full_output_path,
-                });
+            let exit_code = *state.exit_code.lock_recover();
+            if let Some(exit_code) = exit_code {
+                return self
+                    .finish_tracked_process(
+                        id,
+                        &state,
+                        max_output_tokens,
+                        PollFinish::Exited(exit_code),
+                    )
+                    .await;
             }
 
             if let Some(dl) = deadline
                 && tokio::time::Instant::now() >= dl
             {
                 let exit_code = *state.exit_code.lock_recover();
-                if let Some(exit_code) = exit_code {
-                    wait_for_buffer_settle(&state, Duration::from_millis(OUTPUT_QUIET_PERIOD_MS))
-                        .await;
-                    let (output, original_token_count, full_output_path) =
-                        self.take_incremental_output(id, max_output_tokens)?;
-                    return Ok(PollOutcome::Exited {
-                        output,
-                        original_token_count,
-                        exit_code,
-                        full_output_path,
-                    });
-                }
-                let (output, original_token_count, full_output_path) =
-                    self.take_incremental_output(id, max_output_tokens)?;
-                return Ok(PollOutcome::Running {
-                    output,
-                    original_token_count,
-                    full_output_path,
-                });
+                let finish = exit_code.map_or(PollFinish::Running, PollFinish::Exited);
+                return self
+                    .finish_tracked_process(id, &state, max_output_tokens, finish)
+                    .await;
             }
 
-            let cancel_future = async {
-                match cancel.as_ref() {
-                    Some(token) => token.cancelled().await,
-                    None => std::future::pending::<()>().await,
-                }
-            };
-
-            if let Some(wake_at) = deadline {
-                tokio::select! {
-                    _ = state.exit_notify.notified() => {}
-                    _ = tokio::time::sleep_until(wake_at) => {}
-                    _ = cancel_future => {}
-                }
-            } else {
-                tokio::select! {
-                    _ = state.exit_notify.notified() => {}
-                    _ = cancel_future => {}
-                }
+            tokio::select! {
+                _ = state.exit_notify.notified() => {}
+                _ = sleep_until(deadline), if deadline.is_some() => {}
+                _ = cancel.cancelled() => {}
             }
         }
     }
@@ -782,6 +826,7 @@ impl ShellRuntime {
             max_output_tokens,
             cancel,
         } = request;
+        let cancel = cancel.unwrap_or_default();
         let mut cmd = TokioCommand::new(shell_path);
         for arg in self.shell_args(command, login, shell_path, false)? {
             cmd.arg(arg);
@@ -846,119 +891,149 @@ impl ShellRuntime {
             ));
         }
 
+        #[cfg(test)]
+        if self.abort_pipe_reader {
+            let abort_handle = reader_handles[0].abort_handle();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                abort_handle.abort();
+            });
+        }
+
         let deadline = timeout.map(|value| tokio::time::Instant::now() + value);
-        let wait_handle = tokio::spawn(async move { child.wait().await });
-        tokio::pin!(wait_handle);
+        let mut process = PipeProcessState {
+            child_pid,
+            wait_handle: tokio::spawn(async move { child.wait().await }),
+            reader_handles,
+            buffer,
+            buffer_start,
+            truncated,
+            spill,
+            reader_died,
+        };
+        #[cfg(test)]
+        if let Some(gate) = &self.pipe_loop_gate {
+            gate.wait().await;
+            gate.wait().await;
+        }
         loop {
-            if let Some(token) = cancel.as_ref()
-                && token.is_cancelled()
-            {
-                terminate_pipe_process(child_pid);
-                let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait_handle).await;
-                wait_for_pipe_readers(&mut reader_handles).await;
-                if reader_died.load(Ordering::SeqCst) {
-                    return Err(shell_reader_died_failure());
-                }
-                return Ok(PollOutcome::Cancelled);
+            if process.reader_died.load(Ordering::SeqCst) {
+                return finish_pipe_process(
+                    id,
+                    &mut process,
+                    max_output_tokens,
+                    PollFinish::Cancelled,
+                )
+                .await;
+            }
+            if cancel.is_cancelled() {
+                return finish_pipe_process(
+                    id,
+                    &mut process,
+                    max_output_tokens,
+                    PollFinish::Cancelled,
+                )
+                .await;
+            }
+
+            if process.wait_handle.is_finished() {
+                let exit_code = pipe_exit_code((&mut process.wait_handle).await)?;
+                return finish_pipe_process(
+                    id,
+                    &mut process,
+                    max_output_tokens,
+                    PollFinish::Exited(exit_code),
+                )
+                .await;
             }
 
             if let Some(dl) = deadline
                 && tokio::time::Instant::now() >= dl
             {
-                terminate_pipe_process(child_pid);
-                let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait_handle).await;
-                wait_for_pipe_readers(&mut reader_handles).await;
-                let (output, original_token_count, full_output_path) = render_buffer_output(
+                return finish_pipe_process(
                     id,
-                    &buffer,
-                    &buffer_start,
-                    Arc::as_ref(&truncated),
-                    &spill,
+                    &mut process,
                     max_output_tokens,
-                );
-                return Ok(PollOutcome::Running {
-                    output,
-                    original_token_count,
-                    full_output_path,
-                });
+                    PollFinish::Running,
+                )
+                .await;
             }
 
-            let cancel_future = async {
-                match cancel.as_ref() {
-                    Some(token) => token.cancelled().await,
-                    None => std::future::pending::<()>().await,
+            tokio::select! {
+                status = &mut process.wait_handle => {
+                    let exit_code = pipe_exit_code(status)?;
+                    return finish_pipe_process(
+                        id,
+                        &mut process,
+                        max_output_tokens,
+                        PollFinish::Exited(exit_code),
+                    )
+                    .await;
                 }
-            };
-
-            if let Some(wake_at) = deadline {
-                tokio::select! {
-                    status = &mut wait_handle => {
-                        let exit_code = status
-                            .map_err(|err| {
-                                shell_execution_failure(
-                                    "shell_wait_task_failed",
-                                    format!("Wait task failed: {err}"),
-                                )
-                            })?
-                            .map(exit_status_code)
-                            .unwrap_or(-1);
-                        wait_for_pipe_readers(&mut reader_handles).await;
-                        if reader_died.load(Ordering::SeqCst) {
-                            return Err(shell_reader_died_failure());
-                        }
-                        let (output, original_token_count, full_output_path) = render_buffer_output(
-                            id,
-                            &buffer,
-                            &buffer_start,
-                            Arc::as_ref(&truncated),
-                            &spill,
-                            max_output_tokens,
-                        );
-                        return Ok(PollOutcome::Exited {
-                            output,
-                            original_token_count,
-                            exit_code,
-                            full_output_path,
-                        });
-                    }
-                    _ = tokio::time::sleep_until(wake_at) => {}
-                    _ = cancel_future => {}
-                }
-            } else {
-                tokio::select! {
-                    status = &mut wait_handle => {
-                        let exit_code = status
-                            .map_err(|err| {
-                                shell_execution_failure(
-                                    "shell_wait_task_failed",
-                                    format!("Wait task failed: {err}"),
-                                )
-                            })?
-                            .map(exit_status_code)
-                            .unwrap_or(-1);
-                        wait_for_pipe_readers(&mut reader_handles).await;
-                        if reader_died.load(Ordering::SeqCst) {
-                            return Err(shell_reader_died_failure());
-                        }
-                        let (output, original_token_count, full_output_path) = render_buffer_output(
-                            id,
-                            &buffer,
-                            &buffer_start,
-                            Arc::as_ref(&truncated),
-                            &spill,
-                            max_output_tokens,
-                        );
-                        return Ok(PollOutcome::Exited {
-                            output,
-                            original_token_count,
-                            exit_code,
-                            full_output_path,
-                        });
-                    }
-                    _ = cancel_future => {}
-                }
+                _ = sleep_until(deadline), if deadline.is_some() => {}
+                _ = cancel.cancelled() => {}
             }
         }
+    }
+}
+
+fn pipe_exit_code(
+    status: Result<std::io::Result<ExitStatus>, tokio::task::JoinError>,
+) -> ShellResult<i32> {
+    Ok(status
+        .map_err(|err| {
+            shell_execution_failure("shell_wait_task_failed", format!("Wait task failed: {err}"))
+        })?
+        .map(exit_status_code)
+        .unwrap_or(-1))
+}
+
+async fn finish_pipe_process(
+    id: &str,
+    process: &mut PipeProcessState,
+    max_output_tokens: Option<usize>,
+    finish: PollFinish,
+) -> ShellResult<PollOutcome> {
+    if matches!(finish, PollFinish::Cancelled | PollFinish::Running) {
+        terminate_pipe_process(process.child_pid);
+        let _ = tokio::time::timeout(Duration::from_millis(500), &mut process.wait_handle).await;
+    }
+    wait_for_pipe_readers(&mut process.reader_handles).await;
+    if process.reader_died.load(Ordering::SeqCst) {
+        return Err(shell_reader_died_failure());
+    }
+    if matches!(finish, PollFinish::Cancelled) {
+        return Ok(PollOutcome::Cancelled);
+    }
+
+    let (output, original_token_count, full_output_path) = render_buffer_output(
+        id,
+        &process.buffer,
+        &process.buffer_start,
+        Arc::as_ref(&process.truncated),
+        &process.spill,
+        max_output_tokens,
+    );
+    Ok(match finish {
+        PollFinish::Exited(exit_code) => PollOutcome::Exited {
+            output,
+            original_token_count,
+            exit_code,
+            full_output_path,
+        },
+        PollFinish::Running => PollOutcome::Running {
+            output,
+            original_token_count,
+            full_output_path,
+        },
+        PollFinish::Cancelled => unreachable!("cancelled returned before rendering"),
+    })
+}
+
+async fn sleep_until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
     }
 }
 
