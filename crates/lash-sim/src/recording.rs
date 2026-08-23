@@ -292,6 +292,7 @@ impl RecordingExchange {
                 captured_at: Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)),
                 notes: self.config.notes.clone(),
             }),
+            compiled_plan: std::sync::OnceLock::new(),
         };
         let mut encoded = serde_json::to_vec_pretty(&script).map_err(|error| {
             recording_error(format!("could not serialize provider recording: {error}"))

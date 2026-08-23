@@ -1,7 +1,7 @@
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 
 pub const PROVIDER_WIRE_SCRIPT_SCHEMA: &str = "lash.provider-wire-script.v1";
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderWireScript {
     pub schema: String,
@@ -29,6 +29,24 @@ pub struct ProviderWireScript {
     pub expected_provider: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<ProviderWireProvenance>,
+    #[serde(skip)]
+    pub(crate) compiled_plan: OnceLock<Result<ScriptedResponsePlan, LlmTransportError>>,
+}
+
+impl Clone for ProviderWireScript {
+    fn clone(&self) -> Self {
+        Self {
+            schema: self.schema.clone(),
+            name: self.name.clone(),
+            provider_kind: self.provider_kind.clone(),
+            endpoint: self.endpoint.clone(),
+            request_match: self.request_match.clone(),
+            timeline: self.timeline.clone(),
+            expected_provider: self.expected_provider.clone(),
+            provenance: self.provenance.clone(),
+            compiled_plan: OnceLock::new(),
+        }
+    }
 }
 
 impl ProviderWireScript {
@@ -66,7 +84,18 @@ impl ProviderWireScript {
             }
             previous_at = at;
         }
+        self.plan()?;
         Ok(())
+    }
+
+    fn plan(&self) -> Result<&ScriptedResponsePlan, LlmTransportError> {
+        match self
+            .compiled_plan
+            .get_or_init(|| ScriptedResponsePlan::build(&self.name, &self.timeline))
+        {
+            Ok(plan) => Ok(plan),
+            Err(error) => Err(error.clone()),
+        }
     }
 }
 
@@ -228,6 +257,297 @@ impl ProviderWireEvent {
             Self::HttpError { .. } => "http_error",
             Self::TransportError { .. } => "transport_error",
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ScriptedResponsePlan {
+    Response {
+        event_index: usize,
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: BodyPlan,
+    },
+    HttpError {
+        event_index: usize,
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: Bytes,
+    },
+    Failure {
+        event_index: usize,
+        error: LlmTransportError,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum BodyPlan {
+    Buffered(Vec<BufferedStep>),
+    Streamed(Vec<StreamStep>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BufferedStep {
+    event_index: usize,
+    bytes: Option<Bytes>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum StreamStep {
+    Chunk {
+        event_index: usize,
+        bytes: Bytes,
+    },
+    End {
+        event_index: usize,
+    },
+    Failure {
+        event_index: usize,
+        error: LlmTransportError,
+    },
+}
+
+impl ScriptedResponsePlan {
+    fn build(script_name: &str, timeline: &[ProviderWireEvent]) -> Result<Self, LlmTransportError> {
+        let first = timeline.first().ok_or_else(|| {
+            script_validation_error(format!(
+                "Provider Wire Script `{script_name}` has no timeline events"
+            ))
+        })?;
+        match first {
+            ProviderWireEvent::ResponseStart {
+                status, headers, ..
+            } => Ok(Self::Response {
+                event_index: 0,
+                status: *status,
+                headers: header_vec(headers.clone()),
+                body: BodyPlan::build(script_name, &timeline[1..])?,
+            }),
+            ProviderWireEvent::HttpError {
+                status,
+                headers,
+                body,
+                ..
+            } => {
+                require_final_event(script_name, timeline, 0, "http_error")?;
+                Ok(Self::HttpError {
+                    event_index: 0,
+                    status: *status,
+                    headers: header_vec(headers.clone()),
+                    body: Bytes::from(body.clone()),
+                })
+            }
+            ProviderWireEvent::Timeout { message, .. } => {
+                require_final_event(script_name, timeline, 0, "timeout")?;
+                Ok(Self::Failure {
+                    event_index: 0,
+                    error: timeout_error(message.clone()),
+                })
+            }
+            ProviderWireEvent::TransportError {
+                message, retryable, ..
+            } => {
+                require_final_event(script_name, timeline, 0, "transport_error")?;
+                Ok(Self::Failure {
+                    event_index: 0,
+                    error: transport_error(message.clone(), *retryable),
+                })
+            }
+            event => Err(script_validation_error(format!(
+                "Provider Wire Script `{script_name}` emitted `{}` before response_start at index 0",
+                event.event_name()
+            ))),
+        }
+    }
+
+    #[cfg(test)]
+    fn event_indices(&self) -> Vec<usize> {
+        match self {
+            Self::Response {
+                event_index, body, ..
+            } => std::iter::once(*event_index)
+                .chain(body.event_indices())
+                .collect(),
+            Self::HttpError { event_index, .. } | Self::Failure { event_index, .. } => {
+                vec![*event_index]
+            }
+        }
+    }
+}
+
+impl BodyPlan {
+    fn build(
+        script_name: &str,
+        timeline_after_start: &[ProviderWireEvent],
+    ) -> Result<Self, LlmTransportError> {
+        let mut buffered_steps = Vec::with_capacity(timeline_after_start.len());
+        let mut streamed_steps = Vec::with_capacity(timeline_after_start.len());
+        let mut streamed = false;
+
+        for (offset, event) in timeline_after_start.iter().enumerate() {
+            let event_index = offset + 1;
+            match event {
+                ProviderWireEvent::Body { data, .. } => {
+                    let bytes = Bytes::from(data.clone());
+                    buffered_steps.push(BufferedStep {
+                        event_index,
+                        bytes: Some(bytes.clone()),
+                    });
+                    streamed_steps.push(StreamStep::Chunk { event_index, bytes });
+                }
+                ProviderWireEvent::Chunk { data, bytes, .. } => {
+                    streamed = true;
+                    streamed_steps.push(StreamStep::Chunk {
+                        event_index,
+                        bytes: chunk_bytes(script_name, data.clone(), bytes.clone())?,
+                    });
+                }
+                ProviderWireEvent::Sse { data, .. } => {
+                    streamed = true;
+                    streamed_steps.push(StreamStep::Chunk {
+                        event_index,
+                        bytes: Bytes::from(format!("data: {data}\n\n")),
+                    });
+                }
+                ProviderWireEvent::End { .. } => {
+                    require_final_body_event(script_name, timeline_after_start, offset, "end")?;
+                    buffered_steps.push(BufferedStep {
+                        event_index,
+                        bytes: None,
+                    });
+                    streamed_steps.push(StreamStep::End { event_index });
+                }
+                ProviderWireEvent::Disconnect {
+                    message, retryable, ..
+                } => {
+                    require_final_body_event(
+                        script_name,
+                        timeline_after_start,
+                        offset,
+                        "disconnect",
+                    )?;
+                    streamed = true;
+                    streamed_steps.push(StreamStep::Failure {
+                        event_index,
+                        error: disconnect_error(message.clone(), *retryable),
+                    });
+                }
+                ProviderWireEvent::Timeout { message, .. } => {
+                    require_final_body_event(script_name, timeline_after_start, offset, "timeout")?;
+                    streamed = true;
+                    streamed_steps.push(StreamStep::Failure {
+                        event_index,
+                        error: timeout_error(message.clone()),
+                    });
+                }
+                ProviderWireEvent::TransportError {
+                    message, retryable, ..
+                } => {
+                    require_final_body_event(
+                        script_name,
+                        timeline_after_start,
+                        offset,
+                        "transport_error",
+                    )?;
+                    streamed = true;
+                    streamed_steps.push(StreamStep::Failure {
+                        event_index,
+                        error: transport_error(message.clone(), *retryable),
+                    });
+                }
+                ProviderWireEvent::ResponseStart { .. } => {
+                    return Err(script_validation_error(format!(
+                        "Provider Wire Script `{script_name}` emitted a second response_start at index {event_index}"
+                    )));
+                }
+                ProviderWireEvent::HttpError { .. } => {
+                    return Err(script_validation_error(format!(
+                        "Provider Wire Script `{script_name}` emitted http_error after response_start at index {event_index}"
+                    )));
+                }
+            }
+        }
+
+        if streamed {
+            Ok(Self::Streamed(streamed_steps))
+        } else {
+            Ok(Self::Buffered(buffered_steps))
+        }
+    }
+
+    #[cfg(test)]
+    fn event_indices(&self) -> impl Iterator<Item = usize> + '_ {
+        match self {
+            Self::Buffered(steps) => BodyEventIndices::Buffered(steps.iter()),
+            Self::Streamed(steps) => BodyEventIndices::Streamed(steps.iter()),
+        }
+    }
+}
+
+#[cfg(test)]
+enum BodyEventIndices<'a> {
+    Buffered(std::slice::Iter<'a, BufferedStep>),
+    Streamed(std::slice::Iter<'a, StreamStep>),
+}
+
+#[cfg(test)]
+impl Iterator for BodyEventIndices<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Buffered(steps) => steps.next().map(|step| step.event_index),
+            Self::Streamed(steps) => steps.next().map(StreamStep::event_index),
+        }
+    }
+}
+
+impl StreamStep {
+    fn event_index(&self) -> usize {
+        match self {
+            Self::Chunk { event_index, .. }
+            | Self::End { event_index }
+            | Self::Failure { event_index, .. } => *event_index,
+        }
+    }
+
+    fn into_chunk(self) -> Result<Option<Bytes>, LlmTransportError> {
+        match self {
+            Self::Chunk { bytes, .. } => Ok(Some(bytes)),
+            Self::End { .. } => Ok(None),
+            Self::Failure { error, .. } => Err(error),
+        }
+    }
+}
+
+fn require_final_event(
+    script_name: &str,
+    timeline: &[ProviderWireEvent],
+    event_index: usize,
+    event_name: &str,
+) -> Result<(), LlmTransportError> {
+    if event_index + 1 == timeline.len() {
+        Ok(())
+    } else {
+        Err(script_validation_error(format!(
+            "Provider Wire Script `{script_name}` `{event_name}` at index {event_index} must be the final timeline event"
+        )))
+    }
+}
+
+fn require_final_body_event(
+    script_name: &str,
+    timeline_after_start: &[ProviderWireEvent],
+    body_offset: usize,
+    event_name: &str,
+) -> Result<(), LlmTransportError> {
+    if body_offset + 1 == timeline_after_start.len() {
+        Ok(())
+    } else {
+        let event_index = body_offset + 1;
+        Err(script_validation_error(format!(
+            "Provider Wire Script `{script_name}` `{event_name}` at index {event_index} must be the final timeline event"
+        )))
     }
 }
 
@@ -494,7 +814,7 @@ impl LlmHttpTransport for ScriptedLlmHttpTransport {
                 .as_deref()
                 .unwrap_or("LLM HTTP response start timed out");
             let result = execute_scheduled_script(
-                script.clone(),
+                &script,
                 exchange_index,
                 schedule.clone(),
                 timeout,
@@ -508,7 +828,7 @@ impl LlmHttpTransport for ScriptedLlmHttpTransport {
             }
             return result;
         }
-        let result = execute_script(script.clone());
+        let result = execute_script(&script);
         let exchange = scripted_exchange(&script, &request, true);
         self.record_exchange(exchange)?;
         result
@@ -671,205 +991,138 @@ fn json_shape(value: &Value) -> Value {
 
 #[derive(Debug)]
 struct ScriptedByteStream {
-    events: VecDeque<ScriptedByteEvent>,
+    steps: VecDeque<StreamStep>,
 }
 
 impl ScriptedByteStream {
-    fn new(events: VecDeque<ScriptedByteEvent>) -> Self {
-        Self { events }
+    fn new(steps: Vec<StreamStep>) -> Self {
+        Self {
+            steps: steps.into(),
+        }
     }
-}
-
-#[derive(Debug)]
-enum ScriptedByteEvent {
-    Chunk(Bytes),
-    Error(LlmTransportError),
 }
 
 #[async_trait]
 impl LlmByteStream for ScriptedByteStream {
     async fn next_chunk(&mut self) -> Result<Option<Bytes>, LlmTransportError> {
-        match self.events.pop_front() {
-            Some(ScriptedByteEvent::Chunk(chunk)) => Ok(Some(chunk)),
-            Some(ScriptedByteEvent::Error(error)) => Err(error),
-            None => Ok(None),
-        }
+        self.steps
+            .pop_front()
+            .map_or(Ok(None), StreamStep::into_chunk)
     }
 }
 
 #[derive(Debug)]
 struct ScheduledScriptedByteStream {
-    script_name: String,
     exchange_index: usize,
     schedule: ScriptedTransportSchedule,
-    events: VecDeque<ScheduledByteEvent>,
+    steps: VecDeque<StreamStep>,
 }
 
 impl ScheduledScriptedByteStream {
     fn new(
-        script_name: String,
         exchange_index: usize,
         schedule: ScriptedTransportSchedule,
-        events: VecDeque<ScheduledByteEvent>,
+        steps: Vec<StreamStep>,
     ) -> Self {
         Self {
-            script_name,
             exchange_index,
             schedule,
-            events,
+            steps: steps.into(),
         }
     }
-}
-
-#[derive(Debug)]
-enum ScheduledByteEvent {
-    Immediate(Bytes),
-    Scripted(usize, ProviderWireEvent),
 }
 
 #[async_trait]
 impl LlmByteStream for ScheduledScriptedByteStream {
     async fn next_chunk(&mut self) -> Result<Option<Bytes>, LlmTransportError> {
-        let Some(event) = self.events.pop_front() else {
+        let Some(step) = self.steps.pop_front() else {
             return Ok(None);
         };
-        let (event_index, event) = match event {
-            ScheduledByteEvent::Immediate(bytes) => return Ok(Some(bytes)),
-            ScheduledByteEvent::Scripted(event_index, event) => (event_index, event),
-        };
-        let event_name = event.event_name();
+        let event_index = step.event_index();
         self.schedule
             .wait_for_release(self.exchange_index, event_index)
             .await;
-        match event {
-            ProviderWireEvent::Body { data, .. } => Ok(Some(Bytes::from(data))),
-            ProviderWireEvent::Chunk { data, bytes, .. } => {
-                Ok(Some(chunk_bytes(&self.script_name, data, bytes)?))
-            }
-            ProviderWireEvent::Sse { data, .. } => {
-                Ok(Some(Bytes::from(format!("data: {data}\n\n"))))
-            }
-            ProviderWireEvent::End { .. } => Ok(None),
-            ProviderWireEvent::Disconnect {
-                message, retryable, ..
-            } => Err(disconnect_error(message, retryable)),
-            ProviderWireEvent::Timeout { message, .. } => Err(timeout_error(message)),
-            ProviderWireEvent::TransportError {
-                message, retryable, ..
-            } => Err(transport_error(message, retryable)),
-            ProviderWireEvent::ResponseStart { .. } | ProviderWireEvent::HttpError { .. } => {
-                Err(script_validation_error(format!(
-                    "Provider Wire Script `{}` emitted `{event_name}` inside a response body stream",
-                    self.script_name
-                )))
-            }
-        }
+        step.into_chunk()
     }
 }
 
 async fn execute_scheduled_script(
-    script: ProviderWireScript,
+    script: &ProviderWireScript,
     exchange_index: usize,
     schedule: ScriptedTransportSchedule,
     timeout: Option<std::time::Duration>,
     response_start_timeout_message: &str,
 ) -> Result<LlmHttpResponse, LlmTransportError> {
-    let mut prefix_body = BytesMut::new();
-    let script_name = script.name.clone();
-    let mut timeline = script
-        .timeline
-        .into_iter()
-        .enumerate()
-        .collect::<VecDeque<_>>();
-    while let Some((event_index, event)) = timeline.pop_front() {
-        match event {
-            ProviderWireEvent::ResponseStart {
-                status, headers, ..
-            } => {
-                wait_for_scheduled_response_event(
-                    &schedule,
-                    exchange_index,
-                    event_index,
-                    timeout,
-                    response_start_timeout_message,
-                )
-                .await?;
-                let body = scheduled_response_body(
-                    script_name,
-                    exchange_index,
-                    schedule,
-                    prefix_body,
-                    timeline,
-                )
-                .await?;
-                return Ok(LlmHttpResponse {
-                    status,
-                    headers: header_vec(headers),
-                    body,
-                });
-            }
-            ProviderWireEvent::Body { data, .. } => {
-                prefix_body.extend_from_slice(data.as_bytes());
-            }
-            ProviderWireEvent::HttpError {
+    match script.plan()?.clone() {
+        ScriptedResponsePlan::Response {
+            event_index,
+            status,
+            headers,
+            body,
+        } => {
+            wait_for_scheduled_response_event(
+                &schedule,
+                exchange_index,
+                event_index,
+                timeout,
+                response_start_timeout_message,
+            )
+            .await?;
+            let body = match body {
+                BodyPlan::Buffered(steps) => {
+                    let mut bytes = BytesMut::new();
+                    for step in steps {
+                        schedule
+                            .wait_for_release(exchange_index, step.event_index)
+                            .await;
+                        if let Some(chunk) = step.bytes {
+                            bytes.extend_from_slice(&chunk);
+                        }
+                    }
+                    LlmHttpBody::buffered(bytes.freeze())
+                }
+                BodyPlan::Streamed(steps) => LlmHttpBody::streamed(
+                    ScheduledScriptedByteStream::new(exchange_index, schedule, steps),
+                ),
+            };
+            Ok(LlmHttpResponse {
                 status,
                 headers,
                 body,
-                ..
-            } => {
-                wait_for_scheduled_response_event(
-                    &schedule,
-                    exchange_index,
-                    event_index,
-                    timeout,
-                    response_start_timeout_message,
-                )
-                .await?;
-                return Ok(LlmHttpResponse {
-                    status,
-                    headers: header_vec(headers),
-                    body: LlmHttpBody::buffered(body),
-                });
-            }
-            ProviderWireEvent::TransportError {
-                message, retryable, ..
-            } => {
-                wait_for_scheduled_response_event(
-                    &schedule,
-                    exchange_index,
-                    event_index,
-                    timeout,
-                    response_start_timeout_message,
-                )
-                .await?;
-                return Err(transport_error(message, retryable));
-            }
-            ProviderWireEvent::Timeout { message, .. } => {
-                wait_for_scheduled_response_event(
-                    &schedule,
-                    exchange_index,
-                    event_index,
-                    timeout,
-                    response_start_timeout_message,
-                )
-                .await?;
-                return Err(timeout_error(message));
-            }
-            ProviderWireEvent::Chunk { .. }
-            | ProviderWireEvent::Sse { .. }
-            | ProviderWireEvent::End { .. }
-            | ProviderWireEvent::Disconnect { .. } => {
-                return Err(script_validation_error(format!(
-                    "Provider Wire Script `{script_name}` emitted `{}` before response_start",
-                    event.event_name()
-                )));
-            }
+            })
+        }
+        ScriptedResponsePlan::HttpError {
+            event_index,
+            status,
+            headers,
+            body,
+        } => {
+            wait_for_scheduled_response_event(
+                &schedule,
+                exchange_index,
+                event_index,
+                timeout,
+                response_start_timeout_message,
+            )
+            .await?;
+            Ok(LlmHttpResponse {
+                status,
+                headers,
+                body: LlmHttpBody::buffered(body),
+            })
+        }
+        ScriptedResponsePlan::Failure { event_index, error } => {
+            wait_for_scheduled_response_event(
+                &schedule,
+                exchange_index,
+                event_index,
+                timeout,
+                response_start_timeout_message,
+            )
+            .await?;
+            Err(error)
         }
     }
-
-    Err(script_validation_error(format!(
-        "Provider Wire Script `{script_name}` did not include response_start"
-    )))
 }
 
 async fn wait_for_scheduled_response_event(
@@ -888,68 +1141,6 @@ async fn wait_for_scheduled_response_event(
         timeout_message,
     )
     .await
-}
-
-async fn scheduled_response_body(
-    script_name: String,
-    exchange_index: usize,
-    schedule: ScriptedTransportSchedule,
-    mut buffered: BytesMut,
-    remaining: VecDeque<(usize, ProviderWireEvent)>,
-) -> Result<LlmHttpBody, LlmTransportError> {
-    let streamed = remaining.iter().any(|(_, event)| {
-        matches!(
-            event,
-            ProviderWireEvent::Chunk { .. }
-                | ProviderWireEvent::Sse { .. }
-                | ProviderWireEvent::Disconnect { .. }
-                | ProviderWireEvent::Timeout { .. }
-                | ProviderWireEvent::TransportError { .. }
-        )
-    });
-    if streamed {
-        let mut events = remaining
-            .into_iter()
-            .map(|(event_index, event)| ScheduledByteEvent::Scripted(event_index, event))
-            .collect::<VecDeque<_>>();
-        if !buffered.is_empty() {
-            events.push_front(ScheduledByteEvent::Immediate(buffered.split().freeze()));
-        }
-        return Ok(LlmHttpBody::streamed(ScheduledScriptedByteStream::new(
-            script_name,
-            exchange_index,
-            schedule,
-            events,
-        )));
-    }
-
-    for (event_index, event) in remaining {
-        schedule.wait_for_release(exchange_index, event_index).await;
-        match event {
-            ProviderWireEvent::Body { data, .. } => {
-                buffered.extend_from_slice(data.as_bytes());
-            }
-            ProviderWireEvent::End { .. } => break,
-            ProviderWireEvent::Timeout { message, .. } => return Err(timeout_error(message)),
-            ProviderWireEvent::TransportError {
-                message, retryable, ..
-            } => return Err(transport_error(message, retryable)),
-            ProviderWireEvent::Disconnect {
-                message, retryable, ..
-            } => return Err(disconnect_error(message, retryable)),
-            ProviderWireEvent::ResponseStart { .. }
-            | ProviderWireEvent::Chunk { .. }
-            | ProviderWireEvent::Sse { .. }
-            | ProviderWireEvent::HttpError { .. } => {
-                return Err(script_validation_error(format!(
-                    "Provider Wire Script `{script_name}` emitted `{}` in a buffered response body",
-                    event.event_name()
-                )));
-            }
-        }
-    }
-
-    Ok(LlmHttpBody::buffered(buffered.freeze()))
 }
 
 fn match_request(
@@ -1000,136 +1191,43 @@ fn match_request(
     Ok(())
 }
 
-fn execute_script(script: ProviderWireScript) -> Result<LlmHttpResponse, LlmTransportError> {
-    let mut status = None;
-    let mut headers = Vec::new();
-    let mut buffered = BytesMut::new();
-    let mut stream_events = VecDeque::new();
-    let mut streamed = false;
-
-    for event in script.timeline {
-        match event {
-            ProviderWireEvent::ResponseStart {
-                status: next_status,
-                headers: next_headers,
-                ..
-            } => {
-                status = Some(next_status);
-                headers = header_vec(next_headers);
-            }
-            ProviderWireEvent::Body { data, .. } => {
-                if streamed {
-                    stream_events.push_back(ScriptedByteEvent::Chunk(Bytes::from(data)));
-                } else {
-                    buffered.extend_from_slice(data.as_bytes());
-                }
-            }
-            ProviderWireEvent::Chunk { data, bytes, .. } => {
-                streamed = true;
-                if !buffered.is_empty() {
-                    stream_events.push_back(ScriptedByteEvent::Chunk(buffered.split().freeze()));
-                }
-                stream_events.push_back(ScriptedByteEvent::Chunk(chunk_bytes(
-                    &script.name,
-                    data,
-                    bytes,
-                )?));
-            }
-            ProviderWireEvent::Sse { data, .. } => {
-                streamed = true;
-                if !buffered.is_empty() {
-                    stream_events.push_back(ScriptedByteEvent::Chunk(buffered.split().freeze()));
-                }
-                stream_events.push_back(ScriptedByteEvent::Chunk(Bytes::from(format!(
-                    "data: {data}\n\n"
-                ))));
-            }
-            ProviderWireEvent::End { .. } => {}
-            ProviderWireEvent::Disconnect {
-                message, retryable, ..
-            } => {
-                streamed = true;
-                if !buffered.is_empty() {
-                    stream_events.push_back(ScriptedByteEvent::Chunk(buffered.split().freeze()));
-                }
-                stream_events.push_back(ScriptedByteEvent::Error(
-                    LlmTransportError::new(format!(
-                        "Stream read failed: {}",
-                        message.unwrap_or_else(|| "scripted disconnect".to_string())
-                    ))
-                    .with_kind(ProviderFailureKind::Stream)
-                    .retryable(retryable.unwrap_or(true)),
-                ));
-            }
-            ProviderWireEvent::Timeout { message, .. } => {
-                let error = LlmTransportError::new(
-                    message.unwrap_or_else(|| "scripted provider timeout".to_string()),
-                )
-                .with_kind(ProviderFailureKind::Timeout)
-                .with_code("timeout")
-                .retryable(true);
-                if status.is_some() {
-                    streamed = true;
-                    if !buffered.is_empty() {
-                        stream_events
-                            .push_back(ScriptedByteEvent::Chunk(buffered.split().freeze()));
+fn execute_script(script: &ProviderWireScript) -> Result<LlmHttpResponse, LlmTransportError> {
+    match script.plan()?.clone() {
+        ScriptedResponsePlan::Response {
+            status,
+            headers,
+            body,
+            ..
+        } => {
+            let body = match body {
+                BodyPlan::Buffered(steps) => {
+                    let mut bytes = BytesMut::new();
+                    for step in steps {
+                        if let Some(chunk) = step.bytes {
+                            bytes.extend_from_slice(&chunk);
+                        }
                     }
-                    stream_events.push_back(ScriptedByteEvent::Error(error));
-                } else {
-                    return Err(error);
+                    LlmHttpBody::buffered(bytes.freeze())
                 }
-            }
-            ProviderWireEvent::HttpError {
+                BodyPlan::Streamed(steps) => LlmHttpBody::streamed(ScriptedByteStream::new(steps)),
+            };
+            Ok(LlmHttpResponse {
                 status,
                 headers,
                 body,
-                ..
-            } => {
-                return Ok(LlmHttpResponse {
-                    status,
-                    headers: header_vec(headers),
-                    body: LlmHttpBody::buffered(body),
-                });
-            }
-            ProviderWireEvent::TransportError {
-                message, retryable, ..
-            } => {
-                let error = LlmTransportError::new(message)
-                    .with_kind(ProviderFailureKind::Transport)
-                    .retryable(retryable.unwrap_or(true));
-                if status.is_some() {
-                    streamed = true;
-                    if !buffered.is_empty() {
-                        stream_events
-                            .push_back(ScriptedByteEvent::Chunk(buffered.split().freeze()));
-                    }
-                    stream_events.push_back(ScriptedByteEvent::Error(error));
-                } else {
-                    return Err(error);
-                }
-            }
+            })
         }
-    }
-
-    let status = status.ok_or_else(|| {
-        script_validation_error(format!(
-            "Provider Wire Script `{}` did not include response_start",
-            script.name
-        ))
-    })?;
-
-    if streamed {
-        Ok(LlmHttpResponse {
+        ScriptedResponsePlan::HttpError {
             status,
             headers,
-            body: LlmHttpBody::streamed(ScriptedByteStream::new(stream_events)),
-        })
-    } else {
-        Ok(LlmHttpResponse {
+            body,
+            ..
+        } => Ok(LlmHttpResponse {
             status,
             headers,
-            body: LlmHttpBody::buffered(buffered.freeze()),
-        })
+            body: LlmHttpBody::buffered(body),
+        }),
+        ScriptedResponsePlan::Failure { error, .. } => Err(error),
     }
 }
 
@@ -1403,8 +1501,8 @@ mod tests {
     use serde_json::json;
 
     use crate::canonical_scripts::{
-        OPENAI_COMPAT_DISCONNECT, OPENAI_COMPAT_RATE_LIMIT, OPENAI_COMPAT_TOOL_CALL,
-        OPENAI_COMPAT_VALIDATION, OPENAI_RESPONSES_TEXT,
+        CANONICAL_SCRIPTS, OPENAI_COMPAT_DISCONNECT, OPENAI_COMPAT_RATE_LIMIT,
+        OPENAI_COMPAT_TOOL_CALL, OPENAI_COMPAT_VALIDATION, OPENAI_RESPONSES_TEXT,
     };
 
     const RATE_LIMIT_BODY: &str = "{\"error\":{\"message\":\"Rate limit reached for requests\",\"type\":\"rate_limit_error\",\"code\":\"rate_limit_exceeded\"}}";
@@ -1674,6 +1772,117 @@ mod tests {
         assert!(err.message.contains("moved backward"));
     }
 
+    #[test]
+    fn provider_wire_script_rejects_non_terminal_end() {
+        let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "response_start", "status": 200 },
+            { "event": "end" },
+            { "event": "body", "data": "unreachable" }
+        ])))
+        .expect_err("end must be the final timeline event");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(err.message.contains("end"));
+        assert!(err.message.contains("final"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_chunk_before_response_start() {
+        let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "chunk", "data": "premature" },
+            { "event": "response_start", "status": 200 },
+            { "event": "end" }
+        ])))
+        .expect_err("chunk before response_start must fail validation");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(err.message.contains("chunk"));
+        assert!(err.message.contains("before response_start"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_sse_before_response_start() {
+        let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "sse", "data": "{}" },
+            { "event": "response_start", "status": 200 },
+            { "event": "end" }
+        ])))
+        .expect_err("SSE before response_start must fail validation");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(err.message.contains("sse"));
+        assert!(err.message.contains("before response_start"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_body_before_response_start() {
+        let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "body", "data": "premature" },
+            { "event": "response_start", "status": 200 },
+            { "event": "end" }
+        ])))
+        .expect_err("body before response_start must fail validation");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(err.message.contains("body"));
+        assert!(err.message.contains("before response_start"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_http_error_after_response_start() {
+        let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "response_start", "status": 200 },
+            { "event": "http_error", "status": 429, "body": "rate limited" }
+        ])))
+        .expect_err("http_error after response_start must fail validation");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(err.message.contains("http_error after response_start"));
+    }
+
+    #[test]
+    fn provider_wire_script_rejects_second_response_start() {
+        let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "response_start", "status": 200 },
+            { "event": "response_start", "status": 201 },
+            { "event": "end" }
+        ])))
+        .expect_err("second response_start must fail validation");
+
+        assert_eq!(err.kind, ProviderFailureKind::Validation);
+        assert!(err.message.contains("second response_start"));
+    }
+
+    #[test]
+    fn canonical_provider_wire_script_plans_cover_every_timeline_event_index() {
+        for canonical in CANONICAL_SCRIPTS {
+            let script = ProviderWireScript::from_json_str(canonical.content)
+                .unwrap_or_else(|error| panic!("{} failed to parse: {error}", canonical.path));
+            assert_eq!(
+                script.plan().expect("compiled plan").event_indices(),
+                (0..script.timeline.len()).collect::<Vec<_>>(),
+                "{} plan must cover each timeline event exactly once",
+                canonical.path
+            );
+        }
+    }
+
+    #[test]
+    fn cloned_provider_wire_script_recompiles_a_replaced_timeline() {
+        let script = ProviderWireScript::from_json_str(OPENAI_COMPAT_TOOL_CALL).expect("script");
+        let mut failure = script.clone();
+        failure.timeline = vec![ProviderWireEvent::TransportError {
+            at: 0,
+            message: "retry me".to_string(),
+            retryable: Some(true),
+        }];
+
+        assert!(matches!(
+            failure.plan().expect("recompiled failure plan"),
+            ScriptedResponsePlan::Failure { event_index: 0, .. }
+        ));
+    }
+
     fn scripted_provider(script: &str) -> OpenAiCompatibleProvider {
         let transport = Arc::new(ScriptedLlmHttpTransport::from_json_str(script).unwrap());
         OpenAiCompatibleProvider::new("test-key", "https://provider.test").with_transport(transport)
@@ -1702,6 +1911,17 @@ mod tests {
     fn request_body_json(err: &LlmTransportError) -> serde_json::Value {
         serde_json::from_str(err.request_body.as_deref().expect("request body snapshot"))
             .expect("request body JSON")
+    }
+
+    fn wire_script_json(timeline: Value) -> String {
+        json!({
+            "schema": PROVIDER_WIRE_SCRIPT_SCHEMA,
+            "name": "invalid-shape",
+            "provider_kind": "openai-compatible",
+            "endpoint": { "method": "POST", "path": "/chat/completions" },
+            "timeline": timeline
+        })
+        .to_string()
     }
 
     fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
