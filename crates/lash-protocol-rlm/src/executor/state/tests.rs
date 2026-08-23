@@ -158,6 +158,49 @@ fn canonical_root_recognizes_quoted_global_keys_as_direct_children() {
 }
 
 #[test]
+fn root_classifier_prefers_envelope_entries_over_json_field_names() {
+    for location in [
+        "root.globals.schema",
+        "root.globals.input_schema",
+        "root.globals.bindings",
+    ] {
+        assert!(matches!(
+            root_map_order(location),
+            CanonicalMapOrder::Declared(fields) if fields == PERSISTED_VALUE_FIELDS
+        ));
+    }
+    assert!(matches!(
+        root_map_order("root.deferred_resolutions.resolutions.schema"),
+        CanonicalMapOrder::Declared(fields) if fields == RESOLUTION_FIELDS
+    ));
+    assert_eq!(
+        root_map_order("root.deferred_resolutions.resolutions.tool.execution_binding.account"),
+        CanonicalMapOrder::Sorted
+    );
+}
+
+#[test]
+fn rlm_snapshot_accepts_inline_global_named_schema() {
+    let mut state = RlmExecutionState::new();
+    state
+        .rlm
+        .insert_global("schema".to_string(), FlowValue::String("note".into()))
+        .expect("seed schema global");
+    state.mark_execution_started();
+
+    let snapshot = state
+        .snapshot_execution_state()
+        .expect("schema global snapshots as canonical RLM state");
+    let hydration = hydrate(snapshot);
+    let root: RlmSnapshotRoot =
+        rmp_serde::from_slice(&hydration.root).expect("schema root decodes");
+    assert!(matches!(
+        root.globals.get("schema"),
+        Some(PersistedValue::Inline { .. })
+    ));
+}
+
+#[test]
 fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     #[derive(Serialize)]
     struct PreviousEnvelope {
