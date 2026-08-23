@@ -4866,3 +4866,11 @@ finish final_ids"#;
         });
     }
 }
+
+#[cfg(test)]
+mod parked_tests;
+
+#[cfg(test)]
+pub(crate) use parked_tests::{
+    ParkedCellEvidence, execute_parked_cell_for_tests, parked_cell_context_for_tests,
+};

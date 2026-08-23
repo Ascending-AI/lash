@@ -35,6 +35,7 @@ mod harness;
 mod multi_cell;
 mod no_poisoning;
 mod parity;
+mod parked_continuation;
 mod persistence;
 mod syntax;
 

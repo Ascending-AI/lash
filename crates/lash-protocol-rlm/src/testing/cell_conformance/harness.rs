@@ -13,8 +13,8 @@ use lash_core::ExecRequest;
 use lash_lashlang_runtime::LashlangSurface;
 
 use crate::executor::{
-    RlmExecutionState, RlmLashlangExecutionTraceConfig, SourceDialect,
-    execute_code_with_dialect_and_bounds,
+    ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig, SourceDialect,
+    execute_code_with_dialect_and_bounds, execute_parked_cell_for_tests,
 };
 use crate::projection::{ProjectionRegistry, RlmProjectedBindings, flow_to_json_value};
 
@@ -229,6 +229,52 @@ impl Session {
     pub(crate) fn persisted_bytes(&self) -> usize {
         let hydrated = self.persisted_state();
         hydrated.root.len() + hydrated.components.values().map(Vec::len).sum::<usize>()
+    }
+
+    /// Runs a cell through the VM's process-mode effect boundary, snapshots
+    /// the real continuation, restores it, and resumes to completion. This is
+    /// deliberately test-only: foreground cells still use the production RLM
+    /// executor above, while this method supplies the missing continuation
+    /// composition without adding a production suspension policy.
+    pub(crate) fn run_parked(&mut self, code: &str) -> ParkedCellEvidence {
+        let mut state = std::mem::replace(
+            &mut self.state,
+            RlmExecutionState::for_engine(self.dialect.language_id()),
+        );
+        let evidence = block_on(execute_parked_cell_for_tests(
+            &mut state,
+            crate::executor::parked_cell_context_for_tests(),
+            self.dialect.language_id(),
+            code,
+            false,
+        ))
+        .unwrap_or_else(|error| {
+            panic!(
+                "parked cell `{code}` must suspend and resume in {}: {error}",
+                self.dialect
+            )
+        });
+        self.state = state;
+        self.history.push(code.to_string());
+        evidence
+    }
+
+    /// Injects the retention defect used by the red-proof law. The broken
+    /// continuation must fail before it can produce a terminal value.
+    pub(crate) fn run_parked_broken(&mut self, code: &str) -> String {
+        let mut state = std::mem::replace(
+            &mut self.state,
+            RlmExecutionState::for_engine(self.dialect.language_id()),
+        );
+        let result = block_on(execute_parked_cell_for_tests(
+            &mut state,
+            crate::executor::parked_cell_context_for_tests(),
+            self.dialect.language_id(),
+            code,
+            true,
+        ));
+        self.state = state;
+        result.expect_err("the deliberately broken continuation must fail")
     }
 }
 
