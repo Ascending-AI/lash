@@ -281,6 +281,7 @@ jobs:
           python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_durable_read_fixture_version.py
           python3 scripts/test_check_format_versions.py
+          python3 scripts/test_lint_docs.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_service_gate_pinning.py
