@@ -368,8 +368,7 @@ impl SessionModel {
             // The ruled contract, stated as a model transition: a closure-valued
             // binding does not reach the next cell, so the session holds no
             // binding of that name afterwards. See
-            // `docs/adr/0059-lashlang-durable-stores-hold-exclusively-owned-copies.md`
-            // (three ADRs carry the number 0059; this is the one).
+            // `docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md`
             Cell::ClosureBinding { name } => {
                 self.bindings.remove(name);
                 Expectation::succeeds()

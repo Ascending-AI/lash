@@ -91,6 +91,23 @@ MOVED_STUBS = {
     "plugins-tools.html",
 }
 
+ADR_FILENAME_RE = re.compile(r"^(?P<number>\d{4})-[^/]+\.md$")
+
+
+def check_adr_number_uniqueness(errors: list[str]) -> None:
+    """Every ADR filename has one unique four-digit number prefix."""
+    by_number: dict[str, list[Path]] = {}
+    for path in sorted((DOCS / "adr").glob("*.md")):
+        match = ADR_FILENAME_RE.fullmatch(path.name)
+        if match is None:
+            continue
+        by_number.setdefault(match.group("number"), []).append(path)
+
+    for number, paths in sorted(by_number.items()):
+        if len(paths) > 1:
+            listed = ", ".join(path.relative_to(ROOT).as_posix() for path in paths)
+            errors.append(f"docs/adr: duplicate ADR number {number}: {listed}")
+
 
 def normalize_href(path: str) -> str:
     path = path.strip()
@@ -724,6 +741,7 @@ def check_readme_snippets(
 def main() -> int:
     fix = "--fix-snippets" in sys.argv[1:]
     errors: list[str] = []
+    check_adr_number_uniqueness(errors)
     pages = parse_pages()
     canonical = check_registry(errors, pages)
     check_pagefind_coverage(errors, canonical)

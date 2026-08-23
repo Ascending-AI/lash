@@ -51,7 +51,7 @@ A **runbook** is an **agent-driven test scenario**: QA performed by an agent aga
 
 ## ADR norms
 
-- **Numbering:** next number = highest existing + 1. Check first: `ls docs/adr/ | sort -V | tail -3`. Duplicate numbers have happened (two each of 0034/0036/0037/0038; grandfathered, do not renumber, cite them by full filename); never mint a duplicate again.
+- **Numbering:** next number = highest existing + 1. Check first: `ls docs/adr/ | sort -V | tail -3`. Every four-digit ADR prefix must be unique; the docs lint gate rejects duplicates, and an ADR is cited by full filename when a reference needs the slug. Never mint a duplicate.
 - **Shape:** one decision per ADR, filename `NNNN-kebab-case-title.md`, status/context/decision/consequences.
 - **Conflicts:** if your output contradicts an ADR, surface it explicitly ("Contradicts ADR-NNNN … worth reopening because …") rather than silently overriding; see [domain.md](domain.md).
 

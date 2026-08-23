@@ -12,7 +12,7 @@ three ways, and the three have very different costs.
 It could be a **migration**: TypeScript replaces Lashlang, which acquires a
 deprecation clock and a compatibility story. That discards work that is not
 replaceable on any near horizon — the workflow-graph lens (ADR 0037) and its
-canonical printer, gradual value types through to the editor (ADR 0038), the
+canonical printer, gradual value types through to the editor (ADR 0073), the
 judged runbooks and examples built on them — and it forces every host on
 Lashlang into a move it did not ask for.
 

@@ -19,7 +19,7 @@
 //! prose, and reading it as a cell the instant the closing tag arrives would
 //! let the provider's chunk boundaries decide what executed. Streaming passes
 //! `allow_eof: false` until the response ends, mirroring the block shape's own
-//! end-tag rule (ADR 0047: the mask owns the cell boundary, not the transport).
+//! end-tag rule (ADR 0074: the mask owns the cell boundary, not the transport).
 //!
 //! Two residues follow from the shape, both deliberate:
 //!

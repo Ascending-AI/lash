@@ -15,7 +15,7 @@ Adding a second dialect ends that freedom. A TypeScript dialect is
 reference-semantic by definition — two bindings can name one object, mutation
 through either is visible through both, and `===` compares identity. Lashlang is
 value-semantic: a store copies, and mutation through one binding is never
-observable through another (ADR 0059). One of the two has to be the machine's
+observable through another (ADR 0076). One of the two has to be the machine's
 semantics and the other has to be produced by lowering, or there have to be two
 machines.
 
@@ -43,7 +43,7 @@ says to duplicate a reference, and nothing in the VM copies a graph on its own
 initiative. Lashlang's value semantics is produced entirely by the Lashlang
 compiler, which inserts a recursive isolation copy at every durable store — name
 and slot stores, global stores, every container member, iterator bindings,
-effect-result bindings, and the `State` patch APIs, enumerated in ADR 0059. A
+effect-result bindings, and the `State` patch APIs, enumerated in ADR 0076. A
 dialect that wants reference semantics omits that lowering and writes the
 reference straight through. The decision lives in the compiler, in one direction
 only.
@@ -62,7 +62,7 @@ work.
 
 A value-semantic machine has no identity to hand out. Its durable form names a
 forest — roots and the trees they own — and sharing has no encoding in it at
-all, which is exactly the property ADR 0059 relies on. A reference dialect
+all, which is exactly the property ADR 0076 relies on. A reference dialect
 lowered onto it would have to synthesize identity in guest-visible state: an
 object table held as an ordinary machine value, every property read and write
 indirected through it, `===` and aliasing implemented in emitted code. That
@@ -111,10 +111,10 @@ the TypeScript lowering: a TypeScript `return` must lower to a real function
 return and never to `Expr::Finish`, which is a process terminal and
 deliberately does not run pending `finally` blocks.
 
-### Relationship to ADR 0059
+### Relationship to ADR 0076
 
-ADR 0059 stands as written and is not restated here. Read together, the split is
-this: ADR 0059 decides what *Lashlang's* durable state may look like — a forest
+ADR 0076 stands as written and is not restated here. Read together, the split is
+this: ADR 0076 decides what *Lashlang's* durable state may look like — a forest
 of exclusively owned trees, enforced by a validator at every durable boundary in
 release builds — and this ADR decides that the same rule is a dialect invariant
 rather than a property of the machine.
@@ -123,7 +123,7 @@ That distinction has a consequence which must be named rather than discovered.
 A reference-semantic dialect omits the isolation lowering and therefore produces
 graphs with sharing, which the forest validator refuses by construction. So the
 durable-boundary validator becomes dialect-scoped: the segment's pinned dialect
-selects it, and Lashlang's remains exactly the validator ADR 0059 specifies,
+selects it, and Lashlang's remains exactly the validator ADR 0076 specifies,
 with no relaxation. The general object graph a reference dialect persists needs
 its own wire contract — how sharing is expressed, and how a cold restore
 reconstructs it identically — and that contract is an obligation of the
@@ -147,7 +147,7 @@ compatibility decoder exists at any of these version boundaries.
   schedule serve both dialects. A defect fixed in the substrate is fixed for
   every dialect at once.
 - Lashlang pays the isolation copy on every durable store, which is inherent to
-  copy semantics and already accepted in ADR 0059. A copy-on-write
+  copy semantics and already accepted in ADR 0076. A copy-on-write
   representation behind identical observable semantics remains possible later.
 - A reference-semantic dialect gets identity, aliasing, and `===` for free from
   the substrate, and owes only its own durable-graph wire contract and
