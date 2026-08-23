@@ -40,6 +40,28 @@ impl RuntimePerfPhaseProbe {
         // Async process phases can still be running at take; leave open spans dropped.
         std::mem::take(&mut state.completed)
     }
+
+    pub(crate) fn open_span_count(&self) -> usize {
+        self.state
+            .lock_recover()
+            .open
+            .values()
+            .map(Vec::len)
+            .sum()
+    }
+
+    pub(crate) fn take_completed_after_settlement(
+        &self,
+    ) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
+        let mut state = self.state.lock_recover();
+        let open_span_count = state.open.values().map(Vec::len).sum::<usize>();
+        if open_span_count != 0 {
+            anyhow::bail!(
+                "async settlement finished with {open_span_count} open phase spans"
+            );
+        }
+        Ok(std::mem::take(&mut state.completed))
+    }
 }
 
 impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
@@ -110,6 +132,14 @@ pub(crate) async fn run_once(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     match scenario {
+        RuntimePerfScenario::WriterContention2Workers
+        | RuntimePerfScenario::WriterContention8Workers => {
+            return Box::pin(run_once_writer_contention(scenario, chat_turns)).await;
+        }
+        RuntimePerfScenario::AsyncProcessSettlement2Children
+        | RuntimePerfScenario::AsyncProcessSettlement8Children => {
+            return Box::pin(run_once_async_process_settlement(scenario, chat_turns)).await;
+        }
         RuntimePerfScenario::TurnCheckpoint => return run_once_turn_checkpoint(chat_turns).await,
         RuntimePerfScenario::CheckpointStateHotPaths => {
             return Box::pin(run_once_checkpoint_state_hot_paths(chat_turns)).await;
@@ -608,6 +638,7 @@ pub(crate) async fn run_once(
         session_nodes: state.session_graph.nodes.len(),
         active_path_messages: state.read_view().messages().len(),
         extra_counters,
+        metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,
             rss_after_build_kb: after_build_memory.rss_kb,
@@ -699,6 +730,7 @@ fn skipped_runtime_perf_result(
         session_nodes: 0,
         active_path_messages: 0,
         extra_counters,
+        metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: None,
             rss_after_build_kb: None,

@@ -27,14 +27,13 @@ use tokio_util::sync::CancellationToken;
 use super::openai_compat::OpenAiCompatBenchServer;
 use super::providers::{
     BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE, BenchmarkEchoTool, BenchmarkLargeToolCatalog,
-    BenchmarkObliqueTools, BenchmarkProviderControl, BenchmarkWorkbenchMailTool,
-    benchmark_provider, benchmark_provider_with_control, benchmark_stream_profile,
+    BenchmarkObliqueTools, BenchmarkProviderControl, BenchmarkSettlementControl,
+    BenchmarkWorkbenchMailTool, benchmark_provider, benchmark_provider_with_control,
+    benchmark_stream_profile,
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
 
-const DEFAULT_PROMPT: &str =
-    "Inspect the current state and reply with exactly: runtime perf benchmark ok";
 const HISTORY_EXCHANGES: usize = 18;
 const RUNTIME_PERF_MAX_TURNS: usize = 1;
 
@@ -98,6 +97,27 @@ impl BenchmarkCore {
         }
     }
 
+    pub(crate) async fn open_child_session(
+        &self,
+        session_id: String,
+        parent_session_id: String,
+    ) -> lash::Result<lash::LashSession> {
+        match self {
+            Self::Standard(core) => {
+                core.session(session_id)
+                    .parent(parent_session_id)
+                    .open()
+                    .await
+            }
+            Self::Rlm(core) => {
+                core.session(session_id)
+                    .parent(parent_session_id)
+                    .open()
+                    .await
+            }
+        }
+    }
+
     async fn open_session_with_state(
         &self,
         session_id: String,
@@ -127,6 +147,7 @@ pub(crate) struct BenchmarkRuntime {
     store: Option<Arc<RuntimePerfStore>>,
     store_metrics: Arc<RuntimePerfStoreMetrics>,
     provider_control: Option<Arc<BenchmarkProviderControl>>,
+    settlement_control: Option<Arc<BenchmarkSettlementControl>>,
     _openai_compat_server: Option<OpenAiCompatBenchServer>,
 }
 
@@ -154,6 +175,33 @@ impl BenchmarkRuntime {
 
     pub(crate) fn core(&self) -> LashCore {
         self.core.as_lash_core()
+    }
+
+    pub(crate) fn session(&self) -> lash::LashSession {
+        self.session.as_ref().expect("benchmark session").clone()
+    }
+
+    pub(crate) async fn open_child_session(
+        &self,
+        session_id: String,
+    ) -> anyhow::Result<lash::LashSession> {
+        let parent_session_id = self.session().session_id();
+        self.core
+            .open_child_session(session_id, parent_session_id)
+            .await
+            .map_err(anyhow::Error::from)
+    }
+
+    pub(crate) fn provider_control(&self) -> anyhow::Result<Arc<BenchmarkProviderControl>> {
+        self.provider_control
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("benchmark provider control missing"))
+    }
+
+    pub(crate) fn settlement_control(&self) -> anyhow::Result<Arc<BenchmarkSettlementControl>> {
+        self.settlement_control
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("benchmark settlement control missing"))
     }
 
     pub(crate) async fn reopen_with_state(
@@ -696,15 +744,26 @@ pub(crate) async fn build_runtime_with_store(
             )
         };
     let store = store.unwrap_or_else(|| Arc::new(RuntimePerfStore::default()));
+    let settlement_control = scenario
+        .settlement_children()
+        .map(|_| Arc::new(BenchmarkSettlementControl::new()));
     let mut plugin_stack = standard_tool_stack(StandardToolStackOptions {
         standard_context_approach: standard_context_approach.clone(),
         tavily_api_key: None,
         include_cancel_process: execution_mode.is_standard(),
     });
+    let benchmark_tool = settlement_control.as_ref().map_or_else(
+        || BenchmarkEchoTool::new(Arc::clone(&effect_host)),
+        |control| {
+            BenchmarkEchoTool::with_settlement_control(
+                Arc::clone(&effect_host),
+                Arc::clone(control),
+            )
+        },
+    );
     plugin_stack.push(Arc::new(StaticPluginFactory::new(
         "runtime_perf_tools",
-        PluginSpec::new()
-            .with_tool_provider(Arc::new(BenchmarkEchoTool::new(Arc::clone(&effect_host)))),
+        PluginSpec::new().with_tool_provider(Arc::new(benchmark_tool)),
     )));
     if matches!(scenario, RuntimePerfScenario::RlmLlmQuery) {
         plugin_stack.push(Arc::new(LlmToolsPluginFactory::default()));
@@ -741,7 +800,10 @@ pub(crate) async fn build_runtime_with_store(
     }
     if matches!(
         scenario,
-        RuntimePerfScenario::RlmTriggerMailPipeline | RuntimePerfScenario::DeepTurnComposition
+        RuntimePerfScenario::RlmTriggerMailPipeline
+            | RuntimePerfScenario::DeepTurnComposition
+            | RuntimePerfScenario::AsyncProcessSettlement2Children
+            | RuntimePerfScenario::AsyncProcessSettlement8Children
     ) {
         plugin_stack.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
     }
@@ -817,6 +879,7 @@ pub(crate) async fn build_runtime_with_store(
         session: Some(session),
         store: Some(store),
         provider_control,
+        settlement_control,
         _openai_compat_server: openai_compat_server,
     })
 }
@@ -1144,6 +1207,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         session: Some(session),
         store: None,
         provider_control: None,
+        settlement_control: None,
         _openai_compat_server: None,
     })
 }
@@ -1247,6 +1311,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
         session: Some(session),
         store: None,
         provider_control: None,
+        settlement_control: None,
         _openai_compat_server: None,
     })
 }
@@ -1345,229 +1410,4 @@ pub(crate) fn rlm_perf_projected_bindings(
                 "mode": "runtime_perf",
             }),
         )?)
-}
-
-pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize) -> String {
-    match scenario {
-        RuntimePerfScenario::CheckpointStateHotPaths => {
-            unreachable!("checkpoint-state hot paths use their dedicated measurement")
-        }
-        RuntimePerfScenario::Standard | RuntimePerfScenario::EmbedStandard => format!(
-            "Turn {} of a longer runtime benchmark conversation. Inspect the state and reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::Rlm | RuntimePerfScenario::EmbedRlm => format!(
-            "Turn {} in RLM mode. Continue the benchmark chat and reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmLargeToolCatalog => format!(
-            "Turn {} in RLM mode with a Gmail-sized callable tool catalog. Do not call a Gmail tool; reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmObliqueStackMix => format!(
-            "Turn {} in RLM mode. Exercise the OBLIQ-style search, subagent, live-handle, direct judge, trace, and large print paths, then finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmToolCalls
-        | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
-        | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres => format!(
-            "Turn {} in RLM mode. Exercise the benchmark_echo tool path and reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmAsyncToolCompletion => format!(
-            "Turn {} in RLM mode. Exercise the pending benchmark_async tool completion path, then finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::StandardToolCalls
-        | RuntimePerfScenario::DurableStandardToolTurnSqlite
-        | RuntimePerfScenario::DurableStandardToolTurnPostgres => format!(
-            "Turn {} in standard mode. Use the batch tool to exercise parallel benchmark_echo calls, then reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::StandardAsyncToolCompletion => format!(
-            "Turn {} in standard mode. Launch the async benchmark tool completion, then reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::StandardShellOutput => format!(
-            "Turn {} in standard mode. Exercise shell.exec output capture, then reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::ToolDiscoverySearch => format!(
-            "Turn {} in standard mode. Search the catalog for Gmail email tools, then reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::OpenAiResponsesSseParse => format!(
-            "Turn {} in OpenAI Responses SSE parser benchmark mode. Parse a local Responses stream and verify the benchmark marker.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::DirectLlmClient => format!(
-            "Turn {} in direct LLM client benchmark mode. Run a direct structured completion and verify the benchmark marker.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::ProcessListStress => format!(
-            "Turn {} in process-list stress benchmark mode. Compare live process listing with explicit full history and verify the benchmark marker.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::RlmProcessHandles => format!(
-            "Turn {} in RLM mode. Exercise start/await/cancel process handles, then finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmTriggerMailPipeline => format!(
-            "Turn {} in RLM mode. Ensure a mail trigger is registered, send through inbox.test, let the forwarder process run, and finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmProcessAsyncToolCompletion => format!(
-            "Turn {} in RLM mode. Exercise pending benchmark_async completion inside a started process, then finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmSubagentSpawn
-        | RuntimePerfScenario::DurableAgentChildTurnSqlite
-        | RuntimePerfScenario::DurableAgentChildTurnPostgres => format!(
-            "Turn {} in RLM mode. Start a process that spawns a default subagent with seeded input, await it, then finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmLlmQuery => format!(
-            "Turn {} in RLM mode. Exercise llm_query direct completion, then finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmGlobals => format!(
-            "Turn {} in RLM mode with bound variables updated for this turn. Inspect the current state and reply with exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmLargePrint => format!(
-            "Turn {} in RLM mode. Print a large structured tool result to exercise host-owned print projection, then finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::RlmStreamedPairedLashlang => format!(
-            "Turn {} in RLM mode. Stream visible prose before a paired <lashlang> block, close it, ignore any suffix after the close tag, and finish exactly: {}",
-            turn_index + 1,
-            DEFAULT_PROMPT
-                .rsplit_once(": ")
-                .map(|(_, text)| text)
-                .unwrap_or("runtime perf benchmark ok")
-        ),
-        RuntimePerfScenario::OpenAiCompatStream => format!(
-            "Turn {} in OpenAI-compatible streaming benchmark mode. Continue the benchmark chat and reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::TurnCheckpoint => format!(
-            "Turn {} in sans-IO turn checkpoint benchmark mode. Checkpoint and restore pending effects, then reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::ScopedEffectController => format!(
-            "Turn {} in scoped effect-controller benchmark mode. Continue the benchmark chat and reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::StoreReopen | RuntimePerfScenario::SqliteStoreReopen => format!(
-            "Turn {} in store reopen benchmark mode. Continue after persisted reload and reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::LiveReplayPressure => format!(
-            "Turn {} in live replay pressure benchmark mode. Append, replay, subscribe, trim, and verify gap handling.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::TraceJsonlStandard => format!(
-            "Turn {} in standard JSONL trace benchmark mode. Continue the benchmark chat and reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::TraceJsonlExtended => format!(
-            "Turn {} in extended JSONL trace benchmark mode. Run the Lashlang block and finish exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::QueuedWorkClaimStress => format!(
-            "Turn {} in queued-work claim stress benchmark mode. Claim, renew, complete, and verify queued work.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::TurnInputIngressInterrupt => format!(
-            "Turn {} in turn-input ingress interrupt benchmark mode. Claim, defer, reclaim, complete, and verify pending turn input.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::DeepTurnComposition => format!(
-            "Turn {} in the deep-composition stack benchmark. Run the parent process/tool loop and child session, then incorporate the injected active-turn input.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::TurnStartGate => format!(
-            "Turn {} in the cancellation start-gate benchmark. Reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::TurnCancelRoundTrip => format!(
-            "Turn {} in the cancellation round-trip benchmark. Wait for the exact-turn cancellation request.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::IngressClaimProjection => format!(
-            "Turn {} in the active-ingress projection benchmark. Continue after the checkpoint and incorporate the injected marker.",
-            turn_index + 1
-        ),
-        RuntimePerfScenario::DurableCheckpointCurveSqlite
-        | RuntimePerfScenario::DurableCheckpointCurvePostgres => format!(
-            "Turn {} in the durable checkpoint curve. Persist checkpoint body bytes {} inside this live RLM turn, then finish exactly: runtime perf benchmark ok",
-            turn_index + 1,
-            scenario
-                .checkpoint_curve_bytes(turn_index)
-                .expect("checkpoint curve scenario")
-        ),
-        RuntimePerfScenario::StoreHardeningHotPaths => {
-            format!("Turn {} in the store-hardening benchmark.", turn_index + 1)
-        }
-    }
 }

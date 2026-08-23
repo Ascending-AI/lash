@@ -2,6 +2,7 @@ mod duration_trend;
 mod harness;
 mod measurement;
 mod openai_compat;
+mod prompt;
 mod providers;
 mod report;
 mod scenarios;

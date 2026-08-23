@@ -916,7 +916,7 @@ availability = "all-features"
 aliases = ["lash_core::RuntimeCommit::persisted_state_for_test_with_budget"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:242#let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget("
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:243#let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget("
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::persisted_state_with_operation_for_testing"
@@ -1113,7 +1113,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1247#RuntimeTurnPhase::ContextTransform => \"context_transform\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1250#RuntimeTurnPhase::ContextTransform => \"context_transform\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase::ALL"
@@ -1130,7 +1130,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1248#RuntimeTurnPhase::BeforeTurnHooks => \"before_turn_hooks\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1251#RuntimeTurnPhase::BeforeTurnHooks => \"before_turn_hooks\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase::CommittedTurn"
@@ -1138,7 +1138,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1252#RuntimeTurnPhase::CommittedTurn => \"committed_turn\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1255#RuntimeTurnPhase::CommittedTurn => \"committed_turn\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase::ContextTransform"
@@ -1146,7 +1146,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1247#RuntimeTurnPhase::ContextTransform => \"context_transform\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1250#RuntimeTurnPhase::ContextTransform => \"context_transform\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase::EffectLoop"
@@ -1154,7 +1154,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1250#RuntimeTurnPhase::EffectLoop => \"effect_loop\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1253#RuntimeTurnPhase::EffectLoop => \"effect_loop\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase::PostCommitDelivery"
@@ -1162,7 +1162,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1253#RuntimeTurnPhase::PostCommitDelivery => \"post_commit_delivery\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1256#RuntimeTurnPhase::PostCommitDelivery => \"post_commit_delivery\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase::PreparedTurn"
@@ -1170,7 +1170,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1251#RuntimeTurnPhase::PreparedTurn => \"prepared_turn\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1254#RuntimeTurnPhase::PreparedTurn => \"prepared_turn\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhase::PromptBuild"
@@ -1178,7 +1178,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1249#RuntimeTurnPhase::PromptBuild => \"prompt_build\","
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:1252#RuntimeTurnPhase::PromptBuild => \"prompt_build\","
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe"
@@ -1186,7 +1186,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/harness.rs:200#probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,"
+usage = "crates/lash-perf/src/runtime_perf/harness.rs:248#probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::begin"
@@ -1194,7 +1194,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:46#fn begin(&self, phase: RuntimeTurnPhase) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:68#fn begin(&self, phase: RuntimeTurnPhase) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::begin_named"
@@ -1202,7 +1202,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:54#fn begin_named(&self, phase: &str) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:76#fn begin_named(&self, phase: &str) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::end"
@@ -1210,7 +1210,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:50#fn end(&self, phase: RuntimeTurnPhase) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:72#fn end(&self, phase: RuntimeTurnPhase) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::end_named"
@@ -1218,7 +1218,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:67#fn end_named(&self, phase: &str) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:89#fn end_named(&self, phase: &str) {"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::set_local_cancel_origin_hint"
@@ -12715,7 +12715,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::TurnActivity::0"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:570#SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent("
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:572#SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent("
 
 [[api]]
 symbol = "lash::observe::SessionObservationStream"
@@ -14491,7 +14491,7 @@ availability = "default+all-features"
 aliases = ["lash_core::OperationId::storage_key"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs:482#lash_core::OperationId::storage_key(&commit.turn_commit.operation)?;"
+usage = "crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs:483#let operation_storage_key = lash_core::OperationId::storage_key(&commit.turn_commit.operation)?;"
 
 [[api]]
 symbol = "lash::persistence::OperationId::turn"
@@ -14609,7 +14609,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::new"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs:471#lash_core::PendingTurnInputDraft::new("
+usage = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs:472#lash_core::PendingTurnInputDraft::new("
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::session_id"
@@ -48579,7 +48579,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::execute_effect"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/harness.rs:909#self.delegate.execute_effect(envelope, local_executor).await"
+usage = "crates/lash-perf/src/runtime_perf/harness.rs:972#self.delegate.execute_effect(envelope, local_executor).await"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::supports_concurrent_effects"
@@ -52068,7 +52068,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionPolicy::session_id"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:216#runtime_state.session_id.clone(),"
+usage = "crates/lash-remote-protocol/src/core_conversions/processes.rs:1087#session_id,"
 
 [[api]]
 symbol = "lash::runtime::SessionPolicy::turn_budget"
@@ -71293,7 +71293,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:838#model_return: ModelToolReturn::from_output("
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:840#model_return: ModelToolReturn::from_output("
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturn::parts"

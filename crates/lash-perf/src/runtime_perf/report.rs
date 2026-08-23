@@ -466,8 +466,27 @@ fn summarize(
                 sample_session_nodes: matching[0].session_nodes,
                 sample_active_path_messages: matching[0].active_path_messages,
                 sample_extra_counters: matching[0].extra_counters.clone(),
+                metric_summary_ms: summarize_metric_samples(&matching),
             })
         })
+        .collect()
+}
+
+fn summarize_metric_samples(
+    results: &[&RuntimePerfRunResult],
+) -> BTreeMap<String, RuntimePerfMetricSummary> {
+    let mut samples_by_key = BTreeMap::<String, Vec<f64>>::new();
+    for result in results {
+        for (key, samples) in &result.metric_samples_ms {
+            samples_by_key
+                .entry(key.clone())
+                .or_default()
+                .extend(samples.iter().copied());
+        }
+    }
+    samples_by_key
+        .into_iter()
+        .map(|(key, samples)| (key, summarize_metric(samples)))
         .collect()
 }
 
@@ -710,6 +729,7 @@ mod tests {
             session_nodes: 1,
             active_path_messages: 1,
             extra_counters: BTreeMap::new(),
+            metric_samples_ms: BTreeMap::new(),
             memory: memory_run(),
             allocations: allocation_run(bytes_allocated),
             phase_profile: BTreeMap::new(),
@@ -1011,6 +1031,13 @@ mod tests {
         assert!(
             !RuntimePerfScenario::DEFAULTS.contains(&RuntimePerfScenario::StoreHardeningHotPaths)
         );
+        assert!(
+            !RuntimePerfScenario::DEFAULTS.contains(&RuntimePerfScenario::WriterContention2Workers)
+        );
+        assert!(
+            !RuntimePerfScenario::DEFAULTS
+                .contains(&RuntimePerfScenario::AsyncProcessSettlement2Children)
+        );
         assert_eq!(
             resolve_scenarios(&["all".to_string()]).unwrap(),
             RuntimePerfScenario::KNOWN.to_vec()
@@ -1021,6 +1048,27 @@ mod tests {
                 .len(),
             RuntimePerfScenario::KNOWN.len()
         );
+    }
+
+    #[test]
+    fn named_metric_summary_preserves_signed_samples_for_percentiles() {
+        let scenario = RuntimePerfScenario::WriterContention2Workers;
+        let mut result = run_result(scenario, 1.0, 1);
+        result.metric_samples_ms.insert(
+            "writer_contention.same_session.wait_ms".to_string(),
+            vec![-4.0, -2.0, 8.0, 16.0],
+        );
+        let summary = summarize(
+            &[result],
+            &[scenario],
+            1,
+            &StackProfile::capture(Some(2 * 1024 * 1024), None),
+        );
+        let wait = &summary[0].metric_summary_ms["writer_contention.same_session.wait_ms"];
+
+        assert_eq!(wait.min, -4.0);
+        assert_eq!(wait.p50, 3.0);
+        assert_eq!(wait.p95, 14.8);
     }
 
     #[test]
