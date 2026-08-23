@@ -9,13 +9,12 @@ struct PhaseStart {
 
 #[derive(Default)]
 struct RuntimePerfPhaseProbeState {
-    started: HashMap<RuntimeTurnPhase, PhaseStart>,
-    named_started: HashMap<String, Vec<PhaseStart>>,
+    open: HashMap<String, Vec<PhaseStart>>,
     completed: BTreeMap<String, RuntimePerfPhaseRunResult>,
 }
 
 #[derive(Default)]
-struct RuntimePerfPhaseProbe {
+pub(crate) struct RuntimePerfPhaseProbe {
     state: Mutex<RuntimePerfPhaseProbeState>,
 }
 
@@ -36,37 +35,26 @@ impl lash::runtime::RuntimeEffectController for ScopedPerfEffectController {
 }
 
 impl RuntimePerfPhaseProbe {
-    fn take_completed(&self) -> BTreeMap<String, RuntimePerfPhaseRunResult> {
+    pub(crate) fn take_completed(&self) -> BTreeMap<String, RuntimePerfPhaseRunResult> {
         let mut state = self.state.lock_recover();
+        debug_assert!(state.open.is_empty(), "all phase spans must be closed");
         std::mem::take(&mut state.completed)
     }
 }
 
 impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
     fn begin(&self, phase: RuntimeTurnPhase) {
-        let mut state = self.state.lock_recover();
-        state.started.insert(
-            phase,
-            PhaseStart {
-                started_at: Instant::now(),
-                alloc_before: allocator_stats(),
-                memory_before: process_memory_sample(),
-            },
-        );
+        self.begin_named(phase_name(phase));
     }
 
     fn end(&self, phase: RuntimeTurnPhase) {
-        let mut state = self.state.lock_recover();
-        let Some(start) = state.started.remove(&phase) else {
-            return;
-        };
-        record_completed_phase(&mut state.completed, phase_name(phase).to_string(), start);
+        self.end_named(phase_name(phase));
     }
 
     fn begin_named(&self, phase: &str) {
         let mut state = self.state.lock_recover();
         state
-            .named_started
+            .open
             .entry(phase.to_string())
             .or_default()
             .push(PhaseStart {
@@ -78,14 +66,14 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
 
     fn end_named(&self, phase: &str) {
         let mut state = self.state.lock_recover();
-        let Some(starts) = state.named_started.get_mut(phase) else {
+        let Some(starts) = state.open.get_mut(phase) else {
             return;
         };
         let Some(start) = starts.pop() else {
             return;
         };
         if starts.is_empty() {
-            state.named_started.remove(phase);
+            state.open.remove(phase);
         }
         record_completed_phase(&mut state.completed, phase.to_string(), start);
     }

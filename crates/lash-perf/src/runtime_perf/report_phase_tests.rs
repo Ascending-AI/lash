@@ -6,7 +6,58 @@ use super::budgets::{
 };
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
-use crate::runtime_perf::measurement::phase_name;
+use crate::runtime_perf::measurement::{RuntimePerfPhaseProbe, phase_name};
+use lash_core::runtime::RuntimeTurnPhaseProbe;
+
+#[test]
+fn typed_phase_nesting_records_each_open_span() {
+    let probe = RuntimePerfPhaseProbe::default();
+    let phase = lash_core::runtime::RuntimeTurnPhase::EffectLoop;
+
+    probe.begin(phase);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    probe.begin(phase);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    probe.end(phase);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    probe.end(phase);
+
+    let completed = probe.take_completed();
+    let result = completed
+        .get(phase_name(phase))
+        .expect("nested typed phase should be recorded");
+    assert_eq!(result.samples, 2);
+    assert!(
+        result.duration_ms > 10.0,
+        "nested typed spans should contribute both durations: {result:?}"
+    );
+}
+
+#[test]
+fn typed_and_named_phase_paths_share_one_completion_key() {
+    let probe = RuntimePerfPhaseProbe::default();
+    let phase = lash_core::runtime::RuntimeTurnPhase::EffectLoop;
+    let name = phase_name(phase);
+
+    probe.begin(phase);
+    probe.end(phase);
+    probe.begin_named(name);
+    probe.end_named(name);
+
+    let completed = probe.take_completed();
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed.get(name).expect("shared phase name").samples, 2);
+}
+
+#[test]
+fn ending_an_unstarted_phase_is_a_no_op() {
+    let probe = RuntimePerfPhaseProbe::default();
+
+    probe.end(lash_core::runtime::RuntimeTurnPhase::EffectLoop);
+    probe.end_named("unstarted");
+
+    assert!(probe.take_completed().is_empty());
+}
 
 #[test]
 fn turn_scenarios_require_the_typed_commit_phase_metrics() {
