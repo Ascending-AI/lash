@@ -1254,14 +1254,8 @@ pub(crate) fn phase_name(phase: RuntimeTurnPhase) -> &'static str {
     }
 }
 
-#[cfg(not(feature = "dhat-heap"))]
 pub(crate) fn allocator_stats() -> Stats {
     crate::GLOBAL_ALLOCATOR.stats()
-}
-
-#[cfg(feature = "dhat-heap")]
-pub(crate) fn allocator_stats() -> Stats {
-    Stats::default()
 }
 
 pub(crate) fn alloc_delta(before: Stats, after: Stats) -> RuntimePerfAllocationDelta {

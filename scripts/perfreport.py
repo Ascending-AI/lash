@@ -48,6 +48,13 @@ def fmt_ns(n: float | None) -> str:
     return f"{n:.1f}ns"
 
 
+def fmt_metric_percentiles(metric: dict[str, Any]) -> str:
+    parts = [f"median={fmt_ms(metric.get('median'))}"]
+    if metric.get("p95") is not None:
+        parts.append(f"p95={fmt_ms(metric['p95'])}")
+    return "  ".join(parts)
+
+
 # Guard classes the runtime report marks as advisory: they are measured and
 # reported, but never fail the gate. The class is decided by the harness
 # (`RuntimePerfGuardClass`), not re-derived from metric spelling here.
@@ -182,34 +189,34 @@ def summarize_runtime(report: dict[str, Any]) -> str:
         scenario = s["scenario"]
         lines.append(f"## scenario: {scenario}  ({s['runs']} runs × {s['chat_turns']} turns)")
         lines.append("")
-        lines.append("phase totals (median across runs):")
+        lines.append("phase totals (median/p95 across runs):")
         lines.append(
-            f"  build_runtime         {fmt_ms(s['build_runtime_ms']['median']):>10s}  "
+            f"  build_runtime         {fmt_metric_percentiles(s['build_runtime_ms'])}  "
             f"alloc={fmt_bytes(s['build_runtime_alloc_bytes']['median']):>10s}  "
             f"live={fmt_bytes(s['build_runtime_live_bytes']['median']):>10s}"
         )
         lines.append(
-            f"  seed_state            {fmt_ms(s['seed_state_ms']['median']):>10s}  "
+            f"  seed_state            {fmt_metric_percentiles(s['seed_state_ms'])}  "
             f"alloc={fmt_bytes(s['seed_state_alloc_bytes']['median']):>10s}  "
             f"live={fmt_bytes(s['seed_state_live_bytes']['median']):>10s}"
         )
         lines.append(
-            f"  run_turn (sum)        {fmt_ms(s['run_turn_ms']['median']):>10s}  "
+            f"  run_turn (sum)        {fmt_metric_percentiles(s['run_turn_ms'])}  "
             f"alloc={fmt_bytes(s['run_turn_alloc_bytes']['median']):>10s}  "
             f"live={fmt_bytes(s['run_turn_live_bytes']['median']):>10s}"
         )
         lines.append(
-            f"  await_background      {fmt_ms(s['await_background_work_ms']['median']):>10s}  "
+            f"  await_background      {fmt_metric_percentiles(s['await_background_work_ms'])}  "
             f"alloc={fmt_bytes(s['await_background_work_alloc_bytes']['median']):>10s}  "
             f"live={fmt_bytes(s['await_background_work_live_bytes']['median']):>10s}"
         )
         lines.append(
-            f"  export_state          {fmt_ms(s['export_state_ms']['median']):>10s}  "
+            f"  export_state          {fmt_metric_percentiles(s['export_state_ms'])}  "
             f"alloc={fmt_bytes(s['export_state_alloc_bytes']['median']):>10s}  "
             f"live={fmt_bytes(s['export_state_live_bytes']['median']):>10s}"
         )
         lines.append(
-            f"  TOTAL                 {fmt_ms(s['total_ms']['median']):>10s}  "
+            f"  TOTAL                 {fmt_metric_percentiles(s['total_ms'])}  "
             f"alloc={fmt_bytes(s['total_alloc_bytes']['median']):>10s}  "
             f"live={fmt_bytes(s['total_live_bytes']['median']):>10s}"
         )
@@ -235,13 +242,13 @@ def summarize_runtime(report: dict[str, Any]) -> str:
 
         ps = s.get("phase_summary", {})
         if ps:
-            lines.append("hot phases by median duration:")
+            lines.append("hot phases by median/p95 duration:")
             ranked = sorted(ps.items(), key=lambda kv: -kv[1]["duration_ms"]["median"])
             for name, m in ranked:
                 samples = m.get("samples", {}).get("median")
                 sample_text = f"n={int(samples):>4d}" if samples is not None else "n=   ?"
                 lines.append(
-                    f"  {name:30s}  {sample_text}  dur={fmt_ms(m['duration_ms']['median']):>9s}  "
+                    f"  {name:30s}  {sample_text}  dur={fmt_metric_percentiles(m['duration_ms'])}  "
                     f"alloc={fmt_bytes(m['alloc_bytes']['median']):>10s}  "
                     f"live={fmt_bytes(m['live_bytes']['median']):>10s}"
                 )

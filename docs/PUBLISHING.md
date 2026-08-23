@@ -55,8 +55,9 @@ time (`scripts/release_version.py stamp`, `scripts/publish_workspace.py
    50% above its own trailing 20-run median for five consecutive main runs.
    That signal is advisory everywhere too, it is a transition detector rather
    than a level check (a step change is loud for six or seven main runs and
-   then becomes the new baseline), and the release and dispatch-only perf runs
-   contribute nothing to it — only the quick profile records history today.
+   then becomes the new baseline), and full/release-profile runs append to a
+   sibling `runtime-duration-history-full.jsonl` ledger keyed by `(profile,
+   scenario)`, so quick and full observations are never compared together.
    Run `cargo run -p lash-perf -- duration-trend --history <FILE>` to read a
    history locally, and `gh cache delete` on the
    `perf-duration-history-quick-*` keys to reset the series after a scenario is

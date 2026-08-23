@@ -35,6 +35,7 @@ pub(crate) struct RuntimePerfReport {
     stack_profile: StackProfile,
     scenarios: Vec<String>,
     scenario_harnesses: Vec<String>,
+    allocation_mode: &'static str,
     dhat_out: Option<PathBuf>,
     results: Vec<RuntimePerfRunResult>,
     summary: Vec<RuntimePerfScenarioSummary>,
@@ -88,6 +89,20 @@ pub async fn run_cli(
 
     let out_path = out.unwrap_or_else(default_output_path);
     report_support::ensure_parent_dir(&out_path, "benchmark output")?;
+    // The quick main-push job supplies its cache-backed history explicitly.
+    // Full and release runs already write their report into an uploaded perf
+    // artifact, so give those runs a sibling ledger without requiring a
+    // workflow-specific flag. The profile key keeps that ledger separate from
+    // the quick series if a caller later combines the retained artifacts.
+    let auto_full_duration_history =
+        duration_history.is_none() && is_full_profile(runs, warmups, chat_turns);
+    let duration_profile = if auto_full_duration_history && duration_profile == "custom" {
+        "full".to_string()
+    } else {
+        duration_profile
+    };
+    let duration_history = duration_history
+        .or_else(|| auto_full_duration_history.then(|| full_duration_history_path(&out_path)));
     let dhat_out_path = resolve_dhat_output_path(enable_dhat, &out_path, dhat_out);
     dhat::ensure_dhat_parent(dhat_out_path.as_ref())?;
 
@@ -122,6 +137,7 @@ pub async fn run_cli(
             .map(|scenario| scenario.name().to_string())
             .collect(),
         scenario_harnesses: selected_scenario_harnesses(&scenarios),
+        allocation_mode: crate::ALLOCATION_MODE,
         dhat_out: dhat_out_path.clone(),
         summary,
         scenario_harness_summary,
@@ -163,6 +179,7 @@ fn runtime_perf_output_json(out_path: &Path, report: &RuntimePerfReport) -> serd
         "dhat_out": report.dhat_out,
         "worker_stack_bytes": report.worker_stack_bytes,
         "stack_profile": report.stack_profile,
+        "allocation_mode": report.allocation_mode,
         "scenario_harnesses": report.scenario_harnesses,
         "summary": report.summary,
         "scenario_harness_summary": report.scenario_harness_summary,
@@ -180,6 +197,14 @@ fn resolve_dhat_output_path(
 
 fn stack_profile(worker_stack_bytes: usize) -> StackProfile {
     StackProfile::capture(Some(worker_stack_bytes), Some(DEFAULT_STACK_BUDGET_BYTES))
+}
+
+fn is_full_profile(runs: usize, warmups: usize, chat_turns: usize) -> bool {
+    runs == 5 && warmups == 1 && chat_turns == 12
+}
+
+fn full_duration_history_path(out_path: &Path) -> PathBuf {
+    out_path.with_file_name("runtime-duration-history-full.jsonl")
 }
 
 fn resolve_scenarios(filters: &[String]) -> anyhow::Result<Vec<RuntimePerfScenario>> {
@@ -802,6 +827,7 @@ mod tests {
                 .map(|scenario| scenario.name().to_string())
                 .collect(),
             scenario_harnesses: selected_scenario_harnesses(&scenarios),
+            allocation_mode: crate::ALLOCATION_MODE,
             dhat_out: None,
             results,
             summary,
@@ -819,6 +845,7 @@ mod tests {
                 "Agent Scenario"
             ])
         );
+        assert_eq!(report_json["allocation_mode"], crate::ALLOCATION_MODE);
         assert_eq!(
             report_json["scenario_harness_summary"][0]["scenario_harness"],
             "Runtime Scenario"
@@ -856,6 +883,7 @@ mod tests {
             output_json["scenario_harness_summary"],
             report_json["scenario_harness_summary"]
         );
+        assert_eq!(output_json["allocation_mode"], crate::ALLOCATION_MODE);
 
         let output_golden = serde_json::json!({
             "scenario_harnesses": [
@@ -941,6 +969,37 @@ mod tests {
                 .collect::<Vec<_>>(),
         });
         assert_eq!(output_projection, output_golden);
+    }
+
+    #[test]
+    fn runtime_perf_ledger_keeps_the_summary_median_and_p95() {
+        let scenario = RuntimePerfScenario::TurnCheckpoint;
+        let stack_profile = stack_profile(2 * 1024 * 1024);
+        let summary = summarize(
+            &[run_result(scenario, 10.0, 100)],
+            &[scenario],
+            1,
+            &stack_profile,
+        )
+        .into_iter()
+        .next()
+        .expect("summary exists");
+
+        let records = duration_trend::records_for_run(std::slice::from_ref(&summary), "full");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].total_ms, summary.total_ms.median);
+        assert_eq!(records[0].total_p95_ms, Some(summary.total_ms.p95));
+        assert_ne!(summary.total_ms.p95, 0.0);
+    }
+
+    #[test]
+    fn full_profile_history_uses_a_retained_sibling_of_the_report() {
+        assert!(is_full_profile(5, 1, 12));
+        assert!(!is_full_profile(2, 0, 3));
+        assert_eq!(
+            full_duration_history_path(Path::new(".benchmarks/perf-guard/runtime.json")),
+            Path::new(".benchmarks/perf-guard/runtime-duration-history-full.jsonl")
+        );
     }
 
     #[test]
