@@ -59,7 +59,7 @@ mod tests {
         assert_eq!(timeout, Some(Duration::from_secs(300)));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn run_with_timeout_returns_timeout_error() {
         let result = run_with_timeout(
             async {
