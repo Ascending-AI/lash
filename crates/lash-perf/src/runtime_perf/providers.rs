@@ -1,6 +1,10 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    time::Instant,
 };
 
 use lash_core::llm::types::{
@@ -30,6 +34,7 @@ pub(crate) struct BenchmarkStreamProfile {
 pub(crate) struct BenchmarkProviderControl {
     pub(crate) provider_started: tokio::sync::Notify,
     pub(crate) release_provider: tokio::sync::Notify,
+    armed: AtomicBool,
 }
 
 impl BenchmarkProviderControl {
@@ -37,7 +42,72 @@ impl BenchmarkProviderControl {
         Self {
             provider_started: tokio::sync::Notify::new(),
             release_provider: tokio::sync::Notify::new(),
+            armed: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn arm(&self) {
+        self.armed.store(true, Ordering::SeqCst);
+    }
+
+    fn take_armed(&self) -> bool {
+        self.armed.swap(false, Ordering::SeqCst)
+    }
+}
+
+pub(crate) struct BenchmarkSettlementControl {
+    pending: AtomicUsize,
+    pending_changed: tokio::sync::Notify,
+    releases: tokio::sync::Semaphore,
+    pending_durations_ms: Mutex<Vec<f64>>,
+}
+
+impl BenchmarkSettlementControl {
+    pub(crate) fn new() -> Self {
+        Self {
+            pending: AtomicUsize::new(0),
+            pending_changed: tokio::sync::Notify::new(),
+            releases: tokio::sync::Semaphore::new(0),
+            pending_durations_ms: Mutex::new(Vec::new()),
+        }
+    }
+
+    async fn hold_completion(&self) -> f64 {
+        let started = Instant::now();
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        self.pending_changed.notify_waiters();
+        self.releases
+            .acquire()
+            .await
+            .expect("settlement release semaphore remains open")
+            .forget();
+        let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+        self.pending_durations_ms
+            .lock()
+            .expect("settlement duration lock")
+            .push(duration_ms);
+        duration_ms
+    }
+
+    pub(crate) async fn wait_for_pending(&self, expected: usize) {
+        loop {
+            let changed = self.pending_changed.notified();
+            if self.pending.load(Ordering::SeqCst) >= expected {
+                return;
+            }
+            changed.await;
+        }
+    }
+
+    pub(crate) fn release(&self, count: usize) {
+        self.releases.add_permits(count);
+    }
+
+    pub(crate) fn pending_durations_ms(&self) -> Vec<f64> {
+        self.pending_durations_ms
+            .lock()
+            .expect("settlement duration lock")
+            .clone()
     }
 }
 
@@ -52,7 +122,12 @@ pub(crate) fn benchmark_provider_with_control(
         scenario,
         RuntimePerfScenario::TurnCancelRoundTrip | RuntimePerfScenario::IngressClaimProjection
     )
-    .then(|| Arc::new(BenchmarkProviderControl::new()));
+    .then(|| Arc::new(BenchmarkProviderControl::new()))
+    .or_else(|| {
+        scenario
+            .contention_workers()
+            .map(|_| Arc::new(BenchmarkProviderControl::new()))
+    });
     let completion_control = control.clone();
     let provider = TestProvider::builder()
         .kind("benchmark")
@@ -79,6 +154,18 @@ pub(crate) fn benchmark_provider_with_control(
                     let control = completion_control
                         .as_ref()
                         .expect("ingress projection control");
+                    control.provider_started.notify_one();
+                    control.release_provider.notified().await;
+                }
+                if scenario.contention_workers().is_some()
+                    && completion_control
+                        .as_ref()
+                        .expect("writer contention provider control")
+                        .take_armed()
+                {
+                    let control = completion_control
+                        .as_ref()
+                        .expect("writer contention provider control");
                     control.provider_started.notify_one();
                     control.release_provider.notified().await;
                 }
@@ -132,12 +219,24 @@ pub(crate) fn benchmark_provider_with_control(
 #[derive(Clone)]
 pub(crate) struct BenchmarkEchoTool {
     completion_resolver: Arc<dyn lash_core::EffectHost>,
+    settlement_control: Option<Arc<BenchmarkSettlementControl>>,
 }
 
 impl BenchmarkEchoTool {
     pub(crate) fn new(completion_resolver: Arc<dyn lash_core::EffectHost>) -> Self {
         Self {
             completion_resolver,
+            settlement_control: None,
+        }
+    }
+
+    pub(crate) fn with_settlement_control(
+        completion_resolver: Arc<dyn lash_core::EffectHost>,
+        settlement_control: Arc<BenchmarkSettlementControl>,
+    ) -> Self {
+        Self {
+            completion_resolver,
+            settlement_control: Some(settlement_control),
         }
     }
 }
@@ -224,7 +323,12 @@ impl ToolProvider for BenchmarkEchoTool {
             "benchmark_echo" => execute_benchmark_echo(call).await,
             "benchmark_slow" => execute_benchmark_slow(call).await,
             "benchmark_async" => {
-                execute_benchmark_async(Arc::clone(&self.completion_resolver), call).await
+                execute_benchmark_async(
+                    Arc::clone(&self.completion_resolver),
+                    self.settlement_control.clone(),
+                    call,
+                )
+                .await
             }
             _ => ToolOutcome::err_fmt(format_args!("Unknown benchmark tool: {}", call.name)),
         }
@@ -486,6 +590,7 @@ async fn execute_benchmark_slow(call: lash_core::ToolCall<'_>) -> ToolOutcome {
 
 async fn execute_benchmark_async(
     completion_resolver: Arc<dyn lash_core::EffectHost>,
+    settlement_control: Option<Arc<BenchmarkSettlementControl>>,
     call: lash_core::ToolCall<'_>,
 ) -> ToolOutcome {
     let key = match call.context.completion_key() {
@@ -502,10 +607,16 @@ async fn execute_benchmark_async(
         .get("value")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    let pending_phase = settlement_control
+        .as_ref()
+        .map(|_| call.context.named_phase("async_settlement.child_pending"));
     tokio::spawn(async move {
-        if delay_ms > 0 {
+        if let Some(control) = settlement_control {
+            let _ = control.hold_completion().await;
+        } else if delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
+        drop(pending_phase);
         let _ = completion_resolver
             .resolve_await_event(
                 &key,
@@ -1683,6 +1794,31 @@ first_result = (await first)?
 second_result = (await second)?
 finish first_result.value"#,
             );
+            text_profile(text)
+        }
+        RuntimePerfScenario::AsyncProcessSettlement2Children
+        | RuntimePerfScenario::AsyncProcessSettlement8Children => {
+            let children = scenario
+                .settlement_children()
+                .expect("async settlement child count");
+            let starts = (0..children)
+                .map(|index| {
+                    format!(
+                        "child_{index} = start settlement_child(tool: tools, value: \"child-{index}\")"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let text = lashlang_block(&format!(
+                r#"
+process settlement_child(tool: Tools, value: str) {{
+  result = await tool.benchmark_async({{ value: value, delay_ms: 0 }})?
+  finish result
+}}
+
+{starts}
+finish "runtime perf benchmark ok""#
+            ));
             text_profile(text)
         }
         RuntimePerfScenario::RlmSubagentSpawn

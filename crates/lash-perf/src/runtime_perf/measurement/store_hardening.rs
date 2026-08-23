@@ -297,6 +297,7 @@ async fn run_once_store_hardening_hot_paths(
                 (chat_turns * HARDENING_OCCURRENCE_ITERATIONS) as u64,
             ),
         ]),
+        metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,
             rss_after_build_kb: after_build_memory.rss_kb,

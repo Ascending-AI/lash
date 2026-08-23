@@ -98,6 +98,10 @@ pub(crate) enum RuntimePerfScenario {
     DurableAgentChildTurnPostgres,
     DurableCheckpointCurveSqlite,
     DurableCheckpointCurvePostgres,
+    WriterContention2Workers,
+    WriterContention8Workers,
+    AsyncProcessSettlement2Children,
+    AsyncProcessSettlement8Children,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -127,7 +131,7 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 47] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 51] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -470,8 +474,36 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures checkpoint-size attribution inside complete RLM turns against the decorated PostgreSQL persistence boundary."
         ),
+        runtime_perf_metadata!(
+            WriterContention2Workers,
+            "writer_contention_2_workers",
+            Standard,
+            RuntimeScenario,
+            "Measures signed same-facade contended-minus-baseline latency against a two-worker many-session control; second-turn history depth is a known confound."
+        ),
+        runtime_perf_metadata!(
+            WriterContention8Workers,
+            "writer_contention_8_workers",
+            Standard,
+            RuntimeScenario,
+            "Measures signed same-facade contended-minus-baseline latency against an eight-worker many-session control; second-turn history depth is a known confound."
+        ),
+        runtime_perf_metadata!(
+            AsyncProcessSettlement2Children,
+            "async_process_settlement_2_children",
+            Rlm,
+            AgentScenario,
+            "Measures two gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return."
+        ),
+        runtime_perf_metadata!(
+            AsyncProcessSettlement8Children,
+            "async_process_settlement_8_children",
+            Rlm,
+            AgentScenario,
+            "Measures eight gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return."
+        ),
     ];
-    pub(crate) const KNOWN: [Self; 47] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 51] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; 38] = runtime_perf_default_scenarios();
@@ -536,6 +568,24 @@ impl RuntimePerfScenario {
 
     pub(crate) fn has_guard_budget(self) -> bool {
         !self.is_durable()
+            && self.contention_workers().is_none()
+            && self.settlement_children().is_none()
+    }
+
+    pub(crate) fn contention_workers(self) -> Option<usize> {
+        match self {
+            Self::WriterContention2Workers => Some(2),
+            Self::WriterContention8Workers => Some(8),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn settlement_children(self) -> Option<usize> {
+        match self {
+            Self::AsyncProcessSettlement2Children => Some(2),
+            Self::AsyncProcessSettlement8Children => Some(8),
+            _ => None,
+        }
     }
 
     pub(crate) fn checkpoint_curve_bytes(self, turn_index: usize) -> Option<usize> {
@@ -562,7 +612,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 47] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 51] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -611,6 +661,10 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 47] {
         RuntimePerfScenario::METADATA[44].scenario,
         RuntimePerfScenario::METADATA[45].scenario,
         RuntimePerfScenario::METADATA[46].scenario,
+        RuntimePerfScenario::METADATA[47].scenario,
+        RuntimePerfScenario::METADATA[48].scenario,
+        RuntimePerfScenario::METADATA[49].scenario,
+        RuntimePerfScenario::METADATA[50].scenario,
     ]
 }
 
