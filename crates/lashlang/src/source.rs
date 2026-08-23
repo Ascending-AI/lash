@@ -909,7 +909,8 @@ fn is_identifier(name: &str) -> bool {
     if !(first == '_' || first.is_ascii_alphabetic()) {
         return false;
     }
-    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()) && !is_hard_keyword(name)
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        && !crate::parser::is_parser_reserved_name(name)
 }
 
 fn is_bare_key(name: &str) -> bool {
@@ -919,26 +920,6 @@ fn is_bare_key(name: &str) -> bool {
     };
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-fn is_hard_keyword(name: &str) -> bool {
-    matches!(
-        name,
-        "if" | "else"
-            | "for"
-            | "in"
-            | "await"
-            | "cancel"
-            | "submit"
-            | "print"
-            | "call"
-            | "and"
-            | "or"
-            | "not"
-            | "true"
-            | "false"
-            | "null"
-    )
 }
 
 fn binary_op_source(op: BinaryOp) -> &'static str {
