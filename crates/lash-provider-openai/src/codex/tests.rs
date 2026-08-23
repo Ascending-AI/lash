@@ -27,6 +27,9 @@ use ws_testing::{
     spawn_scripted_websocket_with_injected_accept_faults,
 };
 
+#[path = "idle_timeout_tests.rs"]
+mod idle_timeout_tests;
+
 fn process_event(state: &mut CodexStreamState, event: Value) {
     CodexProvider::process_sse_event(&event.to_string(), state, None).unwrap();
 }
@@ -110,16 +113,27 @@ fn websocket_test_provider(
     responses_url: String,
     websocket_url: String,
 ) -> CodexProvider {
+    websocket_test_provider_with_chunk_timeout(transport, responses_url, websocket_url, None)
+}
+
+fn websocket_test_provider_with_chunk_timeout(
+    transport: CodexTransport,
+    responses_url: String,
+    websocket_url: String,
+    chunk_timeout_ms: Option<u64>,
+) -> CodexProvider {
     CodexProvider::new("access", "refresh", 0)
         .with_transport(transport)
         .with_options(ProviderOptions {
             reliability: ProviderReliability::codex()
                 .request_timeout(Some(RequestTimeout::Millis(5_000)))
-                .stream_chunk_timeout_ms(Some(50)),
+                .stream_chunk_timeout_ms(chunk_timeout_ms),
             ..ProviderOptions::default()
         })
         .with_endpoint_urls(responses_url, websocket_url)
 }
+
+const SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS: u64 = 50;
 
 async fn advance_scripted_websocket_idle_timeout(ready: &Notify) {
     let reached_idle = tokio::time::timeout(Duration::from_secs(5), ready.notified()).await;
@@ -901,6 +915,43 @@ async fn codex_scripted_websocket_trace_diagnostics_cover_cached_delta_and_stale
 }
 
 #[tokio::test]
+async fn codex_scripted_websocket_default_timeout_survives_a_scheduler_stall() {
+    let idle_ready = Arc::new(Notify::new());
+    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::IdleBeforeStart {
+        ready: idle_ready.clone(),
+    }])
+    .await;
+    let mut provider = websocket_test_provider(
+        CodexTransport::Websocket,
+        "http://127.0.0.1:9/unused".to_string(),
+        ws.url.clone(),
+    );
+    let completion = tokio::spawn(async move {
+        provider
+            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .await
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), idle_ready.notified())
+        .await
+        .expect("scripted WebSocket must capture the request before the stall");
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_millis(
+        SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS + 1,
+    ))
+    .await;
+    tokio::task::yield_now().await;
+
+    assert!(
+        !completion.is_finished(),
+        "ordinary scripted WebSocket traffic must not use the intentional-idle deadline"
+    );
+    completion.abort();
+    let _ = completion.await;
+    tokio::time::resume();
+}
+
+#[tokio::test]
 async fn codex_scripted_websocket_full_turn_sends_response_create() {
     let ws = spawn_scripted_websocket(vec![ScriptedWsAction::Complete {
         response_id: "resp_1",
@@ -937,40 +988,6 @@ async fn codex_scripted_websocket_full_turn_sends_response_create() {
         Some("session-1:request:test")
     );
     assert_eq!(header("session_id"), None);
-}
-
-#[tokio::test]
-async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
-    let idle_ready = Arc::new(Notify::new());
-    let idle = ScriptedWsAction::IdleBeforeStart {
-        ready: idle_ready.clone(),
-    };
-    let ws = spawn_scripted_websocket(vec![idle]).await;
-    let mut provider = websocket_test_provider(
-        CodexTransport::Websocket,
-        "http://127.0.0.1:9/unused".to_string(),
-        ws.url.clone(),
-    );
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let event_sink = Arc::clone(&events);
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.stream_events = Some(lash_core::llm::types::LlmEventSender::new(move |event| {
-        event_sink.lock_recover().push(event);
-    }));
-
-    let completion = tokio::spawn(async move { provider.complete(req).await });
-    advance_scripted_websocket_idle_timeout(&idle_ready).await;
-    let error = tokio::time::timeout(Duration::from_secs(5), completion)
-        .await
-        .expect("idle WebSocket completion must not hang")
-        .expect("join idle WebSocket completion")
-        .expect_err("idle before response start must time out");
-
-    assert_eq!(error.code.as_deref(), Some("websocket_idle_timeout"));
-    assert!(
-        events.lock_recover().is_empty(),
-        "no stream event may commit before the first response frame"
-    );
 }
 
 #[tokio::test]
@@ -1692,31 +1709,6 @@ async fn codex_scripted_websocket_mid_stream_failure_does_not_fallback() {
 }
 
 #[tokio::test]
-async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
-    let idle_ready = Arc::new(Notify::new());
-    let idle = ScriptedWsAction::IdleBeforeStart {
-        ready: idle_ready.clone(),
-    };
-    let ws = spawn_scripted_websocket(vec![idle]).await;
-    let http = spawn_http_sse("resp_http", "msg_http", "fallback").await;
-    let mut provider =
-        websocket_test_provider(CodexTransport::Auto, http.url.clone(), ws.url.clone());
-
-    let request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let completion = tokio::spawn(async move { provider.complete(request).await });
-    advance_scripted_websocket_idle_timeout(&idle_ready).await;
-    let response = tokio::time::timeout(Duration::from_secs(5), completion)
-        .await
-        .expect("idle WebSocket fallback must not hang")
-        .expect("join idle WebSocket fallback")
-        .expect("sse fallback response");
-
-    assert_eq!(response.full_text, "fallback");
-    assert_eq!(ws.captured().len(), 1);
-    assert_eq!(http.captured_len(), 1);
-}
-
-#[tokio::test]
 async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
     let http = spawn_http_sse_with_headers(
         "resp_http",
@@ -1824,27 +1816,6 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
     assert!(sse_request.contains("session-id: session-1"));
     assert!(sse_request.contains("x-client-request-id: session-1:request:test"));
     assert!(!sse_request.contains("session_id:"));
-}
-
-#[tokio::test]
-async fn codex_scripted_websocket_idle_after_output_is_terminal_error() {
-    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::IdleAfterStart {
-        message_id: "msg_1",
-        text: "partial",
-    }])
-    .await;
-    let http = spawn_http_sse("resp_http", "msg_http", "fallback").await;
-    let mut provider =
-        websocket_test_provider(CodexTransport::Auto, http.url.clone(), ws.url.clone());
-
-    let err = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
-        .await
-        .expect_err("idle after output");
-
-    assert_eq!(err.code.as_deref(), Some("websocket_idle_timeout"));
-    assert_eq!(http.captured_len(), 0);
-    assert_eq!(ws.captured().len(), 1);
 }
 
 #[tokio::test]
