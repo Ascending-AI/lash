@@ -212,9 +212,9 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
 }
 
 #[tokio::test]
-async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
+async fn durable_process_worker_config_uses_child_store_factory_without_root() -> Result<()> {
     // The CLI can wire a child store factory without a root store factory.
-    // The process work runner must resolve the same effective factory.
+    // The process worker config must resolve the same effective factory.
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
@@ -224,14 +224,53 @@ async fn durable_registry_with_only_child_store_factory_builds() -> Result<()> {
         .await
         .expect("open durable registry"),
     );
-    peer_coherence_builder()
+    let child_factory = durable_session_store_factory(dir.path());
+    let core = peer_coherence_builder()
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
-        .child_store_factory(durable_session_store_factory(dir.path()))
+        .child_store_factory(Arc::clone(&child_factory))
         .attachment_store(durable_attachment_store(dir.path()))
         .process_env_store(durable_process_env_store(dir.path()).await)
         .trigger_store(durable_trigger_store(dir.path()).await)
         .process_registry(registry)
         .build(crate::testing::runtime_lease_owner())?;
+    let config = core.durable_process_worker_config()?;
+    assert!(Arc::ptr_eq(&config.session_store_factory, &child_factory));
+    Ok(())
+}
+
+#[tokio::test]
+async fn durable_process_worker_config_matches_inline_child_factory_when_both_are_set(
+) -> Result<()> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root_factory = durable_session_store_factory(&dir.path().join("root"));
+    let child_factory = durable_session_store_factory(&dir.path().join("child"));
+    let core = peer_coherence_builder()
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
+        .store_factory(root_factory)
+        .child_store_factory(Arc::clone(&child_factory))
+        .attachment_store(durable_attachment_store(dir.path()))
+        .process_env_store(durable_process_env_store(dir.path()).await)
+        .trigger_store(durable_trigger_store(dir.path()).await)
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let inline_config = core
+        .work_driver
+        .process_worker_config()
+        .expect("inline process worker config must be assembled at build");
+    let public_config = core.durable_process_worker_config()?;
+    assert!(Arc::ptr_eq(
+        &inline_config.session_store_factory,
+        &child_factory
+    ));
+    assert!(Arc::ptr_eq(
+        &public_config.session_store_factory,
+        &child_factory
+    ));
+    assert!(Arc::ptr_eq(
+        &inline_config.session_store_factory,
+        &public_config.session_store_factory
+    ));
     Ok(())
 }
 
