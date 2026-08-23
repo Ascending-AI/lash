@@ -1121,7 +1121,7 @@ kind = "assoc_const"
 availability = "all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs:113#for phase in lash_core::runtime::RuntimeTurnPhase::ALL {"
+usage = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs:167#for phase in lash_core::runtime::RuntimeTurnPhase::ALL {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -1186,7 +1186,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/harness.rs:195#probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,"
+usage = "crates/lash-perf/src/runtime_perf/harness.rs:200#probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::begin"
@@ -14491,7 +14491,7 @@ availability = "default+all-features"
 aliases = ["lash_core::OperationId::storage_key"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs:479#let operation_storage_key = commit.turn_commit.operation.storage_key()?;"
+usage = "crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs:482#lash_core::OperationId::storage_key(&commit.turn_commit.operation)?;"
 
 [[api]]
 symbol = "lash::persistence::OperationId::turn"
@@ -48579,7 +48579,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::execute_effect"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/harness.rs:903#self.delegate.execute_effect(envelope, local_executor).await"
+usage = "crates/lash-perf/src/runtime_perf/harness.rs:909#self.delegate.execute_effect(envelope, local_executor).await"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::supports_concurrent_effects"
@@ -93109,7 +93109,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:119#Err(lash_core::MaintenanceFailure::failed_before_any_work("
+usage = "crates/lash-perf/src/runtime_perf/store.rs:360#Err(lash_core::MaintenanceFailure::failed_before_any_work("
 reason = "FIG-1505: `lash-perf`'s artifact store reports its unsupported session deletion through this type rather than an empty report, so the consumer is another workspace crate rather than an example. Host-facing projection: `lash::persistence::MaintenanceFailure`."
 
 [[api]]
@@ -93158,7 +93158,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed_before_any_work"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:119#Err(lash_core::MaintenanceFailure::failed_before_any_work("
+usage = "crates/lash-perf/src/runtime_perf/store.rs:360#Err(lash_core::MaintenanceFailure::failed_before_any_work("
 reason = "FIG-1505: every backend that stops before reclaiming anything constructs its failure through this; the consumers are backend crates rather than examples."
 
 [[api]]

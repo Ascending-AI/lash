@@ -170,6 +170,9 @@ mod tests {
     #[test]
     fn process_list_stress_is_the_only_run_turn_scenario() {
         for scenario in RuntimePerfScenario::KNOWN {
+            if !scenario.has_guard_budget() {
+                continue;
+            }
             let expected_span = if scenario == RuntimePerfScenario::ProcessListStress {
                 GuardedSpan::RunTurn
             } else {

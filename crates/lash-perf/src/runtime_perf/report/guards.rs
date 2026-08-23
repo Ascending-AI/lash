@@ -146,6 +146,9 @@ pub(super) fn evaluate_budgets(
             });
             continue;
         };
+        if !scenario.has_guard_budget() {
+            continue;
+        }
 
         for phase in required_phases(*scenario) {
             let passed = summary.phase_summary.contains_key(*phase);
@@ -365,6 +368,20 @@ mod tests {
         assert_eq!(
             result.reason.as_deref(),
             Some("metric exceeded advisory guard budget (reported, not gating)")
+        );
+    }
+
+    #[test]
+    fn durable_scenarios_still_require_a_summary() {
+        let scenario = RuntimePerfScenario::DurableCheckpointCurveSqlite;
+        let results = evaluate_budgets(&[], &[scenario]);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].metric, "scenario_output");
+        assert!(!results[0].passed);
+        assert_eq!(
+            results[0].reason.as_deref(),
+            Some("scenario did not produce a summary")
         );
     }
 }
