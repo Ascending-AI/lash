@@ -64,6 +64,30 @@ struct Args {
     #[arg(long, default_value_t = 12)]
     runtime_perf_turns: usize,
 
+    /// Concurrent session population for high-traffic load scenarios
+    #[arg(long, default_value_t = 4)]
+    runtime_perf_load_population: usize,
+
+    /// Open-loop arrivals per second for high-traffic scenarios; zero starts
+    /// every session immediately
+    #[arg(long, default_value_t = 0)]
+    runtime_perf_load_arrival_rate: u64,
+
+    /// Weighted high-traffic turn mix as comma-separated `kind=weight` pairs
+    #[arg(
+        long,
+        default_value = "plain=1,tool=1,queued=1,child=1,wake=1,trigger=1"
+    )]
+    runtime_perf_load_mix: String,
+
+    /// Comma-separated populations for high-traffic knee-search scenarios
+    #[arg(long, default_value = "4,8")]
+    runtime_perf_knee_populations: String,
+
+    /// First p95-vs-initial-step ratio reported as the saturation knee
+    #[arg(long, default_value_t = 1.25)]
+    runtime_perf_knee_threshold: f64,
+
     /// Tokio worker stack size for runtime benchmark processes
     #[arg(long, value_name = "BYTES")]
     runtime_perf_worker_stack_bytes: Option<usize>,
@@ -138,6 +162,11 @@ fn main() -> anyhow::Result<()> {
         args.runtime_perf_warmups,
         args.runtime_perf_scenario,
         args.runtime_perf_turns,
+        args.runtime_perf_load_population,
+        args.runtime_perf_load_arrival_rate,
+        args.runtime_perf_load_mix,
+        args.runtime_perf_knee_populations,
+        args.runtime_perf_knee_threshold,
         args.runtime_perf_enforce_budgets,
         args.runtime_perf_enforce_inventory,
         args.runtime_perf_duration_history,

@@ -1,6 +1,7 @@
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
 use lash_core::{
@@ -62,6 +63,13 @@ pub(crate) struct RuntimePerfCommitMeasurement {
 pub(crate) struct RuntimePerfStoreMetrics {
     calls: Mutex<BTreeMap<String, u64>>,
     commits: Mutex<Vec<RuntimePerfCommitMeasurement>>,
+    timings: Mutex<BTreeMap<String, RuntimePerfStoreTiming>>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RuntimePerfStoreTiming {
+    pub(crate) calls: u64,
+    pub(crate) total_micros: u64,
 }
 
 impl RuntimePerfStoreMetrics {
@@ -71,6 +79,15 @@ impl RuntimePerfStoreMetrics {
             .lock_recover()
             .entry(operation.to_string())
             .or_default() += 1;
+    }
+
+    fn record_timing(&self, operation: &str, elapsed: Duration) {
+        let mut timings = self.timings.lock_recover();
+        let timing = timings.entry(operation.to_string()).or_default();
+        timing.calls += 1;
+        timing.total_micros = timing
+            .total_micros
+            .saturating_add(elapsed.as_micros().min(u128::from(u64::MAX)) as u64);
     }
 
     fn record_commit(&self, commit: &RuntimeCommit) {
@@ -101,6 +118,10 @@ impl RuntimePerfStoreMetrics {
     pub(crate) fn commit_measurements(&self) -> Vec<RuntimePerfCommitMeasurement> {
         self.commits.lock_recover().clone()
     }
+
+    pub(crate) fn timing_snapshot(&self) -> BTreeMap<String, RuntimePerfStoreTiming> {
+        self.timings.lock_recover().clone()
+    }
 }
 
 #[async_trait::async_trait]
@@ -123,7 +144,11 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let receipt = self.inner.commit_runtime_state(commit).await?;
+        let started = Instant::now();
+        let receipt = self.inner.commit_runtime_state(commit).await;
+        self.metrics
+            .record_timing("store_transaction", started.elapsed());
+        let receipt = receipt?;
         self.committed_node_ids.lock_recover().extend(node_ids);
         Ok(receipt)
     }
@@ -166,6 +191,71 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
     async fn load_session_meta(&self) -> Result<Option<lash_core::SessionMeta>, StoreError> {
         self.metrics.record_call("load_session_meta");
         self.inner.load_session_meta().await
+    }
+
+    async fn enqueue_pending_turn_input(
+        &self,
+        input: lash_core::PendingTurnInputDraft,
+    ) -> Result<lash_core::PendingTurnInput, StoreError> {
+        self.metrics.record_call("enqueue_pending_turn_input");
+        let started = Instant::now();
+        let result = self.inner.enqueue_pending_turn_input(input).await;
+        self.metrics
+            .record_timing("queue_enqueue", started.elapsed());
+        result
+    }
+
+    async fn claim_next_turn_inputs(
+        &self,
+        session_id: &str,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        owner: &lash_core::LeaseOwnerIdentity,
+        max_inputs: usize,
+    ) -> Result<Option<lash_core::WorkClaim<lash_core::runtime::TurnInputClaimData>>, StoreError>
+    {
+        self.metrics.record_call("claim_next_turn_inputs");
+        let started = Instant::now();
+        let result = self
+            .inner
+            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
+            .await;
+        self.metrics.record_timing("claim_scan", started.elapsed());
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn claim_checkpoint_work(
+        &self,
+        session_id: &str,
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        owner: &lash_core::LeaseOwnerIdentity,
+        turn_id: &lash_core::TurnId,
+        checkpoint: lash_core::CheckpointKind,
+        max_inputs: usize,
+        policy: lash_core::QueuedWorkClaimPolicy,
+    ) -> Result<
+        (
+            Option<lash_core::WorkClaim<lash_core::runtime::TurnInputClaimData>>,
+            Option<lash_core::WorkClaim<lash_core::runtime::QueuedWorkClaimData>>,
+        ),
+        StoreError,
+    > {
+        self.metrics.record_call("claim_checkpoint_work");
+        let started = Instant::now();
+        let result = self
+            .inner
+            .claim_checkpoint_work(
+                session_id,
+                session_execution_lease,
+                owner,
+                turn_id,
+                checkpoint,
+                max_inputs,
+                policy,
+            )
+            .await;
+        self.metrics.record_timing("claim_scan", started.elapsed());
+        result
     }
 
     async fn try_claim_session_execution_lease(

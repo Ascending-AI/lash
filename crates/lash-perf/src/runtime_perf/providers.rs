@@ -1406,14 +1406,15 @@ fn benchmark_stream_profile_for_request(
     scenario: RuntimePerfScenario,
     request: &LlmRequest,
 ) -> BenchmarkStreamProfile {
-    if matches!(
+    if (matches!(
         scenario,
         RuntimePerfScenario::RlmSubagentSpawn
             | RuntimePerfScenario::DurableAgentChildTurnSqlite
             | RuntimePerfScenario::DurableAgentChildTurnPostgres
             | RuntimePerfScenario::RlmObliqueStackMix
             | RuntimePerfScenario::DeepTurnComposition
-    ) && request_text(request).contains("Subagent capability: default. Depth: 1/5.")
+    ) || scenario.is_high_traffic())
+        && request_text(request).contains("Subagent capability: default. Depth: 1/5.")
     {
         if matches!(scenario, RuntimePerfScenario::DeepTurnComposition) {
             return text_profile(lashlang_block(
@@ -1461,6 +1462,10 @@ finish { len: result.value }"#,
             })
             .to_string(),
         );
+    }
+
+    if scenario.is_high_traffic() {
+        return high_traffic_stream_profile(request);
     }
 
     match scenario {
@@ -1626,6 +1631,7 @@ big_map = {}
 for i in range(24) {
   big_map[format("room_{}", i)] = { exits: ["north", "south", "east"], items: [format("item_{}", i)] }
 }
+
 big_notes = []
 for i in range(45) {
   big_notes = push(big_notes, format("note {}: long observation about world state, plan, and next steps", i))
@@ -1959,6 +1965,88 @@ finish result"#,
     }
 }
 
+fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStreamProfile {
+    let kind = high_traffic_operation_kind(request);
+    if kind == Some("tool") {
+        return text_profile(lashlang_block(
+            r#"result = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 })?
+finish result.value"#,
+        ));
+    }
+    if kind == Some("child") {
+        return text_profile(lashlang_block(
+            r#"process load_child(agents: Agents) {
+  result = await agents.spawn({
+    capability: "default",
+    task: "Submit `{ len: len(chunk) }` using the seeded `chunk` variable.",
+    seed: { chunk: ["alpha", "beta", "gamma"] },
+    output: Type { len: int }
+  })?
+  finish result
+}
+handle = start load_child(agents: agents)
+result = (await handle)?
+finish "runtime perf benchmark ok""#,
+        ));
+    }
+    if kind == Some("wake") {
+        return text_profile(lashlang_block(
+            r#"process load_wake(tool: Tools) {
+  result = await tool.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 })?
+  finish result
+}
+handle = start load_wake(tool: tools)
+result = (await handle)?
+finish result.value"#,
+        ));
+    }
+    if kind == Some("trigger") {
+        let trigger_name = high_traffic_trigger_name(request);
+        let trigger_name = serde_json::to_string(&trigger_name)
+            .expect("high-traffic trigger name always serializes");
+        return text_profile(lashlang_block(&format!(
+            r#"process load_forward(event: mail.Received) {{
+  finish event.title
+}}
+existing = await triggers.list({{ name: {trigger_name}, enabled: true }})?
+if len(existing) == 0 {{
+  handle = await triggers.register({{
+    source: mail.received({{}}),
+    target: load_forward,
+    inputs: {{ event: trigger.event }},
+    name: {trigger_name}
+  }})?
+}}
+finish "runtime perf benchmark ok""#,
+        )));
+    }
+    text_profile(lashlang_block(r#"finish "runtime perf benchmark ok""#))
+}
+
+fn high_traffic_operation_kind(request: &LlmRequest) -> Option<&str> {
+    const KINDS: [&str; 6] = ["plain", "tool", "queued", "child", "wake", "trigger"];
+    let text = request_text(request);
+    let kind = text
+        .rsplit_once("load-kind:")
+        .and_then(|(_, suffix)| suffix.split_whitespace().next())?;
+    KINDS.into_iter().find(|candidate| *candidate == kind)
+}
+
+fn high_traffic_trigger_name(request: &LlmRequest) -> String {
+    let request_text = request_text(request);
+    let session_id = request_text
+        .rsplit_once("session:")
+        .and_then(|(_, suffix)| suffix.split_whitespace().next())
+        .filter(|value| {
+            !value.is_empty()
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        })
+        .unwrap_or("missing-session");
+    format!("runtime-perf-load-trigger-{session_id}")
+}
+
 fn checkpoint_curve_bytes_from_request(request: &LlmRequest) -> usize {
     let text = request_text(request);
     let marker = "checkpoint body bytes ";
@@ -2285,6 +2373,26 @@ mod tests {
         assert_eq!(
             historical_marker_profile.full_text,
             lashlang_block(r#"print("checkpoint before projection")"#)
+        );
+    }
+
+    #[test]
+    fn high_traffic_trigger_registration_is_session_scoped() {
+        let mut request = empty_request();
+        request.messages.push(request_input(
+            "load-kind:trigger operation:7 session:runtime-perf-session-a",
+        ));
+        let profile = high_traffic_stream_profile(&request);
+
+        assert!(
+            profile
+                .full_text
+                .contains("runtime-perf-load-trigger-runtime-perf-session-a")
+        );
+        assert!(
+            !profile
+                .full_text
+                .contains("name: \"runtime-perf-load-trigger\"")
         );
     }
 

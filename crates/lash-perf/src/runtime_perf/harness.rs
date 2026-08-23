@@ -243,6 +243,10 @@ impl BenchmarkRuntime {
         Ok(())
     }
 
+    pub(crate) fn take_session(&mut self) -> lash::LashSession {
+        self.session.take().expect("benchmark session")
+    }
+
     pub(crate) async fn set_turn_phase_probe(
         &self,
         probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,
@@ -1091,7 +1095,9 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         "runtime_perf_tools",
         PluginSpec::new().with_tool_provider(Arc::new(BenchmarkEchoTool::new(effect_host.clone()))),
     )));
-    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnSqlite) {
+    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnSqlite)
+        || scenario.is_high_traffic()
+    {
         plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
             Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
                 lash_subagents::StaticCapability::new(
@@ -1100,6 +1106,9 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 ),
             ))),
         )));
+    }
+    if scenario.is_high_traffic() {
+        plugin_stack.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
     }
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         attachments_root,
@@ -1244,7 +1253,9 @@ pub(crate) async fn build_runtime_with_postgres_store(
         "runtime_perf_tools",
         PluginSpec::new().with_tool_provider(Arc::new(BenchmarkEchoTool::new(effect_host.clone()))),
     )));
-    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnPostgres) {
+    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnPostgres)
+        || scenario.is_high_traffic()
+    {
         plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
             Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
                 lash_subagents::StaticCapability::new(
@@ -1253,6 +1264,9 @@ pub(crate) async fn build_runtime_with_postgres_store(
                 ),
             ))),
         )));
+    }
+    if scenario.is_high_traffic() {
+        plugin_stack.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
     }
 
     let core = match mode_id {

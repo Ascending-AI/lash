@@ -102,6 +102,10 @@ pub(crate) enum RuntimePerfScenario {
     WriterContention8Workers,
     AsyncProcessSettlement2Children,
     AsyncProcessSettlement8Children,
+    HighTrafficLoadSqlite,
+    HighTrafficLoadPostgres,
+    HighTrafficKneeSqlite,
+    HighTrafficKneePostgres,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -131,7 +135,7 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 51] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 55] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -502,8 +506,36 @@ impl RuntimePerfScenario {
             AgentScenario,
             "Measures eight gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return."
         ),
+        runtime_perf_metadata!(
+            HighTrafficLoadSqlite,
+            "high_traffic_load_sqlite",
+            Rlm,
+            RuntimeScenario,
+            "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence."
+        ),
+        runtime_perf_metadata!(
+            HighTrafficLoadPostgres,
+            "high_traffic_load_postgres",
+            Rlm,
+            RuntimeScenario,
+            "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared PostgreSQL persistence."
+        ),
+        runtime_perf_metadata!(
+            HighTrafficKneeSqlite,
+            "high_traffic_knee_sqlite",
+            Rlm,
+            RuntimeScenario,
+            "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search."
+        ),
+        runtime_perf_metadata!(
+            HighTrafficKneePostgres,
+            "high_traffic_knee_postgres",
+            Rlm,
+            RuntimeScenario,
+            "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search."
+        ),
     ];
-    pub(crate) const KNOWN: [Self; 51] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 55] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; 38] = runtime_perf_default_scenarios();
@@ -546,6 +578,10 @@ impl RuntimePerfScenario {
                 | Self::DurableAgentChildTurnPostgres
                 | Self::DurableCheckpointCurveSqlite
                 | Self::DurableCheckpointCurvePostgres
+                | Self::HighTrafficLoadSqlite
+                | Self::HighTrafficLoadPostgres
+                | Self::HighTrafficKneeSqlite
+                | Self::HighTrafficKneePostgres
         )
     }
 
@@ -556,6 +592,25 @@ impl RuntimePerfScenario {
                 | Self::DurableRlmCheckpointTurnPostgres
                 | Self::DurableAgentChildTurnPostgres
                 | Self::DurableCheckpointCurvePostgres
+                | Self::HighTrafficLoadPostgres
+                | Self::HighTrafficKneePostgres
+        )
+    }
+
+    pub(crate) fn is_high_traffic(self) -> bool {
+        matches!(
+            self,
+            Self::HighTrafficLoadSqlite
+                | Self::HighTrafficLoadPostgres
+                | Self::HighTrafficKneeSqlite
+                | Self::HighTrafficKneePostgres
+        )
+    }
+
+    pub(crate) fn is_high_traffic_knee(self) -> bool {
+        matches!(
+            self,
+            Self::HighTrafficKneeSqlite | Self::HighTrafficKneePostgres
         )
     }
 
@@ -612,7 +667,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 51] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 55] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -665,6 +720,10 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 51] {
         RuntimePerfScenario::METADATA[48].scenario,
         RuntimePerfScenario::METADATA[49].scenario,
         RuntimePerfScenario::METADATA[50].scenario,
+        RuntimePerfScenario::METADATA[51].scenario,
+        RuntimePerfScenario::METADATA[52].scenario,
+        RuntimePerfScenario::METADATA[53].scenario,
+        RuntimePerfScenario::METADATA[54].scenario,
     ]
 }
 
