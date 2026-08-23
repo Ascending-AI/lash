@@ -1019,7 +1019,8 @@ fn runtime_core_for_scripts(
     scripts: Vec<ProviderWireScript>,
     provider_schedule: Option<ScriptedTransportSchedule>,
 ) -> Result<(lash::LashCore, Arc<ScriptedLlmHttpTransport>, String), PostgresReplayError> {
-    let mut transport = ScriptedLlmHttpTransport::from_scripts(scripts);
+    let mut transport = ScriptedLlmHttpTransport::from_scripts(scripts)
+        .map_err(|err| PostgresReplayError::Runtime(err.to_string()))?;
     if let Some(schedule) = provider_schedule {
         transport = transport.with_event_schedule(schedule);
     }

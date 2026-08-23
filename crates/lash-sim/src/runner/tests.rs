@@ -78,7 +78,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
                 .equals = Some(json!(model));
         }
         let capture = Arc::new(CapturingLlmHttpTransport {
-            inner: ScriptedLlmHttpTransport::from_scripts(scripts),
+            inner: ScriptedLlmHttpTransport::from_scripts(scripts).expect("valid provider scripts"),
             bodies: Mutex::new(Vec::new()),
         });
         let provider = OpenAiCompatibleProvider::new("test-key", OPENROUTER_BASE_URL)

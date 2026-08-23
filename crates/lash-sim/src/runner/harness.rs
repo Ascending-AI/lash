@@ -26,7 +26,7 @@ pub(super) fn runtime_core_for_scripts(
             "runtime provider scripts for a session must use one provider kind".to_string(),
         ));
     }
-    let mut transport = ScriptedLlmHttpTransport::from_scripts(scripts);
+    let mut transport = ScriptedLlmHttpTransport::from_scripts(scripts)?;
     if let Some(schedule) = provider_schedule {
         transport = transport.with_event_schedule(schedule);
     }

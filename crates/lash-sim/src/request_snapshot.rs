@@ -18,7 +18,9 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         &["first reply".to_string(), "second reply".to_string()],
     )
     .expect("runtime scripts");
-    let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(scripts));
+    let transport = Arc::new(
+        ScriptedLlmHttpTransport::from_scripts(scripts).expect("valid runtime provider scripts"),
+    );
     let (provider, model, _) =
         runtime_provider_components(OPENAI_COMPATIBLE, &transport).expect("runtime provider");
     let trace_dir = tempfile::tempdir().expect("trace directory");

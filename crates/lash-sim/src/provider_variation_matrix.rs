@@ -825,11 +825,14 @@ async fn complete_http_buffered(
     row: &MatrixRow,
     recording: &Recording,
 ) -> Result<ProviderCompletion, Box<ProviderCompletionError>> {
-    let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts([recorded_script(
-        dialect,
-        &row.variation,
-        recording,
-    )]));
+    let transport = Arc::new(
+        ScriptedLlmHttpTransport::from_scripts([recorded_script(
+            dialect,
+            &row.variation,
+            recording,
+        )])
+        .expect("valid recorded provider script"),
+    );
     let mut provider = http_provider(dialect, transport);
     let mut request = matrix_request(dialect, row, Arc::new(Mutex::new(Vec::new())));
     request.stream_events = None;
@@ -846,7 +849,9 @@ async fn complete_http_with_events(
         .iter()
         .map(|recording| recorded_script(dialect, &row.variation, recording))
         .collect::<Vec<_>>();
-    let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(scripts));
+    let transport = Arc::new(
+        ScriptedLlmHttpTransport::from_scripts(scripts).expect("valid recorded provider scripts"),
+    );
     let mut provider = http_provider(dialect, transport);
     let mut options = provider.options();
     options.expose_thinking = true;
@@ -971,20 +976,17 @@ fn recorded_script(dialect: &str, variation: &str, recording: &Recording) -> Pro
         });
         timeline
     };
-    ProviderWireScript {
-        schema: crate::provider::PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
-        name: format!("{dialect}.{variation}.{}", recording.case),
-        provider_kind: dialect.to_string(),
-        endpoint: ProviderWireEndpoint {
+    ProviderWireScript::from_parts(
+        crate::provider::PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
+        format!("{dialect}.{variation}.{}", recording.case),
+        dialect.to_string(),
+        ProviderWireEndpoint {
             method: "POST".to_string(),
             path: dialect_path(dialect).to_string(),
         },
-        request_match: recording.request_match.clone(),
+        recording.request_match.clone(),
         timeline,
-        expected_provider: None,
-        provenance: None,
-        compiled_plan: std::sync::OnceLock::new(),
-    }
+    )
 }
 
 fn materialize_recordings(dialect: &str, cell: &MatrixCell) -> Option<Vec<Recording>> {
@@ -1012,7 +1014,7 @@ fn recording_from_provider_wire_script(dialect: &str, path: &str) -> Recording {
     let mut body = None;
     let mut transport_error = None;
     let mut retryable = false;
-    for event in script.timeline {
+    for event in script.timeline().iter().cloned() {
         match event {
             ProviderWireEvent::ResponseStart {
                 status: response_status,
@@ -1511,7 +1513,8 @@ fn assert_no_replay_state(
 }
 
 fn completion_route(dialect: &str) -> lash_core::ProviderRouteIdentity {
-    let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts([]));
+    let transport =
+        Arc::new(ScriptedLlmHttpTransport::from_scripts([]).expect("empty provider script queue"));
     http_provider(dialect, transport).route_identity(dialect_model(dialect))
 }
 

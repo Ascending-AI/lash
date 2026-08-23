@@ -565,7 +565,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
     let rate_limit_script = ProviderWireScript::from_json_str(OPENAI_COMPAT_RATE_LIMIT)?;
     let transport = ScriptedLlmHttpTransport::from_scripts(
         (0..attempt_budget).map(|_| rate_limit_script.clone()),
-    );
+    )?;
     let transport_for_assert = transport.clone();
     let retry_options = ProviderOptions {
         reliability: lash_core::provider::ProviderReliability::default()

@@ -1385,7 +1385,10 @@ impl BackendRunner {
     }
 
     fn build_lifecycle_core(&self) -> lash::LashCore {
-        let transport = Arc::new(lash_sim::ScriptedLlmHttpTransport::from_scripts([]));
+        let transport = Arc::new(
+            lash_sim::ScriptedLlmHttpTransport::from_scripts([])
+                .expect("empty provider script queue"),
+        );
         let (provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
             lash_sim::runtime_providers::OPENAI_COMPATIBLE,
             &transport,

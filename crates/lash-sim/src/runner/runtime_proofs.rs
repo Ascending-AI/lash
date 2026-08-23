@@ -5,7 +5,7 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
 {
     let script = runtime_script_for_text(OPENAI_COMPATIBLE, "Runtime scripted answer.")
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts([script]));
+    let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts([script])?);
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(OPENAI_COMPATIBLE, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -119,7 +119,7 @@ pub(super) async fn run_live_turn_facts(
 ) -> Result<LiveProviderFailureFacts, FixedScriptRunnerError> {
     let schedule = ScriptedTransportSchedule::new();
     let transport = Arc::new(
-        ScriptedLlmHttpTransport::from_scripts([script.clone()])
+        ScriptedLlmHttpTransport::from_scripts([script.clone()])?
             .with_event_schedule(schedule.clone()),
     );
     let (provider_handle, model, provider_kind) =
@@ -172,7 +172,7 @@ pub(super) async fn run_live_turn_facts(
         json!({ "provider_kind": provider_kind, "turn_index": 1 }),
     );
     let release_boundaries = script
-        .timeline
+        .timeline()
         .iter()
         .enumerate()
         .map(|(event_index, wire_event)| {

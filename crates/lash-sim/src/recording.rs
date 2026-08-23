@@ -278,22 +278,20 @@ impl RecordingExchange {
                 path.display()
             )));
         }
-        let script = ProviderWireScript {
-            schema: PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
+        let mut script = ProviderWireScript::from_parts(
+            PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
             name,
-            provider_kind: self.config.provider_kind.clone(),
-            endpoint: self.endpoint.clone(),
-            request_match: self.request_match.clone(),
+            self.config.provider_kind.clone(),
+            self.endpoint.clone(),
+            self.request_match.clone(),
             timeline,
-            expected_provider: None,
-            provenance: Some(ProviderWireProvenance {
-                kind: ProviderWireProvenanceKind::CapturedLive,
-                source: self.endpoint.path.clone(),
-                captured_at: Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)),
-                notes: self.config.notes.clone(),
-            }),
-            compiled_plan: std::sync::OnceLock::new(),
-        };
+        );
+        script.provenance = Some(ProviderWireProvenance {
+            kind: ProviderWireProvenanceKind::CapturedLive,
+            source: self.endpoint.path.clone(),
+            captured_at: Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)),
+            notes: self.config.notes.clone(),
+        });
         let mut encoded = serde_json::to_vec_pretty(&script).map_err(|error| {
             recording_error(format!("could not serialize provider recording: {error}"))
         })?;
@@ -769,10 +767,9 @@ mod tests {
         // Redacted content matchers cannot match the original request. Clearing
         // them demonstrates that the captured response itself is directly
         // consumable by the existing replay transport.
-        let replay = ScriptedLlmHttpTransport::new(ProviderWireScript {
-            request_match: ProviderWireRequestMatch::default(),
-            ..script
-        });
+        let mut replay_script = script;
+        replay_script.request_match = ProviderWireRequestMatch::default();
+        let replay = ScriptedLlmHttpTransport::new(replay_script).expect("valid replay script");
         let replayed = replay.send(request, None).await.expect("replayed response");
         let replayed_body = read_http_body_text(replayed.body, None, "read replay")
             .await
