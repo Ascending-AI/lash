@@ -162,7 +162,7 @@ async fn wait_for_process(
     label: &str,
     matches: impl Fn(&lash_core::facade_support::ObservedProcess) -> bool,
 ) -> lash_core::facade_support::ObservedProcess {
-    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+    let process = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {
             if let Some(process) = core.processes().get(process_id).await.expect("get process")
                 && matches(&process)
@@ -174,11 +174,8 @@ async fn wait_for_process(
     })
     .await
     .unwrap_or_else(|_| panic!("timed out waiting for {label}"));
-    core.processes()
-        .get(process_id)
-        .await
-        .expect("get final process state")
-        .unwrap_or_else(|| panic!("process `{process_id}` disappeared"))
+    assert!(matches(&process), "returned process did not match {label}");
+    process
 }
 
 async fn wait_for_waiting_signal(
