@@ -85,6 +85,7 @@ pub(crate) struct PipeExecProcessRequest<'a> {
 #[derive(Clone, Copy)]
 enum PollFinish {
     Cancelled,
+    ReaderDied,
     Exited(i32),
     Running,
 }
@@ -187,6 +188,8 @@ pub(crate) struct ShellRuntime {
     abort_pipe_reader: bool,
     #[cfg(test)]
     pipe_loop_gate: Option<Arc<tokio::sync::Barrier>>,
+    #[cfg(test)]
+    pipe_wait_handle_probe: Arc<StdMutex<Option<tokio::task::AbortHandle>>>,
 }
 
 #[cfg(test)]
@@ -233,6 +236,8 @@ impl ShellRuntime {
             abort_pipe_reader: false,
             #[cfg(test)]
             pipe_loop_gate: None,
+            #[cfg(test)]
+            pipe_wait_handle_probe: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -257,6 +262,11 @@ impl ShellRuntime {
     pub(crate) fn with_pipe_loop_gate(mut self, gate: Arc<tokio::sync::Barrier>) -> Self {
         self.pipe_loop_gate = Some(gate);
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pipe_wait_handle_probe(&self) -> Option<tokio::task::AbortHandle> {
+        self.pipe_wait_handle_probe.lock_recover().clone()
     }
 
     fn shell_name(shell_path: &str) -> &str {
@@ -614,6 +624,7 @@ impl ShellRuntime {
                 kill_child(state);
                 wait_for_child_exit(state, Duration::from_millis(500)).await;
             }
+            PollFinish::ReaderDied => {}
             PollFinish::Exited(_) => {
                 wait_for_buffer_settle(state, Duration::from_millis(OUTPUT_QUIET_PERIOD_MS)).await;
             }
@@ -623,26 +634,29 @@ impl ShellRuntime {
         if state.reader_died.load(Ordering::SeqCst) {
             return Err(shell_reader_died_failure());
         }
-        if matches!(finish, PollFinish::Cancelled) {
-            return Ok(PollOutcome::Cancelled);
+        match finish {
+            PollFinish::Cancelled => Ok(PollOutcome::Cancelled),
+            PollFinish::ReaderDied => Err(shell_reader_died_failure()),
+            PollFinish::Exited(exit_code) => {
+                let (output, original_token_count, full_output_path) =
+                    self.take_incremental_output(id, max_output_tokens)?;
+                Ok(PollOutcome::Exited {
+                    output,
+                    original_token_count,
+                    exit_code,
+                    full_output_path,
+                })
+            }
+            PollFinish::Running => {
+                let (output, original_token_count, full_output_path) =
+                    self.take_incremental_output(id, max_output_tokens)?;
+                Ok(PollOutcome::Running {
+                    output,
+                    original_token_count,
+                    full_output_path,
+                })
+            }
         }
-
-        let (output, original_token_count, full_output_path) =
-            self.take_incremental_output(id, max_output_tokens)?;
-        Ok(match finish {
-            PollFinish::Exited(exit_code) => PollOutcome::Exited {
-                output,
-                original_token_count,
-                exit_code,
-                full_output_path,
-            },
-            PollFinish::Running => PollOutcome::Running {
-                output,
-                original_token_count,
-                full_output_path,
-            },
-            PollFinish::Cancelled => unreachable!("cancelled returned before rendering"),
-        })
     }
 
     pub(crate) async fn wait_until_exit_or_timeout(
@@ -848,6 +862,10 @@ impl ShellRuntime {
             reader_died,
         };
         #[cfg(test)]
+        self.pipe_wait_handle_probe
+            .lock_recover()
+            .replace(process.wait_handle.abort_handle());
+        #[cfg(test)]
         if let Some(gate) = &self.pipe_loop_gate {
             gate.wait().await;
             gate.wait().await;
@@ -858,7 +876,7 @@ impl ShellRuntime {
                     id,
                     &mut process,
                     max_output_tokens,
-                    PollFinish::Cancelled,
+                    PollFinish::ReaderDied,
                 )
                 .await;
             }
@@ -930,34 +948,40 @@ async fn finish_pipe_process(
     max_output_tokens: Option<usize>,
     finish: PollFinish,
 ) -> ShellResult<PollOutcome> {
-    if matches!(finish, PollFinish::Cancelled | PollFinish::Running) {
+    if matches!(finish, PollFinish::Cancelled | PollFinish::Running)
+        || (matches!(finish, PollFinish::ReaderDied) && !process.wait_handle.is_finished())
+    {
         terminate_pipe_process(process.child_pid);
         let _ = tokio::time::timeout(Duration::from_millis(500), &mut process.wait_handle).await;
     }
     wait_for_pipe_readers(&mut process.reader_handles).await;
-    if process.reader_died.load(Ordering::SeqCst) {
+    if process.reader_died.load(Ordering::SeqCst) && !matches!(finish, PollFinish::ReaderDied) {
         return Err(shell_reader_died_failure());
     }
-    if matches!(finish, PollFinish::Cancelled) {
-        return Ok(PollOutcome::Cancelled);
-    }
 
-    let (output, original_token_count, full_output_path) =
-        render_buffer_output(id, &process.buffer, max_output_tokens);
-    Ok(match finish {
-        PollFinish::Exited(exit_code) => PollOutcome::Exited {
-            output,
-            original_token_count,
-            exit_code,
-            full_output_path,
-        },
-        PollFinish::Running => PollOutcome::Running {
-            output,
-            original_token_count,
-            full_output_path,
-        },
-        PollFinish::Cancelled => unreachable!("cancelled returned before rendering"),
-    })
+    match finish {
+        PollFinish::ReaderDied => Err(shell_reader_died_failure()),
+        PollFinish::Cancelled => Ok(PollOutcome::Cancelled),
+        PollFinish::Exited(exit_code) => {
+            let (output, original_token_count, full_output_path) =
+                render_buffer_output(id, &process.buffer, max_output_tokens);
+            Ok(PollOutcome::Exited {
+                output,
+                original_token_count,
+                exit_code,
+                full_output_path,
+            })
+        }
+        PollFinish::Running => {
+            let (output, original_token_count, full_output_path) =
+                render_buffer_output(id, &process.buffer, max_output_tokens);
+            Ok(PollOutcome::Running {
+                output,
+                original_token_count,
+                full_output_path,
+            })
+        }
+    }
 }
 
 async fn sleep_until(deadline: Option<tokio::time::Instant>) {
@@ -1005,4 +1029,49 @@ async fn wait_for_pipe_readers(handles: &mut Vec<tokio::task::JoinHandle<()>>) {
 
 fn shell_supports_login(shell_name: &str) -> bool {
     matches!(shell_name, "bash" | "zsh" | "ksh" | "mksh" | "fish")
+}
+
+#[cfg(test)]
+mod finish_pipe_process_tests {
+    use super::*;
+
+    fn test_process(reader_died: bool) -> PipeProcessState {
+        PipeProcessState {
+            child_pid: None,
+            wait_handle: tokio::spawn(async {
+                Err::<ExitStatus, std::io::Error>(std::io::Error::other(
+                    "test wait task already completed",
+                ))
+            }),
+            reader_handles: Vec::new(),
+            buffer: Arc::new(StdMutex::new(ShellOutputBuffer::default())),
+            reader_died: Arc::new(AtomicBool::new(reader_died)),
+        }
+    }
+
+    #[tokio::test]
+    async fn reader_died_finish_is_typed_and_not_cancelled() {
+        let mut reader_died_process = test_process(true);
+        let reader_died = finish_pipe_process(
+            "reader-died",
+            &mut reader_died_process,
+            None,
+            PollFinish::ReaderDied,
+        )
+        .await;
+        assert!(matches!(
+            reader_died,
+            Err(failure) if failure.code == "shell_reader_died"
+        ));
+
+        let mut cancelled_process = test_process(false);
+        let cancelled = finish_pipe_process(
+            "cancelled",
+            &mut cancelled_process,
+            None,
+            PollFinish::Cancelled,
+        )
+        .await;
+        assert!(matches!(cancelled, Ok(PollOutcome::Cancelled)));
+    }
 }

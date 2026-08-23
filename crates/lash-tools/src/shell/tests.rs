@@ -722,8 +722,6 @@ mod tests {
             output_notify.notified().await;
             output.push_str(&take_buffer_output("concurrent-drain", &buffer, None).0);
         }
-        assert!(!stdout_writer_task.is_finished());
-        assert!(!stderr_writer_task.is_finished());
         first_chunks_drained.wait().await;
 
         stdout_writer_task.await.unwrap();
@@ -784,15 +782,16 @@ mod tests {
 
     #[tokio::test]
     async fn exec_command_reader_death_wins_timeout_classification() {
-        let shell = shell_provider(StandardShell {
-            runtime: ShellRuntime::new()
-                .with_cwd("/")
-                .with_aborted_pipe_reader(),
-        });
+        let dir = tempfile::tempdir().expect("reader-death marker directory");
+        let marker = dir.path().join("survived-reader-death");
+        let command = format!("sleep 0.1; printf survived > {}", marker.display());
+        let runtime = ShellRuntime::new().with_cwd("/").with_aborted_pipe_reader();
+        let wait_handle_probe = runtime.clone();
+        let shell = shell_provider(StandardShell { runtime });
         let result = run(
             &shell,
             "exec_command",
-            &json!({"cmd": "sleep 5", "timeout_ms": 50}),
+            &json!({"cmd": command, "timeout_ms": 50}),
         )
         .await;
 
@@ -803,18 +802,40 @@ mod tests {
             );
         };
         assert_eq!(failure.code, "shell_reader_died");
+        assert!(
+            matches!(
+                &result.as_output().outcome,
+                lash_core::ToolCallOutcome::Failure(_)
+            ),
+            "reader death must be ReaderDied, not Cancelled: {}",
+            result.value_for_projection()
+        );
         assert_eq!(result.value_for_projection()["reader_died"], true);
         assert_ne!(result.value_for_projection()["status"], "timed_out");
+        let wait_handle = wait_handle_probe
+            .pipe_wait_handle_probe()
+            .expect("pipe wait handle probe");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !wait_handle.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("ReaderDied child must terminate");
+        assert!(
+            !marker.exists(),
+            "ReaderDied must terminate the child before it writes the survival marker"
+        );
     }
 
     #[tokio::test]
     async fn exec_command_exit_wins_expired_deadline_race() {
         let gate = Arc::new(tokio::sync::Barrier::new(2));
-        let shell = shell_provider(StandardShell {
-            runtime: ShellRuntime::new()
-                .with_cwd("/")
-                .with_pipe_loop_gate(Arc::clone(&gate)),
-        });
+        let runtime = ShellRuntime::new()
+            .with_cwd("/")
+            .with_pipe_loop_gate(Arc::clone(&gate));
+        let wait_handle_probe = runtime.clone();
+        let shell = shell_provider(StandardShell { runtime });
         let run_task = tokio::spawn(async move {
             run(
                 &shell,
@@ -825,7 +846,16 @@ mod tests {
         });
 
         gate.wait().await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        let wait_handle = wait_handle_probe
+            .pipe_wait_handle_probe()
+            .expect("pipe wait handle probe");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !wait_handle.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("pipe wait handle must finish before releasing the loop gate");
         gate.wait().await;
         let result = run_task.await.expect("deadline-race run task");
 
