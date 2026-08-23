@@ -2403,8 +2403,7 @@ mod tests {
                 .with_processes()
                 .with_process_signals(),
             lashlang::LashlangLanguageFeatures::default(),
-            lash_lashlang_runtime::lashlang_resources_from_tool_catalog(&tool_catalog)
-                .expect("surface resources"),
+            lashlang::LashlangHostCatalog::new(),
         );
         let session_policy = lash_core::SessionPolicy {
             model: lash_core::ModelSpec::builder("mock-model")
@@ -2508,7 +2507,6 @@ mod tests {
 
     fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
         let mut resources = lashlang::LashlangHostCatalog::new();
-        lashlang::add_trigger_resource_operations(&mut resources);
         resources
             .add_trigger_source_constructor(
                 ["timer", "Schedule"],
@@ -2535,6 +2533,13 @@ mod tests {
                 .expect("valid timer tick type"),
             )
             .expect("valid timer trigger source");
+        resources
+    }
+
+    fn disabled_timer_trigger_resources() -> lashlang::LashlangHostCatalog {
+        let mut resources = timer_trigger_resources();
+        lashlang::add_trigger_resource_operations(&mut resources)
+            .expect("trigger resource operations are unique");
         resources
     }
 
@@ -3446,7 +3451,7 @@ mod tests {
                     })?
                 "#,
                 abilities: lashlang::LashlangAbilities::default().with_processes(),
-                resources: timer_trigger_resources,
+                resources: disabled_timer_trigger_resources,
                 feature: "triggers",
             },
         ];

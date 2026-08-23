@@ -30,7 +30,8 @@ fn host_catalog() -> LashlangHostCatalog {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    crate::add_trigger_resource_operations(&mut catalog);
+    crate::add_trigger_resource_operations(&mut catalog)
+        .expect("trigger resource operations are unique");
     catalog
         .add_trigger_source_constructor(
             ["timer", "Schedule"],
@@ -516,11 +517,13 @@ finish source"#,
 #[test]
 fn ambiguous_host_descriptor_constructor_is_rejected() {
     let mut catalog = host_catalog();
-    catalog.add_value_constructor(
-        ["timer", "DuplicateSchedule"],
-        TypeExpr::Object(vec![]),
-        TypeExpr::Ref("timer.Schedule".into()),
-    );
+    catalog
+        .add_value_constructor(
+            ["timer", "DuplicateSchedule"],
+            TypeExpr::Object(vec![]),
+            TypeExpr::Ref("timer.Schedule".into()),
+        )
+        .expect("duplicate schedule path is unique");
     let requirements = HostRequirements {
         resources: catalog,
         globals: Default::default(),

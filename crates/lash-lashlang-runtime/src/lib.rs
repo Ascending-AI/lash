@@ -352,9 +352,12 @@ impl LashlangSurface {
         self
     }
 
-    pub fn with_resources(mut self, resources: LashlangHostCatalog) -> Self {
-        self.resources.extend(resources);
-        self
+    pub fn with_resources(
+        mut self,
+        resources: LashlangHostCatalog,
+    ) -> Result<Self, LashlangRuntimeError> {
+        self.resources.try_extend(resources)?;
+        Ok(self)
     }
 
     pub fn with_plugin_extensions(
@@ -366,7 +369,7 @@ impl LashlangSurface {
                 .map_err(|source| LashlangRuntimeError::InvalidSurfaceExtension { source })?;
             self.abilities = self.abilities.union(contribution.abilities);
             self.language_features = self.language_features.union(contribution.language_features);
-            self.resources.extend(contribution.resources);
+            self.resources.try_extend(contribution.resources)?;
         }
         Ok(self)
     }
@@ -391,7 +394,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
     host_resources: LashlangHostCatalog,
 ) -> Result<LashlangHostEnvironment, ToolBindingError> {
     let mut resources = lashlang_resources_from_tool_catalog(catalog)?;
-    resources.extend(host_resources);
+    resources.try_extend(host_resources)?;
     for (operation, host_operation) in [
         ("now", "typescript.runtime.now"),
         ("random", "typescript.runtime.random"),
@@ -409,7 +412,7 @@ pub fn lashlang_host_environment_from_tool_catalog(
         )?;
     }
     if abilities.triggers {
-        lashlang::add_trigger_resource_operations(&mut resources);
+        lashlang::add_trigger_resource_operations(&mut resources)?;
     }
     Ok(
         LashlangHostEnvironment::new(resources, abilities)
@@ -520,12 +523,13 @@ pub fn lashlang_host_environment_satisfies_requirements(
                 &module.alias,
                 operation,
             ) {
-                Some(current_binding) if current_binding == required_binding => {}
+                Some(current_binding)
+                    if current_binding.host_operation == required_binding.host_operation => {}
                 Some(current_binding) => {
                     return Err(LashlangRuntimeError::ModuleOperationMismatch {
                         module: module.alias.clone(),
                         operation: operation.clone(),
-                        actual: current_binding.host_operation.clone(),
+                        actual: current_binding.host_operation.to_string(),
                         expected: required_binding.host_operation.clone(),
                     });
                 }
@@ -783,7 +787,7 @@ pub fn resolve_lashlang_module_operation(
     host_environment
         .resources
         .resolve_module_operation(&receiver.resource_type, &receiver.alias, operation)
-        .map(|binding| binding.host_operation.clone())
+        .map(|binding| binding.host_operation.to_string())
         .ok_or_else(|| {
             LashlangHostError::ModuleOperationUnavailable {
                 module: receiver.alias.to_string(),

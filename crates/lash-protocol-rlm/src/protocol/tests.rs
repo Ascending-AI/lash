@@ -420,7 +420,8 @@ fn execution_section_hides_trigger_registry_language_without_processes() {
 #[test]
 fn execution_section_lists_typed_operations_constructors_and_trigger_sources() {
     let mut resources = lashlang::LashlangHostCatalog::new();
-    lashlang::add_trigger_resource_operations(&mut resources);
+    lashlang::add_trigger_resource_operations(&mut resources)
+        .expect("trigger resource operations are unique");
     resources
         .add_trigger_source_constructor(
             ["timer", "Schedule"],

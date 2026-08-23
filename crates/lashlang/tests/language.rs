@@ -141,7 +141,7 @@ fn test_host_operation(
                 &receiver.alias,
                 &operation.operation,
             )
-            .map(|binding| binding.host_operation.clone())
+            .map(|binding| binding.host_operation.to_string())
             .ok_or_else(|| {
                 ExecutionHostError::new(format!(
                     "module `{}` of type `{}` does not expose operation `{}`",

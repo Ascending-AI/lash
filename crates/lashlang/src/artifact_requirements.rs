@@ -134,7 +134,7 @@ impl<'program> RequirementsCollector<'program> {
                     .clone();
                 self.requirements
                     .resources
-                    .add_named_data_type(data_type)
+                    .require_named_data_type(data_type)
                     .expect("host data type requirement came from host catalog");
             }
             TypeExpr::Ref(name)
@@ -305,18 +305,17 @@ impl<'program> RequirementsCollector<'program> {
                         .map(|(_, constructor)| constructor)
                         .find(|constructor| constructor.type_name == type_name.as_str())
                 {
-                    self.requirements.resources.add_value_constructor(
-                        constructor.path.iter().map(String::as_str),
-                        constructor.input_ty.clone(),
-                        constructor.output_ty.clone(),
-                    );
+                    self.requirements
+                        .resources
+                        .require_value_constructor(constructor.clone())
+                        .expect("constructor requirement is collected once");
                 }
                 if let Some(catalog) = self.resource_catalog
                     && let Some(binding) = catalog.resolve_trigger_source(type_name.as_str())
                 {
                     self.requirements
                         .resources
-                        .add_trigger_source_type(
+                        .require_trigger_source_type(
                             type_name.to_string(),
                             binding.event_type().clone(),
                         )
@@ -476,7 +475,7 @@ impl<'program> RequirementsCollector<'program> {
     fn require_resource_ref(&mut self, resource: &ResourceRefExpr) {
         self.requirements
             .resources
-            .add_module_instance(
+            .require_module_instance(
                 resource.path.iter().map(|segment| segment.as_str()),
                 resource.resource_type.to_string(),
             )
@@ -497,11 +496,11 @@ impl<'program> RequirementsCollector<'program> {
             {
                 self.requirements
                     .resources
-                    .add_module_operation_binding(
+                    .require_module_operation_binding(
                         path.iter().map(String::as_str),
                         resource_type,
                         operation,
-                        module_binding.host_operation.clone(),
+                        module_binding.host_operation,
                         binding,
                     )
                     .expect("host catalog operation must not conflict");
@@ -510,7 +509,8 @@ impl<'program> RequirementsCollector<'program> {
         }
         self.requirements
             .resources
-            .add_operation_binding(resource_type, operation, binding);
+            .require_operation_binding(resource_type, operation, binding)
+            .expect("resource operation requirement is collected once");
     }
 
     fn resource_operation_requirement(

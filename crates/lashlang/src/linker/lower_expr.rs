@@ -637,29 +637,18 @@ impl<'module> Linker<'module> {
                 span: scope.span,
             });
         };
-        if let Some(alias) = receiver_alias.as_deref()
-            && self
+        let operation_binding = match receiver_alias.as_deref() {
+            Some(alias) => self
                 .surface
                 .resources
                 .resolve_module_operation(&resource_type, alias, operation.as_str())
-                .is_none()
-        {
-            return Err(LinkError::UnknownResourceOperation {
-                resource_type: resource_type.clone(),
-                operation: operation.to_string(),
-                suggestions: self
-                    .surface
-                    .resources
-                    .operation_suggestions_for_resource_type(&resource_type),
-                span: scope.span,
-            });
-        }
-        let Some(operation_binding) = self
-            .surface
-            .resources
-            .resolve_operation(&resource_type, operation)
-            .cloned()
-        else {
+                .map(|resolved| resolved.binding),
+            None => self
+                .surface
+                .resources
+                .resolve_operation(&resource_type, operation),
+        };
+        let Some(operation_binding) = operation_binding.cloned() else {
             return Err(LinkError::UnknownResourceOperation {
                 resource_type: resource_type.clone(),
                 operation: operation.to_string(),

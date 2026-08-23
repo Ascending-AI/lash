@@ -622,6 +622,51 @@ fn surface_merges_plugin_extensions() {
     );
 }
 
+#[test]
+fn surface_resources_return_typed_catalog_conflicts() {
+    let surface = LashlangSurface::default()
+        .with_resources(LashlangHostCatalog::tool_default(["lookup"]))
+        .expect("first resource contribution is unique");
+
+    assert!(matches!(
+        surface.with_resources(LashlangHostCatalog::tool_default(["lookup"])),
+        Err(LashlangRuntimeError::HostCatalog {
+            source: lashlang::LashlangHostCatalogError::ConflictingModuleOperation {
+                module,
+                operation,
+                ..
+            }
+        }) if module == "tools" && operation == "lookup"
+    ));
+}
+
+#[test]
+fn plugin_extensions_return_typed_catalog_conflicts() {
+    let contributions = ["first", "second"].map(|_| {
+        lash_core::facade_support::PluginExtensionContribution::new(
+            LASHLANG_SURFACE_EXTENSION_ID,
+            LashlangSurfaceContribution::new(
+                LashlangAbilities::default(),
+                LashlangLanguageFeatures::default(),
+                LashlangHostCatalog::tool_default(["lookup"]),
+            ),
+        )
+        .expect("extension payload serializes")
+    });
+    let extensions = lash_core::PluginExtensions::from_contributions(contributions);
+
+    assert!(matches!(
+        LashlangSurface::default().with_plugin_extensions(&extensions),
+        Err(LashlangRuntimeError::HostCatalog {
+            source: lashlang::LashlangHostCatalogError::ConflictingModuleOperation {
+                module,
+                operation,
+                ..
+            }
+        }) if module == "tools" && operation == "lookup"
+    ));
+}
+
 fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
     lash_remote_protocol::RemoteToolGrant {
         protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,

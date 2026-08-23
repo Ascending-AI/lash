@@ -74,6 +74,23 @@ pub enum LashlangHostCatalogError {
         existing: String,
         incoming: String,
     },
+    #[error("resource type `{resource_type}` is already registered")]
+    ConflictingResourceType { resource_type: String },
+    #[error("resource type `{resource_type}` operation `{operation}` is already registered")]
+    ConflictingResourceOperation {
+        resource_type: String,
+        operation: String,
+    },
+    #[error("value constructor `{path}` is already registered")]
+    ConflictingValueConstructor { path: String },
+    #[error(
+        "module `{module}` cannot use resource type `{resource_type}` operation `{operation}` without a host-operation binding"
+    )]
+    UnboundModuleOperation {
+        module: String,
+        resource_type: String,
+        operation: String,
+    },
     #[error(
         "trigger source `{source_type}` already emits `{existing}`, cannot change it to `{incoming}`"
     )]
@@ -185,6 +202,12 @@ pub struct OutputFromInputBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleOperationBinding {
     pub host_operation: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedOperation<'a> {
+    pub host_operation: &'a str,
+    pub binding: &'a ResourceOperationBinding,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

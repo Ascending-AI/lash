@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::artifact::ModuleArtifact;
 use crate::ast::{AstString, Expr, TypeExpr, TypeField, format_type_expr};
 use crate::identity::{ProcessDefinitionIdentity, ProcessDefinitionIdentityError};
-use crate::linker::{LashlangHostCatalog, NamedDataType};
+use crate::linker::{LashlangHostCatalog, LashlangHostCatalogError, NamedDataType};
 use crate::runtime::{LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY};
 
 const TRIGGERS_RESOURCE_TYPE: &str = "Triggers";
@@ -149,47 +149,48 @@ pub fn is_trigger_resource_type(resource_type: &str) -> bool {
     resource_type == TRIGGERS_RESOURCE_TYPE
 }
 
-pub fn add_trigger_resource_operations(catalog: &mut LashlangHostCatalog) {
-    catalog
-        .add_named_data_type(
-            NamedDataType::object(
-                TRIGGER_REGISTRATION_TYPE,
-                vec![
-                    required_field("subscription_key", TypeExpr::Str),
-                    required_field("incarnation", TypeExpr::Str),
-                    required_field("revision", TypeExpr::Int),
-                    required_field("registrant", TypeExpr::Dict),
-                    required_field(
-                        "manifest_membership",
-                        TypeExpr::Enum(vec![
-                            "present_in_current_artifact".into(),
-                            "orphaned".into(),
-                            "unknown".into(),
-                        ]),
-                    ),
-                    required_field("source_key", TypeExpr::Str),
-                    optional_field("name", TypeExpr::Str),
-                    required_field("source_type", TypeExpr::Str),
-                    required_field("source", TypeExpr::Dict),
-                    required_field("target", TypeExpr::Dict),
-                    required_field("enabled", TypeExpr::Bool),
-                ],
-            )
-            .expect("trigger registration is a valid named data type"),
+pub fn add_trigger_resource_operations(
+    catalog: &mut LashlangHostCatalog,
+) -> Result<(), LashlangHostCatalogError> {
+    let mut extended = catalog.clone();
+    extended.add_named_data_type(
+        NamedDataType::object(
+            TRIGGER_REGISTRATION_TYPE,
+            vec![
+                required_field("subscription_key", TypeExpr::Str),
+                required_field("incarnation", TypeExpr::Str),
+                required_field("revision", TypeExpr::Int),
+                required_field("registrant", TypeExpr::Dict),
+                required_field(
+                    "manifest_membership",
+                    TypeExpr::Enum(vec![
+                        "present_in_current_artifact".into(),
+                        "orphaned".into(),
+                        "unknown".into(),
+                    ]),
+                ),
+                required_field("source_key", TypeExpr::Str),
+                optional_field("name", TypeExpr::Str),
+                required_field("source_type", TypeExpr::Str),
+                required_field("source", TypeExpr::Dict),
+                required_field("target", TypeExpr::Dict),
+                required_field("enabled", TypeExpr::Bool),
+            ],
         )
-        .expect("trigger registration named data type is stable");
+        .expect("trigger registration is a valid named data type"),
+    )?;
     for operation in TriggerHostOperation::ALL {
-        catalog
-            .add_module_operation(
-                [TRIGGERS_ALIAS],
-                TRIGGERS_RESOURCE_TYPE,
-                operation.receiver_method(),
-                operation.host_operation(),
-                operation.input_ty(),
-                operation.output_ty(),
-            )
-            .expect("host catalog operation must not conflict");
+        extended.add_module_operation(
+            [TRIGGERS_ALIAS],
+            TRIGGERS_RESOURCE_TYPE,
+            operation.receiver_method(),
+            operation.host_operation(),
+            operation.input_ty(),
+            operation.output_ty(),
+        )?;
     }
+    *catalog = extended;
+    Ok(())
 }
 
 fn required_field(name: &'static str, ty: TypeExpr) -> TypeField {

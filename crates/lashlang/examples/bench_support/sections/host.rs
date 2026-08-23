@@ -60,7 +60,7 @@ fn bench_resource_call(
                 &receiver.alias,
                 &operation.operation,
             )
-            .map(|binding| binding.host_operation.as_str())
+            .map(|binding| binding.host_operation)
             .ok_or_else(|| {
                 ExecutionHostError::new(format!(
                     "module `{}` of type `{}` does not expose operation `{}`",

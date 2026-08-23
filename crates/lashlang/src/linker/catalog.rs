@@ -30,7 +30,7 @@ impl LashlangHostCatalog {
                     TypeExpr::Any,
                     TypeExpr::Any,
                 )
-                .expect("tool-default operations are idempotent");
+                .expect("tool-default operation names must be unique");
         }
         catalog
     }
@@ -45,26 +45,24 @@ impl LashlangHostCatalog {
         let resource_type = resource_type.into();
         let key = module_path_key(&path);
         if let Some(existing) = self.module_instances.get(&key) {
-            if existing.resource_type != resource_type {
-                return Err(LashlangHostCatalogError::ConflictingModuleInstance {
-                    alias: key,
-                    existing: existing.resource_type.clone(),
-                    incoming: resource_type,
-                });
-            }
-            self.ensure_resource_type(resource_type);
-            return Ok(());
-        }
-        self.module_instances.insert(
-            key.clone(),
-            ModuleInstanceCatalog {
-                path,
-                resource_type: resource_type.clone(),
+            return Err(LashlangHostCatalogError::ConflictingModuleInstance {
                 alias: key,
-                operations: BTreeMap::new(),
-            },
-        );
-        self.ensure_resource_type(resource_type);
+                existing: existing.resource_type.clone(),
+                incoming: resource_type,
+            });
+        }
+        if let Some(operation) = self
+            .resource_types
+            .get(&resource_type)
+            .and_then(|resource| resource.operations.keys().next())
+        {
+            return Err(LashlangHostCatalogError::UnboundModuleOperation {
+                module: key,
+                resource_type,
+                operation: operation.clone(),
+            });
+        }
+        self.insert_module_instance(path, resource_type);
         Ok(())
     }
 
@@ -78,7 +76,7 @@ impl LashlangHostCatalog {
         operation: impl Into<String>,
         input_ty: TypeExpr,
         output_ty: TypeExpr,
-    ) {
+    ) -> Result<(), LashlangHostCatalogError> {
         self.add_operation_binding(
             resource_type,
             operation,
@@ -87,7 +85,7 @@ impl LashlangHostCatalog {
                 output_ty,
                 output_from_input: None,
             },
-        );
+        )
     }
 
     pub fn add_operation_binding(
@@ -95,12 +93,21 @@ impl LashlangHostCatalog {
         resource_type: impl Into<String>,
         operation: impl Into<String>,
         binding: ResourceOperationBinding,
-    ) {
-        self.resource_types
-            .entry(resource_type.into())
-            .or_default()
-            .operations
-            .insert(operation.into(), binding);
+    ) -> Result<(), LashlangHostCatalogError> {
+        let resource_type = resource_type.into();
+        let operation = operation.into();
+        if let Some(module) = self
+            .module_instances
+            .values()
+            .find(|module| module.resource_type == resource_type)
+        {
+            return Err(LashlangHostCatalogError::UnboundModuleOperation {
+                module: module.alias.clone(),
+                resource_type,
+                operation,
+            });
+        }
+        self.insert_resource_operation(resource_type, operation, binding)
     }
 
     pub fn add_module_operation(
@@ -138,31 +145,47 @@ impl LashlangHostCatalog {
         let resource_type = resource_type.into();
         let operation = operation.into();
         let host_operation = host_operation.into();
-        self.add_module_instance(path.iter().map(String::as_str), resource_type.clone())?;
         let key = module_path_key(&path);
-        if let Some(existing) = self
-            .module_instances
-            .get(&key)
-            .expect("module instance was just inserted")
-            .operations
-            .get(&operation)
-        {
-            let same_resource_binding = self
-                .resource_types
-                .get(&resource_type)
-                .and_then(|resource| resource.operations.get(&operation))
-                == Some(&binding);
-            if existing.host_operation == host_operation && same_resource_binding {
-                return Ok(());
+        if let Some(existing_module) = self.module_instances.get(&key) {
+            if existing_module.path != path
+                || existing_module.resource_type != resource_type
+                || existing_module.alias != key
+            {
+                return Err(LashlangHostCatalogError::ConflictingModuleInstance {
+                    alias: key,
+                    existing: existing_module.resource_type.clone(),
+                    incoming: resource_type,
+                });
             }
-            return Err(LashlangHostCatalogError::ConflictingModuleOperation {
-                module: key,
+            if let Some(existing) = existing_module.operations.get(&operation) {
+                return Err(LashlangHostCatalogError::ConflictingModuleOperation {
+                    module: key,
+                    operation,
+                    existing: existing.host_operation.clone(),
+                    incoming: host_operation,
+                });
+            }
+        }
+        if let Some(existing) = self
+            .resource_types
+            .get(&resource_type)
+            .and_then(|resource| resource.operations.get(&operation))
+            && existing != &binding
+        {
+            return Err(LashlangHostCatalogError::ConflictingResourceOperation {
+                resource_type,
                 operation,
-                existing: existing.host_operation.clone(),
-                incoming: host_operation,
             });
         }
-        self.add_operation_binding(resource_type, operation.clone(), binding);
+        if !self.module_instances.contains_key(&key) {
+            self.insert_module_instance(path, resource_type.clone());
+        }
+        self.resource_types
+            .entry(resource_type)
+            .or_default()
+            .operations
+            .entry(operation.clone())
+            .or_insert(binding);
         let module = self
             .module_instances
             .get_mut(&key)
@@ -173,24 +196,132 @@ impl LashlangHostCatalog {
         Ok(())
     }
 
+    pub(crate) fn require_module_operation_binding(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        host_operation: impl Into<String>,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashlangHostCatalogError> {
+        let path = module_path.into_iter().map(Into::into).collect::<Vec<_>>();
+        let resource_type = resource_type.into();
+        let operation = operation.into();
+        let host_operation = host_operation.into();
+        let alias = module_path_key(&path);
+        if let Some(existing) = self.resolve_module_operation(&resource_type, &alias, &operation) {
+            if existing.host_operation == host_operation && existing.binding == &binding {
+                return Ok(());
+            }
+            return Err(LashlangHostCatalogError::ConflictingModuleOperation {
+                module: alias,
+                operation,
+                existing: existing.host_operation.to_string(),
+                incoming: host_operation,
+            });
+        }
+        if let Some(existing) = self.module_instances.get(&alias)
+            && existing.resource_type != resource_type
+        {
+            return Err(LashlangHostCatalogError::ConflictingModuleInstance {
+                alias,
+                existing: existing.resource_type.clone(),
+                incoming: resource_type,
+            });
+        }
+        if let Some(existing) = self.resolve_operation(&resource_type, &operation)
+            && existing != &binding
+        {
+            return Err(LashlangHostCatalogError::ConflictingResourceOperation {
+                resource_type,
+                operation,
+            });
+        }
+        if !self.module_instances.contains_key(&alias) {
+            self.insert_module_instance(path, resource_type.clone());
+        }
+        self.resource_types
+            .entry(resource_type)
+            .or_default()
+            .operations
+            .entry(operation.clone())
+            .or_insert(binding);
+        self.module_instances
+            .get_mut(&alias)
+            .expect("requirement module was inserted")
+            .operations
+            .insert(operation, ModuleOperationBinding { host_operation });
+        Ok(())
+    }
+
+    pub(crate) fn require_module_instance(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+    ) -> Result<(), LashlangHostCatalogError> {
+        let path = module_path.into_iter().map(Into::into).collect::<Vec<_>>();
+        let resource_type = resource_type.into();
+        let alias = module_path_key(&path);
+        if let Some(existing) = self.module_instances.get(&alias) {
+            if existing.path == path
+                && existing.resource_type == resource_type
+                && existing.alias == alias
+            {
+                return Ok(());
+            }
+            return Err(LashlangHostCatalogError::ConflictingModuleInstance {
+                alias,
+                existing: existing.resource_type.clone(),
+                incoming: resource_type,
+            });
+        }
+        self.insert_module_instance(path, resource_type);
+        Ok(())
+    }
+
+    pub(crate) fn require_operation_binding(
+        &mut self,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashlangHostCatalogError> {
+        let resource_type = resource_type.into();
+        let operation = operation.into();
+        if let Some(existing) = self.resolve_operation(&resource_type, &operation) {
+            if existing == &binding {
+                return Ok(());
+            }
+            return Err(LashlangHostCatalogError::ConflictingResourceOperation {
+                resource_type,
+                operation,
+            });
+        }
+        self.resource_types
+            .entry(resource_type)
+            .or_default()
+            .operations
+            .insert(operation, binding);
+        Ok(())
+    }
+
     pub fn add_value_constructor(
         &mut self,
         path: impl IntoIterator<Item = impl Into<String>>,
         input_ty: TypeExpr,
         output_ty: TypeExpr,
-    ) {
+    ) -> Result<(), LashlangHostCatalogError> {
         let path = path.into_iter().map(Into::into).collect::<Vec<_>>();
         assert!(!path.is_empty(), "constructor path must not be empty");
         let key = module_path_key(&path);
-        self.value_constructors.insert(
-            key.clone(),
+        self.insert_value_constructor(
+            key,
             ValueConstructorBinding {
                 path,
                 type_name: format_type_expr(&output_ty),
                 input_ty,
                 output_ty,
             },
-        );
+        )
     }
 
     pub fn add_named_data_type(
@@ -198,6 +329,38 @@ impl LashlangHostCatalog {
         data_type: NamedDataType,
     ) -> Result<(), LashlangHostCatalogError> {
         self.merge_named_data_type(data_type)
+    }
+
+    pub(crate) fn require_named_data_type(
+        &mut self,
+        data_type: NamedDataType,
+    ) -> Result<(), LashlangHostCatalogError> {
+        if let Some(existing) = self.named_data_types.get(data_type.name()) {
+            if existing == &data_type {
+                return Ok(());
+            }
+            return Err(LashlangHostCatalogError::ConflictingNamedDataType {
+                name: data_type.name().to_string(),
+            });
+        }
+        self.named_data_types
+            .insert(data_type.name().to_string(), data_type);
+        Ok(())
+    }
+
+    pub(crate) fn require_value_constructor(
+        &mut self,
+        binding: ValueConstructorBinding,
+    ) -> Result<(), LashlangHostCatalogError> {
+        let path = module_path_key(&binding.path);
+        if let Some(existing) = self.value_constructors.get(&path) {
+            if existing == &binding {
+                return Ok(());
+            }
+            return Err(LashlangHostCatalogError::ConflictingValueConstructor { path });
+        }
+        self.value_constructors.insert(path, binding);
+        Ok(())
     }
 
     pub fn add_trigger_source_constructor(
@@ -209,74 +372,111 @@ impl LashlangHostCatalog {
         let path = path.into_iter().map(Into::into).collect::<Vec<_>>();
         assert!(!path.is_empty(), "constructor path must not be empty");
         let source_type = module_path_key(&path);
-        self.check_named_data_type(&event_ty)?;
-        if let Some(existing) = self.trigger_sources.get(source_type.as_str())
-            && existing.event_type() != &event_ty
-        {
+        let mut extended = self.clone();
+        extended.insert_trigger_source(source_type.clone(), event_ty.clone())?;
+        extended.add_value_constructor(
+            path,
+            input_ty,
+            TypeExpr::Ref(source_type.clone().into()),
+        )?;
+        extended.add_named_data_type(event_ty)?;
+        *self = extended;
+        Ok(())
+    }
+
+    pub(crate) fn require_trigger_source_type(
+        &mut self,
+        source_type: impl Into<String>,
+        event_type: NamedDataType,
+    ) -> Result<(), LashlangHostCatalogError> {
+        let source_type = source_type.into();
+        if let Some(existing) = self.trigger_sources.get(&source_type) {
+            if existing.event_type() == &event_type {
+                return self.require_named_data_type(event_type);
+            }
             return Err(LashlangHostCatalogError::ConflictingTriggerSource {
                 source_type,
                 existing: existing.event_type().name().to_string(),
-                incoming: event_ty.name().to_string(),
+                incoming: event_type.name().to_string(),
             });
         }
-        self.add_value_constructor(path, input_ty, TypeExpr::Ref(source_type.clone().into()));
-        self.add_trigger_source_type(source_type, event_ty)?;
-        Ok(())
-    }
-
-    pub(crate) fn add_trigger_source_type(
-        &mut self,
-        source_ty: impl Into<String>,
-        event_ty: NamedDataType,
-    ) -> Result<(), LashlangHostCatalogError> {
-        self.merge_named_data_type(event_ty.clone())?;
+        self.require_named_data_type(event_type.clone())?;
         self.trigger_sources
-            .insert(source_ty.into(), TriggerSourceBinding::new(event_ty));
+            .insert(source_type, TriggerSourceBinding::new(event_type));
         Ok(())
-    }
-
-    pub fn extend(&mut self, other: Self) {
-        self.try_extend(other)
-            .expect("conflicting host catalog entries");
     }
 
     pub fn try_extend(&mut self, other: Self) -> Result<(), LashlangHostCatalogError> {
-        for (resource_type, incoming) in other.resource_types {
-            let entry = self.resource_types.entry(resource_type).or_default();
-            entry.operations.extend(incoming.operations);
-        }
-        for (alias, incoming) in other.module_instances {
-            match self.module_instances.get_mut(&alias) {
-                Some(existing)
-                    if existing.path == incoming.path
-                        && existing.resource_type == incoming.resource_type
-                        && existing.alias == incoming.alias =>
-                {
-                    existing.operations.extend(incoming.operations);
-                }
-                Some(existing) => {
-                    return Err(LashlangHostCatalogError::ConflictingModuleInstance {
-                        alias,
-                        existing: existing.resource_type.clone(),
-                        incoming: incoming.resource_type,
+        let mut merged = self.clone();
+        let LashlangHostCatalog {
+            module_instances,
+            resource_types,
+            named_data_types,
+            value_constructors,
+            trigger_sources,
+        } = other;
+        let mut linked_resource_operations = BTreeSet::new();
+        for incoming in module_instances.into_values() {
+            if incoming.operations.is_empty() {
+                merged.add_module_instance(incoming.path, incoming.resource_type)?;
+                continue;
+            }
+            let resource_type = incoming.resource_type;
+            for (operation, module_binding) in incoming.operations {
+                let Some(binding) = resource_types
+                    .get(&resource_type)
+                    .and_then(|resource| resource.operations.get(&operation))
+                    .cloned()
+                else {
+                    return Err(LashlangHostCatalogError::UnboundModuleOperation {
+                        module: incoming.alias,
+                        resource_type,
+                        operation,
                     });
-                }
-                None => {
-                    self.module_instances.insert(alias, incoming);
-                }
+                };
+                merged.add_module_operation_binding(
+                    incoming.path.iter().map(String::as_str),
+                    resource_type.clone(),
+                    operation.clone(),
+                    module_binding.host_operation,
+                    binding,
+                )?;
+                linked_resource_operations.insert((resource_type.clone(), operation));
             }
         }
-        for data_type in other.named_data_types.into_values() {
-            self.merge_named_data_type(data_type)?;
+        for (resource_type, incoming) in resource_types {
+            if incoming.operations.is_empty() {
+                if merged
+                    .resource_types
+                    .get(&resource_type)
+                    .is_some_and(|resource| !resource.operations.is_empty())
+                {
+                    return Err(LashlangHostCatalogError::ConflictingResourceType {
+                        resource_type,
+                    });
+                }
+                merged.ensure_resource_type(resource_type);
+                continue;
+            }
+            for (operation, binding) in incoming.operations {
+                if linked_resource_operations.contains(&(resource_type.clone(), operation.clone()))
+                {
+                    continue;
+                }
+                merged.add_operation_binding(resource_type.clone(), operation, binding)?;
+            }
         }
-        self.value_constructors.extend(other.value_constructors);
-        self.trigger_sources.extend(other.trigger_sources);
+        for (source_type, incoming) in trigger_sources {
+            merged.insert_trigger_source(source_type, incoming.event_type().clone())?;
+        }
+        for (path, incoming) in value_constructors {
+            merged.insert_value_constructor(path, incoming)?;
+        }
+        for data_type in named_data_types.into_values() {
+            merged.merge_named_data_type(data_type)?;
+        }
+        *self = merged;
         Ok(())
-    }
-
-    pub fn union(mut self, other: Self) -> Self {
-        self.extend(other);
-        self
     }
 
     pub fn satisfies(&self, required: &Self) -> bool {
@@ -437,10 +637,19 @@ impl LashlangHostCatalog {
         resource_type: &str,
         alias: &str,
         operation: &str,
-    ) -> Option<&ModuleOperationBinding> {
+    ) -> Option<ResolvedOperation<'_>> {
         let module = self.module_instances.get(alias)?;
         (module.resource_type == resource_type).then_some(())?;
-        module.operations.get(operation)
+        let module_binding = module.operations.get(operation)?;
+        let binding = self
+            .resource_types
+            .get(resource_type)?
+            .operations
+            .get(operation)?;
+        Some(ResolvedOperation {
+            host_operation: &module_binding.host_operation,
+            binding,
+        })
     }
 
     /// Whether this catalog already provides `operation` on the module at the
@@ -543,13 +752,11 @@ impl LashlangHostCatalog {
         suggestions
     }
 
-    fn check_named_data_type(
+    fn refuse_named_data_type(
         &self,
         data_type: &NamedDataType,
     ) -> Result<(), LashlangHostCatalogError> {
-        if let Some(existing) = self.named_data_types.get(data_type.name())
-            && existing != data_type
-        {
+        if self.named_data_types.contains_key(data_type.name()) {
             return Err(LashlangHostCatalogError::ConflictingNamedDataType {
                 name: data_type.name().to_string(),
             });
@@ -561,10 +768,72 @@ impl LashlangHostCatalog {
         &mut self,
         data_type: NamedDataType,
     ) -> Result<(), LashlangHostCatalogError> {
-        self.check_named_data_type(&data_type)?;
+        self.refuse_named_data_type(&data_type)?;
         self.named_data_types
-            .entry(data_type.name().to_string())
-            .or_insert(data_type);
+            .insert(data_type.name().to_string(), data_type);
+        Ok(())
+    }
+
+    fn insert_module_instance(&mut self, path: Vec<String>, resource_type: String) {
+        let alias = module_path_key(&path);
+        self.module_instances.insert(
+            alias.clone(),
+            ModuleInstanceCatalog {
+                path,
+                resource_type: resource_type.clone(),
+                alias,
+                operations: BTreeMap::new(),
+            },
+        );
+        self.ensure_resource_type(resource_type);
+    }
+
+    fn insert_resource_operation(
+        &mut self,
+        resource_type: String,
+        operation: String,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashlangHostCatalogError> {
+        let resource = self
+            .resource_types
+            .entry(resource_type.clone())
+            .or_default();
+        if resource.operations.contains_key(&operation) {
+            return Err(LashlangHostCatalogError::ConflictingResourceOperation {
+                resource_type,
+                operation,
+            });
+        }
+        resource.operations.insert(operation, binding);
+        Ok(())
+    }
+
+    fn insert_value_constructor(
+        &mut self,
+        path: String,
+        binding: ValueConstructorBinding,
+    ) -> Result<(), LashlangHostCatalogError> {
+        if self.value_constructors.contains_key(&path) {
+            return Err(LashlangHostCatalogError::ConflictingValueConstructor { path });
+        }
+        self.value_constructors.insert(path, binding);
+        Ok(())
+    }
+
+    fn insert_trigger_source(
+        &mut self,
+        source_type: String,
+        event_type: NamedDataType,
+    ) -> Result<(), LashlangHostCatalogError> {
+        if let Some(existing) = self.trigger_sources.get(&source_type) {
+            return Err(LashlangHostCatalogError::ConflictingTriggerSource {
+                source_type,
+                existing: existing.event_type().name().to_string(),
+                incoming: event_type.name().to_string(),
+            });
+        }
+        self.trigger_sources
+            .insert(source_type, TriggerSourceBinding::new(event_type));
         Ok(())
     }
 }

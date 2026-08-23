@@ -2043,3 +2043,18 @@ fn math_random_draws_replay_from_the_journal_in_order() {
         ExecutionOutcome::Finished(Value::String("0.125,0.5,0.875,0".into()))
     );
 }
+
+#[test]
+fn typescript_host_catalog_composition_refuses_duplicate_operations() {
+    let mut resources = lashlang::LashlangHostCatalog::tool_default(["lookup"]);
+    let incoming = lashlang::LashlangHostCatalog::tool_default(["lookup"]);
+
+    assert!(matches!(
+        resources.try_extend(incoming),
+        Err(lashlang::LashlangHostCatalogError::ConflictingModuleOperation {
+            module,
+            operation,
+            ..
+        }) if module == "tools" && operation == "lookup"
+    ));
+}

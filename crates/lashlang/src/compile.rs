@@ -337,15 +337,17 @@ mod tests {
                 crate::TypeExpr::Str,
             )
             .expect("host catalog operation must not conflict");
-        resources.add_value_constructor(
-            ["files", "Open"],
-            crate::TypeExpr::Object(vec![crate::TypeField {
-                name: "path".into(),
-                ty: crate::TypeExpr::Str,
-                optional: false,
-            }]),
-            crate::TypeExpr::Ref("File".into()),
-        );
+        resources
+            .add_value_constructor(
+                ["files", "Open"],
+                crate::TypeExpr::Object(vec![crate::TypeField {
+                    name: "path".into(),
+                    ty: crate::TypeExpr::Str,
+                    optional: false,
+                }]),
+                crate::TypeExpr::Ref("File".into()),
+            )
+            .expect("value constructor is unique");
         resources
             .add_trigger_source_constructor(
                 ["ui", "button"],
