@@ -187,6 +187,25 @@ fn nested_function_declarations_read_enclosing_bindings() {
 }
 
 #[test]
+fn nested_function_loop_break_lowers_to_break_inside_switch_case() {
+    let program = lash_typescript::parse(
+        "while (false) { switch (1) { case 1: const f = () => { while (true) { break; } }; f(); } } finish(1);",
+    )
+    .expect("nested function loop break should lower");
+
+    fn break_count(expression: &lashlang::Expr) -> usize {
+        usize::from(matches!(expression, lashlang::Expr::Break))
+            + expression.children().map(break_count).sum::<usize>()
+    }
+
+    assert_eq!(
+        break_count(&program.main),
+        1,
+        "the nested loop's break must remain a Break expression"
+    );
+}
+
+#[test]
 fn mutually_recursive_declarations_reject_with_their_cycle() {
     // v1 captures by value, so a declaration cycle has no emission order; the
     // frame-record alternative builds a heap cycle the durable encoding cannot

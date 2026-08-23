@@ -871,8 +871,12 @@ impl Lowerer {
         internal_name: Option<String>,
     ) -> Result<LashExpr, Diagnostic> {
         let outer_position = std::mem::take(&mut self.position);
+        let outer_switch_breaks = std::mem::take(&mut self.switch_breaks);
+        let outer_continue_epilogues = std::mem::take(&mut self.continue_epilogues);
         let result = self.lower_function_body(function, internal_name);
         self.position = outer_position;
+        self.switch_breaks = outer_switch_breaks;
+        self.continue_epilogues = outer_continue_epilogues;
         result
     }
 
