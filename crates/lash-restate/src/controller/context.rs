@@ -343,12 +343,6 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         'ctx: 'run;
 
     /// Race a sleep against cancellation.
-    ///
-    /// Implementations backed by a real Restate SDK context MUST override this
-    /// method and obey the SDK suspension protocol: journal the timer
-    /// deterministically, fuse terminal wake-then-`Pending` futures, and poll
-    /// the timer before cancellation. The default is only suitable for
-    /// non-SDK test contexts.
     fn sleep_or_turn_cancel<'run>(
         &'run self,
         duration: Duration,
@@ -356,31 +350,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> TurnCancelRaceFuture<'run, ()>
     where
-        'ctx: 'run,
-    {
-        Box::pin(async move {
-            let Some(turn_cancel) = turn_cancel else {
-                return tokio::select! {
-                    result = self.sleep_send(duration) => {
-                        result.map(RestateTurnCancelRaceOutcome::Completed)
-                    }
-                    _ = cancellation.cancelled() => Ok(RestateTurnCancelRaceOutcome::TurnCancelled),
-                };
-            };
-            tokio::select! {
-                result = self.sleep_send(duration) => {
-                    result.map(RestateTurnCancelRaceOutcome::Completed)
-                }
-                result = self.await_event(
-                    turn_cancel,
-                    tokio_util::sync::CancellationToken::new(),
-                ) => {
-                    result.map(|_| RestateTurnCancelRaceOutcome::TurnCancelled)
-                }
-                _ = cancellation.cancelled() => Ok(RestateTurnCancelRaceOutcome::TurnCancelled),
-            }
-        })
-    }
+        'ctx: 'run;
 
     fn run_json_send<'run, T, Fut>(
         &'run self,
@@ -423,28 +393,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> TurnCancelRaceFuture<'run, Resolution>
     where
-        'ctx: 'run,
-    {
-        Box::pin(async move {
-            let Some(turn_cancel) = turn_cancel else {
-                return self
-                    .await_event(request, cancellation)
-                    .await
-                    .map(RestateTurnCancelRaceOutcome::Completed);
-            };
-            tokio::select! {
-                result = self.await_event(request, cancellation.clone()) => {
-                    result.map(RestateTurnCancelRaceOutcome::Completed)
-                }
-                result = self.await_event(
-                    turn_cancel,
-                    tokio_util::sync::CancellationToken::new(),
-                ) => {
-                    result.map(|_| RestateTurnCancelRaceOutcome::TurnCancelled)
-                }
-            }
-        })
-    }
+        'ctx: 'run;
 
     fn peek_event<'run>(
         &'run self,
@@ -461,26 +410,13 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         'ctx: 'run;
 
     /// Race a process terminal wait against durable turn cancellation.
-    ///
-    /// Implementations backed by a real Restate SDK context MUST override this
-    /// method and obey the SDK suspension protocol. The default is only
-    /// suitable for non-SDK test contexts.
     fn await_process_terminal_or_turn_cancel<'run>(
         &'run self,
         process_id: String,
         turn_cancel: Option<RestateDurableWaitAwaitRequest>,
     ) -> TurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
     where
-        'ctx: 'run,
-    {
-        let _ = turn_cancel;
-        Box::pin(async move {
-            self.await_process_terminal(process_id)
-                .await
-                .map(Box::new)
-                .map(RestateTurnCancelRaceOutcome::Completed)
-        })
-    }
+        'ctx: 'run;
 
     fn resolve_event<'run>(
         &'run self,

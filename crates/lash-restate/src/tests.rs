@@ -5830,6 +5830,286 @@ fn restate_command_execution_plan_is_explicit_for_every_command() {
     }
 }
 
+type TestTurnCancelRaceFuture<'run, T> = Pin<
+    Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,
+>;
+
+#[derive(Default)]
+struct TestTurnCancelGate {
+    state: Mutex<TestTurnCancelGateState>,
+}
+
+#[derive(Default)]
+struct TestTurnCancelGateState {
+    next_registration_id: usize,
+    revoked_sessions: HashSet<String>,
+    registrations: HashMap<usize, TestTurnCancelGateEntry>,
+}
+
+struct TestTurnCancelGateEntry {
+    session_id: String,
+    address: RestateDurableWaitAddress,
+    sender: tokio::sync::oneshot::Sender<RestateTurnCancelWake>,
+}
+
+struct TestTurnCancelRegistration {
+    id: usize,
+    receiver: tokio::sync::oneshot::Receiver<RestateTurnCancelWake>,
+}
+
+enum TestTurnCancelRegistrationVerdict {
+    Registered(TestTurnCancelRegistration),
+    Revoked,
+}
+
+impl TestTurnCancelGate {
+    fn register(
+        &self,
+        address: RestateDurableWaitAddress,
+    ) -> Result<TestTurnCancelRegistrationVerdict, TerminalError> {
+        let Some(session_id) = address.session_id.clone() else {
+            return Err(TerminalError::new(
+                "turn cancellation gate is missing its session id",
+            ));
+        };
+        let mut state = self.state.lock_recover();
+        if state.revoked_sessions.contains(&session_id) {
+            return Ok(TestTurnCancelRegistrationVerdict::Revoked);
+        }
+        let id = state.next_registration_id;
+        state.next_registration_id += 1;
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        state.registrations.insert(
+            id,
+            TestTurnCancelGateEntry {
+                session_id,
+                address,
+                sender,
+            },
+        );
+        Ok(TestTurnCancelRegistrationVerdict::Registered(
+            TestTurnCancelRegistration { id, receiver },
+        ))
+    }
+
+    fn unregister(&self, registration_id: usize) {
+        self.state
+            .lock_recover()
+            .registrations
+            .remove(&registration_id);
+    }
+
+    fn resolve(&self, address: &RestateDurableWaitAddress) -> bool {
+        self.wake_matching(
+            |entry| entry.address == *address,
+            RestateTurnCancelWake::TurnCancelled,
+        )
+    }
+
+    fn revoke_session(&self, session_id: &str) {
+        self.state
+            .lock_recover()
+            .revoked_sessions
+            .insert(session_id.to_string());
+        self.wake_matching(
+            |entry| entry.session_id == session_id,
+            RestateTurnCancelWake::SessionRevoked,
+        );
+    }
+
+    fn is_revoked(&self, session_id: &str) -> bool {
+        self.state
+            .lock_recover()
+            .revoked_sessions
+            .contains(session_id)
+    }
+
+    fn registration_count(&self) -> usize {
+        self.state.lock_recover().registrations.len()
+    }
+
+    fn wake_matching(
+        &self,
+        predicate: impl Fn(&TestTurnCancelGateEntry) -> bool,
+        wake: RestateTurnCancelWake,
+    ) -> bool {
+        let mut state = self.state.lock_recover();
+        let registration_ids = state
+            .registrations
+            .iter()
+            .filter_map(|(id, entry)| predicate(entry).then_some(*id))
+            .collect::<Vec<_>>();
+        for registration_id in &registration_ids {
+            if let Some(entry) = state.registrations.remove(registration_id) {
+                let _ = entry.sender.send(wake);
+            }
+        }
+        !registration_ids.is_empty()
+    }
+}
+
+fn test_turn_cancel_wake_outcome<T>(
+    wake: RestateTurnCancelWake,
+    session_id: String,
+) -> RestateTurnCancelRaceOutcome<T> {
+    match wake {
+        RestateTurnCancelWake::TurnCancelled => RestateTurnCancelRaceOutcome::TurnCancelled,
+        RestateTurnCancelWake::SessionRevoked => {
+            RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+        }
+    }
+}
+
+fn test_sleep_or_turn_cancel<'run, 'ctx, C>(
+    context: &'run C,
+    gate: &'run TestTurnCancelGate,
+    duration: Duration,
+    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> TestTurnCancelRaceFuture<'run, ()>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+    'ctx: 'run,
+{
+    Box::pin(async move {
+        let Some(turn_cancel) = turn_cancel else {
+            return tokio::select! {
+                result = context.sleep_send(duration) => {
+                    result.map(RestateTurnCancelRaceOutcome::Completed)
+                }
+                _ = cancellation.cancelled() => {
+                    Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
+                }
+            };
+        };
+        let session_id = turn_cancel.address.session_id.clone().ok_or_else(|| {
+            TerminalError::new("turn cancellation gate is missing its session id")
+        })?;
+        let mut registration = match gate.register(turn_cancel.address)? {
+            TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
+            TestTurnCancelRegistrationVerdict::Revoked => {
+                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
+            }
+        };
+        tokio::select! {
+            biased;
+            result = context.sleep_send(duration) => {
+                gate.unregister(registration.id);
+                result.map(RestateTurnCancelRaceOutcome::Completed)
+            }
+            wake = &mut registration.receiver => {
+                let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
+                Ok(test_turn_cancel_wake_outcome(wake, session_id))
+            }
+            _ = cancellation.cancelled() => {
+                gate.unregister(registration.id);
+                Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
+            }
+        }
+    })
+}
+
+fn test_await_event_or_turn_cancel<'run, 'ctx, C>(
+    context: &'run C,
+    gate: &'run TestTurnCancelGate,
+    request: RestateDurableWaitAwaitRequest,
+    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> TestTurnCancelRaceFuture<'run, Resolution>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+    'ctx: 'run,
+{
+    Box::pin(async move {
+        let Some(turn_cancel) = turn_cancel else {
+            return context
+                .await_event(request, cancellation)
+                .await
+                .map(RestateTurnCancelRaceOutcome::Completed);
+        };
+        let session_id = turn_cancel.address.session_id.clone().ok_or_else(|| {
+            TerminalError::new("turn cancellation gate is missing its session id")
+        })?;
+        let mut registration = match gate.register(turn_cancel.address)? {
+            TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
+            TestTurnCancelRegistrationVerdict::Revoked => {
+                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
+            }
+        };
+        let event_address = request.address.clone();
+        tokio::select! {
+            biased;
+            wake = &mut registration.receiver => {
+                let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
+                if wake == RestateTurnCancelWake::TurnCancelled {
+                    context.resolve_event(RestateDurableWaitResolveRequest {
+                        address: event_address,
+                        resolution: Resolution::Cancelled,
+                    }).await?;
+                }
+                Ok(test_turn_cancel_wake_outcome(wake, session_id))
+            }
+            result = context.await_event(request, cancellation) => {
+                gate.unregister(registration.id);
+                result.map(RestateTurnCancelRaceOutcome::Completed)
+            }
+        }
+    })
+}
+
+fn test_await_process_terminal_or_turn_cancel<'run, 'ctx, C>(
+    context: &'run C,
+    gate: &'run TestTurnCancelGate,
+    process_id: String,
+    turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+    'ctx: 'run,
+{
+    Box::pin(async move {
+        let Some(turn_cancel) = turn_cancel else {
+            return context
+                .await_process_terminal(process_id)
+                .await
+                .map(Box::new)
+                .map(RestateTurnCancelRaceOutcome::Completed);
+        };
+        let session_id = turn_cancel.address.session_id.clone().ok_or_else(|| {
+            TerminalError::new("turn cancellation gate is missing its session id")
+        })?;
+        let mut registration = match gate.register(turn_cancel.address)? {
+            TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
+            TestTurnCancelRegistrationVerdict::Revoked => {
+                return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
+            }
+        };
+        tokio::select! {
+            biased;
+            wake = &mut registration.receiver => {
+                let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
+                Ok(test_turn_cancel_wake_outcome(wake, session_id))
+            }
+            result = context.await_process_terminal(process_id) => {
+                gate.unregister(registration.id);
+                result
+                    .map(Box::new)
+                    .map(RestateTurnCancelRaceOutcome::Completed)
+            }
+        }
+    })
+}
+
+async fn wait_for_test_turn_cancel_registration(gate: &TestTurnCancelGate) {
+    for _ in 0..100 {
+        if gate.registration_count() > 0 {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("test turn cancellation gate was never registered");
+}
+
 #[derive(Default)]
 struct RecordingContext {
     endpoint: Option<Endpoint>,
@@ -5844,8 +6124,10 @@ struct RecordingContext {
     awaited_events: Mutex<HashMap<String, Resolution>>,
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    process_terminal_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     session_waits: Mutex<HashMap<String, Vec<RestateDurableWaitAddress>>>,
     revoked_sessions: Mutex<HashSet<String>>,
+    turn_cancel_gate: TestTurnCancelGate,
 }
 
 #[derive(Default)]
@@ -5875,12 +6157,21 @@ impl RecordingContext {
         self.awaited_events
             .lock_recover()
             .insert(key.promise_key(), resolution);
+        self.process_terminal_notify(process_id).notify_waiters();
     }
 
     fn durable_event_notify(&self, workflow_key: &str) -> Arc<tokio::sync::Notify> {
         self.durable_event_notifies
             .lock_recover()
             .entry(workflow_key.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
+            .clone()
+    }
+
+    fn process_terminal_notify(&self, process_id: &str) -> Arc<tokio::sync::Notify> {
+        self.process_terminal_notifies
+            .lock_recover()
+            .entry(process_id.to_string())
             .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
             .clone()
     }
@@ -5911,6 +6202,7 @@ impl RecordingContext {
         {
             return ResolveOutcome::UnknownOrRevoked;
         }
+        self.turn_cancel_gate.resolve(&request.address);
         self.terminalize_durable_event(request)
     }
 
@@ -5961,6 +6253,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             }
             Ok(())
         })
+    }
+
+    fn sleep_or_turn_cancel<'run>(
+        &'run self,
+        duration: Duration,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> TestTurnCancelRaceFuture<'run, ()>
+    where
+        'ctx: 'run,
+    {
+        test_sleep_or_turn_cancel(
+            self,
+            &self.turn_cancel_gate,
+            duration,
+            turn_cancel,
+            cancellation,
+        )
     }
 
     fn run_json_send<'run, T, Fut>(
@@ -6105,6 +6415,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         })
     }
 
+    fn await_event_or_turn_cancel<'run>(
+        &'run self,
+        request: RestateDurableWaitAwaitRequest,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> TestTurnCancelRaceFuture<'run, Resolution>
+    where
+        'ctx: 'run,
+    {
+        test_await_event_or_turn_cancel(
+            self,
+            &self.turn_cancel_gate,
+            request,
+            turn_cancel,
+            cancellation,
+        )
+    }
+
     fn peek_event<'run>(
         &'run self,
         _address: RestateDurableWaitAddress,
@@ -6125,24 +6453,42 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         self.process_command_log
             .lock_recover()
             .push(format!("call:{process_id}"));
-        let result = restate_process_terminal_await_key(&process_id)
-            .map_err(TerminalError::from_error)
-            .and_then(|key| {
-                self.awaited_events
+        let context = Arc::clone(self);
+        Box::pin(async move {
+            let key = restate_process_terminal_await_key(&process_id)
+                .map_err(TerminalError::from_error)?;
+            let notify = context.process_terminal_notify(&process_id);
+            let resolution = loop {
+                let notified = notify.notified();
+                if let Some(resolution) = context
+                    .awaited_events
                     .lock_recover()
                     .get(&key.promise_key())
                     .cloned()
-                    .ok_or_else(|| {
-                        TerminalError::new(format!(
-                            "process terminal await is unresolved: {process_id}"
-                        ))
-                    })
-            })
-            .and_then(|resolution| {
-                restate_process_terminal_output(&process_id, resolution)
-                    .map_err(TerminalError::from_error)
-            });
-        Box::pin(async move { result })
+                {
+                    break resolution;
+                }
+                notified.await;
+            };
+            restate_process_terminal_output(&process_id, resolution)
+                .map_err(TerminalError::from_error)
+        })
+    }
+
+    fn await_process_terminal_or_turn_cancel<'run>(
+        &'run self,
+        process_id: String,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
+    where
+        'ctx: 'run,
+    {
+        test_await_process_terminal_or_turn_cancel(
+            self,
+            &self.turn_cancel_gate,
+            process_id,
+            turn_cancel,
+        )
     }
 
     fn resolve_event<'run>(
@@ -6168,6 +6514,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
             self.revoked_sessions
                 .lock_recover()
                 .insert(session_id.clone());
+            self.turn_cancel_gate.revoke_session(&session_id);
         }
         let waits = self
             .session_waits
@@ -6648,6 +6995,7 @@ struct PositionalReplayContext {
     records: Mutex<Vec<(String, Vec<u8>)>>,
     replaying: AtomicBool,
     replay_cursor: AtomicUsize,
+    turn_cancel_gate: TestTurnCancelGate,
 }
 
 impl PositionalReplayContext {
@@ -6675,6 +7023,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     {
         self.sleeps.lock_recover().push(duration.as_millis() as u64);
         Box::pin(async { Ok(()) })
+    }
+
+    fn sleep_or_turn_cancel<'run>(
+        &'run self,
+        duration: Duration,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> TestTurnCancelRaceFuture<'run, ()>
+    where
+        'ctx: 'run,
+    {
+        test_sleep_or_turn_cancel(
+            self,
+            &self.turn_cancel_gate,
+            duration,
+            turn_cancel,
+            cancellation,
+        )
     }
 
     fn run_json_send<'run, T, Fut>(
@@ -6748,6 +7114,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         Box::pin(async { Err(TerminalError::new("event await is unsupported")) })
     }
 
+    fn await_event_or_turn_cancel<'run>(
+        &'run self,
+        request: RestateDurableWaitAwaitRequest,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> TestTurnCancelRaceFuture<'run, Resolution>
+    where
+        'ctx: 'run,
+    {
+        test_await_event_or_turn_cancel(
+            self,
+            &self.turn_cancel_gate,
+            request,
+            turn_cancel,
+            cancellation,
+        )
+    }
+
     fn peek_event<'run>(
         &'run self,
         _address: RestateDurableWaitAddress,
@@ -6765,28 +7149,63 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     where
         'ctx: 'run,
     {
-        Box::pin(async { Err(TerminalError::new("process terminal await is unsupported")) })
+        Box::pin(std::future::pending())
+    }
+
+    fn await_process_terminal_or_turn_cancel<'run>(
+        &'run self,
+        process_id: String,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
+    where
+        'ctx: 'run,
+    {
+        test_await_process_terminal_or_turn_cancel(
+            self,
+            &self.turn_cancel_gate,
+            process_id,
+            turn_cancel,
+        )
     }
 
     fn resolve_event<'run>(
         &'run self,
-        _request: RestateDurableWaitResolveRequest,
+        request: RestateDurableWaitResolveRequest,
     ) -> Pin<Box<dyn Future<Output = Result<ResolveOutcome, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        Box::pin(async { Err(TerminalError::new("event resolve is unsupported")) })
+        let outcome = if self.turn_cancel_gate.resolve(&request.address) {
+            ResolveOutcome::Accepted
+        } else {
+            ResolveOutcome::UnknownOrRevoked
+        };
+        Box::pin(async move { Ok(outcome) })
     }
 
     fn update_session_waits<'run>(
         &'run self,
-        _session_id: String,
-        _revoke: bool,
+        session_id: String,
+        revoke: bool,
     ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        Box::pin(async { Err(TerminalError::new("session wait update is unsupported")) })
+        if revoke {
+            self.turn_cancel_gate.revoke_session(&session_id);
+        }
+        Box::pin(async { Ok(()) })
+    }
+
+    fn session_is_revoked<'run>(
+        &'run self,
+        session_id: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        let revoked = self.turn_cancel_gate.is_revoked(&session_id);
+        Box::pin(async move { Ok(revoked) })
     }
 }
 
@@ -6800,6 +7219,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     {
         self.sleeps.lock_recover().push(duration.as_millis() as u64);
         Box::pin(async { Ok(()) })
+    }
+
+    fn sleep_or_turn_cancel<'run>(
+        &'run self,
+        duration: Duration,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> TestTurnCancelRaceFuture<'run, ()>
+    where
+        'ctx: 'run,
+    {
+        test_sleep_or_turn_cancel(
+            self,
+            &self.events.turn_cancel_gate,
+            duration,
+            turn_cancel,
+            cancellation,
+        )
     }
 
     fn run_json_send<'run, T, Fut>(
@@ -6928,6 +7365,24 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         self.events.await_event(request, cancellation)
     }
 
+    fn await_event_or_turn_cancel<'run>(
+        &'run self,
+        request: RestateDurableWaitAwaitRequest,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> TestTurnCancelRaceFuture<'run, Resolution>
+    where
+        'ctx: 'run,
+    {
+        test_await_event_or_turn_cancel(
+            self,
+            &self.events.turn_cancel_gate,
+            request,
+            turn_cancel,
+            cancellation,
+        )
+    }
+
     fn peek_event<'run>(
         &'run self,
         address: RestateDurableWaitAddress,
@@ -6969,6 +7424,22 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         self.events.await_process_terminal(process_id)
     }
 
+    fn await_process_terminal_or_turn_cancel<'run>(
+        &'run self,
+        process_id: String,
+        turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    ) -> TestTurnCancelRaceFuture<'run, Box<ProcessAwaitOutput>>
+    where
+        'ctx: 'run,
+    {
+        test_await_process_terminal_or_turn_cancel(
+            self,
+            &self.events.turn_cancel_gate,
+            process_id,
+            turn_cancel,
+        )
+    }
+
     fn resolve_event<'run>(
         &'run self,
         request: RestateDurableWaitResolveRequest,
@@ -6989,6 +7460,16 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     {
         self.events.update_session_waits(session_id, revoke)
     }
+
+    fn session_is_revoked<'run>(
+        &'run self,
+        session_id: String,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.events.session_is_revoked(session_id)
+    }
 }
 
 fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> RuntimeInvocation {
@@ -6998,6 +7479,242 @@ fn runtime_invocation(kind: RuntimeEffectKind, effect_id: &str) -> RuntimeInvoca
         kind,
         format!("session:turn:1:0:{}:{effect_id}", kind.as_str()),
     )
+}
+
+fn test_turn_cancel_wait_request(
+    session_id: &str,
+    turn_id: &str,
+) -> RestateDurableWaitAwaitRequest {
+    let key = restate_await_event_key(
+        &durable_turn_scope(session_id, turn_id),
+        AwaitEventWaitIdentity::TurnCancelGate,
+    )
+    .expect("test turn cancellation gate key");
+    RestateDurableWaitAwaitRequest {
+        address: RestateDurableWaitAddress::for_key(&key),
+        timeout_ms: None,
+    }
+}
+
+#[tokio::test]
+async fn recording_context_propagates_revoked_session_from_turn_cancel_gate() {
+    let context = Arc::new(RecordingContext::default());
+    RestateControllerContext::update_session_waits(&context, "recording-revoked".to_string(), true)
+        .await
+        .expect("revoke recording-context session");
+
+    let outcome = RestateControllerContext::sleep_or_turn_cancel(
+        &context,
+        Duration::from_secs(60),
+        Some(test_turn_cancel_wait_request("recording-revoked", "turn")),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("recording-context revoked verdict");
+
+    assert!(matches!(
+        outcome,
+        RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+            if session_id == "recording-revoked"
+    ));
+}
+
+#[tokio::test]
+async fn positional_replay_context_propagates_revoked_session_from_turn_cancel_gate() {
+    let context = Arc::new(PositionalReplayContext::default());
+    RestateControllerContext::update_session_waits(
+        &context,
+        "positional-revoked".to_string(),
+        true,
+    )
+    .await
+    .expect("revoke positional-context session");
+
+    let outcome = RestateControllerContext::sleep_or_turn_cancel(
+        &context,
+        Duration::from_secs(60),
+        Some(test_turn_cancel_wait_request("positional-revoked", "turn")),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("positional-context revoked verdict");
+
+    assert!(matches!(
+        outcome,
+        RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+            if session_id == "positional-revoked"
+    ));
+}
+
+#[tokio::test]
+async fn replayable_recording_context_propagates_revoked_session_from_turn_cancel_gate() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    RestateControllerContext::update_session_waits(
+        &context,
+        "replayable-revoked".to_string(),
+        true,
+    )
+    .await
+    .expect("revoke replayable-context session");
+
+    let outcome = RestateControllerContext::sleep_or_turn_cancel(
+        &context,
+        Duration::from_secs(60),
+        Some(test_turn_cancel_wait_request("replayable-revoked", "turn")),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("replayable-context revoked verdict");
+
+    assert!(matches!(
+        outcome,
+        RestateTurnCancelRaceOutcome::SessionRevoked { session_id }
+            if session_id == "replayable-revoked"
+    ));
+}
+
+#[tokio::test]
+async fn recording_context_process_await_reports_turn_cancelled() {
+    let context = Arc::new(RecordingContext::default());
+    let turn_cancel = test_turn_cancel_wait_request("recording-process", "turn");
+    let task_context = Arc::clone(&context);
+    let task = tokio::spawn(async move {
+        RestateControllerContext::await_process_terminal_or_turn_cancel(
+            &task_context,
+            "recording-process-child".to_string(),
+            Some(turn_cancel),
+        )
+        .await
+    });
+    wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
+    let turn_cancel = test_turn_cancel_wait_request("recording-process", "turn");
+    RestateControllerContext::resolve_event(
+        &context,
+        RestateDurableWaitResolveRequest {
+            address: turn_cancel.address,
+            resolution: Resolution::Cancelled,
+        },
+    )
+    .await
+    .expect("resolve recording-context gate");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("recording-context process await must wake")
+        .expect("join recording-context process await")
+        .expect("recording-context process await outcome");
+    assert!(matches!(
+        outcome,
+        RestateTurnCancelRaceOutcome::TurnCancelled
+    ));
+}
+
+#[tokio::test]
+async fn positional_replay_context_process_await_reports_turn_cancelled() {
+    let context = Arc::new(PositionalReplayContext::default());
+    let turn_cancel = test_turn_cancel_wait_request("positional-process", "turn");
+    let task_context = Arc::clone(&context);
+    let task = tokio::spawn(async move {
+        RestateControllerContext::await_process_terminal_or_turn_cancel(
+            &task_context,
+            "positional-process-child".to_string(),
+            Some(turn_cancel),
+        )
+        .await
+    });
+    wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
+    let turn_cancel = test_turn_cancel_wait_request("positional-process", "turn");
+    RestateControllerContext::resolve_event(
+        &context,
+        RestateDurableWaitResolveRequest {
+            address: turn_cancel.address,
+            resolution: Resolution::Cancelled,
+        },
+    )
+    .await
+    .expect("resolve positional-context gate");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("positional-context process await must wake")
+        .expect("join positional-context process await")
+        .expect("positional-context process await outcome");
+    assert!(matches!(
+        outcome,
+        RestateTurnCancelRaceOutcome::TurnCancelled
+    ));
+}
+
+#[tokio::test]
+async fn replayable_recording_context_process_await_reports_turn_cancelled() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let turn_cancel = test_turn_cancel_wait_request("replayable-process", "turn");
+    let task_context = Arc::clone(&context);
+    let task = tokio::spawn(async move {
+        RestateControllerContext::await_process_terminal_or_turn_cancel(
+            &task_context,
+            "replayable-process-child".to_string(),
+            Some(turn_cancel),
+        )
+        .await
+    });
+    wait_for_test_turn_cancel_registration(&context.events.turn_cancel_gate).await;
+    let turn_cancel = test_turn_cancel_wait_request("replayable-process", "turn");
+    RestateControllerContext::resolve_event(
+        &context,
+        RestateDurableWaitResolveRequest {
+            address: turn_cancel.address,
+            resolution: Resolution::Cancelled,
+        },
+    )
+    .await
+    .expect("resolve replayable-context gate");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("replayable-context process await must wake")
+        .expect("join replayable-context process await")
+        .expect("replayable-context process await outcome");
+    assert!(matches!(
+        outcome,
+        RestateTurnCancelRaceOutcome::TurnCancelled
+    ));
+}
+
+#[tokio::test]
+async fn completed_waits_unregister_the_shared_test_turn_cancel_gate() {
+    let recording = Arc::new(RecordingContext::default());
+    RestateControllerContext::sleep_or_turn_cancel(
+        &recording,
+        Duration::ZERO,
+        Some(test_turn_cancel_wait_request("recording-complete", "turn")),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("complete recording-context wait");
+    assert_eq!(recording.turn_cancel_gate.registration_count(), 0);
+
+    let positional = Arc::new(PositionalReplayContext::default());
+    RestateControllerContext::sleep_or_turn_cancel(
+        &positional,
+        Duration::ZERO,
+        Some(test_turn_cancel_wait_request("positional-complete", "turn")),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("complete positional-context wait");
+    assert_eq!(positional.turn_cancel_gate.registration_count(), 0);
+
+    let replayable = Arc::new(ReplayableRecordingContext::default());
+    RestateControllerContext::sleep_or_turn_cancel(
+        &replayable,
+        Duration::ZERO,
+        Some(test_turn_cancel_wait_request("replayable-complete", "turn")),
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .expect("complete replayable-context wait");
+    assert_eq!(replayable.events.turn_cancel_gate.registration_count(), 0);
 }
 
 #[test]
@@ -7262,7 +7979,7 @@ async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_gate() {
             )
             .await
     });
-    tokio::task::yield_now().await;
+    wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
     assert!(!sleep.is_finished(), "timer must genuinely remain pending");
 
     let cancel_key = restate_await_event_key(
@@ -7321,7 +8038,7 @@ async fn restate_suspended_await_event_is_woken_by_the_durable_turn_cancel_gate(
             )
             .await
     });
-    tokio::task::yield_now().await;
+    wait_for_test_turn_cancel_registration(&context.turn_cancel_gate).await;
     assert!(
         !wait.is_finished(),
         "await-event must genuinely remain pending"
