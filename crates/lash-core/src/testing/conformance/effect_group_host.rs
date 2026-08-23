@@ -105,18 +105,26 @@ where
         .scoped(scope(&prefix, "cancel-terminal"))
         .expect("a scope binds");
     let key = group_key(&prefix, "cancel-terminal");
+    let (child, lifecycle) = gated(0);
     let handle = open(
         &scoped,
         &key,
         1,
         GroupWakePolicy::First,
         LoserPolicy::Cancel,
-        vec![never()],
+        vec![child],
     )
     .await;
+    // Closing immediately after open races the host-owned child task: under a
+    // loaded runner it may not yet have been polled to its cancellation point,
+    // while the fresh reader below already waits on the journal. Establish the
+    // same lifecycle barriers as the shared cancellation laws before asking a
+    // second host to read the terminal.
+    lifecycle.wait_until_waiting().await;
     close(&scoped, handle, LoserPolicy::Cancel)
         .await
         .expect("the caller closes under the declared disposition");
+    lifecycle.wait_until_exited().await;
 
     // The reader has no memory of the cancellation — it was not running when the
     // close happened — so anything it reads at rank 1 came out of the journal.
