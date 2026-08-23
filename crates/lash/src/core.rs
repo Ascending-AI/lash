@@ -1319,12 +1319,9 @@ impl LashCoreBuilder {
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?;
         let tool_registry =
             lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
-
         let process_registry = process_work_source.process_registry();
-
         // Build the inline config eagerly so a missing factory fails at build.
         let live_replay_clock = Arc::clone(&core.clock);
-        let default_trigger_store_clock = Arc::clone(&core.clock);
         let mut env_builder = RuntimeEnvironment::builder(
             core.durability.commit_budget,
             core.durability.queued_work_batching.clone(),
@@ -1341,12 +1338,11 @@ impl LashCoreBuilder {
         {
             env_builder = env_builder.with_session_store_factory(Arc::clone(child_store_factory));
         }
+        env_builder = env_builder.with_trigger_store(Arc::new(
+            facade_support::InMemoryTriggerStore::with_clock(Arc::clone(&live_replay_clock)),
+        ));
         if let Some(trigger_store) = self.trigger_store.as_ref() {
             env_builder = env_builder.with_trigger_store(Arc::clone(trigger_store));
-        } else {
-            env_builder = env_builder.with_trigger_store(Arc::new(
-                facade_support::InMemoryTriggerStore::with_clock(default_trigger_store_clock),
-            ));
         }
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(
