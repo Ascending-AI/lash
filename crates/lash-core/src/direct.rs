@@ -480,6 +480,87 @@ mod tests {
     use lash_sansio::sync::MutexExt;
     use serde_json::json;
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    #[derive(Debug)]
+    struct FrozenClock {
+        instant: Instant,
+    }
+
+    impl FrozenClock {
+        fn new() -> Self {
+            Self {
+                instant: Instant::now(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::Clock for FrozenClock {
+        fn now(&self) -> Instant {
+            self.instant
+        }
+
+        fn timestamp_ms(&self) -> u64 {
+            0
+        }
+
+        fn timestamp_rfc3339(&self) -> String {
+            self.timestamp_datetime().to_rfc3339()
+        }
+
+        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+            chrono::DateTime::from(std::time::UNIX_EPOCH)
+        }
+
+        async fn sleep(&self, _duration: Duration) {}
+
+        async fn sleep_until(&self, _deadline: Instant) {}
+    }
+
+    #[derive(Default)]
+    struct CapturingTraceSink(Mutex<Vec<lash_trace::TraceRecord>>);
+
+    impl TraceSink for CapturingTraceSink {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            self.0.lock_recover().push(record.clone());
+            Ok(())
+        }
+    }
+
+    fn canonical_trace_bytes(sink: &CapturingTraceSink) -> Vec<Vec<u8>> {
+        sink.0
+            .lock_recover()
+            .iter()
+            .map(|record| {
+                let mut value = serde_json::to_value(record).expect("trace record is serializable");
+                let object = value.as_object_mut().expect("trace record is an object");
+                object.insert("id".to_string(), json!("trace-id"));
+                let context = object
+                    .get_mut("context")
+                    .and_then(serde_json::Value::as_object_mut)
+                    .expect("trace record has a context object");
+                context.insert("llm_call_id".to_string(), json!("llm-call-id"));
+                context.insert("graph_node_id".to_string(), json!("llm:llm-call-id"));
+                serde_json::to_vec(&value).expect("canonical trace record is serializable")
+            })
+            .collect()
+    }
+
+    fn traced_client(
+        provider: TestProvider,
+        sink: &Arc<CapturingTraceSink>,
+        clock: &Arc<FrozenClock>,
+    ) -> DirectLlmClient {
+        let trace_sink: Arc<dyn TraceSink> = sink.clone();
+        let clock: Arc<dyn crate::Clock> = clock.clone();
+        DirectLlmClient::new(provider.into_handle().with_clock(Arc::clone(&clock)))
+            .with_trace_sink(Some(trace_sink))
+            .with_clock(clock)
+    }
 
     #[test]
     fn json_schema_request_preserves_output_schema() {
@@ -523,6 +604,109 @@ mod tests {
         client.provider_mut().set_options(options.clone());
 
         assert_eq!(client.provider().options(), options);
+    }
+
+    #[tokio::test]
+    async fn direct_client_trace_records_preserve_current_bytes() {
+        let sink = Arc::new(CapturingTraceSink::default());
+        let clock = Arc::new(FrozenClock::new());
+
+        let provider = TestProvider::builder()
+            .kind("direct-trace-success")
+            .complete(|_request| async {
+                Ok(LlmResponse {
+                    full_text: "direct success".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "direct success".to_string(),
+                        response_meta: None,
+                    }],
+                    usage: LlmUsage {
+                        input_tokens: 11,
+                        output_tokens: 3,
+                        ..Default::default()
+                    },
+                    terminal_reason: LlmTerminalReason::Stop,
+                    response_metadata: Default::default(),
+                    ..Default::default()
+                })
+            })
+            .build();
+        let mut client = traced_client(provider, &sink, &clock);
+        let response = client
+            .complete(DirectRequest::text("trace-model", "trace success"))
+            .await
+            .expect("direct success should complete");
+        assert_eq!(response.full_text, "direct success");
+
+        let provider = TestProvider::builder()
+            .kind("direct-trace-failure")
+            .complete_error("direct transport failure")
+            .build();
+        let mut client = traced_client(provider, &sink, &clock);
+        let error = client
+            .complete(DirectRequest::text("trace-model", "trace failure"))
+            .await
+            .expect_err("direct transport failure should be returned");
+        assert!(matches!(error, DirectLlmError::Transport(_)));
+
+        let provider = TestProvider::builder()
+            .kind("direct-trace-structured-rejection")
+            .complete(|_request| async {
+                Ok(LlmResponse {
+                    full_text: "{}".to_string(),
+                    usage: LlmUsage {
+                        input_tokens: 17,
+                        output_tokens: 3,
+                        ..Default::default()
+                    },
+                    terminal_reason: LlmTerminalReason::Stop,
+                    response_metadata: Default::default(),
+                    ..Default::default()
+                })
+            })
+            .build();
+        let mut client = traced_client(provider, &sink, &clock);
+        let error = client
+            .complete(DirectRequest::json_schema(
+                "trace-model",
+                "trace structured rejection",
+                DirectJsonSchema {
+                    name: "answer_shape".to_string(),
+                    schema: json!({
+                        "type": "object",
+                        "required": ["answer"],
+                        "properties": {"answer": {"type": "string"}}
+                    })
+                    .into(),
+                    strict: true,
+                },
+            ))
+            .await
+            .expect_err("invalid structured output should be rejected");
+        assert!(matches!(error, DirectLlmError::InvalidResponse { .. }));
+
+        let actual: Vec<String> = canonical_trace_bytes(&sink)
+            .into_iter()
+            .map(|bytes| String::from_utf8(bytes).expect("trace bytes are UTF-8"))
+            .collect();
+        assert_eq!(
+            actual,
+            vec![
+                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":8,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
+                    .to_string(),
+                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"terminal_reason":"stop","text":"direct success"},"schema_version":8,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
+                    .to_string(),
+                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace failure"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":8,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
+                    .to_string(),
+                r#"{"attempts":[{"delay_ms":2000,"duration_ms":0,"ordinal":1,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"delay_ms":4000,"duration_ms":0,"ordinal":2,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"delay_ms":8000,"duration_ms":0,"ordinal":3,"outcome":"failed","reason":"unknown; retry: failure_before_response"},{"duration_ms":0,"ordinal":4,"outcome":"failed","reason":"unknown; retry: retry_budget_exhausted"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"message":"direct transport failure","retryable":true,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":8,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
+                    .to_string(),
+                r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace structured rejection"}],"role":"user"}],"model":"trace-model","output_spec":{"name":"answer_shape","schema":{"canonical":{"properties":{"answer":{"type":"string"}},"required":["answer"],"type":"object"}},"strict":true,"type":"json_schema"},"stream":false,"tool_choice":"none"},"schema_version":8,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
+                    .to_string(),
+                r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"invalid_structured_output","message":"invalid response: \"answer\" is a required property","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":8,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
+                    .to_string(),
+            ],
+            "direct trace records are the byte-level compatibility contract"
+        );
     }
 
     #[tokio::test]
