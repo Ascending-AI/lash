@@ -2664,5 +2664,227 @@ class RustdocIsolationTests(unittest.TestCase):
         )
 
 
+class LowLevelRowsRunTheSameValidator(unittest.TestCase):
+    """The `low_level_api` table answers to the `api` table's row checks.
+
+    Until FIG-1865 the low-level table was validated by a hand-copied 26-line
+    loop that had drifted from the 190-line one beside it, so a low-level row
+    could rest on a tautology, on an anchor that observed nothing, or on a
+    second row for the same symbol.  These fixtures are the standing proof that
+    both loops call one validator: nothing here patches the low-level branch
+    specifically, and every case is stated twice where the tables can both hold
+    it.
+    """
+
+    FILE = "examples/docs-snippets/src/low_level_fixture.rs"
+    SOURCE = [
+        "fn exercises_the_vm() {",                                       # 1
+        "    let thing = Thing::new();",                                 # 2
+        "    assert!(size_of::<Thing>() > 0);",                          # 3
+        "    assert_eq!(thing.code(), \"ok\");",                         # 4
+        "    assert_eq!(",                                               # 5
+        "        thing.code(),",                                         # 6
+        "        \"ok\"",                                                # 7
+        "    );",                                                        # 8
+        "    let doubled = thing",                                       # 9
+        "        .map(|value| value + 1);",                              # 10
+        "    assert!(doubled.iter().all(|value| value > 0));",           # 11
+        "}",                                                             # 12
+    ]
+    ITEM = ApiItem(
+        primary="lash::Thing",
+        kind="struct",
+        availability="default+all-features",
+        paths=["lash::Thing"],
+        identity="lash_core::thing::Thing",
+    )
+
+    def setUp(self):
+        _SOURCE_LINES[self.FILE] = list(self.SOURCE)
+        _SCOPE_BLOCKS.pop(self.FILE, None)
+        _ANCHOR_SCOPES.clear()
+        _SYMBOL_BLOCKS.clear()
+        _CONSUMING_LINES.clear()
+        _RESOLVED_RECEIVERS.clear()
+        _IMPORTED_TYPES.pop(self.FILE, None)
+        _TYPE_FACTS.clear()
+        _LITERAL_STACKS.pop(self.FILE, None)
+        self.addCleanup(_TYPE_FACTS.clear)
+        self.addCleanup(_LITERAL_STACKS.pop, self.FILE, None)
+        self.addCleanup(_SOURCE_LINES.pop, self.FILE, None)
+        self.addCleanup(_SCOPE_BLOCKS.pop, self.FILE, None)
+        self.addCleanup(_IMPORTED_TYPES.pop, self.FILE, None)
+
+    def anchor(self, line):
+        return f"{self.FILE}:{line}#{self.SOURCE[line - 1].strip()}"
+
+    def low_level_row(self, symbol, usage, assertion):
+        return {
+            "symbol": symbol,
+            "disposition": "used-asserted",
+            "usage": usage,
+            "assertion": assertion,
+        }
+
+    def api_row(self, symbol, usage, assertion):
+        return {
+            "symbol": symbol,
+            "kind": "struct",
+            "availability": "default+all-features",
+            "area": "sessions-turns",
+            "disposition": "used-asserted",
+            "usage": usage,
+            "assertion": assertion,
+        }
+
+    def run_check(self, api_rows=(), low_level_rows=(), items=()):
+        document = {
+            "prose_citations_recorded": 0,
+            "api": list(api_rows),
+            "low_level_api": list(low_level_rows),
+            "removal_verdict": [],
+            "removal_verdicts_recorded": 0,
+            "gated_core_modules": [],
+        }
+        module = check_api_example_coverage
+        required = {row["symbol"] for row in low_level_rows}
+        with mock.patch.object(module, "inventory_document", lambda: document), mock.patch.object(
+            module, "current_surface", lambda: list(items)
+        ), mock.patch.object(
+            module, "crate_directories", lambda: {"lash": "crates/lash"}
+        ), mock.patch.object(
+            module, "facade_dependency_dirs", set
+        ), mock.patch.object(
+            module, "REQUIRED_LOW_LEVEL_API", required
+        ), mock.patch.object(
+            module, "EXAMPLE_TEST_TIER_RATCHET", 0
+        ):
+            errors, output = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stderr(errors), contextlib.redirect_stdout(output):
+                code = check()
+        return code, errors.getvalue()
+
+    def reported(self, errors):
+        return {
+            line[2:] for line in errors.splitlines() if line.startswith("- ")
+        }
+
+    def test_a_tautological_assertion_fails_on_a_low_level_row(self):
+        code, errors = self.run_check(
+            low_level_rows=[
+                self.low_level_row(
+                    "lashlang::Thing", self.anchor(4), self.anchor(3)
+                )
+            ]
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertIn("is a tautology", errors)
+        self.assertEqual(len(self.reported(errors)), 1, errors)
+
+    def test_an_uninformative_assertion_fails_on_a_low_level_row(self):
+        code, errors = self.run_check(
+            low_level_rows=[
+                self.low_level_row(
+                    "lashlang::Thing", self.anchor(4), self.anchor(5)
+                )
+            ]
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertIn("carries no operands and observes nothing", errors)
+        self.assertEqual(len(self.reported(errors)), 1, errors)
+
+    def test_an_unrelated_fluent_assertion_fails_on_a_low_level_row(self):
+        code, errors = self.run_check(
+            low_level_rows=[
+                self.low_level_row(
+                    "lashlang::Thing", self.anchor(10), self.anchor(11)
+                )
+            ]
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertIn(
+            "inherits a closure operand that can observe an unrelated callback",
+            errors,
+        )
+        self.assertEqual(len(self.reported(errors)), 1, errors)
+
+    def test_a_sound_low_level_row_still_passes(self):
+        code, errors = self.run_check(
+            low_level_rows=[
+                self.low_level_row(
+                    "lashlang::Thing", self.anchor(4), self.anchor(4)
+                )
+            ]
+        )
+        self.assertEqual(code, 0, errors)
+
+    def test_duplicate_low_level_rows_are_reported(self):
+        code, errors = self.run_check(
+            low_level_rows=[
+                self.low_level_row(
+                    "lashlang::Thing", self.anchor(4), self.anchor(4)
+                ),
+                self.low_level_row(
+                    "lashlang::Thing", self.anchor(4), self.anchor(4)
+                ),
+            ]
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertEqual(
+            self.reported(errors),
+            {"duplicate inventory entry: lashlang::Thing"},
+            errors,
+        )
+
+    def test_identical_anchors_produce_the_same_error_set_on_both_tables(self):
+        usage, assertion = self.anchor(4), self.anchor(5)
+        api_code, api_errors = self.run_check(
+            api_rows=[self.api_row("lash::Thing", usage, assertion)],
+            items=[self.ITEM],
+        )
+        low_code, low_errors = self.run_check(
+            low_level_rows=[self.low_level_row("lash::Thing", usage, assertion)]
+        )
+        self.assertEqual(api_code, 1, api_errors)
+        self.assertEqual(low_code, 1, low_errors)
+        self.assertEqual(self.reported(api_errors), self.reported(low_errors))
+        self.assertEqual(len(self.reported(low_errors)), 1, low_errors)
+
+    def test_a_low_level_row_that_states_no_kind_skips_only_the_kind_checks(self):
+        """Field absence, not the loop, is why a check does not run."""
+        self.assertTrue(check_api_example_coverage.API_TABLE.states("kind"))
+        self.assertFalse(check_api_example_coverage.LOW_LEVEL_TABLE.states("kind"))
+        self.assertEqual(
+            check_api_example_coverage.LOW_LEVEL_TABLE.absent_fields,
+            frozenset({"kind", "area", "availability", "aliases"}),
+        )
+        code, errors = self.run_check(
+            low_level_rows=[
+                self.low_level_row(
+                    "lashlang::Thing", self.anchor(4), self.anchor(4)
+                )
+            ]
+        )
+        self.assertEqual(code, 0, errors)
+        # The same row in the `api` table, which does state those fields, is
+        # held to them.
+        code, errors = self.run_check(
+            api_rows=[
+                self.low_level_row(
+                    "lash::Thing", self.anchor(4), self.anchor(4)
+                )
+            ],
+            items=[self.ITEM],
+        )
+        self.assertEqual(code, 1, errors)
+        self.assertIn("invalid availability", errors)
+        self.assertIn("unknown area", errors)
+
+
+class TheExampleTestTierRatchetCountsBothTables(unittest.TestCase):
+    def test_the_pin_is_unchanged_by_the_shared_validator(self):
+        self.assertEqual(EXAMPLE_TEST_TIER_RATCHET, 1951)
+
+
 if __name__ == "__main__":
     unittest.main()
