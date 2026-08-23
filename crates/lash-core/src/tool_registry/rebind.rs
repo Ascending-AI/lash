@@ -223,18 +223,12 @@ fn insert_advertised_entry(
             for id in conflicts {
                 advertised.remove(&id);
             }
-        } else if conflicts
-            .iter()
-            .any(|id| {
-                id_conflict
-                    .as_ref()
-                    .is_some_and(|(conflict_id, owner, _)| {
-                        conflict_id == id && preferred_source_key == Some(owner)
-                    })
-                    || name_conflict.as_ref().is_some_and(|(conflict_id, owner)| {
-                        conflict_id == id && preferred_source_key == Some(owner)
-                    })
-            })
+        } else if id_conflict
+            .as_ref()
+            .is_some_and(|(_, owner, _)| preferred_source_key == Some(owner))
+            || name_conflict
+                .as_ref()
+                .is_some_and(|(_, owner)| preferred_source_key == Some(owner))
         {
             return Ok(());
         }
@@ -339,16 +333,19 @@ fn insert_result_entry(
     let name_conflict = surface
         .get_by_name(&entry.manifest.name)
         .map(|(existing_id, _)| existing_id.clone());
+    if let Some(existing_id) = name_conflict {
+        return Err(ReconfigureError::Validation(format!(
+            "duplicate tool name `{}` for tool ids `{existing_id}` and `{id}`",
+            entry.manifest.name
+        )));
+    }
     match surface.insert(entry) {
         Ok(()) => Ok(()),
         Err(ToolSurfaceInsertError::DuplicateId) => Err(ReconfigureError::Validation(
             format!("duplicate tool id `{id}` in reconciled surface"),
         )),
-        Err(ToolSurfaceInsertError::DuplicateName { name }) => {
-            let existing_id = name_conflict.expect("surface name conflict was indexed");
-            Err(ReconfigureError::Validation(format!(
-                "duplicate tool name `{name}` for tool ids `{existing_id}` and `{id}`"
-            )))
+        Err(ToolSurfaceInsertError::DuplicateName { .. }) => {
+            unreachable!("surface name conflicts were checked before insertion")
         }
     }
 }
