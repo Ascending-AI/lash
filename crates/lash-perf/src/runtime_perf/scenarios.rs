@@ -1,5 +1,8 @@
 use lash_standard_plugins::{RollingHistoryConfig, StandardContextApproach};
 
+pub(crate) const DURABLE_CHECKPOINT_CURVE_BYTES: [usize; 5] =
+    [256 * 1024, 512 * 1024, 768 * 1024, 1024 * 1024, 1280 * 1024];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ExecutionMode {
     Standard,
@@ -87,6 +90,14 @@ pub(crate) enum RuntimePerfScenario {
     TurnCancelRoundTrip,
     IngressClaimProjection,
     StoreHardeningHotPaths,
+    DurableStandardToolTurnSqlite,
+    DurableStandardToolTurnPostgres,
+    DurableRlmCheckpointTurnSqlite,
+    DurableRlmCheckpointTurnPostgres,
+    DurableAgentChildTurnSqlite,
+    DurableAgentChildTurnPostgres,
+    DurableCheckpointCurveSqlite,
+    DurableCheckpointCurvePostgres,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -116,7 +127,7 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 39] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 47] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -403,11 +414,66 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures hardening-era store operations below protocol and facade ownership on the in-memory floor and real SQLite/PostgreSQL backends."
         ),
+        runtime_perf_metadata!(
+            DurableStandardToolTurnSqlite,
+            "durable_standard_tool_turn_sqlite",
+            Standard,
+            RuntimeScenario,
+            "Measures a complete Standard tool turn through the runtime against the decorated SQLite persistence boundary."
+        ),
+        runtime_perf_metadata!(
+            DurableStandardToolTurnPostgres,
+            "durable_standard_tool_turn_postgres",
+            Standard,
+            RuntimeScenario,
+            "Measures a complete Standard tool turn through the runtime against the decorated PostgreSQL persistence boundary."
+        ),
+        runtime_perf_metadata!(
+            DurableRlmCheckpointTurnSqlite,
+            "durable_rlm_checkpoint_turn_sqlite",
+            Rlm,
+            RuntimeScenario,
+            "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated SQLite persistence boundary."
+        ),
+        runtime_perf_metadata!(
+            DurableRlmCheckpointTurnPostgres,
+            "durable_rlm_checkpoint_turn_postgres",
+            Rlm,
+            RuntimeScenario,
+            "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated PostgreSQL persistence boundary."
+        ),
+        runtime_perf_metadata!(
+            DurableAgentChildTurnSqlite,
+            "durable_agent_child_turn_sqlite",
+            Rlm,
+            RuntimeScenario,
+            "Measures a complete parent and child agent turn through the runtime against the decorated SQLite persistence boundary."
+        ),
+        runtime_perf_metadata!(
+            DurableAgentChildTurnPostgres,
+            "durable_agent_child_turn_postgres",
+            Rlm,
+            RuntimeScenario,
+            "Measures a complete parent and child agent turn through the runtime against the decorated PostgreSQL persistence boundary."
+        ),
+        runtime_perf_metadata!(
+            DurableCheckpointCurveSqlite,
+            "durable_checkpoint_curve_sqlite",
+            Rlm,
+            RuntimeScenario,
+            "Measures checkpoint-size attribution inside complete RLM turns against the decorated SQLite persistence boundary."
+        ),
+        runtime_perf_metadata!(
+            DurableCheckpointCurvePostgres,
+            "durable_checkpoint_curve_postgres",
+            Rlm,
+            RuntimeScenario,
+            "Measures checkpoint-size attribution inside complete RLM turns against the decorated PostgreSQL persistence boundary."
+        ),
     ];
-    pub(crate) const KNOWN: [Self; 39] = runtime_perf_known_scenarios();
-    // The external PostgreSQL scenario is enforced by the full perf/release
-    // workflows with an explicit `all`; local and push-CI smoke defaults remain
-    // provider/database free.
+    pub(crate) const KNOWN: [Self; 47] = runtime_perf_known_scenarios();
+    // Durable scenarios are intentionally opt-in (or selected by `all`) so the
+    // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; 38] = runtime_perf_default_scenarios();
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
@@ -437,6 +503,47 @@ impl RuntimePerfScenario {
         self.metadata().correctness_coverage_ids
     }
 
+    pub(crate) fn is_durable(self) -> bool {
+        matches!(
+            self,
+            Self::DurableStandardToolTurnSqlite
+                | Self::DurableStandardToolTurnPostgres
+                | Self::DurableRlmCheckpointTurnSqlite
+                | Self::DurableRlmCheckpointTurnPostgres
+                | Self::DurableAgentChildTurnSqlite
+                | Self::DurableAgentChildTurnPostgres
+                | Self::DurableCheckpointCurveSqlite
+                | Self::DurableCheckpointCurvePostgres
+        )
+    }
+
+    pub(crate) fn uses_postgres(self) -> bool {
+        matches!(
+            self,
+            Self::DurableStandardToolTurnPostgres
+                | Self::DurableRlmCheckpointTurnPostgres
+                | Self::DurableAgentChildTurnPostgres
+                | Self::DurableCheckpointCurvePostgres
+        )
+    }
+
+    pub(crate) fn is_checkpoint_curve(self) -> bool {
+        matches!(
+            self,
+            Self::DurableCheckpointCurveSqlite | Self::DurableCheckpointCurvePostgres
+        )
+    }
+
+    pub(crate) fn has_guard_budget(self) -> bool {
+        !self.is_durable()
+    }
+
+    pub(crate) fn checkpoint_curve_bytes(self, turn_index: usize) -> Option<usize> {
+        self.is_checkpoint_curve().then(|| {
+            DURABLE_CHECKPOINT_CURVE_BYTES[turn_index % DURABLE_CHECKPOINT_CURVE_BYTES.len()]
+        })
+    }
+
     fn metadata(self) -> &'static RuntimePerfScenarioMetadata {
         Self::METADATA
             .iter()
@@ -455,7 +562,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 39] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 47] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -496,6 +603,14 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 39] {
         RuntimePerfScenario::METADATA[36].scenario,
         RuntimePerfScenario::METADATA[37].scenario,
         RuntimePerfScenario::METADATA[38].scenario,
+        RuntimePerfScenario::METADATA[39].scenario,
+        RuntimePerfScenario::METADATA[40].scenario,
+        RuntimePerfScenario::METADATA[41].scenario,
+        RuntimePerfScenario::METADATA[42].scenario,
+        RuntimePerfScenario::METADATA[43].scenario,
+        RuntimePerfScenario::METADATA[44].scenario,
+        RuntimePerfScenario::METADATA[45].scenario,
+        RuntimePerfScenario::METADATA[46].scenario,
     ]
 }
 

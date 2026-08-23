@@ -166,7 +166,34 @@ pub(crate) async fn run_once(
         | RuntimePerfScenario::DeepTurnComposition
         | RuntimePerfScenario::TurnStartGate
         | RuntimePerfScenario::TurnCancelRoundTrip
-        | RuntimePerfScenario::IngressClaimProjection => {}
+        | RuntimePerfScenario::IngressClaimProjection
+        | RuntimePerfScenario::DurableStandardToolTurnSqlite
+        | RuntimePerfScenario::DurableStandardToolTurnPostgres
+        | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
+        | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres
+        | RuntimePerfScenario::DurableAgentChildTurnSqlite
+        | RuntimePerfScenario::DurableAgentChildTurnPostgres
+        | RuntimePerfScenario::DurableCheckpointCurveSqlite
+        | RuntimePerfScenario::DurableCheckpointCurvePostgres => {}
+    }
+
+    let postgres_database_url = if scenario.uses_postgres() {
+        configured_postgres_database_url()
+    } else {
+        None
+    };
+    if scenario.uses_postgres() && postgres_database_url.is_none() {
+        if postgres_is_required() {
+            anyhow::bail!(
+                "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
+                scenario.name()
+            );
+        }
+        eprintln!(
+            "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
+            scenario.name()
+        );
+        return Ok(skipped_runtime_perf_result(scenario, chat_turns));
     }
 
     let total_started = Instant::now();
@@ -175,8 +202,13 @@ pub(crate) async fn run_once(
 
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
-    let sqlite_root = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen) {
-        Some(make_temp_bench_dir("lash-runtime-perf-sqlite-store")?)
+    let sqlite_root = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen)
+        || (scenario.is_durable() && !scenario.uses_postgres())
+    {
+        Some(make_temp_bench_dir(&format!(
+            "lash-runtime-perf-{}",
+            scenario.name()
+        ))?)
     } else {
         None
     };
@@ -198,7 +230,9 @@ pub(crate) async fn run_once(
             lashlang_execution_jsonl_path: Some(root.join("lashlang-execution.jsonl")),
             trace_level: lash::tracing::TraceLevel::Extended,
         });
-    let mut runtime = if let Some(root) = sqlite_root.as_ref() {
+    let mut runtime = if let Some(database_url) = postgres_database_url.as_deref() {
+        build_runtime_with_postgres_store(scenario, database_url).await?
+    } else if let Some(root) = sqlite_root.as_ref() {
         build_runtime_with_sqlite_store(scenario, root.clone()).await?
     } else {
         build_runtime_with_store(scenario, None, trace_config).await?
@@ -215,6 +249,7 @@ pub(crate) async fn run_once(
     let after_seed_memory = process_memory_sample();
 
     let mut turns = Vec::with_capacity(chat_turns);
+    let mut extra_counters = BTreeMap::new();
     for turn_index in 0..chat_turns {
         let mut extra_phase_profile = BTreeMap::new();
         if matches!(scenario, RuntimePerfScenario::StoreReopen) && turn_index > 0 {
@@ -308,6 +343,7 @@ pub(crate) async fn run_once(
         runtime.set_turn_phase_probe(phase_probe.clone()).await;
 
         let before_turn_usage = runtime.usage_report();
+        let commit_measurement_start = runtime.store_metrics().commit_measurements().len();
         let turn_before_alloc = allocator_stats();
         let turn_before_memory = process_memory_sample();
         let turn_started = Instant::now();
@@ -463,6 +499,45 @@ pub(crate) async fn run_once(
                 .map_err(anyhow::Error::msg)?;
         let mut phase_profile = phase_probe.take_completed();
         phase_profile.extend(extra_phase_profile);
+        if let Some(target_bytes) = scenario.checkpoint_curve_bytes(turn_index) {
+            phase_profile = phase_profile
+                .into_iter()
+                .map(|(phase, measurement)| {
+                    (
+                        format!("checkpoint_curve.{target_bytes}.{phase}"),
+                        measurement,
+                    )
+                })
+                .collect();
+            let measurements = runtime.store_metrics().commit_measurements();
+            let turn_measurements = &measurements[commit_measurement_start..];
+            extra_counters.insert(
+                format!("checkpoint_curve.{target_bytes}.commit_count"),
+                turn_measurements.len() as u64,
+            );
+            if let Some(commit) = turn_measurements.last() {
+                extra_counters.insert(
+                    format!("checkpoint_curve.{target_bytes}.logical_bytes"),
+                    commit.total_bytes,
+                );
+                extra_counters.insert(
+                    format!("checkpoint_curve.{target_bytes}.checkpoint_bytes"),
+                    commit.checkpoint_bytes,
+                );
+                extra_counters.insert(
+                    format!("checkpoint_curve.{target_bytes}.logical_rows"),
+                    commit.total_rows,
+                );
+                extra_counters.insert(
+                    format!("checkpoint_curve.{target_bytes}.graph_rows"),
+                    commit.graph_rows,
+                );
+                extra_counters.insert(
+                    format!("checkpoint_curve.{target_bytes}.checkpoint_components"),
+                    commit.checkpoint_components,
+                );
+            }
+        }
         turns.push(RuntimePerfTurnResult {
             turn_index,
             run_turn_ms,
@@ -498,8 +573,22 @@ pub(crate) async fn run_once(
     let after_export_memory = process_memory_sample();
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
     let last_turn_memory = turns.last().map(|turn| &turn.memory);
+    extra_counters.extend(runtime.store_metrics().call_counters());
+    if let Some(commit) = runtime.store_metrics().commit_measurements().last() {
+        extra_counters.insert("durable_commit.logical_bytes".to_string(), commit.total_bytes);
+        extra_counters.insert(
+            "durable_commit.checkpoint_bytes".to_string(),
+            commit.checkpoint_bytes,
+        );
+        extra_counters.insert("durable_commit.logical_rows".to_string(), commit.total_rows);
+        extra_counters.insert("durable_commit.graph_rows".to_string(), commit.graph_rows);
+        extra_counters.insert(
+            "durable_commit.checkpoint_components".to_string(),
+            commit.checkpoint_components,
+        );
+    }
+    runtime.close().await?;
     if let Some(root) = sqlite_root {
-        runtime.close().await?;
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -518,7 +607,7 @@ pub(crate) async fn run_once(
         total_ms: elapsed_ms(total_started),
         session_nodes: state.session_graph.nodes.len(),
         active_path_messages: state.read_view().messages().len(),
-        extra_counters: BTreeMap::new(),
+        extra_counters,
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,
             rss_after_build_kb: after_build_memory.rss_kb,
@@ -547,4 +636,91 @@ pub(crate) async fn run_once(
         turns,
         cumulative_usage,
     })
+}
+
+fn configured_postgres_database_url() -> Option<String> {
+    std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .or_else(|| {
+            std::env::var("DATABASE_URL")
+                .ok()
+                .filter(|url| !url.trim().is_empty())
+        })
+}
+
+fn postgres_is_required() -> bool {
+    std::env::var_os("LASH_REQUIRE_POSTGRES").is_some()
+}
+
+fn skipped_runtime_perf_result(
+    scenario: RuntimePerfScenario,
+    chat_turns: usize,
+) -> RuntimePerfRunResult {
+    let zero_memory = RuntimePerfTurnMemoryRunResult {
+        rss_before_kb: None,
+        rss_after_turn_kb: None,
+        rss_after_await_kb: None,
+        peak_hwm_before_kb: None,
+        peak_hwm_after_await_kb: None,
+        rss_growth_kb: None,
+        hwm_growth_kb: None,
+    };
+    let zero_alloc = zero_allocation_delta();
+    let turn = RuntimePerfTurnResult {
+        turn_index: 0,
+        run_turn_ms: 0.0,
+        await_background_work_ms: 0.0,
+        total_ms: 0.0,
+        memory: zero_memory,
+        allocations: RuntimePerfTurnAllocationRunResult {
+            run_turn: zero_alloc.clone(),
+            await_background_work: zero_alloc.clone(),
+            total: zero_alloc.clone(),
+        },
+        phase_profile: BTreeMap::new(),
+        turn_usage: TokenUsage::default(),
+        usage_delta: SessionUsageReport::default(),
+        cumulative_usage: SessionUsageReport::default(),
+    };
+    let mut extra_counters = BTreeMap::new();
+    extra_counters.insert("skipped.no_database_url".to_string(), 1);
+    RuntimePerfRunResult {
+        scenario: scenario.name().to_string(),
+        scenario_harness: scenario.scenario_harness().name().to_string(),
+        chat_turns,
+        stack_profile: None,
+        build_runtime_ms: 0.0,
+        seed_state_ms: 0.0,
+        run_turn_ms: 0.0,
+        await_background_work_ms: 0.0,
+        export_state_ms: 0.0,
+        total_ms: 0.0,
+        session_nodes: 0,
+        active_path_messages: 0,
+        extra_counters,
+        memory: RuntimePerfMemoryRunResult {
+            rss_before_kb: None,
+            rss_after_build_kb: None,
+            rss_after_seed_kb: None,
+            rss_after_turn_kb: None,
+            rss_after_await_kb: None,
+            rss_after_export_kb: None,
+            peak_hwm_before_kb: None,
+            peak_hwm_after_export_kb: None,
+            rss_growth_kb: None,
+            hwm_growth_kb: None,
+        },
+        allocations: RuntimePerfAllocationRunResult {
+            build_runtime: zero_alloc.clone(),
+            seed_state: zero_alloc.clone(),
+            run_turn: zero_alloc.clone(),
+            await_background_work: zero_alloc.clone(),
+            export_state: zero_alloc.clone(),
+            total: zero_alloc,
+        },
+        phase_profile: BTreeMap::new(),
+        turns: vec![turn],
+        cumulative_usage: SessionUsageReport::default(),
+    }
 }

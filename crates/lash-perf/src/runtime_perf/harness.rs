@@ -31,7 +31,7 @@ use super::providers::{
     benchmark_provider, benchmark_provider_with_control, benchmark_stream_profile,
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
-use super::store::{RuntimePerfStore, RuntimePerfStoreFactory};
+use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
 
 const DEFAULT_PROMPT: &str =
     "Inspect the current state and reply with exactly: runtime perf benchmark ok";
@@ -125,6 +125,7 @@ pub(crate) struct BenchmarkRuntime {
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
     store: Option<Arc<RuntimePerfStore>>,
+    store_metrics: Arc<RuntimePerfStoreMetrics>,
     provider_control: Option<Arc<BenchmarkProviderControl>>,
     _openai_compat_server: Option<OpenAiCompatBenchServer>,
 }
@@ -145,6 +146,10 @@ impl BenchmarkRuntime {
 
     pub(crate) fn store(&self) -> Arc<RuntimePerfStore> {
         Arc::clone(self.store.as_ref().expect("runtime perf in-memory store"))
+    }
+
+    pub(crate) fn store_metrics(&self) -> Arc<RuntimePerfStoreMetrics> {
+        Arc::clone(&self.store_metrics)
     }
 
     pub(crate) fn core(&self) -> LashCore {
@@ -807,6 +812,7 @@ pub(crate) async fn build_runtime_with_store(
         .open_session(format!("runtime-perf-{}", scenario.name()))
         .await?;
     Ok(BenchmarkRuntime {
+        store_metrics: store.metrics(),
         core,
         session: Some(session),
         store: Some(store),
@@ -1022,6 +1028,16 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         "runtime_perf_tools",
         PluginSpec::new().with_tool_provider(Arc::new(BenchmarkEchoTool::new(effect_host.clone()))),
     )));
+    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnSqlite) {
+        plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
+            Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                lash_subagents::StaticCapability::new(
+                    "default",
+                    lash_core::facade_support::SessionSpec::inherit(),
+                ),
+            ))),
+        )));
+    }
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         attachments_root,
     ));
@@ -1043,9 +1059,34 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             .await
             .map_err(|err| anyhow::anyhow!(err.to_string()))?,
     );
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        sessions_root,
-    ));
+    let (store_factory, store_metrics): (
+        Arc<dyn lash_core::SessionStoreFactory>,
+        Arc<RuntimePerfStoreMetrics>,
+    ) = if matches!(scenario, RuntimePerfScenario::SqliteStoreReopen) {
+        // Keep this DEFAULT scenario on its pre-PR construction path: it is a
+        // store-reopen measurement, not a decorated durable commit measurement.
+        (
+            Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
+                sessions_root,
+            )),
+            Arc::new(RuntimePerfStoreMetrics::default()),
+        )
+    } else {
+        let inner_store_factory: Arc<dyn lash_core::SessionStoreFactory> = Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+                sessions_root,
+                &process_db,
+            ),
+        );
+        let store_factory = RuntimePerfStoreFactory::decorating(inner_store_factory);
+        let store_metrics = store_factory.metrics();
+        (Arc::new(store_factory), store_metrics)
+    };
+    let commit_budget = if scenario.is_checkpoint_curve() {
+        lash::CommitBudget::bounded(8 * 1024 * 1024, 2_048)
+    } else {
+        lash::CommitBudget::bounded(1024 * 1024, 512)
+    };
     let core = match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
@@ -1053,7 +1094,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 .model(benchmark_model_spec())
                 .effect_host(effect_host.clone())
                 .attachment_store(attachment_store.clone())
-                .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                .commit_budget(commit_budget)
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
                 .process_env_store(process_env_store.clone())
                 .process_registry(process_registry.clone())
@@ -1082,7 +1123,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .model(benchmark_model_spec())
                     .effect_host(effect_host.clone())
                     .attachment_store(attachment_store.clone())
-                    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                    .commit_budget(commit_budget)
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
                     .process_env_store(process_env_store.clone())
                     .process_registry(process_registry.clone())
@@ -1098,6 +1139,110 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         .open_session(format!("runtime-perf-{}", scenario.name()))
         .await?;
     Ok(BenchmarkRuntime {
+        store_metrics,
+        core,
+        session: Some(session),
+        store: None,
+        provider_control: None,
+        _openai_compat_server: None,
+    })
+}
+
+pub(crate) async fn build_runtime_with_postgres_store(
+    scenario: RuntimePerfScenario,
+    database_url: &str,
+) -> anyhow::Result<BenchmarkRuntime> {
+    let mode_id = scenario.execution_mode();
+    let provider = benchmark_provider(scenario).into_handle();
+    let postgres = lash_postgres_store::PostgresStorage::connect(database_url)
+        .await
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    let effect_host = Arc::new(postgres.effect_host());
+    let process_env_store = Arc::new(postgres.process_env_store());
+    let process_registry = Arc::new(postgres.process_registry());
+    let trigger_store = Arc::new(postgres.trigger_store());
+    let inner_store_factory: Arc<dyn lash_core::SessionStoreFactory> =
+        Arc::new(postgres.session_store_factory_with_shared_process_registry());
+    let store_factory = Arc::new(RuntimePerfStoreFactory::decorating(inner_store_factory));
+    let store_metrics = store_factory.metrics();
+    let attachment_store = Arc::new(lash::persistence::InMemoryAttachmentStore::new());
+    let commit_budget = if scenario.is_checkpoint_curve() {
+        lash::CommitBudget::bounded(8 * 1024 * 1024, 2_048)
+    } else {
+        lash::CommitBudget::bounded(1024 * 1024, 512)
+    };
+    let mut plugin_stack = standard_tool_stack(StandardToolStackOptions {
+        standard_context_approach: scenario.standard_context_approach(),
+        tavily_api_key: None,
+        include_cancel_process: mode_id.is_standard(),
+    });
+    plugin_stack.push(Arc::new(StaticPluginFactory::new(
+        "runtime_perf_tools",
+        PluginSpec::new().with_tool_provider(Arc::new(BenchmarkEchoTool::new(effect_host.clone()))),
+    )));
+    if matches!(scenario, RuntimePerfScenario::DurableAgentChildTurnPostgres) {
+        plugin_stack.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
+            Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                lash_subagents::StaticCapability::new(
+                    "default",
+                    lash_core::facade_support::SessionSpec::inherit(),
+                ),
+            ))),
+        )));
+    }
+
+    let core = match mode_id {
+        ExecutionMode::Standard => BenchmarkCore::Standard(
+            lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .provider(provider)
+                .model(benchmark_model_spec())
+                .effect_host(effect_host.clone())
+                .attachment_store(attachment_store.clone())
+                .commit_budget(commit_budget)
+                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+                .process_env_store(process_env_store.clone())
+                .process_registry(process_registry.clone())
+                .trigger_store(trigger_store.clone())
+                .store_factory(store_factory.clone())
+                .plugins(plugin_stack)
+                .build(runtime_perf_owner())?,
+        ),
+        ExecutionMode::Rlm => {
+            let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                lash_protocol_rlm::RlmProtocolPluginConfig::new(
+                    lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
+                    lash_protocol_rlm::ExecutionBound::secs(30),
+                    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
+                ),
+                Arc::new(postgres.lashlang_artifact_store()),
+            );
+            BenchmarkCore::Rlm(
+                lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                    .provider(provider)
+                    .model(benchmark_model_spec())
+                    .effect_host(effect_host.clone())
+                    .attachment_store(attachment_store.clone())
+                    .commit_budget(commit_budget)
+                    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+                    .process_env_store(process_env_store.clone())
+                    .process_registry(process_registry.clone())
+                    .trigger_store(trigger_store.clone())
+                    .store_factory(store_factory.clone())
+                    .plugins(plugin_stack)
+                    .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
+                    .build(runtime_perf_owner())?,
+            )
+        }
+    };
+    let session = core
+        .open_session(format!(
+            "runtime-perf-{}-{}",
+            scenario.name(),
+            uuid::Uuid::new_v4()
+        ))
+        .await?;
+    Ok(BenchmarkRuntime {
+        store_metrics,
         core,
         session: Some(session),
         store: None,
@@ -1239,7 +1384,9 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
                 .map(|(_, text)| text)
                 .unwrap_or("runtime perf benchmark ok")
         ),
-        RuntimePerfScenario::RlmToolCalls => format!(
+        RuntimePerfScenario::RlmToolCalls
+        | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
+        | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres => format!(
             "Turn {} in RLM mode. Exercise the benchmark_echo tool path and reply with exactly: {}",
             turn_index + 1,
             DEFAULT_PROMPT
@@ -1255,7 +1402,9 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
                 .map(|(_, text)| text)
                 .unwrap_or("runtime perf benchmark ok")
         ),
-        RuntimePerfScenario::StandardToolCalls => format!(
+        RuntimePerfScenario::StandardToolCalls
+        | RuntimePerfScenario::DurableStandardToolTurnSqlite
+        | RuntimePerfScenario::DurableStandardToolTurnPostgres => format!(
             "Turn {} in standard mode. Use the batch tool to exercise parallel benchmark_echo calls, then reply with exactly: {}",
             turn_index + 1,
             DEFAULT_PROMPT
@@ -1315,7 +1464,9 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
                 .map(|(_, text)| text)
                 .unwrap_or("runtime perf benchmark ok")
         ),
-        RuntimePerfScenario::RlmSubagentSpawn => format!(
+        RuntimePerfScenario::RlmSubagentSpawn
+        | RuntimePerfScenario::DurableAgentChildTurnSqlite
+        | RuntimePerfScenario::DurableAgentChildTurnPostgres => format!(
             "Turn {} in RLM mode. Start a process that spawns a default subagent with seeded input, await it, then finish exactly: {}",
             turn_index + 1,
             DEFAULT_PROMPT
@@ -1406,6 +1557,14 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
         RuntimePerfScenario::IngressClaimProjection => format!(
             "Turn {} in the active-ingress projection benchmark. Continue after the checkpoint and incorporate the injected marker.",
             turn_index + 1
+        ),
+        RuntimePerfScenario::DurableCheckpointCurveSqlite
+        | RuntimePerfScenario::DurableCheckpointCurvePostgres => format!(
+            "Turn {} in the durable checkpoint curve. Persist checkpoint body bytes {} inside this live RLM turn, then finish exactly: runtime perf benchmark ok",
+            turn_index + 1,
+            scenario
+                .checkpoint_curve_bytes(turn_index)
+                .expect("checkpoint curve scenario")
         ),
         RuntimePerfScenario::StoreHardeningHotPaths => {
             format!("Turn {} in the store-hardening benchmark.", turn_index + 1)

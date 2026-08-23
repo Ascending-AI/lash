@@ -49,12 +49,15 @@ async fn run_once_store_hardening_hot_paths(
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::StoreHardeningHotPaths;
     let run_id = uuid::Uuid::new_v4().simple().to_string();
-    let postgres_url = std::env::var("LASH_POSTGRES_DATABASE_URL").map_err(|_| {
-        anyhow::anyhow!(
-            "{} requires LASH_POSTGRES_DATABASE_URL (the full perf workflows provide it)",
-            scenario.name()
-        )
-    })?;
+    let postgres_url = std::env::var("LASH_POSTGRES_DATABASE_URL").map_err(|_| ());
+    let postgres_url = postgres_url
+        .or_else(|_| std::env::var("DATABASE_URL").map_err(|_| ()))
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL (the full perf workflows provide it)",
+                scenario.name()
+            )
+        })?;
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
     let total_before_alloc = allocator_stats();
@@ -476,7 +479,7 @@ async fn measure_store_hardening_backend_turn(
         None,
     )?;
     let usage = store_hardening_usage(turn_index);
-    let operation_storage_key = commit.turn_commit.operation.storage_key()?;
+    let operation_storage_key = lash_core::OperationId::storage_key(&commit.turn_commit.operation)?;
     commit.usage_deltas = vec![lash_core::store::RuntimeUsageDelta {
         identity: lash_core::store::RuntimeUsageDeltaIdentity::for_entry(
             operation_storage_key,

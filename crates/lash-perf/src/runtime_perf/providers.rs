@@ -1298,6 +1298,8 @@ fn benchmark_stream_profile_for_request(
     if matches!(
         scenario,
         RuntimePerfScenario::RlmSubagentSpawn
+            | RuntimePerfScenario::DurableAgentChildTurnSqlite
+            | RuntimePerfScenario::DurableAgentChildTurnPostgres
             | RuntimePerfScenario::RlmObliqueStackMix
             | RuntimePerfScenario::DeepTurnComposition
     ) && request_text(request).contains("Subagent capability: default. Depth: 1/5.")
@@ -1372,7 +1374,9 @@ finish { len: result.value }"#,
                 parts: Vec::new(),
             }
         }
-        RuntimePerfScenario::StandardToolCalls => {
+        RuntimePerfScenario::StandardToolCalls
+        | RuntimePerfScenario::DurableStandardToolTurnSqlite
+        | RuntimePerfScenario::DurableStandardToolTurnPostgres => {
             if request_has_tool_result(request) {
                 text_profile("runtime perf benchmark ok")
             } else {
@@ -1579,7 +1583,9 @@ finish "runtime perf benchmark ok""#,
             );
             text_profile(text)
         }
-        RuntimePerfScenario::RlmToolCalls => {
+        RuntimePerfScenario::RlmToolCalls
+        | RuntimePerfScenario::DurableRlmCheckpointTurnSqlite
+        | RuntimePerfScenario::DurableRlmCheckpointTurnPostgres => {
             let text = lashlang_block(
                 r#"
 first = await tools.benchmark_echo({ value: "runtime perf benchmark ok", ordinal: 1 })?
@@ -1679,7 +1685,9 @@ finish first_result.value"#,
             );
             text_profile(text)
         }
-        RuntimePerfScenario::RlmSubagentSpawn => {
+        RuntimePerfScenario::RlmSubagentSpawn
+        | RuntimePerfScenario::DurableAgentChildTurnSqlite
+        | RuntimePerfScenario::DurableAgentChildTurnPostgres => {
             let text = lashlang_block(
                 r#"
 process spawn_child(agents: Agents) {
@@ -1697,6 +1705,15 @@ result = (await handle)?
 finish "runtime perf benchmark ok""#,
             );
             text_profile(text)
+        }
+        RuntimePerfScenario::DurableCheckpointCurveSqlite
+        | RuntimePerfScenario::DurableCheckpointCurvePostgres => {
+            let target_bytes = checkpoint_curve_bytes_from_request(request);
+            let body = "x".repeat(target_bytes);
+            let literal = serde_json::to_string(&body).expect("checkpoint curve string literal");
+            text_profile(lashlang_block(&format!(
+                "checkpoint_curve_blob = {literal}\nfinish \"runtime perf benchmark ok\""
+            )))
         }
         RuntimePerfScenario::RlmObliqueStackMix => {
             let text = lashlang_block(
@@ -1804,6 +1821,16 @@ finish result"#,
         }
         _ => text_profile("runtime perf benchmark ok"),
     }
+}
+
+fn checkpoint_curve_bytes_from_request(request: &LlmRequest) -> usize {
+    let text = request_text(request);
+    let marker = "checkpoint body bytes ";
+    text.rsplit(marker)
+        .next()
+        .and_then(|suffix| suffix.split_whitespace().next())
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(256 * 1024)
 }
 
 fn lashlang_block(source: &str) -> String {

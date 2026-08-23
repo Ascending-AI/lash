@@ -6,7 +6,8 @@ use super::budgets::{
 };
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
-use crate::runtime_perf::measurement::{RuntimePerfPhaseProbe, phase_name};
+use crate::runtime_perf::measurement::{RuntimePerfPhaseProbe, phase_name, run_once};
+use crate::runtime_perf::scenarios::DURABLE_CHECKPOINT_CURVE_BYTES;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 
 #[test]
@@ -59,6 +60,56 @@ fn ending_an_unstarted_phase_is_a_no_op() {
     assert!(probe.take_completed().is_empty());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
+    for scenario in [
+        RuntimePerfScenario::DurableStandardToolTurnSqlite,
+        RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
+        RuntimePerfScenario::DurableAgentChildTurnSqlite,
+    ] {
+        let result = Box::pin(run_once(scenario, 1))
+            .await
+            .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
+        assert!(
+            !result.phase_profile.is_empty(),
+            "{} emitted no phase measurements",
+            scenario.name()
+        );
+        assert!(
+            result
+                .extra_counters
+                .get("store_calls.total")
+                .is_some_and(|calls| *calls > 0),
+            "{} emitted no decorated store calls: {:?}",
+            scenario.name(),
+            result.extra_counters
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_sqlite_checkpoint_curve_reports_each_target_size() {
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::DurableCheckpointCurveSqlite,
+        DURABLE_CHECKPOINT_CURVE_BYTES.len(),
+    ))
+    .await
+    .expect("durable checkpoint curve should run");
+
+    for target_bytes in DURABLE_CHECKPOINT_CURVE_BYTES {
+        let checkpoint_bytes = result
+            .extra_counters
+            .get(&format!("checkpoint_curve.{target_bytes}.checkpoint_bytes"))
+            .copied()
+            .unwrap_or_else(|| panic!("missing checkpoint measurement for {target_bytes}"));
+        assert!(
+            checkpoint_bytes >= target_bytes as u64
+                && checkpoint_bytes <= target_bytes as u64 + 16 * 1024,
+            "checkpoint size for target {target_bytes} was {checkpoint_bytes}"
+        );
+    }
+}
+
 #[test]
 fn turn_scenarios_require_the_typed_commit_phase_metrics() {
     for scenario in [
@@ -97,6 +148,9 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
 #[test]
 fn every_required_phase_has_a_checked_in_wall_clock_budget() {
     for scenario in RuntimePerfScenario::KNOWN {
+        if !scenario.has_guard_budget() {
+            continue;
+        }
         for phase in required_phases(scenario) {
             assert!(
                 phase_wall_clock_budget_ms(scenario, phase).is_some(),
@@ -127,6 +181,7 @@ fn typed_runtime_phase_inventory_is_required_and_budgeted() {
 fn runtime_phase_inventory_is_closed_in_both_directions() {
     let known_scenarios = RuntimePerfScenario::KNOWN
         .iter()
+        .filter(|scenario| scenario.has_guard_budget())
         .map(|scenario| scenario.name())
         .collect::<BTreeSet<_>>();
     let budgeted_scenarios = configured_scenario_names().collect::<BTreeSet<_>>();
@@ -136,6 +191,9 @@ fn runtime_phase_inventory_is_closed_in_both_directions() {
     );
 
     for scenario in RuntimePerfScenario::KNOWN {
+        if !scenario.has_guard_budget() {
+            continue;
+        }
         assert_complete_runtime_budget(scenario);
         let required = required_phases(scenario)
             .iter()

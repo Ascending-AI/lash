@@ -38,9 +38,9 @@ use crate::perf_support::tempdir::make_temp_bench_dir;
 use crate::perf_support::time::{elapsed_ms, round3};
 
 use super::harness::{
-    RuntimePerfTraceConfig, benchmark_prompt, build_embed_core, build_runtime_with_sqlite_store,
-    build_runtime_with_store, prepare_turn, rlm_perf_projected_bindings, seed_runtime_state,
-    validate_runtime_perf_turn,
+    RuntimePerfTraceConfig, benchmark_prompt, build_embed_core, build_runtime_with_postgres_store,
+    build_runtime_with_sqlite_store, build_runtime_with_store, prepare_turn,
+    rlm_perf_projected_bindings, seed_runtime_state, validate_runtime_perf_turn,
 };
 use super::scenarios::RuntimePerfScenario;
 use super::store::RuntimePerfStore;
