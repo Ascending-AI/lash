@@ -356,7 +356,7 @@ pub(super) fn transcript_for_script(
     let script = ProviderWireScript::from_json_str(script_content)?;
     let body_paths = script.request_match.body.keys().cloned().collect();
     let headers = script.request_match.headers.keys().cloned().collect();
-    let response_events = script.timeline.iter().map(transcript_event).collect();
+    let response_events = script.timeline().iter().map(transcript_event).collect();
     Ok(FixedScriptTranscript {
         schema: "lash.sim.fixed-script-proof-transcript.v1",
         proof: proof_name.to_string(),

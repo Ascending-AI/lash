@@ -271,7 +271,7 @@ impl LlmHttpTransport for PairedProviderStopTransport {
         }
 
         let fixture = provider_stop_fixture(self.dialect, variation);
-        ScriptedLlmHttpTransport::new(fixture.script()?)
+        ScriptedLlmHttpTransport::new(fixture.script()?)?
             .send(request, timeout)
             .await
     }

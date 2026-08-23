@@ -165,7 +165,7 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
         };
         let mut failed_before_response = script.clone();
         failed_before_response.name = format!("{provider_kind}.retryable-before-response");
-        failed_before_response.timeline = vec![lash_sim::ProviderWireEvent::TransportError {
+        *failed_before_response.timeline_mut() = vec![lash_sim::ProviderWireEvent::TransportError {
             at: 0,
             message: "connection failed before response".to_string(),
             retryable: Some(true),
@@ -175,11 +175,14 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             "response_started": false,
             "retryable": true,
         }));
-        let transport = Arc::new(lash_sim::ScriptedLlmHttpTransport::from_scripts([
-            failed_before_response,
-            script.clone(),
-            script,
-        ]));
+        let transport = Arc::new(
+            lash_sim::ScriptedLlmHttpTransport::from_scripts([
+                failed_before_response,
+                script.clone(),
+                script,
+            ])
+            .expect("valid provider scripts"),
+        );
         let (mut provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
             provider_kind,
             &transport,

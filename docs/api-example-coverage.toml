@@ -46357,7 +46357,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::Turn::session_id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_active_turn_divergence.rs:505#session_id,"
+usage = "crates/lash-sim/tests/cross_backend_active_turn_divergence.rs:611#session_id,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -46367,7 +46367,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::Turn::turn_id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_active_turn_divergence.rs:506#turn_id,"
+usage = "crates/lash-sim/tests/cross_backend_active_turn_divergence.rs:612#turn_id,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]

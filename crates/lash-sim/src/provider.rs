@@ -24,7 +24,7 @@ pub struct ProviderWireScript {
     #[serde(default, rename = "request_match")]
     pub request_match: ProviderWireRequestMatch,
     #[serde(default)]
-    pub timeline: Vec<ProviderWireEvent>,
+    timeline: Vec<ProviderWireEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_provider: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,6 +57,36 @@ impl ProviderWireScript {
         })?;
         script.validate()?;
         Ok(script)
+    }
+
+    pub fn timeline(&self) -> &[ProviderWireEvent] {
+        &self.timeline
+    }
+
+    pub fn timeline_mut(&mut self) -> &mut Vec<ProviderWireEvent> {
+        self.compiled_plan.take();
+        &mut self.timeline
+    }
+
+    pub(crate) fn from_parts(
+        schema: String,
+        name: String,
+        provider_kind: String,
+        endpoint: ProviderWireEndpoint,
+        request_match: ProviderWireRequestMatch,
+        timeline: Vec<ProviderWireEvent>,
+    ) -> Self {
+        Self {
+            schema,
+            name,
+            provider_kind,
+            endpoint,
+            request_match,
+            timeline,
+            expected_provider: None,
+            provenance: None,
+            compiled_plan: OnceLock::new(),
+        }
     }
 
     fn validate(&self) -> Result<(), LlmTransportError> {
@@ -735,21 +765,27 @@ impl ScriptedTransportEventGate {
 }
 
 impl ScriptedLlmHttpTransport {
-    pub fn new(script: ProviderWireScript) -> Self {
+    pub fn new(script: ProviderWireScript) -> Result<Self, LlmTransportError> {
         Self::from_scripts([script])
     }
 
-    pub fn from_scripts(scripts: impl IntoIterator<Item = ProviderWireScript>) -> Self {
-        Self {
-            scripts: Arc::new(Mutex::new(scripts.into_iter().collect())),
+    pub fn from_scripts(
+        scripts: impl IntoIterator<Item = ProviderWireScript>,
+    ) -> Result<Self, LlmTransportError> {
+        let scripts: VecDeque<_> = scripts.into_iter().collect();
+        for script in &scripts {
+            script.validate()?;
+        }
+        Ok(Self {
+            scripts: Arc::new(Mutex::new(scripts)),
             exchanges: Arc::new(Mutex::new(Vec::new())),
             event_schedule: None,
             next_exchange_index: Arc::new(AtomicUsize::new(0)),
-        }
+        })
     }
 
     pub fn from_json_str(input: &str) -> Result<Self, LlmTransportError> {
-        Ok(Self::new(ProviderWireScript::from_json_str(input)?))
+        Self::new(ProviderWireScript::from_json_str(input)?)
     }
 
     pub fn with_event_schedule(mut self, schedule: ScriptedTransportSchedule) -> Self {
@@ -870,7 +906,7 @@ fn scripted_response_exchange(
 
     let mut status = None;
     let mut headers = Vec::new();
-    for event in &script.timeline {
+    for event in script.timeline() {
         match event {
             ProviderWireEvent::ResponseStart {
                 status: next_status,
@@ -894,12 +930,12 @@ fn scripted_response_exchange(
         status,
         headers,
         event_names: script
-            .timeline
+            .timeline()
             .iter()
             .map(|event| event.event_name().to_string())
             .collect(),
         event_schedule: script
-            .timeline
+            .timeline()
             .iter()
             .map(|event| ProviderWireTimelineEntry {
                 event: event.event_name().to_string(),
@@ -1497,6 +1533,7 @@ mod tests {
         DefaultProviderFailureClassifier, Provider, ProviderFailureClassifier, ProviderOptions,
         ProviderReliability, RequestTimeout,
     };
+    use lash_llm_transport::LlmHttpBody;
     use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
     use serde_json::json;
 
@@ -1713,7 +1750,7 @@ mod tests {
     async fn scripted_transport_buffers_scheduler_releases_before_provider_parks() {
         let schedule = ScriptedTransportSchedule::new();
         let script = ProviderWireScript::from_json_str(OPENAI_COMPAT_TOOL_CALL).expect("script");
-        for (event_index, wire_event) in script.timeline.iter().enumerate() {
+        for (event_index, wire_event) in script.timeline().iter().enumerate() {
             let release =
                 schedule.release(0, event_index, wire_event.event_name(), wire_event.at());
             assert!(
@@ -1722,7 +1759,9 @@ mod tests {
             );
         }
         let transport = Arc::new(
-            ScriptedLlmHttpTransport::from_scripts([script]).with_event_schedule(schedule),
+            ScriptedLlmHttpTransport::from_scripts([script])
+                .expect("valid scripted provider")
+                .with_event_schedule(schedule),
         );
         let provider_transport: Arc<dyn lash_llm_transport::LlmHttpTransport> = transport.clone();
         let (events, sender) = event_collector();
@@ -1860,7 +1899,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{} failed to parse: {error}", canonical.path));
             assert_eq!(
                 script.plan().expect("compiled plan").event_indices(),
-                (0..script.timeline.len()).collect::<Vec<_>>(),
+                (0..script.timeline().len()).collect::<Vec<_>>(),
                 "{} plan must cover each timeline event exactly once",
                 canonical.path
             );
@@ -1871,7 +1910,7 @@ mod tests {
     fn cloned_provider_wire_script_recompiles_a_replaced_timeline() {
         let script = ProviderWireScript::from_json_str(OPENAI_COMPAT_TOOL_CALL).expect("script");
         let mut failure = script.clone();
-        failure.timeline = vec![ProviderWireEvent::TransportError {
+        *failure.timeline_mut() = vec![ProviderWireEvent::TransportError {
             at: 0,
             message: "retry me".to_string(),
             retryable: Some(true),
@@ -1881,6 +1920,95 @@ mod tests {
             failure.plan().expect("recompiled failure plan"),
             ScriptedResponsePlan::Failure { event_index: 0, .. }
         ));
+    }
+
+    #[test]
+    fn in_place_provider_wire_script_mutation_recompiles_before_execution() {
+        let mut script =
+            ProviderWireScript::from_json_str(OPENAI_COMPAT_TOOL_CALL).expect("script");
+        script.plan().expect("initial plan");
+
+        let timeline = script.timeline_mut();
+        timeline.clear();
+        timeline.push(ProviderWireEvent::TransportError {
+            at: 0,
+            message: "retry me".to_string(),
+            retryable: Some(true),
+        });
+
+        let error = execute_script(&script).expect_err("mutated plan should execute as failure");
+        assert_eq!(error.kind, ProviderFailureKind::Transport);
+        assert_eq!(error.message, "retry me");
+    }
+
+    #[test]
+    fn scripted_transport_from_scripts_validates_programmatic_scripts() {
+        let timeline = vec![
+            ProviderWireEvent::Chunk {
+                at: 0,
+                data: Some("premature".to_string()),
+                bytes: None,
+            },
+            ProviderWireEvent::ResponseStart {
+                at: 0,
+                status: 200,
+                headers: Vec::new(),
+            },
+            ProviderWireEvent::End { at: 0 },
+        ];
+        let json_error = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "chunk", "data": "premature" },
+            { "event": "response_start", "status": 200 },
+            { "event": "end" }
+        ])))
+        .expect_err("the JSON path should reject the illegal shape");
+        let script = ProviderWireScript::from_parts(
+            PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
+            "invalid-shape".to_string(),
+            "openai-compatible".to_string(),
+            ProviderWireEndpoint {
+                method: "POST".to_string(),
+                path: "/chat/completions".to_string(),
+            },
+            ProviderWireRequestMatch::default(),
+            timeline,
+        );
+
+        let scripts_error = ScriptedLlmHttpTransport::from_scripts([script])
+            .expect_err("from_scripts should reject the illegal shape");
+        assert_eq!(scripts_error.kind, ProviderFailureKind::Validation);
+        assert_eq!(scripts_error.message, json_error.message);
+    }
+
+    #[tokio::test]
+    async fn consecutive_body_events_are_streamed_as_individual_chunks() {
+        let script = ProviderWireScript::from_json_str(&wire_script_json(json!([
+            { "event": "response_start", "status": 200 },
+            { "event": "body", "data": "first" },
+            { "event": "body", "data": "second" },
+            { "event": "chunk", "data": "tail" },
+            { "event": "end" }
+        ])))
+        .expect("streaming body script");
+        let response = execute_script(&script).expect("streaming response");
+        let LlmHttpBody::Streamed(mut stream) = response.body else {
+            panic!("body events followed by a chunk must produce a stream");
+        };
+
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next_chunk().await.expect("stream chunk") {
+            chunks.push(chunk);
+        }
+
+        assert_eq!(
+            chunks,
+            vec![
+                Bytes::from("first"),
+                Bytes::from("second"),
+                Bytes::from("tail")
+            ]
+        );
+        assert_eq!(chunks.len(), 3);
     }
 
     fn scripted_provider(script: &str) -> OpenAiCompatibleProvider {

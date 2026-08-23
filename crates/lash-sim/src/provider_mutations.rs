@@ -475,7 +475,7 @@ async fn run_mutation_script(
         .and_then(Value::as_str)
         .unwrap_or("unspecified")
         .to_string();
-    let transport = Arc::new(ScriptedLlmHttpTransport::new(parsed));
+    let transport = Arc::new(ScriptedLlmHttpTransport::new(parsed)?);
     let result = match spec.request_kind {
         MutationRequestKind::OpenAiCompatible { stream } => {
             let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")

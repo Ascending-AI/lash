@@ -325,7 +325,7 @@ pub(super) fn runtime_completion_units(
         let script = runtime_script_for_text(provider_kind, text)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         return Ok(script
-            .timeline
+            .timeline()
             .iter()
             .enumerate()
             .map(|(index, wire_event)| {

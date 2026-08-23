@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn generated_google_partial_fixture_preserves_canonical_identity_and_reasoning() {
         let script = live_failure_script(GOOGLE_OAUTH, 2).expect("Google partial fixture");
-        let payload = sse_payload(&script.timeline[1]);
+        let payload = sse_payload(&script.timeline()[1]);
         assert_eq!(
             payload.pointer("/response/responseId"),
             Some(&json!("google-evidence-1"))
@@ -517,7 +517,7 @@ mod tests {
         let script = google_runtime_script_for_text_with_explicit_zero_reasoning("answer")
             .expect("Google explicit-zero variant");
         for timeline_index in [1, 2] {
-            let payload = sse_payload(&script.timeline[timeline_index]);
+            let payload = sse_payload(&script.timeline()[timeline_index]);
             assert_eq!(
                 payload.pointer("/response/usageMetadata/thoughtsTokenCount"),
                 Some(&json!(0))
@@ -531,7 +531,7 @@ mod tests {
         let payload = sse_payload(
             &ProviderWireScript::from_json_str(&script.to_string())
                 .expect("valid OpenAI fixture")
-                .timeline[4],
+                .timeline()[4],
         );
         assert!(payload.pointer("/response/responseId").is_none());
         assert!(payload.pointer("/response/modelVersion").is_none());

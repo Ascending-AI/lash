@@ -388,7 +388,7 @@ impl GeneratedRuntimeWorld {
 
         let turn_started_at = completion_event.at;
         let mut final_ready_at = turn_started_at.saturating_add(1);
-        for (event_index, wire_event) in script.timeline.iter().enumerate() {
+        for (event_index, wire_event) in script.timeline().iter().enumerate() {
             let release_at = turn_started_at.saturating_add(wire_event.at());
             final_ready_at = final_ready_at.max(release_at.saturating_add(1));
             scheduler.schedule(provider_release_boundary(
@@ -813,7 +813,7 @@ impl GeneratedRuntimeWorld {
         // wire parsing.
         let suspend_scripts = suspend_roundtrip_scripts(&tool_name)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(suspend_scripts));
+        let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(suspend_scripts)?);
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
