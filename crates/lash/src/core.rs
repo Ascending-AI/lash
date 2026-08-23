@@ -1324,6 +1324,7 @@ impl LashCoreBuilder {
 
         // Build the inline config eagerly so a missing factory fails at build.
         let live_replay_clock = Arc::clone(&core.clock);
+        let default_trigger_store_clock = Arc::clone(&core.clock);
         let mut env_builder = RuntimeEnvironment::builder(
             core.durability.commit_budget,
             core.durability.queued_work_batching.clone(),
@@ -1342,6 +1343,10 @@ impl LashCoreBuilder {
         }
         if let Some(trigger_store) = self.trigger_store.as_ref() {
             env_builder = env_builder.with_trigger_store(Arc::clone(trigger_store));
+        } else {
+            env_builder = env_builder.with_trigger_store(Arc::new(
+                facade_support::InMemoryTriggerStore::with_clock(default_trigger_store_clock),
+            ));
         }
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(

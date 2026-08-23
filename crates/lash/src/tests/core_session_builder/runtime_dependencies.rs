@@ -173,6 +173,51 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
 }
 
 #[tokio::test]
+async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_configs(
+) -> Result<()> {
+    const NOW_MS: u64 = 4_200_000;
+    let clock: Arc<dyn lash_core::Clock> =
+        Arc::new(lash_core::testing::TestClock::new(NOW_MS));
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .clock(Arc::clone(&clock))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::with_clock(clock.clone()),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let inline_trigger_store = {
+        let config = core
+            .work_driver
+            .process_worker_config()
+            .expect("inline worker config must be assembled at build");
+        Arc::clone(&config.trigger_store)
+    };
+    let public_trigger_store = Arc::clone(&core.durable_process_worker_config()?.trigger_store);
+
+    assert!(Arc::ptr_eq(&inline_trigger_store, &public_trigger_store));
+    for (path, trigger_store) in [
+        ("inline-worker", inline_trigger_store),
+        ("public-worker-config", public_trigger_store),
+    ] {
+        let receipt = trigger_store
+            .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
+                "fig1882.clock",
+                path,
+                serde_json::Value::Null,
+                format!("fig1882:{path}"),
+            ))
+            .await
+            .expect("default trigger store must ingest the clock probe");
+        assert_eq!(
+            receipt.occurrence.occurred_at_ms, NOW_MS,
+            "{path} trigger store must observe the injected core clock"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn builder_requires_explicit_process_env_store_at_build() {
     let result = peer_coherence_builder()
         .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
