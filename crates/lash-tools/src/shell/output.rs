@@ -74,7 +74,7 @@ impl Drop for ReaderDeathGuard {
 /// child without holding the process map lock.
 #[derive(Clone)]
 pub(crate) struct ProcessState {
-    pub(crate) buffer: Arc<StdMutex<Vec<u8>>>,
+    pub(crate) buffer: Arc<StdMutex<ShellOutputBuffer>>,
     pub(crate) exit_code: Arc<StdMutex<Option<i32>>>,
     pub(crate) exit_notify: Arc<Notify>,
     pub(crate) output_notify: Arc<Notify>,
@@ -90,6 +90,94 @@ pub(crate) struct ProcessState {
 pub(crate) struct ShellOutputSpill {
     pub(crate) path: PathBuf,
     pub(crate) file: File,
+}
+
+#[derive(Default)]
+pub(crate) struct ShellOutputBuffer {
+    bytes: Vec<u8>,
+    start_offset: usize,
+    spill: Option<ShellOutputSpill>,
+    read_cursor: usize,
+}
+
+struct OutputSnapshot {
+    rendered: String,
+    full_output_path: Option<PathBuf>,
+}
+
+impl ShellOutputBuffer {
+    pub(crate) fn append(&mut self, id: &str, chunk: &[u8]) {
+        if self.bytes.len() + chunk.len() > SPILL_OUTPUT_THRESHOLD {
+            let _ = activate_spill(id, &self.bytes, &mut self.spill);
+        }
+        let mut clear_spill = false;
+        if let Some(spill) = self.spill.as_mut()
+            && spill.file.write_all(chunk).is_err()
+        {
+            clear_spill = true;
+        }
+        if clear_spill {
+            self.spill = None;
+        }
+
+        self.bytes.extend_from_slice(chunk);
+        if self.bytes.len() > MAX_OUTPUT {
+            let to_drop = self.bytes.len() - MAX_OUTPUT;
+            self.bytes.drain(..to_drop);
+            self.start_offset += to_drop;
+        }
+    }
+
+    fn render_all(&mut self) -> OutputSnapshot {
+        let mut rendered = String::from_utf8_lossy(&self.bytes).to_string();
+        if self.start_offset != 0 {
+            append_truncation_marker(&mut rendered);
+        }
+        if let Some(spill) = self.spill.as_mut() {
+            let _ = spill.file.flush();
+        }
+        OutputSnapshot {
+            rendered,
+            full_output_path: self.spill.as_ref().map(|spill| spill.path.clone()),
+        }
+    }
+
+    fn take_since(&mut self) -> OutputSnapshot {
+        let end_offset = self.start_offset + self.bytes.len();
+        let had_gap = self.read_cursor < self.start_offset;
+        let start = self.read_cursor.max(self.start_offset);
+        let relative_start = start.saturating_sub(self.start_offset);
+        let mut rendered =
+            String::from_utf8_lossy(self.bytes.get(relative_start..).unwrap_or_default())
+                .to_string();
+        self.read_cursor = end_offset;
+        if !rendered.is_empty() && (had_gap || self.start_offset != 0) {
+            append_truncation_marker(&mut rendered);
+        }
+        OutputSnapshot {
+            rendered,
+            full_output_path: self.spill.as_ref().map(|spill| spill.path.clone()),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    fn activate_spill(&mut self, id: &str) -> Option<PathBuf> {
+        activate_spill(id, &self.bytes, &mut self.spill)
+    }
+
+    pub(crate) fn take_spill(&mut self) -> Option<ShellOutputSpill> {
+        self.spill.take()
+    }
+}
+
+fn append_truncation_marker(rendered: &mut String) {
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered.push_str("[truncated]");
 }
 
 pub(crate) enum PollOutcome {
@@ -181,31 +269,39 @@ pub(crate) async fn wait_for_child_exit(state: &ProcessState, timeout: Duration)
 
 pub(crate) fn render_buffer_output(
     id: &str,
-    buffer: &Arc<StdMutex<Vec<u8>>>,
-    buffer_start: &Arc<StdMutex<usize>>,
-    truncated: &AtomicBool,
-    spill: &Arc<StdMutex<Option<ShellOutputSpill>>>,
+    buffer: &Arc<StdMutex<ShellOutputBuffer>>,
     max_output_tokens: Option<usize>,
 ) -> (String, Option<usize>, Option<PathBuf>) {
-    let buf = buffer.lock_recover();
-    let start_offset = *buffer_start.lock_recover();
-    let mut rendered = String::from_utf8_lossy(&buf).to_string();
-    if truncated.load(Ordering::SeqCst) || start_offset > 0 {
-        if !rendered.ends_with('\n') {
-            rendered.push('\n');
-        }
-        rendered.push_str("[truncated]");
-    }
-    let rendered = clean_terminal_output(&rendered);
+    let snapshot = buffer.lock_recover().render_all();
+    finalize_output(id, buffer, snapshot, max_output_tokens, true)
+}
+
+pub(crate) fn take_buffer_output(
+    id: &str,
+    buffer: &Arc<StdMutex<ShellOutputBuffer>>,
+    max_output_tokens: Option<usize>,
+) -> (String, Option<usize>, Option<PathBuf>) {
+    let snapshot = buffer.lock_recover().take_since();
+    finalize_output(id, buffer, snapshot, max_output_tokens, false)
+}
+
+fn finalize_output(
+    id: &str,
+    buffer: &Arc<StdMutex<ShellOutputBuffer>>,
+    snapshot: OutputSnapshot,
+    max_output_tokens: Option<usize>,
+    flush_spill: bool,
+) -> (String, Option<usize>, Option<PathBuf>) {
+    let rendered = clean_terminal_output(&snapshot.rendered);
     let (rendered, original_token_count, token_truncated) =
         truncate_exec_output(rendered, max_output_tokens);
-    let mut spill_guard = spill.lock_recover();
-    let mut full_output_path = spill_guard.as_ref().map(|spill| spill.path.clone());
+    let mut full_output_path = snapshot.full_output_path;
     if token_truncated && full_output_path.is_none() {
-        full_output_path = activate_spill(id, &buf, &mut spill_guard);
-    }
-    if let Some(spill) = spill_guard.as_mut() {
-        let _ = spill.file.flush();
+        let mut buffer = buffer.lock_recover();
+        full_output_path = buffer.activate_spill(id);
+        if flush_spill && let Some(spill) = buffer.spill.as_mut() {
+            let _ = spill.file.flush();
+        }
     }
     (rendered, original_token_count, full_output_path)
 }
@@ -231,10 +327,7 @@ pub(crate) async fn wait_for_buffer_settle(state: &ProcessState, quiet_period: D
 pub(crate) fn spawn_reader_thread(
     id: String,
     mut reader: Box<dyn Read + Send>,
-    buffer: Arc<StdMutex<Vec<u8>>>,
-    buffer_start: Arc<StdMutex<usize>>,
-    truncated: Arc<AtomicBool>,
-    spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
+    buffer: Arc<StdMutex<ShellOutputBuffer>>,
     signals: ReaderSignals,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
@@ -244,30 +337,7 @@ pub(crate) fn spawn_reader_thread(
             match reader.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(n) => {
-                    {
-                        let mut buf = buffer.lock_recover();
-                        let mut spill = spill.lock_recover();
-                        if buf.len() + n > SPILL_OUTPUT_THRESHOLD {
-                            let _ = activate_spill(&id, &buf, &mut spill);
-                        }
-                        let mut clear_spill = false;
-                        if let Some(spill_file) = spill.as_mut()
-                            && spill_file.file.write_all(&chunk[..n]).is_err()
-                        {
-                            clear_spill = true;
-                        }
-                        if clear_spill {
-                            *spill = None;
-                        }
-
-                        buf.extend_from_slice(&chunk[..n]);
-                        if buf.len() > MAX_OUTPUT {
-                            let to_drop = buf.len() - MAX_OUTPUT;
-                            buf.drain(..to_drop);
-                            *buffer_start.lock_recover() += to_drop;
-                            truncated.store(true, Ordering::SeqCst);
-                        }
-                    }
+                    buffer.lock_recover().append(&id, &chunk[..n]);
                     signals.output_notify.notify_waiters();
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -282,10 +352,7 @@ pub(crate) fn spawn_reader_thread(
 pub(crate) fn spawn_async_reader<R>(
     id: String,
     mut reader: R,
-    buffer: Arc<StdMutex<Vec<u8>>>,
-    buffer_start: Arc<StdMutex<usize>>,
-    truncated: Arc<AtomicBool>,
-    spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
+    buffer: Arc<StdMutex<ShellOutputBuffer>>,
     signals: ReaderSignals,
 ) -> tokio::task::JoinHandle<()>
 where
@@ -298,30 +365,7 @@ where
             match reader.read(&mut chunk).await {
                 Ok(0) => break,
                 Ok(n) => {
-                    {
-                        let mut buf = buffer.lock_recover();
-                        let mut spill = spill.lock_recover();
-                        if buf.len() + n > SPILL_OUTPUT_THRESHOLD {
-                            let _ = activate_spill(&id, &buf, &mut spill);
-                        }
-                        let mut clear_spill = false;
-                        if let Some(spill_file) = spill.as_mut()
-                            && spill_file.file.write_all(&chunk[..n]).is_err()
-                        {
-                            clear_spill = true;
-                        }
-                        if clear_spill {
-                            *spill = None;
-                        }
-
-                        buf.extend_from_slice(&chunk[..n]);
-                        if buf.len() > MAX_OUTPUT {
-                            let to_drop = buf.len() - MAX_OUTPUT;
-                            buf.drain(..to_drop);
-                            *buffer_start.lock_recover() += to_drop;
-                            truncated.store(true, Ordering::SeqCst);
-                        }
-                    }
+                    buffer.lock_recover().append(&id, &chunk[..n]);
                     signals.output_notify.notify_waiters();
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -613,10 +657,7 @@ mod reader_death_tests {
         let handle = spawn_reader_thread(
             "reader-death".to_string(),
             Box::new(PanickingReader),
-            Arc::new(StdMutex::new(Vec::new())),
-            Arc::new(StdMutex::new(0)),
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(StdMutex::new(None)),
+            Arc::new(StdMutex::new(ShellOutputBuffer::default())),
             ReaderSignals::new(Arc::new(Notify::new()), Arc::clone(&reader_died)),
         );
         assert!(handle.join().is_err());

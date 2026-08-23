@@ -27,11 +27,10 @@ use tokio_util::sync::CancellationToken;
 use lash_core::{ToolFailure, ToolFailureClass};
 
 use crate::shell::output::{
-    OUTPUT_QUIET_PERIOD_MS, PollOutcome, ProcessState, ReaderSignals, ShellOutputSpill,
-    activate_spill, clean_terminal_output, exit_status_code, kill_child,
-    kill_process_group_and_reap, render_buffer_output, shell_reader_died_failure,
-    spawn_async_reader, spawn_reader_thread, spawn_wait_thread, terminate_pipe_process,
-    truncate_exec_output, wait_for_buffer_settle, wait_for_child_exit,
+    OUTPUT_QUIET_PERIOD_MS, PollOutcome, ProcessState, ReaderSignals, ShellOutputBuffer,
+    exit_status_code, kill_child, kill_process_group_and_reap, render_buffer_output,
+    shell_reader_died_failure, spawn_async_reader, spawn_reader_thread, spawn_wait_thread,
+    take_buffer_output, terminate_pipe_process, wait_for_buffer_settle, wait_for_child_exit,
 };
 
 pub(crate) const DEFAULT_EXEC_COMMAND_TIMEOUT_MS: u64 = 10 * 60 * 1000;
@@ -63,15 +62,11 @@ fn shell_execution_failure(code: &'static str, message: impl Into<String>) -> Bo
 struct ShellProcess {
     _master: Box<dyn MasterPty + Send>,
     writer: Arc<StdMutex<Option<Box<dyn Write + Send>>>>,
-    buffer: Arc<StdMutex<Vec<u8>>>,
-    buffer_start: Arc<StdMutex<usize>>,
-    truncated: Arc<AtomicBool>,
-    read_cursor: Arc<StdMutex<usize>>,
+    buffer: Arc<StdMutex<ShellOutputBuffer>>,
     exit_code: Arc<StdMutex<Option<i32>>>,
     exit_notify: Arc<Notify>,
     output_notify: Arc<Notify>,
     reader_died: Arc<AtomicBool>,
-    spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
     killer: Arc<StdMutex<Option<Box<dyn ChildKiller + Send + Sync>>>>,
     pid: Option<u32>,
 }
@@ -98,10 +93,7 @@ struct PipeProcessState {
     child_pid: Option<u32>,
     wait_handle: tokio::task::JoinHandle<std::io::Result<ExitStatus>>,
     reader_handles: Vec<tokio::task::JoinHandle<()>>,
-    buffer: Arc<StdMutex<Vec<u8>>>,
-    buffer_start: Arc<StdMutex<usize>>,
-    truncated: Arc<AtomicBool>,
-    spill: Arc<StdMutex<Option<ShellOutputSpill>>>,
+    buffer: Arc<StdMutex<ShellOutputBuffer>>,
     reader_died: Arc<AtomicBool>,
 }
 
@@ -372,24 +364,17 @@ impl ShellRuntime {
         })?;
         drop(pair.slave);
 
-        let buffer = Arc::new(StdMutex::new(Vec::new()));
-        let buffer_start = Arc::new(StdMutex::new(0usize));
-        let truncated = Arc::new(AtomicBool::new(false));
-        let read_cursor = Arc::new(StdMutex::new(0usize));
+        let buffer = Arc::new(StdMutex::new(ShellOutputBuffer::default()));
         let exit_code = Arc::new(StdMutex::new(None));
         let exit_notify = Arc::new(Notify::new());
         let output_notify = Arc::new(Notify::new());
         let reader_died = Arc::new(AtomicBool::new(false));
-        let spill = Arc::new(StdMutex::new(None));
         let killer = Arc::new(StdMutex::new(Some(killer)));
 
         let _reader = spawn_reader_thread(
             id.clone(),
             reader,
             Arc::clone(&buffer),
-            Arc::clone(&buffer_start),
-            Arc::clone(&truncated),
-            Arc::clone(&spill),
             ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
         );
         spawn_wait_thread(
@@ -403,14 +388,10 @@ impl ShellRuntime {
             _master: pair.master,
             writer: Arc::new(StdMutex::new(Some(writer))),
             buffer,
-            buffer_start,
-            truncated,
-            read_cursor,
             exit_code,
             exit_notify,
             output_notify,
             reader_died,
-            spill,
             killer,
             pid,
         };
@@ -611,47 +592,14 @@ impl ShellRuntime {
         id: &str,
         max_output_tokens: Option<usize>,
     ) -> ShellResult<(String, Option<usize>, Option<PathBuf>)> {
-        let (buffer, buffer_start, truncated, read_cursor, spill) = {
+        let buffer = {
             let procs = self.table.processes.lock_recover();
             let proc = procs.get(id).ok_or_else(|| {
                 shell_invalid_request("unknown_shell_process", format!("Unknown session id {id}"))
             })?;
-            (
-                Arc::clone(&proc.buffer),
-                Arc::clone(&proc.buffer_start),
-                Arc::clone(&proc.truncated),
-                Arc::clone(&proc.read_cursor),
-                Arc::clone(&proc.spill),
-            )
+            Arc::clone(&proc.buffer)
         };
-
-        let buf = buffer.lock_recover();
-        let start_offset = *buffer_start.lock_recover();
-        let end_offset = start_offset + buf.len();
-        let mut cursor = read_cursor.lock_recover();
-        let had_gap = *cursor < start_offset;
-        let start = (*cursor).max(start_offset);
-        let relative_start = start.saturating_sub(start_offset);
-        let mut rendered =
-            String::from_utf8_lossy(buf.get(relative_start..).unwrap_or_default()).to_string();
-        *cursor = end_offset;
-        if !rendered.is_empty()
-            && (had_gap || truncated.load(Ordering::SeqCst) && *cursor == end_offset)
-        {
-            if !rendered.ends_with('\n') {
-                rendered.push('\n');
-            }
-            rendered.push_str("[truncated]");
-        }
-        let rendered = clean_terminal_output(&rendered);
-        let (rendered, original_token_count, token_truncated) =
-            truncate_exec_output(rendered, max_output_tokens);
-        let mut spill_guard = spill.lock_recover();
-        let mut full_output_path = spill_guard.as_ref().map(|spill| spill.path.clone());
-        if token_truncated && full_output_path.is_none() {
-            full_output_path = activate_spill(id, &buf, &mut spill_guard);
-        }
-        Ok((rendered, original_token_count, full_output_path))
+        Ok(take_buffer_output(id, &buffer, max_output_tokens))
     }
 
     async fn finish_tracked_process(
@@ -749,7 +697,7 @@ impl ShellRuntime {
 
     pub(crate) fn remove_process(&self, id: &str) {
         if let Some(proc) = self.table.processes.lock_recover().remove(id)
-            && let Some(mut spill) = proc.spill.lock_recover().take()
+            && let Some(mut spill) = proc.buffer.lock_recover().take_spill()
         {
             // Flush but deliberately do NOT delete the spill here: this hook
             // fires as the same tool call hands `full_output_path` back to the
@@ -860,10 +808,7 @@ impl ShellRuntime {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        let buffer = Arc::new(StdMutex::new(Vec::new()));
-        let buffer_start = Arc::new(StdMutex::new(0usize));
-        let truncated = Arc::new(AtomicBool::new(false));
-        let spill = Arc::new(StdMutex::new(None));
+        let buffer = Arc::new(StdMutex::new(ShellOutputBuffer::default()));
         let output_notify = Arc::new(Notify::new());
         let reader_died = Arc::new(AtomicBool::new(false));
         let mut reader_handles = Vec::new();
@@ -873,9 +818,6 @@ impl ShellRuntime {
                 id.to_string(),
                 stdout,
                 Arc::clone(&buffer),
-                Arc::clone(&buffer_start),
-                Arc::clone(&truncated),
-                Arc::clone(&spill),
                 ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
             ));
         }
@@ -884,9 +826,6 @@ impl ShellRuntime {
                 id.to_string(),
                 stderr,
                 Arc::clone(&buffer),
-                Arc::clone(&buffer_start),
-                Arc::clone(&truncated),
-                Arc::clone(&spill),
                 ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
             ));
         }
@@ -906,9 +845,6 @@ impl ShellRuntime {
             wait_handle: tokio::spawn(async move { child.wait().await }),
             reader_handles,
             buffer,
-            buffer_start,
-            truncated,
-            spill,
             reader_died,
         };
         #[cfg(test)]
@@ -1006,14 +942,8 @@ async fn finish_pipe_process(
         return Ok(PollOutcome::Cancelled);
     }
 
-    let (output, original_token_count, full_output_path) = render_buffer_output(
-        id,
-        &process.buffer,
-        &process.buffer_start,
-        Arc::as_ref(&process.truncated),
-        &process.spill,
-        max_output_tokens,
-    );
+    let (output, original_token_count, full_output_path) =
+        render_buffer_output(id, &process.buffer, max_output_tokens);
     Ok(match finish {
         PollFinish::Exited(exit_code) => PollOutcome::Exited {
             output,

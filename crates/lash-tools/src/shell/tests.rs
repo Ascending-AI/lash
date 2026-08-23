@@ -1,12 +1,21 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell::output::{MAX_OUTPUT, SPILL_OUTPUT_THRESHOLD, clean_terminal_output};
+    use crate::shell::output::{
+        MAX_OUTPUT, ReaderSignals, SPILL_OUTPUT_THRESHOLD, ShellOutputBuffer,
+        clean_terminal_output, render_buffer_output, spawn_async_reader, take_buffer_output,
+    };
     use lash_core::ProcessRegistry as _;
+    use lash_sansio::sync::MutexExt;
     use serde_json::json;
     use std::fs;
-    use std::sync::Arc;
+    use std::sync::{
+        Arc, Mutex as StdMutex,
+        atomic::{AtomicBool, Ordering},
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::io::AsyncWriteExt;
+    use tokio::sync::{Barrier, Notify};
 
     fn test_shell() -> StaticToolProvider<StandardShell> {
         shell_provider(StandardShell::new().with_cwd("/"))
@@ -653,6 +662,79 @@ mod tests {
         let output = result_value["output"].as_str().unwrap();
         assert!(output.contains("stdout-line"), "{output}");
         assert!(output.contains("stderr-line"), "{output}");
+    }
+
+    #[test]
+    fn shell_output_marks_truncation_when_start_offset_is_nonzero() {
+        let buffer = Arc::new(StdMutex::new(ShellOutputBuffer::default()));
+        buffer
+            .lock_recover()
+            .append("nonzero-start", &vec![b'x'; MAX_OUTPUT + 1]);
+
+        let (output, _, full_output_path) =
+            render_buffer_output("nonzero-start", &buffer, None);
+
+        assert!(output.ends_with("\n[truncated]"));
+        assert!(full_output_path.is_some());
+    }
+
+    #[tokio::test]
+    async fn shell_output_drains_stdout_stderr_during_incremental_reads() {
+        let buffer = Arc::new(StdMutex::new(ShellOutputBuffer::default()));
+        let output_notify = Arc::new(Notify::new());
+        let reader_died = Arc::new(AtomicBool::new(false));
+        let (mut stdout_writer, stdout_reader) = tokio::io::duplex(64);
+        let (mut stderr_writer, stderr_reader) = tokio::io::duplex(64);
+        let stdout_reader = spawn_async_reader(
+            "concurrent-drain".to_string(),
+            stdout_reader,
+            Arc::clone(&buffer),
+            ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
+        );
+        let stderr_reader = spawn_async_reader(
+            "concurrent-drain".to_string(),
+            stderr_reader,
+            Arc::clone(&buffer),
+            ReaderSignals::new(Arc::clone(&output_notify), Arc::clone(&reader_died)),
+        );
+        let first_chunks_drained = Arc::new(Barrier::new(3));
+        let stdout_writer_task = {
+            let first_chunks_drained = Arc::clone(&first_chunks_drained);
+            tokio::spawn(async move {
+                stdout_writer.write_all(b"o").await.unwrap();
+                first_chunks_drained.wait().await;
+                stdout_writer.write_all(&vec![b'o'; 4095]).await.unwrap();
+                stdout_writer.shutdown().await.unwrap();
+            })
+        };
+        let stderr_writer_task = {
+            let first_chunks_drained = Arc::clone(&first_chunks_drained);
+            tokio::spawn(async move {
+                stderr_writer.write_all(b"e").await.unwrap();
+                first_chunks_drained.wait().await;
+                stderr_writer.write_all(&vec![b'e'; 4095]).await.unwrap();
+                stderr_writer.shutdown().await.unwrap();
+            })
+        };
+
+        let mut output = String::new();
+        while !output.contains('o') || !output.contains('e') {
+            output_notify.notified().await;
+            output.push_str(&take_buffer_output("concurrent-drain", &buffer, None).0);
+        }
+        assert!(!stdout_writer_task.is_finished());
+        assert!(!stderr_writer_task.is_finished());
+        first_chunks_drained.wait().await;
+
+        stdout_writer_task.await.unwrap();
+        stderr_writer_task.await.unwrap();
+        stdout_reader.await.unwrap();
+        stderr_reader.await.unwrap();
+        output.push_str(&take_buffer_output("concurrent-drain", &buffer, None).0);
+
+        assert!(!reader_died.load(Ordering::SeqCst));
+        assert_eq!(output.bytes().filter(|byte| *byte == b'o').count(), 4096);
+        assert_eq!(output.bytes().filter(|byte| *byte == b'e').count(), 4096);
     }
 
     #[tokio::test]
