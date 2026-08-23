@@ -481,6 +481,17 @@ fn materially_different_shared_phases_use_scenario_budgets() {
 }
 
 #[test]
+fn fig_1910_catalog_variants_are_opt_in_but_guarded_witnesses() {
+    for scenario in [
+        RuntimePerfScenario::RlmToolCatalogCold,
+        RuntimePerfScenario::RlmToolCatalogWarm,
+    ] {
+        assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
+        assert!(scenario.has_guard_budget());
+    }
+}
+
+#[test]
 fn runtime_perf_direct_counterparts_link_to_correctness_coverage() {
     for scenario in [
         RuntimePerfScenario::Standard,

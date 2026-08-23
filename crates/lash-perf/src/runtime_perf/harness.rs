@@ -28,14 +28,16 @@ use super::openai_compat::OpenAiCompatBenchServer;
 use super::providers::{
     BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE, BenchmarkEchoTool, BenchmarkLargeToolCatalog,
     BenchmarkObliqueTools, BenchmarkProviderControl, BenchmarkSettlementControl,
-    BenchmarkWorkbenchMailTool, benchmark_provider, benchmark_provider_with_control,
-    benchmark_stream_profile,
+    BenchmarkToolCatalogObserver, BenchmarkWorkbenchMailTool, benchmark_provider,
+    benchmark_provider_with_control, benchmark_stream_profile,
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
 
 const HISTORY_EXCHANGES: usize = 18;
 const RUNTIME_PERF_MAX_TURNS: usize = 1;
+
+mod observation;
 
 fn runtime_perf_owner() -> lash::persistence::LeaseOwnerIdentity {
     static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -148,6 +150,7 @@ pub(crate) struct BenchmarkRuntime {
     store_metrics: Arc<RuntimePerfStoreMetrics>,
     provider_control: Option<Arc<BenchmarkProviderControl>>,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
+    tool_catalog_observer: Option<Arc<BenchmarkToolCatalogObserver>>,
     _openai_compat_server: Option<OpenAiCompatBenchServer>,
 }
 
@@ -751,6 +754,11 @@ pub(crate) async fn build_runtime_with_store(
     let settlement_control = scenario
         .settlement_children()
         .map(|_| Arc::new(BenchmarkSettlementControl::new()));
+    let tool_catalog_observer = matches!(
+        scenario,
+        RuntimePerfScenario::RlmToolCatalogCold | RuntimePerfScenario::RlmToolCatalogWarm
+    )
+    .then(|| Arc::new(BenchmarkToolCatalogObserver::default()));
     let mut plugin_stack = standard_tool_stack(StandardToolStackOptions {
         standard_context_approach: standard_context_approach.clone(),
         tavily_api_key: None,
@@ -795,11 +803,24 @@ pub(crate) async fn build_runtime_with_store(
     }
     if matches!(
         scenario,
-        RuntimePerfScenario::RlmLargeToolCatalog | RuntimePerfScenario::ToolDiscoverySearch
+        RuntimePerfScenario::RlmLargeToolCatalog
+            | RuntimePerfScenario::RlmToolCatalogCold
+            | RuntimePerfScenario::RlmToolCatalogWarm
+            | RuntimePerfScenario::ToolDiscoverySearch
     ) {
         plugin_stack.push(Arc::new(StaticPluginFactory::new(
             "runtime_perf_large_tool_catalog",
             PluginSpec::new().with_tool_provider(Arc::new(BenchmarkLargeToolCatalog::default())),
+        )));
+    }
+    if let Some(observer) = tool_catalog_observer.as_ref() {
+        let composition_observer = Arc::clone(observer);
+        plugin_stack.push(Arc::new(StaticPluginFactory::new(
+            "runtime_perf_tool_catalog_observer",
+            PluginSpec::new().with_tool_catalog_contributor(Arc::new(move |context| {
+                composition_observer.observe_session_catalog_composition(&context.session_id)?;
+                Ok(Default::default())
+            })),
         )));
     }
     if matches!(
@@ -884,6 +905,7 @@ pub(crate) async fn build_runtime_with_store(
         store: Some(store),
         provider_control,
         settlement_control,
+        tool_catalog_observer,
         _openai_compat_server: openai_compat_server,
     })
 }
@@ -1217,6 +1239,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         store: None,
         provider_control: None,
         settlement_control: None,
+        tool_catalog_observer: None,
         _openai_compat_server: None,
     })
 }
@@ -1326,6 +1349,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
         store: None,
         provider_control: None,
         settlement_control: None,
+        tool_catalog_observer: None,
         _openai_compat_server: None,
     })
 }

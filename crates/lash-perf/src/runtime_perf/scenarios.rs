@@ -66,6 +66,8 @@ pub(crate) enum RuntimePerfScenario {
     RlmLargePrint,
     RlmStreamedPairedLashlang,
     RlmLargeToolCatalog,
+    RlmToolCatalogCold,
+    RlmToolCatalogWarm,
     RlmObliqueStackMix,
     OpenAiCompatStream,
     StandardShellOutput,
@@ -135,7 +137,7 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 55] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 57] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -249,6 +251,20 @@ impl RuntimePerfScenario {
             Rlm,
             RlmProtocolScenario,
             "Measures RLM protocol prompt pressure from a large tool catalog."
+        ),
+        runtime_perf_metadata!(
+            RlmToolCatalogCold,
+            "rlm_tool_catalog_cold",
+            Rlm,
+            RlmProtocolScenario,
+            "Measures cold tool-catalog reconstruction inside the measured RLM turn."
+        ),
+        runtime_perf_metadata!(
+            RlmToolCatalogWarm,
+            "rlm_tool_catalog_warm",
+            Rlm,
+            RlmProtocolScenario,
+            "Measures the warm RLM turn after the tool catalog has been reconstructed."
         ),
         runtime_perf_metadata!(
             RlmObliqueStackMix,
@@ -535,7 +551,7 @@ impl RuntimePerfScenario {
             "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search."
         ),
     ];
-    pub(crate) const KNOWN: [Self; 55] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 57] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; 38] = runtime_perf_default_scenarios();
@@ -667,7 +683,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 55] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 57] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -724,6 +740,8 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 55] {
         RuntimePerfScenario::METADATA[52].scenario,
         RuntimePerfScenario::METADATA[53].scenario,
         RuntimePerfScenario::METADATA[54].scenario,
+        RuntimePerfScenario::METADATA[55].scenario,
+        RuntimePerfScenario::METADATA[56].scenario,
     ]
 }
 
@@ -744,8 +762,6 @@ const fn runtime_perf_default_scenarios() -> [RuntimePerfScenario; 38] {
         RuntimePerfScenario::METADATA[12].scenario,
         RuntimePerfScenario::METADATA[13].scenario,
         RuntimePerfScenario::METADATA[14].scenario,
-        RuntimePerfScenario::METADATA[15].scenario,
-        RuntimePerfScenario::METADATA[16].scenario,
         RuntimePerfScenario::METADATA[17].scenario,
         RuntimePerfScenario::METADATA[18].scenario,
         RuntimePerfScenario::METADATA[19].scenario,
@@ -767,5 +783,7 @@ const fn runtime_perf_default_scenarios() -> [RuntimePerfScenario; 38] {
         RuntimePerfScenario::METADATA[35].scenario,
         RuntimePerfScenario::METADATA[36].scenario,
         RuntimePerfScenario::METADATA[37].scenario,
+        RuntimePerfScenario::METADATA[38].scenario,
+        RuntimePerfScenario::METADATA[39].scenario,
     ]
 }
