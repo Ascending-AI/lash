@@ -8,6 +8,9 @@ pub struct BasicMetricSummary {
     pub median: f64,
     pub max: f64,
     pub mean: f64,
+    pub p50: f64,
+    pub p95: f64,
+    pub p99: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,11 +38,17 @@ pub fn basic_summary(mut values: Vec<f64>) -> BasicMetricSummary {
     } else {
         values.iter().sum::<f64>() / values.len() as f64
     };
+    let p50 = percentile_sorted(&values, 0.50);
+    let p95 = percentile_sorted(&values, 0.95);
+    let p99 = percentile_sorted(&values, 0.99);
     BasicMetricSummary {
         min: round3(min),
         median: round3(median),
         max: round3(max),
         mean: round3(mean),
+        p50: round3(p50),
+        p95: round3(p95),
+        p99: round3(p99),
     }
 }
 
@@ -77,5 +86,43 @@ pub fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
     } else {
         let weight = rank - lower as f64;
         values[lower] * (1.0 - weight) + values[upper] * weight
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percentiles_use_interpolation_for_odd_samples() {
+        let summary = basic_summary(vec![3.0, 1.0, 2.0]);
+
+        assert_eq!(summary.median, 2.0);
+        assert_eq!(summary.p50, 2.0);
+        assert_eq!(summary.p95, 2.9);
+        assert_eq!(summary.p99, 2.98);
+    }
+
+    #[test]
+    fn percentiles_use_interpolation_for_even_samples() {
+        let summary = basic_summary(vec![4.0, 1.0, 3.0, 2.0]);
+
+        assert_eq!(summary.median, 2.5);
+        assert_eq!(summary.p50, 2.5);
+        assert_eq!(summary.p95, 3.85);
+        assert_eq!(summary.p99, 3.97);
+    }
+
+    #[test]
+    fn percentiles_handle_empty_and_single_sample_inputs() {
+        let empty = basic_summary(Vec::new());
+        assert_eq!(empty.p50, 0.0);
+        assert_eq!(empty.p95, 0.0);
+        assert_eq!(empty.p99, 0.0);
+
+        let single = basic_summary(vec![7.25]);
+        assert_eq!(single.p50, 7.25);
+        assert_eq!(single.p95, 7.25);
+        assert_eq!(single.p99, 7.25);
     }
 }

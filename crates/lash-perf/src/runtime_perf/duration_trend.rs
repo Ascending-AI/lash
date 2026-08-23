@@ -34,12 +34,10 @@
 //! level-shift marker so the signal survives its own baseline is a possible
 //! follow-up, deliberately not built here.
 //!
-//! **Only the quick-profile main-push smoke records history.** That is the one
-//! perf invocation on every commit to `main` (`.github/workflows/ci.yml`).
-//! `perf.yml` is dispatch-only and `release.yml` runs at release time, so
-//! neither contributes observations today; wiring the full profile is a
-//! follow-up. Records carry their size preset and series are keyed by it, so a
-//! future full-profile history cannot contaminate the quick one.
+//! The quick-profile main-push smoke supplies its cache-backed history path.
+//! Full and release profiles write a sibling ledger next to their uploaded
+//! report. Records carry their size preset and series are keyed by it, so full
+//! observations cannot contaminate the quick one.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -128,7 +126,8 @@ pub(crate) const RETAINED_RUNS_PER_SERIES: usize = 50;
 /// entitled to destroy them.
 pub(crate) const HISTORY_RECORD_VERSION: u32 = 1;
 
-/// One durable observation: one scenario's median wall clock from one perf run.
+/// One durable observation: one scenario's median and p95 wall clock from one
+/// perf run.
 ///
 /// `total_ms` is the scenario summary's median `total_ms` — the same statistic
 /// the advisory duration guard reads — so the trend and the advisory line are
@@ -148,6 +147,10 @@ pub(crate) struct DurationHistoryRecord {
     pub(crate) run_id: String,
     pub(crate) recorded_at: String,
     pub(crate) total_ms: f64,
+    /// The same run's p95 wall clock. `None` means a legacy record predating
+    /// percentile reporting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) total_p95_ms: Option<f64>,
 }
 
 fn first_record_version() -> u32 {
@@ -214,6 +217,7 @@ pub(crate) struct DurationTrendRow {
     pub(crate) scenario: String,
     pub(crate) profile: String,
     pub(crate) current_ms: f64,
+    pub(crate) current_p95_ms: Option<f64>,
     pub(crate) baseline_median_ms: Option<f64>,
     pub(crate) delta_pct: Option<f64>,
     pub(crate) verdict: DriftVerdict,
@@ -237,6 +241,7 @@ pub(crate) fn records_for_run(
             run_id: run_id.clone(),
             recorded_at: recorded_at.clone(),
             total_ms: summary.total_ms.median,
+            total_p95_ms: Some(summary.total_ms.p95),
         })
         .collect()
 }
@@ -415,7 +420,7 @@ pub(crate) fn trend_rows(
     history: &[DurationHistoryRecord],
     profile_filter: Option<&str>,
 ) -> Vec<DurationTrendRow> {
-    let mut series: BTreeMap<(&str, &str), Vec<f64>> = BTreeMap::new();
+    let mut series: BTreeMap<(&str, &str), Vec<&DurationHistoryRecord>> = BTreeMap::new();
     for record in history {
         if profile_filter.is_some_and(|profile| profile != record.profile) {
             continue;
@@ -423,17 +428,25 @@ pub(crate) fn trend_rows(
         series
             .entry((record.profile.as_str(), record.scenario.as_str()))
             .or_default()
-            .push(record.total_ms);
+            .push(record);
     }
     series
         .into_iter()
-        .filter_map(|((profile, scenario), values)| {
+        .filter_map(|((profile, scenario), records)| {
+            let values = records
+                .iter()
+                .map(|record| record.total_ms)
+                .collect::<Vec<_>>();
             let current_ms = *values.last()?;
             let baseline_median_ms = baseline_median(&values, values.len() - 1);
             Some(DurationTrendRow {
                 scenario: scenario.to_string(),
                 profile: profile.to_string(),
                 current_ms: round3(current_ms),
+                current_p95_ms: records
+                    .last()
+                    .and_then(|record| record.total_p95_ms)
+                    .map(round3),
                 baseline_median_ms: baseline_median_ms.map(round3),
                 delta_pct: baseline_median_ms
                     .filter(|median| *median > 0.0)
@@ -529,10 +542,14 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
         .unwrap_or(7)
         .max("profile".len());
     out.push_str(&format!(
-        "  {:scenario_width$}  {:profile_width$}  {:>12}  {:>12}  {:>9}  {}\n",
-        "scenario", "profile", "current_ms", "median_ms", "delta", "verdict"
+        "  {:scenario_width$}  {:profile_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {}\n",
+        "scenario", "profile", "current_ms", "p95_ms", "median_ms", "delta", "verdict"
     ));
     for row in rows {
+        let p95 = row
+            .current_p95_ms
+            .map(|value| format!("{value:.3}"))
+            .unwrap_or_else(|| "-".to_string());
         let median = row
             .baseline_median_ms
             .map(|value| format!("{value:.3}"))
@@ -542,8 +559,8 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
             .map(|value| format!("{value:+.1}%"))
             .unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            "  {:scenario_width$}  {:profile_width$}  {:>12.3}  {:>12}  {:>9}  {}\n",
-            row.scenario, row.profile, row.current_ms, median, delta, row.verdict
+            "  {:scenario_width$}  {:profile_width$}  {:>12.3}  {:>12}  {:>12}  {:>9}  {}\n",
+            row.scenario, row.profile, row.current_ms, p95, median, delta, row.verdict
         ));
     }
     out
@@ -943,6 +960,7 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].total_ms, 20.0);
         assert_eq!(loaded[1].total_ms, 30.0);
+        assert_eq!(loaded[0].total_p95_ms, Some(25.0));
     }
 
     #[test]
@@ -959,6 +977,7 @@ mod tests {
         let loaded = load_history(&path).expect("legacy record parses");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].version, 1);
+        assert_eq!(loaded[0].total_p95_ms, None);
     }
 
     #[test]
@@ -1210,6 +1229,7 @@ mod tests {
             run_id: format!("{index}"),
             recorded_at: format!("2026-01-01T{:02}:{:02}:00Z", index / 60, index % 60),
             total_ms,
+            total_p95_ms: Some(total_ms + 5.0),
         }
     }
 }

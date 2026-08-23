@@ -6,8 +6,6 @@
 //! writes a structured JSON report.
 
 use clap::Parser;
-#[cfg(feature = "dhat-heap")]
-use dhat::Alloc as DhatAlloc;
 #[cfg(not(feature = "dhat-heap"))]
 use stats_alloc::{INSTRUMENTED_SYSTEM, StatsAlloc};
 #[cfg(not(feature = "dhat-heap"))]
@@ -15,7 +13,7 @@ use std::alloc::System;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
-static GLOBAL_ALLOCATOR: DhatAlloc = DhatAlloc;
+static GLOBAL_ALLOCATOR: &lash_perf::DhatStatsAllocator = &lash_perf::GLOBAL_ALLOCATOR;
 
 // The same `INSTRUMENTED_SYSTEM` instance that `lash_perf::GLOBAL_ALLOCATOR`
 // reads its counters from.
