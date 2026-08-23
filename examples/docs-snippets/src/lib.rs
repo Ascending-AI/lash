@@ -40,6 +40,7 @@ mod fig1313_drain_policy;
 mod fig1348_selected_drain;
 mod fig1556_preflight;
 mod fig1556_probe;
+mod fig1922_read_session;
 mod index;
 mod operations;
 mod persistence;

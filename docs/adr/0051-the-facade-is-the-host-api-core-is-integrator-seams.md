@@ -164,6 +164,22 @@ The rule is enforced, not asserted:
 `lash_core` in code. A plugin type that cannot be reached from `lash` is
 therefore a facade gap the next such module discovers, not a carve-out.
 
+### Read-only handles
+
+Inspection hosts read settled session history, tree, and usage through
+`LashCore::read_session`, which returns the same `SessionReadView` a live
+session exposes without opening a runtime or acquiring its lease. Store
+implementors provide that capability through `SessionStoreFactory::read_session`;
+SQLite's `SqliteSessionStoreFactory::open_read_only` opens the catalog with
+`mode=ro` and never exposes its internal persistence handle. This prevents the
+read path from mutating durable session, lease, claim, or graph state. It is not
+a filesystem no-write guarantee: when no live connection has materialized a
+WAL catalog's wal-index, SQLite may create the catalog's `-wal` and `-shm`
+sidecars while reading it. A catalog on read-only media therefore cannot be
+inspected unless the required sidecars already exist; that SQLite failure is
+reported as a backend error. The reader does not use `immutable=1`, which would
+be unsound while another process may hold a writer.
+
 ## Why
 
 Three defects in one week were unused-public-surface defects: a drain API with

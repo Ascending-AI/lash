@@ -1,0 +1,5 @@
+error[E0599]: no method named `commit_runtime_state` found for struct `SessionReadView` in the current scope
+ --> tests/ui/session_read_view_has_no_mutations.rs:2:10
+  |
+2 |     view.commit_runtime_state();
+  |          ^^^^^^^^^^^^^^^^^^^^ method not found in `SessionReadView`

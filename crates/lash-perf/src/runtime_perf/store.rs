@@ -500,6 +500,18 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         }))
     }
 
+    async fn read_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<lash_core::SessionReadView>, StoreError> {
+        let Some(inner) = &self.inner else {
+            return Err(StoreError::UnsupportedStoreOperation {
+                operation: "read_session",
+            });
+        };
+        inner.read_session(session_id).await
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,

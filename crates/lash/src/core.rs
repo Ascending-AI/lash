@@ -206,6 +206,27 @@ impl LashCore {
         Ok(store.load_session_meta().await?.is_some())
     }
 
+    /// Read the canonical settled view of a durable session without opening a
+    /// live runtime, acquiring its execution lease, or exposing mutations.
+    ///
+    /// This is the inspection path for exporters, debuggers, and administrative
+    /// tooling that must coexist with a live writer. `Ok(None)` means the store
+    /// has no readable committed state for `session_id`; unsupported backends
+    /// return [`StoreError::UnsupportedStoreOperation`](lash_core::StoreError::UnsupportedStoreOperation).
+    pub async fn read_session(
+        &self,
+        session_id: impl AsRef<str>,
+    ) -> Result<Option<crate::persistence::SessionReadView>> {
+        let session_id = session_id.as_ref();
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory
+            .read_session(session_id)
+            .await
+            .map_err(EmbedError::Store)
+    }
+
     /// Report whether the durable single-use tombstone for `session_id` exists.
     /// A `false` result means only "no tombstone"; it is not evidence that the session is live.
     /// Tombstones are monotonic: once this returns `true`, the session id cannot become live again.

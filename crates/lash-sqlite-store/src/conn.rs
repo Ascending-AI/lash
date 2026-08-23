@@ -183,10 +183,18 @@ impl SqliteConnection {
     /// Open a file-backed database read-only. Used by the export/resume call
     /// sites that must never mutate the source database.
     pub(crate) async fn open_readonly(path: &std::path::Path) -> tokio_rusqlite::Result<Self> {
-        let path = path.to_path_buf();
+        let path = path
+            .to_str()
+            .ok_or_else(|| rusqlite::Error::InvalidPath(path.to_path_buf()))?
+            .replace('%', "%25")
+            .replace('?', "%3F")
+            .replace('#', "%23");
+        let path = format!("file:{path}?mode=ro");
         let inner = AsyncConnection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )
         .await?;
         inner

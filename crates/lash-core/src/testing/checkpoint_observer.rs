@@ -313,6 +313,13 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
             .map(|store| self.wrap(store)))
     }
 
+    async fn read_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::SessionReadView>, StoreError> {
+        self.inner.read_session(session_id).await
+    }
+
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }
