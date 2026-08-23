@@ -731,74 +731,17 @@ impl ProcessCapability {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::runtime::session_manager) async fn signal_process(
-        &self,
-        current: &CurrentSessionCapability,
-        session_id: &str,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal_process_with_visibility(
-            current,
-            session_id,
-            process_id,
-            signal_name,
-            signal_id,
-            payload,
-            scope,
-            true,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::runtime::session_manager) async fn signal_possessed_process(
         &self,
         current: &CurrentSessionCapability,
-        session_id: &str,
+        _session_id: &str,
         process_id: &str,
         signal_name: String,
         signal_id: String,
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal_process_with_visibility(
-            current,
-            session_id,
-            process_id,
-            signal_name,
-            signal_id,
-            payload,
-            scope,
-            false,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn signal_process_with_visibility(
-        &self,
-        current: &CurrentSessionCapability,
-        session_id: &str,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-        require_session_visibility: bool,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
-        if require_session_visibility {
-            self.validate_process_handles_observed_inner(
-                current,
-                session_id,
-                &[process_id.to_string()],
-            )
-            .await?;
-        }
         let record = runner
             .registry()
             .get_process(process_id)

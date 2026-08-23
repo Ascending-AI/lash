@@ -360,7 +360,7 @@ mod tests {
                 .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))
         }
 
-        async fn signal(
+        async fn signal_possessed(
             &self,
             session_id: &str,
             process_id: &str,

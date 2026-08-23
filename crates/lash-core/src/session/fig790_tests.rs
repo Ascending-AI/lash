@@ -305,7 +305,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         self.cancel(session_id, process_id, scope).await
     }
 
-    async fn signal(
+    async fn signal_possessed(
         &self,
         _session_id: &str,
         _process_id: &str,

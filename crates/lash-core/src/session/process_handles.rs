@@ -10,10 +10,14 @@ use crate::{ToolCallOutput, ToolCallRecord};
 
 const PROCESS_HANDLE_KIND: &str = "process";
 
+enum HandleAuthority {
+    RunLocalPossession,
+    SessionVisible,
+}
+
 impl RuntimeExecutionContext<'_> {
     #[cfg(test)]
-    pub(super) fn process_handle_value(id: &str, tool_name: &str) -> serde_json::Value {
-        let _ = tool_name;
+    pub(super) fn process_handle_value(id: &str) -> serde_json::Value {
         Self::process_handle_json(id)
     }
 
@@ -33,9 +37,7 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
-    pub(super) fn parse_process_handle(
-        handle: &serde_json::Value,
-    ) -> Result<(String, Option<String>), String> {
+    pub(super) fn parse_process_handle(handle: &serde_json::Value) -> Result<String, String> {
         let kind = handle
             .get("__handle__")
             .and_then(|value| value.as_str())
@@ -48,11 +50,26 @@ impl RuntimeExecutionContext<'_> {
             .and_then(|value| value.as_str())
             .filter(|value| !value.is_empty())
             .ok_or_else(|| "Invalid process handle: missing `id`".to_string())?;
-        let tool_name = handle
-            .get("tool")
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
-        Ok((id.to_string(), tool_name))
+        Ok(id.to_string())
+    }
+
+    async fn authorize_handle(
+        &self,
+        handle_id: &str,
+    ) -> Result<HandleAuthority, crate::PluginError> {
+        if self.is_run_local_process(handle_id) {
+            return Ok(HandleAuthority::RunLocalPossession);
+        }
+        let handle_id = handle_id.to_string();
+        self.dispatch
+            .processes
+            .validate_visible(
+                &self.session_id,
+                std::slice::from_ref(&handle_id),
+                self.process_scope(self.parent_invocation.clone()),
+            )
+            .await?;
+        Ok(HandleAuthority::SessionVisible)
     }
 
     #[cfg(test)]
@@ -107,7 +124,7 @@ impl RuntimeExecutionContext<'_> {
             return ToolInvocationReply::error(json!(err.to_string()));
         }
 
-        let handle_value = Self::process_handle_value(&handle_id, &tool_name);
+        let handle_value = Self::process_handle_value(&handle_id);
         let record = ToolCallRecord {
             call_id: Some(call_id),
             tool: prepared_call.tool_name,
@@ -161,7 +178,7 @@ impl RuntimeExecutionContext<'_> {
     ) -> ToolInvocationReply {
         let started = self.dispatch.clock.now();
         let args = json!({ "handle": handle.clone() });
-        let (handle_id, _hinted_tool_name) = match Self::parse_process_handle(&handle) {
+        let handle_id = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
                 return Self::recorded_process_error(
@@ -173,20 +190,7 @@ impl RuntimeExecutionContext<'_> {
                 );
             }
         };
-        // Possession of a handle this run created is sufficient capability;
-        // session observation gates only handles that arrived from elsewhere
-        // (run-local children need no observer edge).
-        if !self.is_run_local_process(&handle_id)
-            && let Err(err) = self
-                .dispatch
-                .processes
-                .validate_visible(
-                    &self.session_id,
-                    std::slice::from_ref(&handle_id),
-                    self.process_scope(self.parent_invocation.clone()),
-                )
-                .await
-        {
+        if let Err(err) = self.authorize_handle(&handle_id).await {
             return Self::recorded_process_error(
                 call_id,
                 "await_process",
@@ -232,7 +236,7 @@ impl RuntimeExecutionContext<'_> {
             "signal_name": signal_name.clone(),
             "payload": payload.clone()
         });
-        let (handle_id, _hinted_tool_name) = match Self::parse_process_handle(&handle) {
+        let handle_id = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
                 return Self::recorded_process_error(
@@ -244,32 +248,28 @@ impl RuntimeExecutionContext<'_> {
                 );
             }
         };
+        if let Err(err) = self.authorize_handle(&handle_id).await {
+            return Self::recorded_process_error(
+                call_id,
+                "signal_process",
+                args,
+                err.to_string(),
+                self.elapsed_ms(started),
+            );
+        }
         let signal_id = format!("process-{call_id}");
-        let result = if self.is_run_local_process(&handle_id) {
-            self.dispatch
-                .processes
-                .signal_possessed(
-                    &self.session_id,
-                    &handle_id,
-                    signal_name,
-                    signal_id,
-                    payload,
-                    self.process_scope(self.parent_invocation.clone()),
-                )
-                .await
-        } else {
-            self.dispatch
-                .processes
-                .signal(
-                    &self.session_id,
-                    &handle_id,
-                    signal_name,
-                    signal_id,
-                    payload,
-                    self.process_scope(self.parent_invocation.clone()),
-                )
-                .await
-        };
+        let result = self
+            .dispatch
+            .processes
+            .signal_possessed(
+                &self.session_id,
+                &handle_id,
+                signal_name,
+                signal_id,
+                payload,
+                self.process_scope(self.parent_invocation.clone()),
+            )
+            .await;
         let output = match result {
             Ok(event) => ToolCallOutput::success(json!({
                 "process_id": event.process_id,
@@ -293,7 +293,7 @@ impl RuntimeExecutionContext<'_> {
     ) -> ToolInvocationReply {
         let started = self.dispatch.clock.now();
         let args = json!({ "handle": handle.clone() });
-        let (handle_id, _hinted_tool_name) = match Self::parse_process_handle(&handle) {
+        let handle_id = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
                 return Self::recorded_process_error(
@@ -305,28 +305,24 @@ impl RuntimeExecutionContext<'_> {
                 );
             }
         };
-        // Run-local children bypass observer validation: possession of the
-        // handle this run created is the capability, and these children carry
-        // no session observer edge by design.
-        let result = if self.is_run_local_process(&handle_id) {
-            self.dispatch
-                .processes
-                .cancel(
-                    &self.session_id,
-                    &handle_id,
-                    self.process_scope(self.parent_invocation.clone()),
-                )
-                .await
-        } else {
-            self.dispatch
-                .processes
-                .cancel_visible(
-                    &self.session_id,
-                    &handle_id,
-                    self.process_scope(self.parent_invocation.clone()),
-                )
-                .await
-        };
+        if let Err(err) = self.authorize_handle(&handle_id).await {
+            return Self::recorded_process_error(
+                call_id,
+                "cancel_process",
+                args,
+                err.to_string(),
+                self.elapsed_ms(started),
+            );
+        }
+        let result = self
+            .dispatch
+            .processes
+            .cancel(
+                &self.session_id,
+                &handle_id,
+                self.process_scope(self.parent_invocation.clone()),
+            )
+            .await;
         let output = match result {
             Ok(status) => ToolCallOutput::success(Self::process_status_value(&status)),
             Err(err) => ToolInvocationReply::error(json!(format!("cancel failed: {err}"))).output,
@@ -567,6 +563,14 @@ mod tests {
             )
             .await
             .expect("register target process");
+        host.process_registry
+            .add_observer(
+                "session",
+                "target-process",
+                crate::ProcessObserverBy::host("foreground-signal-test"),
+            )
+            .await
+            .expect("observe target process");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
@@ -642,7 +646,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn process_handle_await_and_cancel_require_session_observer() {
+    async fn process_handle_operations_share_one_authority_rule() {
         let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
@@ -655,14 +659,21 @@ mod tests {
         ));
         let host = Arc::new(crate::testing::MockSessionManager::default());
         host.process_registry
-            .register_process(ProcessRegistration::new(
-                "hidden-process",
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                crate::RecoveryContract::ExternallyOwned,
-                crate::ProcessProvenance::host(),
-            ))
+            .register_process(
+                ProcessRegistration::new(
+                    "hidden-process",
+                    ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    crate::RecoveryContract::ExternallyOwned,
+                    crate::ProcessProvenance::host(),
+                )
+                .with_extra_event_types([crate::ProcessEventType {
+                    name: "signal.ready".to_string(),
+                    payload_schema: crate::LashSchema::any(),
+                    semantics: crate::ProcessEventSemanticsSpec::default(),
+                }]),
+            )
             .await
             .expect("register hidden process");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
@@ -716,20 +727,38 @@ mod tests {
         let awaited = context
             .await_process_handle("await-hidden-process".to_string(), handle.clone())
             .await;
+        let signalled = context
+            .signal_process_handle(
+                "signal-hidden-process".to_string(),
+                handle.clone(),
+                "ready".to_string(),
+                serde_json::Value::Null,
+            )
+            .await;
         let cancelled = context
             .cancel_process_handle("cancel-hidden-process".to_string(), handle.clone())
             .await;
 
-        assert!(!awaited.output.is_success());
-        assert!(!cancelled.output.is_success());
-        let await_error = awaited.output.value_for_projection().to_string();
-        let cancel_error = cancelled.output.value_for_projection().to_string();
-        for error in [&await_error, &cancel_error] {
+        let visibility_miss = awaited.output.value_for_projection();
+        for (operation, reply) in [
+            ("await", &awaited),
+            ("signal", &signalled),
+            ("cancel", &cancelled),
+        ] {
             assert!(
-                error.contains(
+                !reply.output.is_success(),
+                "{operation} unexpectedly operated an unpossessed, unobserved handle"
+            );
+            let error = reply.output.value_for_projection();
+            assert_eq!(
+                error, visibility_miss,
+                "{operation} must return the exact same typed visibility miss"
+            );
+            assert!(
+                error.to_string().contains(
                     "process handle `hidden-process` is not live or visible in this session"
                 ),
-                "await and cancel must return the same typed visibility miss: {error}"
+                "{operation} must return the shared typed visibility miss: {error}"
             );
         }
         assert_eq!(
@@ -800,12 +829,17 @@ mod tests {
         let local_await = context
             .await_process_handle("await-local".to_string(), local_handle("local-await"))
             .await;
-        assert!(
-            local_signal.output.is_success()
-                && local_cancel.output.is_success()
-                && local_await.output.is_success(),
-            "run-local possession must bypass observer and tier-2 visibility checks"
-        );
+        for (operation, reply) in [
+            ("await", &local_await),
+            ("signal", &local_signal),
+            ("cancel", &local_cancel),
+        ] {
+            assert!(
+                reply.output.is_success(),
+                "{operation} must accept run-local possession without an observer edge: {:?}",
+                reply.output.value_for_projection()
+            );
+        }
         let local_prune = host
             .process_registry
             .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
