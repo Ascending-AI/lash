@@ -1,8 +1,9 @@
 use lash_core::SessionError;
 use lash_lashlang_runtime::LashlangSurface;
 
-use super::{CellTags, DialectSession, LashlangDialectServices, RlmDialect, RlmDialectSession};
-use crate::executor::SourceDialect;
+use super::{
+    CellTags, DialectSession, LashlangDialectServices, RlmDialect, RlmDialectSession, SourceDialect,
+};
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
 
