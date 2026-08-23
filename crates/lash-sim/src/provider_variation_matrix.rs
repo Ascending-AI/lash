@@ -983,6 +983,7 @@ fn recorded_script(dialect: &str, variation: &str, recording: &Recording) -> Pro
         timeline,
         expected_provider: None,
         provenance: None,
+        compiled_plan: std::sync::OnceLock::new(),
     }
 }
 
