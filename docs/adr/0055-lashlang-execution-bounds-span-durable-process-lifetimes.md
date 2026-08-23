@@ -23,20 +23,25 @@ because only committed continuation meters survive.
 
 Every RLM configuration must explicitly choose three independent bounds:
 
-- `instruction_budget: ExecutionBound<NonZeroU64>` limits VM instructions plus
-  collection work charged by builtins;
-- `deadline: ExecutionBound<Duration>` limits active VM execution time; and
-- `memory_limit: ExecutionBound<NonZeroU64>` limits live logical heap bytes.
+- `instruction_limit: InstructionBound` limits VM instructions plus collection
+  work charged by builtins;
+- `wall_clock: WallClockBound` limits active VM execution time; and
+- `memory_limit: MemoryBound` limits live logical heap bytes.
 
 The engine's own `ExecutionBounds::new` takes all three as well: a host that has
 not decided how much logical memory an execution may hold has not finished
 configuring it, and a silent default would be a bound nobody chose.
 
-Hosts select a finite bound or `Unbounded` for each field. Rust callers should
-use `ExecutionBound::instructions(n)`, `ExecutionBound::millis(n)`, or
-`ExecutionBound::secs(n)` as appropriate; the byte-valued memory limit uses the
-same nonzero integer bound representation as instructions. Serialized RLM
-configuration must contain all three fields and has no implicit memory limit.
+Each bound is its own Rust type, and each type carries only the constructors
+that make sense for its axis: `InstructionBound::instructions(n)`,
+`WallClockBound::millis(n)` / `WallClockBound::secs(n)`, and
+`MemoryBound::bytes(n)` / `MemoryBound::mebibytes(n)`, plus `unbounded()` on
+each for the explicit opt-out. Instructions and heap bytes share a nonzero
+integer representation but not a type, so a byte count can never be spent as an
+instruction budget. Hosts assemble a config through
+`RlmProtocolPluginConfig::builder()`, which names every bound at its call site
+and refuses to `build()` until all three are set. Serialized RLM configuration
+must contain all three fields and has no implicit memory limit.
 It uses
 `{"bounded": 1000000}` for instructions and milliseconds, or the string
 `"unbounded"`; duration serialization never exposes Rust's internal

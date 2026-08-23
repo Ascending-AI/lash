@@ -20,11 +20,11 @@ async fn approval_test_core(
             .expect("open approval test trigger store"),
     );
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::new(
-            lash::rlm::ExecutionBound::instructions(1_000_000),
-            lash::rlm::ExecutionBound::secs(30),
-            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-        )
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash::rlm::WallClockBound::secs(30))
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .build()
         .with_lashlang_abilities(workbench_lashlang_abilities()),
         artifact_store,
     );

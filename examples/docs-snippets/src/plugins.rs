@@ -36,11 +36,11 @@ async fn plugin_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result
     use lash::plugins::PluginFactory;
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::new(
-            lash::rlm::ExecutionBound::instructions(1_000_000),
-            lash::rlm::ExecutionBound::secs(30),
-            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-        ),
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash::rlm::WallClockBound::secs(30))
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)

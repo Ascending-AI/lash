@@ -212,11 +212,11 @@ fn process_test_core(
     explicit_ephemeral_facets(LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::new(
-                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
-                lash_protocol_rlm::ExecutionBound::secs(30),
-                lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-            ),
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
             artifact_store,
         ),
     ))
@@ -1063,11 +1063,11 @@ fn process_test_core_with_sink(
     explicit_ephemeral_facets(LashCore::rlm_builder(
         crate::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::new(
-                lash_protocol_rlm::ExecutionBound::instructions(1_000_000),
-                lash_protocol_rlm::ExecutionBound::secs(30),
-                lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-            ),
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
             artifact_store,
         ),
     ))

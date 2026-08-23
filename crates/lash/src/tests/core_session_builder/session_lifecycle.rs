@@ -842,8 +842,8 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .build()
         .into_handle();
     let config: crate::rlm::RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
-        "instruction_budget": { "bounded": 1_000_000 },
-        "deadline": { "bounded": 30_000 },
+        "instruction_limit": { "bounded": 1_000_000 },
+        "wall_clock": { "bounded": 30_000 },
         "memory_limit": { "bounded": 67_108_864 },
         "lashlang_abilities": { "processes": true, "triggers": true }
     }))
@@ -1060,9 +1060,11 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // them (here `compile-extra-tool` resolves to `lookup`).
     let artifact_store = Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new());
     let factory = Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        lash_protocol_rlm::RlmProtocolPluginConfig::new(lash_protocol_rlm::ExecutionBound::instructions(1_000_000), lash_protocol_rlm::ExecutionBound::secs(30),
-    lash_protocol_rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-),
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
         artifact_store.clone(),
     ));
     let plugin_host = lash_core::facade_support::PluginHost::new(vec![

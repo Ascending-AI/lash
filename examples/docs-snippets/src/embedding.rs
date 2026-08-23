@@ -78,11 +78,11 @@ async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> an
         Arc::new(lash_sqlite_store::Store::open(&data_dir.join("artifacts.db")).await?);
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::new(
-            lash::rlm::ExecutionBound::instructions(1_000_000),
-            lash::rlm::ExecutionBound::secs(30),
-            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-        ),
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash::rlm::WallClockBound::secs(30))
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .build(),
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
@@ -141,11 +141,11 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         );
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::new(
-            lash::rlm::ExecutionBound::instructions(1_000_000),
-            lash::rlm::ExecutionBound::secs(30),
-            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-        ),
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash::rlm::WallClockBound::secs(30))
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
@@ -177,11 +177,11 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
     });
 
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::new(
-            lash::rlm::ExecutionBound::instructions(1_000_000),
-            lash::rlm::ExecutionBound::secs(30),
-            lash::rlm::ExecutionBound::instructions(64 * 1024 * 1024),
-        ),
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+            .wall_clock(lash::rlm::WallClockBound::secs(30))
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)

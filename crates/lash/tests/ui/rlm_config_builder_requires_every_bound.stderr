@@ -1,0 +1,13 @@
+error[E0599]: no method named `build` found for struct `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound>` in the current scope
+ --> tests/ui/rlm_config_builder_requires_every_bound.rs:7:10
+  |
+4 |       let _config = lash::rlm::RlmProtocolPluginConfig::builder()
+  |  ___________________-
+5 | |         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+6 | |         .wall_clock(lash::rlm::WallClockBound::secs(30))
+7 | |         .build();
+  | |         -^^^^^ method not found in `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound>`
+  | |_________|
+  |
+  |
+  = note: the method was found for `RlmProtocolPluginConfigBuilder<InstructionBound, WallClockBound, MemoryBound>`

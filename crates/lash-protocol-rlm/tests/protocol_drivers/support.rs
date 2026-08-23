@@ -985,11 +985,11 @@ impl RlmProtocolRun {
 pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
     Arc::new(
         RlmProtocolPluginFactory::new(
-            RlmProtocolPluginConfig::new(
-                lashlang::ExecutionBound::Unbounded,
-                lashlang::ExecutionBound::Unbounded,
-                lashlang::ExecutionBound::instructions(64 * 1024 * 1024),
-            ),
+            RlmProtocolPluginConfig::builder()
+                .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
+                .wall_clock(lash_protocol_rlm::WallClockBound::unbounded())
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
             lashlang::global_in_memory_lashlang_artifact_store(),
         )
         .with_process_lifecycle(false),
