@@ -44,7 +44,7 @@ use super::harness::{
 };
 use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;
-use super::store::RuntimePerfStore;
+use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
 
 include!("measurement/types.rs");
 include!("measurement/phase_probe.rs");
@@ -55,3 +55,4 @@ include!("measurement/process_stress.rs");
 include!("measurement/queued_work.rs");
 include!("measurement/checkpoint.rs");
 include!("measurement/store_hardening.rs");
+include!("measurement/high_traffic.rs");

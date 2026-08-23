@@ -176,6 +176,12 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             "Turn {} in the async process settlement benchmark. Spawn the gated child processes and return before their settlement.",
             turn_index + 1
         ),
+        RuntimePerfScenario::HighTrafficLoadSqlite
+        | RuntimePerfScenario::HighTrafficLoadPostgres
+        | RuntimePerfScenario::HighTrafficKneeSqlite
+        | RuntimePerfScenario::HighTrafficKneePostgres => {
+            unreachable!("high-traffic scenarios construct per-operation prompts")
+        }
         RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres => format!(
             "Turn {} in the durable checkpoint curve. Persist checkpoint body bytes {} inside this live RLM turn, then finish exactly: runtime perf benchmark ok",

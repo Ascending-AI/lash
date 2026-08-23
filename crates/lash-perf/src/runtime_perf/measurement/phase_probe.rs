@@ -11,6 +11,7 @@ struct PhaseStart {
 struct RuntimePerfPhaseProbeState {
     open: HashMap<String, Vec<PhaseStart>>,
     completed: BTreeMap<String, RuntimePerfPhaseRunResult>,
+    first_started_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -62,6 +63,14 @@ impl RuntimePerfPhaseProbe {
         }
         Ok(std::mem::take(&mut state.completed))
     }
+
+    pub(crate) fn first_phase_delay_ms(&self, operation_started: Instant) -> f64 {
+        self.state
+            .lock_recover()
+            .first_started_at
+            .and_then(|started| started.checked_duration_since(operation_started))
+            .map_or(0.0, |elapsed| round3(elapsed.as_secs_f64() * 1000.0))
+    }
 }
 
 impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
@@ -75,6 +84,7 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
 
     fn begin_named(&self, phase: &str) {
         let mut state = self.state.lock_recover();
+        state.first_started_at.get_or_insert_with(Instant::now);
         state
             .open
             .entry(phase.to_string())
@@ -130,7 +140,34 @@ fn record_completed_phase(
 pub(crate) async fn run_once(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
+    high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
+    if scenario.is_high_traffic() {
+        let database_url = scenario
+            .uses_postgres()
+            .then(configured_postgres_database_url)
+            .flatten();
+        if scenario.uses_postgres() && database_url.is_none() {
+            if postgres_is_required() {
+                anyhow::bail!(
+                    "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
+                    scenario.name()
+                );
+            }
+            eprintln!(
+                "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
+                scenario.name()
+            );
+            return Ok(skipped_runtime_perf_result(scenario, chat_turns));
+        }
+        return Box::pin(run_once_high_traffic(
+            scenario,
+            chat_turns,
+            high_traffic,
+            database_url.as_deref(),
+        ))
+        .await;
+    }
     match scenario {
         RuntimePerfScenario::WriterContention2Workers
         | RuntimePerfScenario::WriterContention8Workers => {
@@ -205,6 +242,12 @@ pub(crate) async fn run_once(
         | RuntimePerfScenario::DurableAgentChildTurnPostgres
         | RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres => {}
+        RuntimePerfScenario::HighTrafficLoadSqlite
+        | RuntimePerfScenario::HighTrafficLoadPostgres
+        | RuntimePerfScenario::HighTrafficKneeSqlite
+        | RuntimePerfScenario::HighTrafficKneePostgres => {
+            unreachable!("high-traffic scenarios return before the generic dispatch")
+        }
     }
 
     let postgres_database_url = if scenario.uses_postgres() {

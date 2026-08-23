@@ -6,9 +6,22 @@ use super::budgets::{
 };
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
-use crate::runtime_perf::measurement::{RuntimePerfPhaseProbe, phase_name, run_once};
+use crate::runtime_perf::measurement::{
+    HighTrafficConfig, RuntimePerfPhaseProbe, phase_name, run_once,
+};
 use crate::runtime_perf::scenarios::DURABLE_CHECKPOINT_CURVE_BYTES;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
+
+fn high_traffic_config() -> HighTrafficConfig {
+    HighTrafficConfig::parse(
+        4,
+        0,
+        "plain=1,tool=1,queued=1,child=1,wake=1,trigger=1",
+        "2,4",
+        1.25,
+    )
+    .expect("valid high-traffic test config")
+}
 
 #[test]
 fn typed_phase_nesting_records_each_open_span() {
@@ -67,7 +80,7 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
         RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
         RuntimePerfScenario::DurableAgentChildTurnSqlite,
     ] {
-        let result = Box::pin(run_once(scenario, 1))
+        let result = Box::pin(run_once(scenario, 1, &high_traffic_config()))
             .await
             .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
         assert!(
@@ -92,6 +105,7 @@ async fn durable_sqlite_checkpoint_curve_reports_each_target_size() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::DurableCheckpointCurveSqlite,
         DURABLE_CHECKPOINT_CURVE_BYTES.len(),
+        &high_traffic_config(),
     ))
     .await
     .expect("durable checkpoint curve should run");
@@ -108,6 +122,141 @@ async fn durable_sqlite_checkpoint_curve_reports_each_target_size() {
             "checkpoint size for target {target_bytes} was {checkpoint_bytes}"
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn high_traffic_sqlite_smoke_reports_load_structure() {
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::HighTrafficLoadSqlite,
+        1,
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("high-traffic SQLite load smoke should run");
+
+    assert!(
+        result
+            .extra_counters
+            .get("throughput.turns_per_second_milli")
+            .is_some_and(|value| *value > 0)
+    );
+    assert!(result.phase_profile.contains_key("wait.store_transaction"));
+    assert!(result.phase_profile.contains_key("wait.queue_enqueue"));
+    assert!(
+        result
+            .extra_counters
+            .contains_key("load.phase.committed_turn.p95_micros")
+    );
+    assert!(
+        result
+            .extra_counters
+            .get("queue_depth.samples")
+            .is_some_and(|value| *value > 0)
+    );
+    assert!(
+        result
+            .extra_counters
+            .keys()
+            .any(|key| key.starts_with("wait.top."))
+    );
+    assert_eq!(
+        result
+            .extra_counters
+            .get("wait.arrival_pacing_lateness.observable"),
+        Some(&0)
+    );
+    assert!(
+        !result
+            .extra_counters
+            .keys()
+            .any(|key| key.starts_with("knee."))
+    );
+    assert!(
+        !result
+            .extra_counters
+            .keys()
+            .any(|key| key.contains("facade_mutex") || key.contains("driver_dispatch"))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::HighTrafficKneeSqlite,
+        1,
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("high-traffic SQLite knee smoke should run");
+
+    assert_eq!(
+        result.extra_counters.get("knee.step.0.population"),
+        Some(&2)
+    );
+    assert_eq!(
+        result.extra_counters.get("knee.step.1.population"),
+        Some(&4)
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.p95_vs_base_ratio_milli")
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.throughput_vs_linear_ratio_milli")
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.wait.store_transaction.micros")
+    );
+    assert!(
+        result
+            .extra_counters
+            .contains_key("knee.step.1.wait.claim_scan.micros")
+    );
+    let durable_samples = result
+        .extra_counters
+        .keys()
+        .filter(|key| key.contains("queue_depth.durable.sample."))
+        .count();
+    assert_eq!(durable_samples, result.turns.len());
+    assert_eq!(
+        result
+            .turns
+            .iter()
+            .map(|turn| turn.turn_index)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        result.turns.len()
+    );
+    assert!(
+        result
+            .turns
+            .iter()
+            .any(|turn| { turn.turn_index >= 100_000_000 && turn.turn_index < 200_000_000 })
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn high_traffic_trigger_waits_for_terminal_delivery() {
+    let config = HighTrafficConfig::parse(1, 0, "trigger=1", "1,2", 1.25)
+        .expect("valid trigger-only config");
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::HighTrafficLoadSqlite,
+        1,
+        &config,
+    ))
+    .await
+    .expect("trigger-only high-traffic operation should observe terminal delivery");
+
+    assert_eq!(
+        result.extra_counters.get("turn_mix.trigger.completed"),
+        Some(&1)
+    );
+    assert_eq!(result.turns.len(), 1);
 }
 
 #[test]

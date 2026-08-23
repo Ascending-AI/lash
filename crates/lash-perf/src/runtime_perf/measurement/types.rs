@@ -1,6 +1,80 @@
 const RUNTIME_PERF_TURN_TIMEOUT_ENV: &str = "LASH_RUNTIME_PERF_TURN_TIMEOUT_MS";
 const DEFAULT_RUNTIME_PERF_TURN_TIMEOUT: Duration = Duration::from_secs(10);
 
+const HIGH_TRAFFIC_KINDS: [&str; 6] = ["plain", "tool", "queued", "child", "wake", "trigger"];
+
+#[derive(Clone, Debug)]
+pub(crate) struct HighTrafficConfig {
+    pub(crate) population: usize,
+    pub(crate) arrival_rate: u64,
+    pub(crate) mix: [u64; HIGH_TRAFFIC_KINDS.len()],
+    pub(crate) knee_populations: Vec<usize>,
+    pub(crate) knee_threshold: f64,
+}
+
+impl HighTrafficConfig {
+    pub(crate) fn parse(
+        population: usize,
+        arrival_rate: u64,
+        mix: &str,
+        knee_populations: &str,
+        knee_threshold: f64,
+    ) -> anyhow::Result<Self> {
+        let mut weights = [0; HIGH_TRAFFIC_KINDS.len()];
+        for entry in mix.split(',').filter(|entry| !entry.trim().is_empty()) {
+            let (kind, weight) = entry
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("invalid high-traffic mix entry `{entry}`; expected kind=weight"))?;
+            let index = HIGH_TRAFFIC_KINDS
+                .iter()
+                .position(|candidate| *candidate == kind.trim())
+                .ok_or_else(|| anyhow::anyhow!("unknown high-traffic mix kind `{}`; expected one of {}", kind.trim(), HIGH_TRAFFIC_KINDS.join(", ")))?;
+            weights[index] = weight.trim().parse::<u64>().map_err(|_| {
+                anyhow::anyhow!("invalid high-traffic mix weight in `{entry}`; expected an integer")
+            })?;
+        }
+        if weights.iter().all(|weight| *weight == 0) {
+            anyhow::bail!("high-traffic mix must contain at least one positive weight");
+        }
+
+        let knee_populations = knee_populations
+            .split(',')
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| {
+                value.trim().parse::<usize>().map_err(|_| {
+                    anyhow::anyhow!("invalid knee population `{value}`; expected a positive integer")
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        if knee_populations.is_empty() || knee_populations.contains(&0) {
+            anyhow::bail!("knee populations must contain positive integers");
+        }
+        if !knee_threshold.is_finite() || knee_threshold <= 1.0 {
+            anyhow::bail!("knee threshold must be finite and greater than 1.0");
+        }
+
+        Ok(Self {
+            population: population.max(1),
+            arrival_rate,
+            mix: weights,
+            knee_populations,
+            knee_threshold,
+        })
+    }
+
+    pub(crate) fn operation_kind(&self, ordinal: usize) -> &'static str {
+        let total = self.mix.iter().sum::<u64>();
+        let mut selected = ordinal as u64 % total;
+        for (index, weight) in self.mix.iter().copied().enumerate() {
+            if selected < weight {
+                return HIGH_TRAFFIC_KINDS[index];
+            }
+            selected -= weight;
+        }
+        unreachable!("positive high-traffic weight total always selects a kind")
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfRunResult {
     pub(crate) scenario: String,
