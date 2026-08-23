@@ -10555,7 +10555,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::process_change_hub", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::process_change_hub"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::process_change_hub` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this field is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drivers#`Some(match slot_supplier {`, crates/lash/src/core.rs::LashCoreBuilder::build#`.with_runtime_host_config(core);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::process_change_hub` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this field is exercised in-repo at crates/lash/src/core/work_drivers.rs::InlineWorkDriverSlot::drivers#`Some(match slot_supplier {`, crates/lash/src/core.rs::LashCoreBuilder::build#`.with_runtime_host_config(core);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::process_execution_concurrency"
@@ -10672,7 +10672,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::DurableProcessWorkerConfig::with_queued_work_driver", "lash_core::runtime::process_worker::DurableProcessWorkerConfig::with_queued_work_driver"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_queued_work_driver` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drivers#`} => {`, crates/lash/src/core.rs::worker_config#`config = config.with_queued_work_driver(driver);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::durability::DurableProcessWorkerConfig::with_queued_work_driver` directly; the gate reaches the same item a second time through `lash_core::runtime::process_worker::DurableProcessWorker::new`. Consumer class: the `lash` facade itself -- this function is exercised in-repo at crates/lash/src/core/work_drivers.rs::InlineWorkDriverSlot::drivers#`} => {`, crates/lash/src/core.rs::worker_config#`config = config.with_queued_work_driver(driver);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::durability::DurableProcessWorkerConfig::with_session_policy"
@@ -16523,7 +16523,7 @@ availability = "default+all-features"
 aliases = ["lash_core::attachments::SessionAttachmentStore::get", "lash_core::facade_support::SessionAttachmentStore::get"]
 area = "attachments"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionAttachmentStore::get` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input`. Consumer class: the `lash` facade and RLM protocol internals -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drop#`if let Some(drivers) = self.drivers.get()`, crates/lash-protocol-rlm/src/executor/host_bridge.rs::collect_printed_images_inner#`attachment_store.get(&id).await.map_err(|_| {`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::SessionAttachmentStore::get` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::materialize_checkpoint_turn_input`. Consumer class: the `lash` facade and RLM protocol internals -- this function is exercised in-repo at crates/lash/src/core/work_drivers.rs::InlineWorkDriverSlot::drop#`if let Some(drivers) = self.drivers.get()`, crates/lash-protocol-rlm/src/executor/host_bridge.rs::collect_printed_images_inner#`attachment_store.get(&id).await.map_err(|_| {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::SessionAttachmentStore::in_memory"
@@ -29726,7 +29726,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver::from_watched", "lash_core::runtime::process_work_driver::ProcessWorkDriver::from_watched"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessWorkDriver::from_watched` directly; the gate reaches the same item a second time through `lash_core::RuntimeEffectLocalExecutor::processes`. Consumer class: the `lash` facade itself and the Restate durable effect-host adapter -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drivers#`Arc::clone(slot_supplier),`, crates/lash-restate/src/process/mod.rs::RestateProcessDeployment::new_with_sink#`let driver = ProcessWorkDriver::from_watched(registry, hub, run_handle).with_attach(attach);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessWorkDriver::from_watched` directly; the gate reaches the same item a second time through `lash_core::RuntimeEffectLocalExecutor::processes`. Consumer class: the `lash` facade itself and the Restate durable effect-host adapter -- this function is exercised in-repo at crates/lash/src/core/work_drivers.rs::InlineWorkDriverSlot::drivers#`Arc::clone(slot_supplier),`, crates/lash-restate/src/process/mod.rs::RestateProcessDeployment::new_with_sink#`let driver = ProcessWorkDriver::from_watched(registry, hub, run_handle).with_attach(attach);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::process::ProcessWorkDriver::inline"
@@ -29735,7 +29735,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver::inline", "lash_core::runtime::process_work_driver::ProcessWorkDriver::inline"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessWorkDriver::inline` directly; the gate reaches the same item a second time through `lash_core::RuntimeEffectLocalExecutor::processes`. Consumer class: the subagent plugin crate and the `lash` facade itself -- this function is exercised in-repo at crates/lash-subagents/src/tests.rs::spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt::run_seed_probe_inner#`let process_driver = lash_core::facade_support::ProcessWorkDriver::inline(`, crates/lash/src/core.rs::InlineWorkDriverSlot::drivers#`.expect(\"queued-work concurrency was validated at build\"),`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::process::ProcessWorkDriver::inline` directly; the gate reaches the same item a second time through `lash_core::RuntimeEffectLocalExecutor::processes`. Consumer class: the subagent plugin crate and the `lash` facade itself -- this function is exercised in-repo at crates/lash-subagents/src/tests.rs::spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt::run_seed_probe_inner#`let process_driver = lash_core::facade_support::ProcessWorkDriver::inline(`, crates/lash/src/core/work_drivers.rs::InlineWorkDriverSlot::drivers#`.expect(\"queued-work concurrency was validated at build\"),`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::process::ProcessWorkDriver::new"
@@ -47773,7 +47773,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::QueuedWorkDriver::with_execution_concurrency", "lash_core::runtime::queued_work_driver::QueuedWorkDriver::with_execution_concurrency"]
 area = "processes"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::QueuedWorkDriver::with_execution_concurrency` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::queued_work_driver`. Consumer class: the `lash` facade itself and core runtime internals -- this function is exercised in-repo at crates/lash/src/core.rs::InlineWorkDriverSlot::drivers#`None => QueuedWorkDriver::with_execution_concurrency(`, crates/lash-core/src/runtime/queued_work_driver/tests/final_regressions.rs::contention_preserves_the_full_transient_error_attempt_budget#`QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect(\"valid concurrency\");`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::QueuedWorkDriver::with_execution_concurrency` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::queued_work_driver`. Consumer class: the `lash` facade itself and core runtime internals -- this function is exercised in-repo at crates/lash/src/core/work_drivers.rs::InlineWorkDriverSlot::drivers#`None => QueuedWorkDriver::with_execution_concurrency(`, crates/lash-core/src/runtime/queued_work_driver/tests/final_regressions.rs::contention_preserves_the_full_transient_error_attempt_budget#`QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect(\"valid concurrency\");`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::QueuedWorkDriver::with_shutdown_token"
@@ -67019,7 +67019,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:861#.retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))"
+usage = "crates/lash/src/core.rs:619#.retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))"
 
 [[api]]
 symbol = "lash_core::ExecRequest"
@@ -67409,7 +67409,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:672#lash_core::ObserverInheritance::All,"
+usage = "crates/lash/src/core.rs:430#lash_core::ObserverInheritance::All,"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::All"
@@ -67417,7 +67417,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:672#lash_core::ObserverInheritance::All,"
+usage = "crates/lash/src/core.rs:430#lash_core::ObserverInheritance::All,"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::None"
@@ -67425,7 +67425,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:697#(lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),"
+usage = "crates/lash/src/core.rs:455#(lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::Only"
@@ -67433,7 +67433,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:704#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
+usage = "crates/lash/src/core.rs:462#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::Only::0"
@@ -67441,7 +67441,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:704#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
+usage = "crates/lash/src/core.rs:462#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
 
 [[api]]
 symbol = "lash_core::Part"
@@ -71101,7 +71101,7 @@ kind = "constant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1239#.unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);"
+usage = "crates/lash/src/core.rs:997#.unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);"
 
 [[api]]
 symbol = "lash_core::facade_support::EffectId"
@@ -71213,7 +71213,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:231#Arc::new(facade_support::InlineProcessRunHandle::new(worker)),"
+usage = "crates/lash/src/core/work_drivers.rs:187#Arc::new(facade_support::InlineProcessRunHandle::new(worker)),"
 
 [[api]]
 symbol = "lash_core::facade_support::InlineProcessRunHandle::new"
@@ -71221,7 +71221,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:231#Arc::new(facade_support::InlineProcessRunHandle::new(worker)),"
+usage = "crates/lash/src/core/work_drivers.rs:187#Arc::new(facade_support::InlineProcessRunHandle::new(worker)),"
 
 [[api]]
 symbol = "lash_core::facade_support::JsonSchema"
@@ -72665,7 +72665,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:776#match scoped_effect_controller.execution_scope() {"
+usage = "crates/lash/src/core.rs:534#match scoped_effect_controller.execution_scope() {"
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction"
@@ -73580,7 +73580,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1289#Arc::new(facade_support::SingleProviderResolver::new(provider));"
+usage = "crates/lash/src/core.rs:1047#Arc::new(facade_support::SingleProviderResolver::new(provider));"
 
 [[api]]
 symbol = "lash_core::facade_support::SingleProviderResolver::new"
@@ -73588,7 +73588,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1289#Arc::new(facade_support::SingleProviderResolver::new(provider));"
+usage = "crates/lash/src/core.rs:1047#Arc::new(facade_support::SingleProviderResolver::new(provider));"
 
 [[api]]
 symbol = "lash_core::facade_support::SnapshotReader"
@@ -74218,7 +74218,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1321#lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;"
+usage = "crates/lash/src/core.rs:1079#lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;"
 
 [[api]]
 symbol = "lash_core::facade_support::build_tool_catalog"
@@ -77160,7 +77160,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:170#phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,"
+usage = "crates/lash/src/core/work_drivers.rs:126#phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,"
 
 [[api]]
 symbol = "lash_core::runtime::RuntimeTurnPhaseProbeSlot::get_for_scope"

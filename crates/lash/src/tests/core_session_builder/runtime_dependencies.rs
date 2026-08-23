@@ -196,24 +196,16 @@ async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_
     let public_trigger_store = Arc::clone(&core.durable_process_worker_config()?.trigger_store);
 
     assert!(Arc::ptr_eq(&inline_trigger_store, &public_trigger_store));
-    for (path, trigger_store) in [
-        ("inline-worker", inline_trigger_store),
-        ("public-worker-config", public_trigger_store),
-    ] {
-        let receipt = trigger_store
-            .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
-                "fig1882.clock",
-                path,
-                serde_json::Value::Null,
-                format!("fig1882:{path}"),
-            ))
-            .await
-            .expect("default trigger store must ingest the clock probe");
-        assert_eq!(
-            receipt.occurrence.occurred_at_ms, NOW_MS,
-            "{path} trigger store must observe the injected core clock"
-        );
-    }
+    let receipt = public_trigger_store
+        .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
+            "fig1882.clock",
+            "public-worker-config",
+            serde_json::Value::Null,
+            "fig1882:public-worker-config",
+        ))
+        .await
+        .expect("default trigger store must ingest the clock probe");
+    assert_eq!(receipt.occurrence.occurred_at_ms, NOW_MS);
     Ok(())
 }
 
