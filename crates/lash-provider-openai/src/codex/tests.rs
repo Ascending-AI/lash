@@ -936,7 +936,10 @@ async fn codex_scripted_websocket_default_timeout_survives_a_scheduler_stall() {
         .await
         .expect("scripted WebSocket must capture the request before the stall");
     tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_millis(SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS)).await;
+    tokio::time::advance(Duration::from_millis(
+        SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS + 1,
+    ))
+    .await;
     tokio::task::yield_now().await;
 
     assert!(
