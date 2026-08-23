@@ -436,6 +436,43 @@ REQUIRED_LOW_LEVEL_API = {
 }
 
 
+class InventoryTable(NamedTuple):
+    """One inventory table's row shape.
+
+    Both tables hold rows of the same shape and answer to the same validator:
+    `row_errors` carries the whole body and both loops call it.  Where a check
+    does not run, the reason is stated here rather than implied by which loop
+    the row fell into -- the drift this declaration replaces is FIG-1865, where
+    a hand-copied 26-line low-level loop silently skipped seventeen of the
+    checks the `api` loop ran, six of them live on the standing rows.
+
+    `absent_fields` names the fields a row of this table states no value for.
+    A check that reads one of them has nothing to validate and is skipped on
+    that ground alone.
+    """
+
+    name: str
+    absent_fields: frozenset[str]
+
+    def states(self, field: str) -> bool:
+        """Whether a row of this table carries `field` at all."""
+        return field not in self.absent_fields
+
+
+API_TABLE = InventoryTable("api", frozenset())
+# The two genuine differences between the tables, both stated rather than
+# implied.  First, a low-level row identifies a Lashlang VM symbol, not a Rust
+# surface item: it states no `kind`, `area`, `availability` or `aliases`, so
+# the checks that read those fields -- and the internal-seam anchor checks,
+# which resolve a member through its owning type's `kind` -- have nothing to
+# read.  Second, the surface reconciliation each table answers to lives outside
+# the row validator: `api` rows reconcile against `current_surface` in
+# `item_errors`, low-level rows against `REQUIRED_LOW_LEVEL_API`.
+LOW_LEVEL_TABLE = InventoryTable(
+    "low_level_api", frozenset({"kind", "area", "availability", "aliases"})
+)
+
+
 def item_kind(item: dict[str, Any]) -> str:
     return next(iter(item["inner"]))
 
@@ -3913,6 +3950,219 @@ def item_errors(
     return errors
 
 
+def row_errors(
+    entry: dict[str, Any],
+    *,
+    table: InventoryTable,
+    seen: dict[tuple[str, str], dict[str, Any]],
+    leaf_owners: dict[str, set[str]],
+    facade_dirs: set[str],
+) -> list[str]:
+    """Every check one inventory row answers to, whichever table holds it.
+
+    `seen` is the table's own symbol mapping, carried in so the row can be
+    checked against the rows already read: a second row for one symbol is an
+    invalid state in both tables, and keeping the population in a set is what
+    let two low-level rows for one symbol validate independently.  The caller
+    reuses the `api` mapping afterwards for the surface reconciliation.
+    """
+    errors: list[str] = []
+    symbol = entry.get("symbol", "")
+    kind = entry.get("kind", "")
+    label = f"{symbol} ({kind})" if table.states("kind") else symbol
+    key = (symbol, kind)
+    if key in seen:
+        errors.append(f"duplicate inventory entry: {label}")
+    seen[key] = entry
+    if table.states("availability"):
+        availability = entry.get("availability", "")
+        if availability not in {"default", "all-features", "default+all-features"}:
+            errors.append(f"{symbol}: invalid availability {availability!r}")
+    if table.states("aliases"):
+        aliases = entry.get("aliases", [])
+        if not isinstance(aliases, list) or not all(
+            isinstance(alias, str) for alias in aliases
+        ):
+            errors.append(f"{symbol}: aliases must be a list of paths")
+        elif aliases != sorted(aliases) or symbol in aliases or len(set(aliases)) != len(aliases):
+            errors.append(
+                f"{symbol}: aliases must be sorted, distinct, and exclude the primary path"
+            )
+        elif "aliases" in entry and not aliases:
+            errors.append(f"{symbol}: omit aliases rather than recording an empty list")
+    if table.states("area") and entry.get("area") not in AREAS:
+        errors.append(f"{symbol}: unknown area {entry.get('area')!r}")
+    disposition = entry.get("disposition")
+    if disposition not in DISPOSITIONS:
+        errors.append(f"{symbol}: unknown disposition {disposition!r}")
+    usage = entry.get("usage", "")
+    assertion = entry.get("assertion", "")
+    if disposition in {"used-asserted", "used-unasserted"}:
+        if not reference_exists(usage):
+            errors.append(f"{symbol}: stale or invalid example usage reference {usage!r}")
+        else:
+            defect = perfunctory_exercise(
+                symbol,
+                kind,
+                anchored_exercise_source(usage) or "",
+                disposition or "",
+            )
+            if defect:
+                errors.append(
+                    f"{symbol}: example usage anchor {usage!r} {defect}. "
+                    "Anchor an executed operation or observed outcome instead."
+                )
+    if disposition == "used-asserted":
+        if not reference_exists(assertion):
+            errors.append(
+                f"{symbol}: stale or invalid example assertion reference {assertion!r}"
+            )
+        elif tautological_assertion(assertion):
+            errors.append(
+                f"{symbol}: assertion anchor {assertion!r} is a tautology -- "
+                "size_of/align_of holds for every non-ZST and proves only that "
+                "the path resolves. Assert an outcome the runtime produced."
+            )
+        else:
+            defect = uninformative_assertion(
+                assertion, anchored_source(assertion) or ""
+            )
+            if defect:
+                errors.append(
+                    f"{symbol}: assertion anchor {assertion!r} {defect}. "
+                    "Anchor the line that states what the example observed."
+                )
+            inherited = (
+                None
+                if usage == assertion
+                else unrelated_fluent_assertion(
+                    anchored_source(usage) or "",
+                    anchored_source(assertion) or "",
+                )
+            )
+            if inherited:
+                errors.append(
+                    f"{symbol}: fluent usage anchor {usage!r} {inherited}; "
+                    f"assertion {assertion!r} does not establish this call's outcome. "
+                    "Anchor a direct outcome or downgrade the disposition."
+                )
+    elif assertion:
+        errors.append(f"{symbol}: only used-asserted entries may name an assertion")
+    if disposition in INTERNAL_DISPOSITIONS:
+        if not reference_exists(usage):
+            errors.append(
+                f"{symbol}: stale or invalid internal consumer reference "
+                f"{usage!r}. An internal seam's justification is its anchor, "
+                "so the file, line, and source text all have to resolve."
+            )
+        imported = import_anchor_defect(usage)
+        if imported:
+            errors.append(
+                f"{symbol}: usage anchor {usage!r} {imported}. An internal "
+                "seam's claim is that shipped code needs the item."
+            )
+        declared = declaration_anchor_defect(symbol, usage)
+        if declared:
+            errors.append(
+                f"{symbol}: usage anchor {usage!r} {declared}. An internal "
+                "consumer's anchor is a line that needs the item, not the "
+                "line that defines it."
+            )
+        if table.states("kind") and table.states("aliases"):
+            owners = member_owners(symbol, entry.get("aliases"), kind or "")
+            defect = member_anchor_defect(
+                symbol,
+                entry.get("aliases"),
+                kind or "",
+                leaf_owners.get(symbol.split("::")[-1], set()) - owners,
+                usage,
+            )
+            if defect:
+                errors.append(
+                    f"{symbol}: usage anchor {usage!r} {defect}. Anchor a line "
+                    "that names the owning type, or record the consumer in prose "
+                    "under a disposition that does not claim machine-checked "
+                    "evidence."
+                )
+        if disposition == "internal-test-only":
+            reason_text = entry.get("reason", "")
+            if not reason_text.strip():
+                errors.append(
+                    f"{symbol}: internal-test-only requires a reason; the anchor "
+                    "says a test consumes it, not why that is the whole story"
+                )
+            elif (
+                not any(home in symbol for home in FEATURE_GATED_TEST_HOMES)
+                and "Relocate:" not in reason_text
+            ):
+                errors.append(
+                    f"{symbol}: internal-test-only outside a testing module "
+                    "requires a Relocate: note naming where the item goes, "
+                    "because a test is not a home"
+                )
+    if disposition.startswith("unused-") and usage:
+        errors.append(
+            f"{symbol}: an unused disposition may not name a usage anchor "
+            f"({usage!r}); an anchor is a claim of use"
+        )
+    for field, reference in (("usage", usage), ("assertion", assertion)):
+        allowed = DISPOSITION_TIERS.get(disposition or "")
+        if not reference or allowed is None:
+            continue
+        tier = anchor_tier(reference)
+        if tier not in allowed:
+            errors.append(
+                f"{symbol}: {field} anchor {reference!r} is "
+                f"{tier or 'unrecognized'}-tier evidence, but {disposition} "
+                f"anchors in {' or '.join(sorted(allowed))}. Each tier proves "
+                "a different thing; a row may not blend them."
+            )
+    if disposition.startswith("unused-") and not entry.get("reason", "").strip():
+        errors.append(f"{symbol}: unused disposition requires a concrete reason")
+    if disposition == "unused-remove" and "Breaking:" not in entry.get("reason", ""):
+        errors.append(f"{symbol}: removal disposition requires a Breaking: note")
+    reason = entry.get("reason", "")
+    # The prose lints read the row's claims, not the source it quotes: a
+    # citation's snippet is code, and code may legitimately say `/`.
+    prose = quoted_prose(reason)
+    for field, value in (("reason", prose), ("usage", usage), ("assertion", assertion)):
+        # For evidence references only the location is a path; the anchored
+        # source text after `#` is code, and code may legitimately say `/`.
+        offender = machine_local_path(
+            value if field == "reason" else value.split("#", 1)[0]
+        )
+        if offender:
+            errors.append(
+                f"{symbol}: {field} names the machine-local path {offender!r}; "
+                "evidence must be repository-relative"
+            )
+    citation = prose_citation_defect(
+        symbol, kind or "", reason, anchor_locations(entry)
+    )
+    if citation:
+        errors.append(
+            f"{symbol}: reason {citation}. A citation a reader cannot "
+            "confirm is not a justification."
+        )
+    stale = stale_disposition_reason(disposition or "", prose)
+    if stale:
+        errors.append(f"{symbol}: reason {stale}")
+    missing = missing_repository_path(prose)
+    if missing:
+        errors.append(
+            f"{symbol}: reason cites missing repository file {missing!r}; "
+            "cited evidence paths must exist"
+        )
+    migration = impossible_facade_migration(prose, facade_dirs)
+    if migration:
+        errors.append(
+            f"{symbol}: reason parks the consumer at {migration!r} behind a "
+            "migration to the lash facade, but the facade is built on that "
+            "crate and it cannot depend on the facade"
+        )
+    return errors
+
+
 def check() -> int:
     document = inventory_document()
     entries = document.get("api", [])
@@ -3934,222 +4184,23 @@ def check() -> int:
             "unknown low-level Lashlang API disposition: "
             + ", ".join(unexpected_low_level)
         )
+    low_level_seen: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in low_level_entries:
-        symbol = entry.get("symbol", "")
-        disposition = entry.get("disposition")
-        if disposition not in DISPOSITIONS:
-            errors.append(f"{symbol}: unknown low-level disposition {disposition!r}")
-        usage = entry.get("usage", "")
-        assertion = entry.get("assertion", "")
-        if disposition in {"used-asserted", "used-unasserted"} and not reference_exists(usage):
-            errors.append(f"{symbol}: stale or invalid low-level usage reference {usage!r}")
-        if disposition == "used-asserted" and not reference_exists(assertion):
-            errors.append(
-                f"{symbol}: stale or invalid low-level assertion reference {assertion!r}"
-            )
-        if disposition.startswith("unused-") and not entry.get("reason", "").strip():
-            errors.append(f"{symbol}: unused low-level disposition requires a concrete reason")
-        for field, reference in (("usage", usage), ("assertion", assertion)):
-            allowed = DISPOSITION_TIERS.get(disposition or "")
-            if not reference or allowed is None:
-                continue
-            tier = anchor_tier(reference)
-            if tier not in allowed:
-                errors.append(
-                    f"{symbol}: low-level {field} anchor {reference!r} is "
-                    f"{tier or 'unrecognized'}-tier evidence, but {disposition} "
-                    f"anchors in {' or '.join(sorted(allowed))}"
-                )
-    for entry in entries:
-        symbol = entry.get("symbol", "")
-        kind = entry.get("kind", "")
-        availability = entry.get("availability", "")
-        api = (symbol, kind)
-        if api in by_api:
-            errors.append(f"duplicate inventory entry: {symbol} ({kind})")
-        by_api[api] = entry
-        if availability not in {"default", "all-features", "default+all-features"}:
-            errors.append(f"{symbol}: invalid availability {availability!r}")
-        aliases = entry.get("aliases", [])
-        if not isinstance(aliases, list) or not all(
-            isinstance(alias, str) for alias in aliases
-        ):
-            errors.append(f"{symbol}: aliases must be a list of paths")
-        elif aliases != sorted(aliases) or symbol in aliases or len(set(aliases)) != len(aliases):
-            errors.append(
-                f"{symbol}: aliases must be sorted, distinct, and exclude the primary path"
-            )
-        elif "aliases" in entry and not aliases:
-            errors.append(f"{symbol}: omit aliases rather than recording an empty list")
-        if entry.get("area") not in AREAS:
-            errors.append(f"{symbol}: unknown area {entry.get('area')!r}")
-        disposition = entry.get("disposition")
-        if disposition not in DISPOSITIONS:
-            errors.append(f"{symbol}: unknown disposition {disposition!r}")
-        usage = entry.get("usage", "")
-        assertion = entry.get("assertion", "")
-        if disposition in {"used-asserted", "used-unasserted"}:
-            if not reference_exists(usage):
-                errors.append(f"{symbol}: stale or invalid example usage reference {usage!r}")
-            else:
-                defect = perfunctory_exercise(
-                    symbol,
-                    kind,
-                    anchored_exercise_source(usage) or "",
-                    disposition or "",
-                )
-                if defect:
-                    errors.append(
-                        f"{symbol}: example usage anchor {usage!r} {defect}. "
-                        "Anchor an executed operation or observed outcome instead."
-                    )
-        if disposition == "used-asserted":
-            if not reference_exists(assertion):
-                errors.append(
-                    f"{symbol}: stale or invalid example assertion reference {assertion!r}"
-                )
-            elif tautological_assertion(assertion):
-                errors.append(
-                    f"{symbol}: assertion anchor {assertion!r} is a tautology -- "
-                    "size_of/align_of holds for every non-ZST and proves only that "
-                    "the path resolves. Assert an outcome the runtime produced."
-                )
-            else:
-                defect = uninformative_assertion(
-                    assertion, anchored_source(assertion) or ""
-                )
-                if defect:
-                    errors.append(
-                        f"{symbol}: assertion anchor {assertion!r} {defect}. "
-                        "Anchor the line that states what the example observed."
-                    )
-                inherited = (
-                    None
-                    if usage == assertion
-                    else unrelated_fluent_assertion(
-                        anchored_source(usage) or "",
-                        anchored_source(assertion) or "",
-                    )
-                )
-                if inherited:
-                    errors.append(
-                        f"{symbol}: fluent usage anchor {usage!r} {inherited}; "
-                        f"assertion {assertion!r} does not establish this call's outcome. "
-                        "Anchor a direct outcome or downgrade the disposition."
-                    )
-        elif assertion:
-            errors.append(f"{symbol}: only used-asserted entries may name an assertion")
-        if disposition in INTERNAL_DISPOSITIONS:
-            if not reference_exists(usage):
-                errors.append(
-                    f"{symbol}: stale or invalid internal consumer reference "
-                    f"{usage!r}. An internal seam's justification is its anchor, "
-                    "so the file, line, and source text all have to resolve."
-                )
-            owners = member_owners(symbol, entry.get("aliases"), kind or "")
-            imported = import_anchor_defect(usage)
-            if imported:
-                errors.append(
-                    f"{symbol}: usage anchor {usage!r} {imported}. An internal "
-                    "seam's claim is that shipped code needs the item."
-                )
-            declared = declaration_anchor_defect(symbol, usage)
-            if declared:
-                errors.append(
-                    f"{symbol}: usage anchor {usage!r} {declared}. An internal "
-                    "consumer's anchor is a line that needs the item, not the "
-                    "line that defines it."
-                )
-            defect = member_anchor_defect(
-                symbol,
-                entry.get("aliases"),
-                kind or "",
-                leaf_owners.get(symbol.split("::")[-1], set()) - owners,
-                usage,
-            )
-            if defect:
-                errors.append(
-                    f"{symbol}: usage anchor {usage!r} {defect}. Anchor a line "
-                    "that names the owning type, or record the consumer in prose "
-                    "under a disposition that does not claim machine-checked "
-                    "evidence."
-                )
-            if disposition == "internal-test-only":
-                reason_text = entry.get("reason", "")
-                if not reason_text.strip():
-                    errors.append(
-                        f"{symbol}: internal-test-only requires a reason; the anchor "
-                        "says a test consumes it, not why that is the whole story"
-                    )
-                elif (
-                    not any(home in symbol for home in FEATURE_GATED_TEST_HOMES)
-                    and "Relocate:" not in reason_text
-                ):
-                    errors.append(
-                        f"{symbol}: internal-test-only outside a testing module "
-                        "requires a Relocate: note naming where the item goes, "
-                        "because a test is not a home"
-                    )
-        if disposition.startswith("unused-") and usage:
-            errors.append(
-                f"{symbol}: an unused disposition may not name a usage anchor "
-                f"({usage!r}); an anchor is a claim of use"
-            )
-        for field, reference in (("usage", usage), ("assertion", assertion)):
-            allowed = DISPOSITION_TIERS.get(disposition or "")
-            if not reference or allowed is None:
-                continue
-            tier = anchor_tier(reference)
-            if tier not in allowed:
-                errors.append(
-                    f"{symbol}: {field} anchor {reference!r} is "
-                    f"{tier or 'unrecognized'}-tier evidence, but {disposition} "
-                    f"anchors in {' or '.join(sorted(allowed))}. Each tier proves "
-                    "a different thing; a row may not blend them."
-                )
-        if disposition.startswith("unused-") and not entry.get("reason", "").strip():
-            errors.append(f"{symbol}: unused disposition requires a concrete reason")
-        if disposition == "unused-remove" and "Breaking:" not in entry.get("reason", ""):
-            errors.append(f"{symbol}: removal disposition requires a Breaking: note")
-        reason = entry.get("reason", "")
-        # The prose lints read the row's claims, not the source it quotes: a
-        # citation's snippet is code, and code may legitimately say `/`.
-        prose = quoted_prose(reason)
-        for field, value in (("reason", prose), ("usage", usage), ("assertion", assertion)):
-            # For evidence references only the location is a path; the anchored
-            # source text after `#` is code, and code may legitimately say `/`.
-            offender = machine_local_path(
-                value if field == "reason" else value.split("#", 1)[0]
-            )
-            if offender:
-                errors.append(
-                    f"{symbol}: {field} names the machine-local path {offender!r}; "
-                    "evidence must be repository-relative"
-                )
-        citation = prose_citation_defect(
-            symbol, kind or "", reason, anchor_locations(entry)
+        errors += row_errors(
+            entry,
+            table=LOW_LEVEL_TABLE,
+            seen=low_level_seen,
+            leaf_owners=leaf_owners,
+            facade_dirs=facade_dirs,
         )
-        if citation:
-            errors.append(
-                f"{symbol}: reason {citation}. A citation a reader cannot "
-                "confirm is not a justification."
-            )
-        stale = stale_disposition_reason(disposition or "", prose)
-        if stale:
-            errors.append(f"{symbol}: reason {stale}")
-        missing = missing_repository_path(prose)
-        if missing:
-            errors.append(
-                f"{symbol}: reason cites missing repository file {missing!r}; "
-                "cited evidence paths must exist"
-            )
-        migration = impossible_facade_migration(prose, facade_dirs)
-        if migration:
-            errors.append(
-                f"{symbol}: reason parks the consumer at {migration!r} behind a "
-                "migration to the lash facade, but the facade is built on that "
-                "crate and it cannot depend on the facade"
-            )
+    for entry in entries:
+        errors += row_errors(
+            entry,
+            table=API_TABLE,
+            seen=by_api,
+            leaf_owners=leaf_owners,
+            facade_dirs=facade_dirs,
+        )
 
     all_entries = [*entries, *low_level_entries]
     errors += example_test_tier_errors(all_entries)
