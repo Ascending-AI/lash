@@ -210,6 +210,9 @@ fn union_type(variants: Vec<TypeExpr>) -> TypeExpr {
         }
     }
     match unique.len() {
+        // Unlike the linker's empty-list element union, this is the
+        // JSON-Schema importer domain: an empty `anyOf` widens to `Any`.
+        // The divergence is intentional and pinned separately (FIG-1878).
         0 => TypeExpr::Any,
         1 => unique.pop().expect("single union variant"),
         _ => TypeExpr::Union(unique),
@@ -398,5 +401,13 @@ mod tests {
         ] {
             assert_eq!(json_schema_to_type_expr(&schema), TypeExpr::Any);
         }
+    }
+
+    #[test]
+    fn empty_any_of_imports_as_any() {
+        assert_eq!(
+            json_schema_to_type_expr(&json!({ "anyOf": [] })),
+            TypeExpr::Any
+        );
     }
 }

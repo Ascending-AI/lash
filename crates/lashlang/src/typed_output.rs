@@ -5,6 +5,10 @@ use thiserror::Error;
 
 use crate::{LASH_TYPE_KEY, runtime::SchemaScalarKind};
 
+// Same name and value as json_schema.rs's importer cap, but opposite policy by
+// design (FIG-1878): the importer widens to Any at the cap, this parser errors.
+const MAX_SCHEMA_DEPTH: usize = 32;
+
 /// Parse a tool's output-schema witness into the JSON Schema it describes.
 ///
 /// Accepts either record shorthand (field name to scalar/list descriptor) or
@@ -36,6 +40,9 @@ pub enum OutputSchemaError {
     /// A `$lash_type` union contains fields outside the producer vocabulary.
     #[error("Type schema `anyOf` cannot have sibling fields")]
     TypeSchemaAnyOfSiblings,
+    /// A `$lash_type` schema is nested beyond the validation depth bound.
+    #[error("Type schema exceeds maximum nesting depth of {MAX_SCHEMA_DEPTH}")]
+    TypeSchemaDepthExceeded,
     /// A `$lash_type` object declares an unsupported JSON Schema type.
     #[error("unsupported Type schema kind `{kind}`")]
     UnsupportedTypeSchema { kind: String },
@@ -83,6 +90,16 @@ pub fn parse_output_schema(value: Option<&Value>) -> Result<Option<Value>, Outpu
 }
 
 fn validate_lash_type_schema(schema: &Value) -> Result<(), OutputSchemaError> {
+    validate_lash_type_schema_at_depth(schema, 0)
+}
+
+fn validate_lash_type_schema_at_depth(
+    schema: &Value,
+    depth: usize,
+) -> Result<(), OutputSchemaError> {
+    if depth >= MAX_SCHEMA_DEPTH {
+        return Err(OutputSchemaError::TypeSchemaDepthExceeded);
+    }
     let object = schema
         .as_object()
         .ok_or(OutputSchemaError::TypeSchemaExpectedObject)?;
@@ -98,7 +115,7 @@ fn validate_lash_type_schema(schema: &Value) -> Result<(), OutputSchemaError> {
             return Err(OutputSchemaError::TypeSchemaAnyOfEmpty);
         }
         for variant in variants {
-            validate_lash_type_schema(variant)?;
+            validate_lash_type_schema_at_depth(variant, depth + 1)?;
         }
         return Ok(());
     }
@@ -240,6 +257,21 @@ mod tests {
         assert_eq!(
             parse_output_schema(Some(&output)),
             Err(OutputSchemaError::TypeSchemaAnyOfSiblings)
+        );
+    }
+
+    #[test]
+    fn rejects_any_of_beyond_max_schema_depth() {
+        let mut schema = serde_json::json!({"type": "string"});
+        for _ in 0..MAX_SCHEMA_DEPTH {
+            schema = serde_json::json!({"anyOf": [schema]});
+        }
+
+        assert_eq!(
+            parse_output_schema(Some(&serde_json::json!({
+                (LASH_TYPE_KEY): schema
+            }))),
+            Err(OutputSchemaError::TypeSchemaDepthExceeded)
         );
     }
 }
