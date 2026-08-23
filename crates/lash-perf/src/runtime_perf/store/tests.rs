@@ -1,18 +1,44 @@
 use super::*;
-use lash_core::runtime::{DeliveryPolicy, QueuedWorkPayload, RuntimeSessionState};
-use lash_sansio::sync::MutexExt;
+use lash_core::SessionCommitStore;
+use lash_core::runtime::{
+    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, RuntimeSessionState,
+};
 
-#[tokio::test]
-async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
-    let store = RuntimePerfStore::default();
-    let state = RuntimeSessionState {
-        session_id: "root".to_string(),
+fn test_state(session_id: &str) -> RuntimeSessionState {
+    RuntimeSessionState {
+        session_id: session_id.to_string(),
         turn_index: 1,
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
-    };
-    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    }
+}
+
+fn state_with_one_pending_node(session_id: &str) -> RuntimeSessionState {
+    let mut state = test_state(session_id);
+    state.ensure_agent_frame_initialized();
+    state
+}
+
+#[tokio::test]
+async fn successful_commits_are_counted_after_the_inner_store_accepts_them() {
+    let store = RuntimePerfStore::default();
+    let commit =
+        RuntimeCommit::persisted_state_for_test(&state_with_one_pending_node("counted"), &[]);
+    let expected_node_count = commit.graph.nodes.len();
+    assert!(expected_node_count > 0, "fixture must commit graph nodes");
+
+    SessionCommitStore::commit_runtime_state(&store, commit)
+        .await
+        .expect("in-memory commit succeeds");
+
+    assert_eq!(store.graph_node_count(), expected_node_count);
+}
+
+#[tokio::test]
+async fn rejected_commits_do_not_change_the_instrumentation_counter() {
+    let store = RuntimePerfStore::default();
+    let mut commit = RuntimeCommit::persisted_state_for_test(&test_state("root"), &[]);
     commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
         "other-session",
         DeliveryPolicy::AfterCurrentTurnCommit,
@@ -23,175 +49,10 @@ async fn runtime_commit_rejects_cross_session_queue_batches_atomically() {
         )],
     )];
 
-    let error = store
-        .commit_runtime_state(commit)
+    let error = SessionCommitStore::commit_runtime_state(&store, commit)
         .await
         .expect_err("cross-session queue batch must reject the commit");
 
-    assert!(matches!(
-        error,
-        StoreError::SessionBindingMismatch {
-            bound_session_id,
-            attempted_session_id,
-        } if bound_session_id == "root" && attempted_session_id == "other-session"
-    ));
-    assert!(
-        store
-            .load_session()
-            .await
-            .expect("load session after rejected commit")
-            .is_none(),
-        "rejected commit must not persist session state"
-    );
-    assert!(
-        store
-            .list_queued_work("other-session")
-            .await
-            .expect("list queued work after rejected commit")
-            .is_empty(),
-        "rejected commit must not enqueue cross-session work"
-    );
-}
-
-/// The perf harness's store is a real [`SessionExecutionLeaseStore`], so it owes
-/// the same displacement contract as the durable backends.
-///
-/// A double that reports no displacement silently disables
-/// `session_execution_lease.taken_over` for everything running on it, and that
-/// absence is invisible until an operator needs the event. This runs the shared
-/// conformance vector rather than a local copy, so the perf store cannot drift
-/// away from the contract the durable backends are held to.
-#[tokio::test]
-async fn perf_store_reports_the_holder_a_claim_displaces() {
-    let store = RuntimePerfStore::default();
-    lash_core::testing::conformance::session_execution_lease_displacement(
-        &store,
-        "perf-lease-displacement",
-    )
-    .await;
-}
-
-/// The perf harness's store is the fourth backend behind the executor
-/// discriminator, so it owes the same-host/distinct-executor geometry too.
-/// Running the shared law rather than a local copy is what stops the double from
-/// quietly granting one host's second open the lane the first one holds.
-#[tokio::test]
-async fn perf_store_keeps_same_host_distinct_executors_lane_less() {
-    lash_core::testing::conformance::same_host_distinct_executors_are_lane_less_without_revoking_holder(
-        Arc::new(RuntimePerfStore::default()),
-    )
-    .await;
-}
-
-/// The perf store implements no reclamation. The maintenance outcome contract
-/// makes that a stated failure rather than an empty sweep, so a benchmark run
-/// can never read "nothing to reclaim" from a backend that never looked.
-#[tokio::test]
-async fn perf_store_reports_unimplemented_maintenance_levers() {
-    let store = RuntimePerfStore::default();
-    lash_core::testing::conformance::store_maintenance_unimplemented_levers_fail(
-        "lash-perf",
-        &store,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn perf_store_enforces_core_lease_fence_authority() {
-    let store = RuntimePerfStore::default();
-    lash_core::testing::conformance::session_execution_lease_fence_authority(&store).await;
-}
-
-#[tokio::test]
-async fn perf_store_enforces_borrowed_commit_contract() {
-    lash_core::testing::conformance::borrowed_session_execution_lease_commit_contract(Arc::new(
-        RuntimePerfStore::default(),
-    ))
-    .await;
-}
-
-#[tokio::test]
-async fn perf_store_pins_durable_claim_id_dialects() {
-    let store = RuntimePerfStore::default();
-    let session_id = "perf-claim-id-dialects";
-    let owner = LeaseOwnerIdentity::opaque("perf-owner", "perf-incarnation");
-    let queued = store
-        .enqueue_queued_work(QueuedWorkBatchDraft::new(
-            session_id,
-            DeliveryPolicy::EarliestSafeBoundary,
-            vec![QueuedWorkPayload::agent_frame_task("frame", "task", None)],
-        ))
-        .await
-        .expect("enqueue perf queued work");
-    let pending = store
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
-            session_id,
-            lash_core::TurnInputIngress::next_turn(),
-            lash_core::TurnInput::text("input"),
-        ))
-        .await
-        .expect("enqueue perf turn input");
-    let lease = store
-        .try_claim_session_execution_lease(
-            session_id,
-            &owner,
-            "perf-store-pins-durable-claim-id-dialects-executor",
-            60_000,
-        )
-        .await
-        .expect("claim perf session lease")
-        .acquired()
-        .expect("perf session lease acquired");
-    let queued_claim = store
-        .claim_ready_queued_work(
-            session_id,
-            &lease.fence(),
-            &owner,
-            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .expect("claim perf queued work")
-        .claim()
-        .expect("perf queued claim");
-    let input_claim = store
-        .claim_next_turn_inputs(session_id, &lease.fence(), &owner, 1)
-        .await
-        .expect("claim perf turn input")
-        .expect("perf turn-input claim");
-
-    assert_eq!(
-        queued_claim.claim_id,
-        format!("perf-qwc:{}:1", queued.enqueue_seq)
-    );
-    assert_eq!(
-        input_claim.claim_id,
-        format!("perf-tic:{}:1", pending.enqueue_seq)
-    );
-    assert_eq!(
-        store.queued_work.lock_recover()[0].claim_id.as_deref(),
-        Some(queued_claim.claim_id.as_str())
-    );
-    assert_eq!(
-        store.pending_turn_inputs.lock_recover()[0]
-            .claim_id
-            .as_deref(),
-        Some(input_claim.claim_id.as_str())
-    );
-}
-
-#[tokio::test]
-async fn perf_store_exact_claim_preserves_physical_order_and_key_breaks() {
-    lash_core::testing::conformance::queued_work_exact_claim_preserves_physical_order_and_key_breaks(
-        Arc::new(RuntimePerfStore::default()),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn perf_store_leaves_no_input_pinned_to_a_turn_that_cannot_commit() {
-    lash_core::testing::conformance::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
-        Arc::new(RuntimePerfStore::default()),
-    )
-    .await;
+    assert!(matches!(error, StoreError::SessionBindingMismatch { .. }));
+    assert_eq!(store.graph_node_count(), 0);
 }

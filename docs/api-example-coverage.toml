@@ -35,7 +35,7 @@ removal_verdicts_recorded = 771
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2792
+prose_citations_recorded = 2796
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -1459,9 +1459,8 @@ symbol = "lash::testing::conformance::queued_work_exact_claim_preserves_physical
 kind = "function"
 availability = "all-features"
 area = "stores"
-disposition = "internal-test-only"
-usage = "crates/lash-perf/src/runtime_perf/store/tests.rs:185#lash_core::testing::conformance::queued_work_exact_claim_preserves_physical_order_and_key_breaks("
-reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
+disposition = "unused-justify"
+reason = "The feature-gated conformance module's aggregate runner invokes this check at crates/lash-core/src/testing/conformance/runtime_persistence.rs::runtime_persistence_suite#`queued_work_exact_claim_preserves_physical_order_and_key_breaks(make(\"physical-order\")).await;`; the checker cannot tie the bare same-module call to the owning path mechanically, so the row records the surviving test consumer in prose rather than claiming a usage anchor."
 
 [[api]]
 symbol = "lash::testing::conformance::queued_work_redrive_selects_claim_identity_across_ready_gap"
@@ -3898,7 +3897,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Internal integrator seam: `lash_core::PendingTurnInput` is consumed inside the workspace at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_pending_turn_input#`) -> Result<lash_core::PendingTurnInput, StoreError> {`. lash-perf is written against the core contract directly, so the core path is the seam it implements. Host-facing projection: `lash::PendingTurnInput`. Also retained for downstream host compatibility: the Figments `lash-runtime` app builds against the published lash-core crate directly."
+reason = "Internal integrator seam: `lash_core::PendingTurnInput` is consumed inside the workspace at crates/lash-core/src/runtime/in_memory_store/turn_input.rs::InMemorySessionStore::enqueue_pending_turn_input#`) -> Result<crate::PendingTurnInput, crate::store::StoreError> {`. The in-memory backend is written against the core contract directly, so the core path is the seam it implements. Host-facing projection: `lash::PendingTurnInput`. Also retained for downstream host compatibility: the Figments `lash-runtime` app builds against the published lash-core crate directly."
 
 [[api]]
 symbol = "lash::PendingTurnInput::accepted_input"
@@ -4027,7 +4026,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome::AlreadyClaimed::claim", "lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed::claim"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:89#claim: self.claim_diagnostics(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1463#claim: pending_turn_input_claim_diagnostics_from_row(&row),"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::AlreadyClaimed::input"
@@ -14600,8 +14599,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::input_id"]
 area = "stores"
-disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:1088#.input_id"
+disposition = "unused-justify"
+reason = "No machine-checked anchor is available for this field: the checker locates a leaf at its first occurrence on the physical line, and every cross-crate typed consumer binds `let input_id` there, so the receiver chain is never extracted -- crates/lash-postgres-store/src/postgres/runtime_persistence.rs::PostgresSessionStore::enqueue_pending_turn_input#`let input_id = draft.input_id.clone().unwrap_or_else(|| {` and crates/lash-sqlite-store/src/persistence.rs::Store::enqueue_pending_turn_input#`let input_id = draft.input_id.clone().unwrap_or_else(|| {` are the two typed consumers. The only cleanly resolvable member access sits in lash-core, the crate that declares PendingTurnInputDraft. The field remains part of the published PendingTurnInputDraft compatibility surface."
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::new"
@@ -14765,7 +14764,7 @@ availability = "default+all-features"
 aliases = ["lash_core::store::PersistedSessionRead::graph"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::PersistedSessionRead::graph` directly; the gate reaches the same item a second time through `lash_core::SessionCommitStore::load_session`. Consumer class: the performance harness and the in-memory core store -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::load_session#`graph,`, crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::load_session#`graph,`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::PersistedSessionRead::graph` directly; the gate reaches the same item a second time through `lash_core::SessionCommitStore::load_session`. Consumer class: the Postgres store adapter and the in-memory core store -- this field is exercised in-repo at crates/lash-postgres-store/src/postgres/runtime_persistence.rs::PostgresSessionStore::load_session#`graph,`, crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::load_session#`graph,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::PersistedSessionRead::head_revision"
@@ -14783,7 +14782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::store::PersistedSessionRead::session_id"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::PersistedSessionRead::session_id` directly; the gate reaches the same item a second time through `lash_core::SessionCommitStore::load_session`. Consumer class: the performance harness -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::find_pending_turn_input_index#`entry.input.session_id == session_id`, crates/lash-perf/src/runtime_perf/store.rs::find_pending_turn_input_index#`session_id: &str,`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::PersistedSessionRead::session_id` directly; the gate reaches the same item a second time through `lash_core::SessionCommitStore::load_session`. Consumer class: the Postgres store adapter and the in-memory core store -- this field is exercised in-repo at crates/lash-postgres-store/src/postgres/runtime_persistence.rs::PostgresSessionStore::load_session#`session_id: meta.session_id,`, crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::load_session#`session_id: meta.session_id,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::PersistedSessionRead::token_ledger"
@@ -14955,7 +14954,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatch::enqueue_seq"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkBatch::enqueue_seq` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::exclusive_session_command`. Consumer class: the performance harness and the SQLite store adapter -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_queued_work_in_memory#`&& entry.batch.source_key.as_deref() == Some(source_key)`, crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_queued_work_in_memory#`enqueue_seq,`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkBatch::enqueue_seq` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::exclusive_session_command`. Consumer class: the Postgres store adapter and the in-memory core store -- this field is exercised in-repo at crates/lash-postgres-store/src/postgres/session_factory.rs::queued_work_batch_from_row#`enqueue_seq: row.enqueue_seq,`, crates/lash-core/src/runtime/in_memory_store/queued_work.rs::InMemorySessionStore::enqueue_queued_work_for_state#`enqueue_seq: *next_seq,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkBatch::enqueued_at_ms"
@@ -14964,7 +14963,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatch::enqueued_at_ms"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkBatch::enqueued_at_ms` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::exclusive_session_command`. Consumer class: the performance harness and the Postgres store adapter -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_queued_work_in_memory#`enqueue_seq,`, crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_pending_turn_input#`input_id,`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkBatch::enqueued_at_ms` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::exclusive_session_command`. Consumer class: the Postgres store adapter and the in-memory core store -- this field is exercised in-repo at crates/lash-postgres-store/src/postgres/session_factory.rs::queued_work_batch_from_row#`enqueued_at_ms: row.enqueued_at_ms,`, crates/lash-core/src/runtime/in_memory_store/queued_work.rs::InMemorySessionStore::enqueue_queued_work_for_state#`enqueued_at_ms,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkBatch::is_session_command_work"
@@ -15081,7 +15080,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::payloads"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkBatchDraft::payloads` directly; the gate reaches the same item a second time through `lash_core::QueuedWorkStore::enqueue_queued_work`. Consumer class: the performance harness and the Postgres store adapter -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_queued_work_in_memory#`delivery_policy: batch.delivery_policy,`, crates/lash-postgres-store/src/postgres/runtime_persistence.rs::enqueue_queued_work_with_outcome_tx#`for (index, payload) in batch.payloads.iter().enumerate() {`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkBatchDraft::payloads` directly; the gate reaches the same item a second time through `lash_core::QueuedWorkStore::enqueue_queued_work`. Consumer class: the in-memory core store and the Postgres store adapter -- this field is exercised in-repo at crates/lash-core/src/runtime/in_memory_store/queued_work.rs::InMemorySessionStore::enqueue_queued_work_for_state#`.payloads`, crates/lash-postgres-store/src/postgres/runtime_persistence.rs::enqueue_queued_work_with_outcome_tx#`for (index, payload) in batch.payloads.iter().enumerate() {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkBatchDraft::process_wake_source"
@@ -15252,7 +15251,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkItem::item_id"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkItem::item_id` directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatch::items`. Consumer class: the performance harness and the Postgres store adapter -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_queued_work_in_memory#`available_at_ms: batch.available_at_ms,`, crates/lash-postgres-store/src/postgres/session_factory.rs::queued_work_batch_from_row#`item_id: item.get(0),`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkItem::item_id` directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatch::items`. Consumer class: the in-memory core store and the Postgres store adapter -- this field is exercised in-repo at crates/lash-core/src/runtime/in_memory_store/queued_work.rs::InMemorySessionStore::enqueue_queued_work_for_state#`item_id: format!(\"{batch_id}:item:{index}\"),`, crates/lash-postgres-store/src/postgres/session_factory.rs::queued_work_batch_from_row#`item_id: item.get(0),`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkItem::payload"
@@ -15261,7 +15260,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkItem::payload"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkItem::payload` directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatch::items`. Consumer class: the performance harness and the Postgres store adapter -- this field is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_queued_work_in_memory#`merge_key: batch.merge_key,`, crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::enqueue_queued_work_in_memory#`enqueued_at_ms: current_epoch_ms(),`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkItem::payload` directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatch::items`. Consumer class: the in-memory core store and the Postgres store adapter -- this field is exercised in-repo at crates/lash-core/src/runtime/in_memory_store/queued_work.rs::InMemorySessionStore::enqueue_queued_work_for_state#`payload,`, crates/lash-postgres-store/src/postgres/session_factory.rs::queued_work_batch_from_row#`payload: store_decode_json(&payload_json, \"queued work payload\")?,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkPayload"
@@ -15353,7 +15352,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkPayload::agent_frame_task"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkPayload::agent_frame_task` directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatchDraft::payloads`. Consumer class: the performance harness and the agent-workbench example host -- this function is exercised in-repo at crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs::measure_store_hardening_backend_turn#`.enqueue_queued_work(`, crates/lash-perf/src/runtime_perf/store/tests.rs::runtime_commit_rejects_cross_session_queue_batches_atomically#`\"other-session\",`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::persistence::QueuedWorkPayload::agent_frame_task` directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatchDraft::payloads`. Consumer class: the performance harness -- this function is exercised in-repo at crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs::measure_store_hardening_backend_turn#`vec![QueuedWorkPayload::agent_frame_task(`, crates/lash-perf/src/runtime_perf/store/tests.rs::rejected_commits_do_not_change_the_instrumentation_counter#`vec![QueuedWorkPayload::agent_frame_task(`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkPayload::process_wake"
@@ -15821,7 +15820,7 @@ availability = "default+all-features"
 aliases = ["lash_core::store::runtime_commit::RuntimeCommitReceipt"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::persistence::RuntimeCommitReceipt` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::RuntimeSessionState::apply_persisted_commit_result` because its canonical identity is the lash-core one. Consumer class: the performance harness and core runtime internals -- this type is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::commit_runtime_state#`) -> Result<RuntimeCommitReceipt, store::StoreError> {`, crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::commit_runtime_state#`) -> Result<crate::store::RuntimeCommitReceipt, crate::store::StoreError> {`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: `lash::persistence::RuntimeCommitReceipt` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::RuntimeSessionState::apply_persisted_commit_result` because its canonical identity is the lash-core one. Consumer class: the performance harness and core runtime internals -- this type is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::commit_runtime_state#`) -> Result<RuntimeCommitReceipt, StoreError> {`, crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::commit_runtime_state#`) -> Result<crate::store::RuntimeCommitReceipt, crate::store::StoreError> {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommitReceipt::checkpoint_ref"
@@ -20681,7 +20680,7 @@ availability = "default+all-features"
 aliases = ["lash_core::store::queued_work::QueuedWorkClass"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::persistence::queued_work::QueuedWorkClass` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatch::work_class` because its canonical identity is the lash-core one. Consumer class: the performance harness and the Postgres store adapter -- this type is exercised in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::queued_batch_work_class, crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::queued_batch_work_class#`) -> Result<lash_core::store::QueuedWorkClass, StoreError> {`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: `lash::persistence::queued_work::QueuedWorkClass` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::runtime::turn_queue::QueuedWorkBatch::work_class` because its canonical identity is the lash-core one. Consumer class: the Postgres and SQLite store adapters -- this type is exercised in-repo at crates/lash-postgres-store/src/postgres/runtime_persistence.rs::PostgresSessionStore::claim_ready_queued_work_by_batch_ids#`Some(lash_core::store::QueuedWorkClass::TurnWork)`, crates/lash-sqlite-store/src/persistence.rs::Store::claim_ready_queued_work_by_batch_ids#`Some(lash_core::store::QueuedWorkClass::TurnWork)`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::persistence::queued_work::QueuedWorkClass::SessionCommand"
@@ -72914,7 +72913,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Internal graph seam the anchor resolver cannot tie mechanically: the extension method is called on a `SessionGraph` receiver in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::commit_runtime_state#`.active_path_nodes()` and crates/lash/src/tests/turn_streaming.rs::rlm_tool_calls_stream_from_live_exec_boundary_inner#`.active_path_nodes()`, and no example reaches it, which is what keeps the row unused."
+reason = "Internal graph seam the anchor resolver cannot tie mechanically: the extension method is called on a `SessionGraph` receiver in-repo at crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::commit_runtime_state#`resident.active_path_nodes()` and crates/lash/src/tests/turn_streaming.rs::rlm_tool_calls_stream_from_live_exec_boundary_inner#`.active_path_nodes()`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::SessionGraphFacadeOps::agent_frame_records"
@@ -72931,7 +72930,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "unused-justify"
-reason = "Internal graph seam the anchor resolver cannot tie mechanically: the extension method is called on a `SessionGraph` receiver in-repo at crates/lash-perf/src/runtime_perf/store.rs::RuntimePerfStore::commit_runtime_state#`graph.extend_node_records(commit.graph.nodes.iter().cloned());` and crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::commit_runtime_state#`proposed.extend_node_records(commit.graph.nodes.iter().cloned());`, and no example reaches it, which is what keeps the row unused."
+reason = "Internal graph seam the anchor resolver cannot tie mechanically: the extension method is called on a `SessionGraph` receiver in-repo at crates/lash/src/tests.rs::SnapshotStore::commit_runtime_state#`graph.extend_node_records(commit.graph.nodes.iter().cloned());` and crates/lash-core/src/runtime/in_memory_store.rs::InMemorySessionStore::commit_runtime_state#`proposed.extend_node_records(commit.graph.nodes.iter().cloned());`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::SessionGraphFacadeOps::nearest_frame_node_id"
@@ -78757,7 +78756,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:242#expires_at_epoch_ms: current.expires_at_epoch_ms,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3805#expires_at_epoch_ms: current.expires_at_ms,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::fencing_token"
@@ -92524,9 +92523,8 @@ symbol = "lash::testing::conformance::a_turn_that_cannot_commit_leaves_no_input_
 kind = "function"
 availability = "all-features"
 area = "stores"
-disposition = "internal-test-only"
-usage = "crates/lash-perf/src/runtime_perf/store/tests.rs:193#lash_core::testing::conformance::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it("
-reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
+disposition = "unused-justify"
+reason = "The feature-gated conformance module's aggregate runner invokes this check at crates/lash-core/src/testing/conformance/runtime_persistence.rs::runtime_persistence_suite#`a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(make(\"root\")).await;`; the checker cannot tie the bare same-module call to the owning path mechanically, so the row records the surviving test consumer in prose rather than claiming a usage anchor."
 
 [[api]]
 symbol = "lash::persistence::OrphanedTurnInputScope"
@@ -93119,8 +93117,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:1355#Err(store::MaintenanceFailure::failed_before_any_work("
-reason = "FIG-1505: `lash-perf`'s store reports its unimplemented maintenance levers through this type rather than an empty report, so the consumer is another workspace crate rather than an example. Host-facing projection: `lash::persistence::MaintenanceFailure`."
+usage = "crates/lash-perf/src/runtime_perf/store.rs:119#Err(lash_core::MaintenanceFailure::failed_before_any_work("
+reason = "FIG-1505: `lash-perf`'s artifact store reports its unsupported session deletion through this type rather than an empty report, so the consumer is another workspace crate rather than an example. Host-facing projection: `lash::persistence::MaintenanceFailure`."
 
 [[api]]
 symbol = "lash::persistence::MaintenanceFailure::stop"
@@ -93168,7 +93166,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed_before_any_work"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:1355#Err(store::MaintenanceFailure::failed_before_any_work("
+usage = "crates/lash-perf/src/runtime_perf/store.rs:119#Err(lash_core::MaintenanceFailure::failed_before_any_work("
 reason = "FIG-1505: every backend that stops before reclaiming anything constructs its failure through this; the consumers are backend crates rather than examples."
 
 [[api]]
