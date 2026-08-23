@@ -79,10 +79,11 @@ use lash_core::{
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
     ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TurnInputStore,
-    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
-    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
+    SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    StoreError, StoreMaintenance, TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
+    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
+    facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
@@ -693,6 +694,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
         };
+        let created_at_ms = self.clock.timestamp_ms();
         store
             .conn
             .write_flow(move |tx| {
@@ -711,8 +713,13 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                         },
                     )));
                 }
-                session_meta::write_session_meta(tx, &meta, session_meta::SessionMetaWrite::Insert)
-                    .map_err(sqlite_conversion_error)?;
+                session_meta::write_session_meta(
+                    tx,
+                    &meta,
+                    session_meta::SessionMetaWrite::Insert,
+                    created_at_ms,
+                )
+                .map_err(sqlite_conversion_error)?;
                 Ok(TxOutcome::Commit(Ok(())))
             })
             .await
@@ -757,6 +764,76 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         session_id: &str,
     ) -> Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
         self.open_read_only(session_id).await
+    }
+
+    async fn list_sessions(
+        &self,
+        filter: &SessionListFilter,
+    ) -> Result<Vec<SessionSummary>, StoreError> {
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let conn = SqliteConnection::open_readonly(&path)
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let filter = filter.clone();
+        conn.call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT meta.session_id, meta.created_at_ms,
+                            meta.last_commit_at_ms, COALESCE(head.head_revision, 0),
+                            meta.relation_kind, meta.parent_session_id, 0
+                     FROM session_meta AS meta
+                     LEFT JOIN session_head AS head ON head.session_id = meta.session_id
+                     UNION ALL
+                     SELECT session_id, created_at_ms, last_commit_at_ms,
+                            head_revision, relation_kind, parent_session_id, 1
+                     FROM deleted_sessions
+                     ORDER BY created_at_ms ASC, session_id ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let relation_label = row.get::<_, String>(4)?;
+                let relation = match relation_label.as_str() {
+                    "root" => SessionRelationKind::Root,
+                    "child" => SessionRelationKind::Child,
+                    "fork" => SessionRelationKind::Fork,
+                    other => {
+                        return Err(sqlite_conversion_error(stored_data_corrupt(
+                            "SessionSummary",
+                            format!("unknown relation_kind `{other}`"),
+                        )));
+                    }
+                };
+                Ok(SessionSummary {
+                    session_id: row.get(0)?,
+                    created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(1)?)?,
+                    last_commit_at_ms: row
+                        .get::<_, Option<i64>>(2)?
+                        .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
+                        .transpose()?,
+                    head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(3)?)?,
+                    relation,
+                    parent_session_id: row.get(5)?,
+                    deleted: row.get::<_, i64>(6)? != 0,
+                })
+            })?;
+            let mut summaries = Vec::new();
+            for row in rows {
+                let summary = row?;
+                if filter
+                    .relation
+                    .is_none_or(|relation| relation == summary.relation)
+                    && filter
+                        .deleted
+                        .is_none_or(|deleted| deleted == summary.deleted)
+                {
+                    summaries.push(summary);
+                }
+            }
+            Ok(summaries)
+        })
+        .await
+        .map_err(sqlite_error)
     }
 
     async fn has_claimable_queued_work(
@@ -855,7 +932,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         request: &lash_core::ForkSessionRequest,
     ) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
-        fork_at_in_catalog(&self.root, request).await
+        fork_at_in_catalog(&self.root, request, self.clock.timestamp_ms()).await
     }
 }
 
@@ -1017,7 +1094,23 @@ async fn delete_session_from_catalog(
                 // its tombstoned rows unreachable forever, because the id is
                 // just as unbindable as a host-facing one once deleted.
                 tx.execute(
-                    "INSERT OR IGNORE INTO deleted_sessions (session_id) VALUES (?1)",
+                    "INSERT OR IGNORE INTO deleted_sessions
+                     (session_id, created_at_ms, last_commit_at_ms, head_revision,
+                      relation_kind, parent_session_id)
+                     SELECT meta.session_id, meta.created_at_ms, meta.last_commit_at_ms,
+                            COALESCE(head.head_revision, 0), meta.relation_kind,
+                            meta.parent_session_id
+                     FROM session_meta AS meta
+                     LEFT JOIN session_head AS head ON head.session_id = meta.session_id
+                     WHERE meta.session_id = ?1",
+                    params![session_id],
+                )
+                .map_err(sqlite_error)?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO deleted_sessions
+                     (session_id, created_at_ms, last_commit_at_ms, head_revision,
+                      relation_kind, parent_session_id)
+                     VALUES (?1, 0, NULL, 0, 'root', NULL)",
                     params![session_id],
                 )
                 .map_err(sqlite_error)?;

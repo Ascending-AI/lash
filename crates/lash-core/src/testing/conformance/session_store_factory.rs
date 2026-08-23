@@ -1,6 +1,7 @@
 //! [`SessionStoreFactory`](crate::SessionStoreFactory) conformance: create,
 //! reopen, delete, and session metadata.
 
+use super::session_store_factory_enumeration::session_store_factory_enumeration_is_read_only_and_keeps_tombstones;
 use super::session_store_factory_vacuum::{
     session_store_factory_unbound_vacuum_is_typed_error,
     session_store_factory_vacuum_agrees_on_unpin_before_delete,
@@ -43,6 +44,7 @@ pub async fn session_store_factory<F>(
     session_store_factory_create_seeds_and_reopens_meta(make()).await;
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
+    session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
     config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;

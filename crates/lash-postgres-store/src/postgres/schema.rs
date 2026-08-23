@@ -185,6 +185,20 @@ const TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EX
             ON lash_trigger_occurrences(reclaimable_at_ms, occurrence_id)
             WHERE reclaimable_at_ms IS NOT NULL"#;
 
+const SESSION_META_ENUMERATION_DDL: &str = r#"ALTER TABLE lash_session_meta
+            ADD COLUMN created_at_ms BIGINT,
+            ADD COLUMN last_commit_at_ms BIGINT"#;
+
+const SESSION_META_ENUMERATION_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_session_meta_catalog
+            ON lash_session_meta(created_at_ms, session_id)"#;
+
+const DELETED_SESSION_ENUMERATION_DDL: &str = r#"ALTER TABLE lash_deleted_sessions
+            ADD COLUMN created_at_ms BIGINT,
+            ADD COLUMN last_commit_at_ms BIGINT,
+            ADD COLUMN head_revision BIGINT,
+            ADD COLUMN relation_kind TEXT,
+            ADD COLUMN parent_session_id TEXT"#;
+
 const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
     table: "lash_runtime_effect_replay",
     columns: &["group_key", "settlement_seq"],
@@ -208,16 +222,46 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    // Component 58 adds nullable session-enumeration metadata and its catalog
+    // ordering index. New writes always populate the metadata; migrated legacy
+    // rows retain NULL where no source evidence exists, and enumeration renders
+    // the documented legacy sentinel values.
+    SchemaMigration {
+        from: 57,
+        to: 58,
+        source_missing_tables: &[],
+        source_missing_columns: &[
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
+        ],
+        source_missing_guards: &[],
+        introduced_relations: &["idx_lash_session_meta_catalog"],
+        statements: &[],
+    },
     // Component 57 adds the indexed manifest -> component edge projection used
     // by session-owner blob reclaim. The two root indexes make every liveness
     // arm an indexed NOT EXISTS predicate.
     SchemaMigration {
         from: 56,
-        to: 57,
+        to: 58,
         source_missing_tables: &["lash_checkpoint_blob_refs"],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
+        ],
         source_missing_guards: &[],
         introduced_relations: &[
+            "idx_lash_session_meta_catalog",
             "lash_checkpoint_blob_refs",
             "idx_lash_checkpoint_blob_refs_blob_ref",
             "idx_lash_sessions_checkpoint_ref",
@@ -234,11 +278,21 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // occurrence reclaim eligibility from 56 and checkpoint edges from 57.
     SchemaMigration {
         from: 55,
-        to: 57,
+        to: 58,
         source_missing_tables: &["lash_checkpoint_blob_refs"],
-        source_missing_columns: &[("lash_trigger_occurrences", "reclaimable_at_ms")],
+        source_missing_columns: &[
+            ("lash_trigger_occurrences", "reclaimable_at_ms"),
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
+        ],
         source_missing_guards: &[],
         introduced_relations: &[
+            "idx_lash_session_meta_catalog",
             "lash_checkpoint_blob_refs",
             "idx_lash_checkpoint_blob_refs_blob_ref",
             "idx_lash_sessions_checkpoint_ref",
@@ -261,11 +315,21 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // source shape a 54 store must present is the current one.
     SchemaMigration {
         from: 54,
-        to: 57,
+        to: 58,
         source_missing_tables: &["lash_checkpoint_blob_refs"],
-        source_missing_columns: &[("lash_trigger_occurrences", "reclaimable_at_ms")],
+        source_missing_columns: &[
+            ("lash_trigger_occurrences", "reclaimable_at_ms"),
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
+        ],
         source_missing_guards: &[],
         introduced_relations: &[
+            "idx_lash_session_meta_catalog",
             "lash_checkpoint_blob_refs",
             "idx_lash_checkpoint_blob_refs_blob_ref",
             "idx_lash_sessions_checkpoint_ref",
@@ -289,15 +353,23 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 57,
+        to: 58,
         source_missing_tables: &["lash_runtime_effect_group", "lash_checkpoint_blob_refs"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
             ("lash_trigger_occurrences", "reclaimable_at_ms"),
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
+            "idx_lash_session_meta_catalog",
             "lash_runtime_effect_group",
             "idx_lash_runtime_effect_group_session",
             "idx_lash_runtime_effect_group_scope",
@@ -328,15 +400,23 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 52,
-        to: 57,
+        to: 58,
         source_missing_tables: &["lash_runtime_effect_group", "lash_checkpoint_blob_refs"],
         source_missing_columns: &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
             ("lash_trigger_occurrences", "reclaimable_at_ms"),
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
+            "idx_lash_session_meta_catalog",
             "idx_lash_queued_work_session_command_order",
             "idx_lash_pending_turn_input_order",
             "lash_runtime_effect_group",
@@ -371,7 +451,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 51,
-        to: 57,
+        to: 58,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_runtime_effect_group",
@@ -381,9 +461,17 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
             ("lash_trigger_occurrences", "reclaimable_at_ms"),
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
+            "idx_lash_session_meta_catalog",
             "lash_attachment_condemnations",
             "idx_lash_queued_work_session_command_order",
             "idx_lash_pending_turn_input_order",
@@ -422,7 +510,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 57,
+        to: 58,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
@@ -434,9 +522,17 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             ("lash_runtime_effect_replay", "group_key"),
             ("lash_runtime_effect_replay", "settlement_seq"),
             ("lash_trigger_occurrences", "reclaimable_at_ms"),
+            ("lash_session_meta", "created_at_ms"),
+            ("lash_session_meta", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "created_at_ms"),
+            ("lash_deleted_sessions", "last_commit_at_ms"),
+            ("lash_deleted_sessions", "head_revision"),
+            ("lash_deleted_sessions", "relation_kind"),
+            ("lash_deleted_sessions", "parent_session_id"),
         ],
         source_missing_guards: EFFECT_GROUP_GUARDS,
         introduced_relations: &[
+            "idx_lash_session_meta_catalog",
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
             "lash_tool_intent_submissions",
@@ -740,6 +836,16 @@ async fn apply_schema_migration(
         .await
         .map_err(store_sqlx_error)?;
     for statement in migration.statements {
+        sqlx::query(statement)
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    for statement in [
+        SESSION_META_ENUMERATION_DDL,
+        DELETED_SESSION_ENUMERATION_DDL,
+        SESSION_META_ENUMERATION_INDEX_DDL,
+    ] {
         sqlx::query(statement)
             .execute(&mut **tx)
             .await
@@ -1118,7 +1224,7 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is normally a reject-and-recreate boundary. This build has \
          explicit Lash-managed migrations from the published component-50, component-51, \
-         component-52, component-53, component-54, component-55, and component-56 shapes to 57; they run only under \
+         component-52, component-53, component-54, component-55, component-56, and component-57 shapes to 58; they run only under \
          SchemaCheck::Enforce \
          after an exact \
          source-shape preflight. This mismatch \
@@ -1135,7 +1241,20 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
 mod tests {
     use super::*;
 
-    /// The declared 53 -> 57 migration, which every case below perturbs.
+    #[test]
+    fn immediate_predecessor_migration_has_a_relation_divergence_witness() {
+        let predecessor = SCHEMA_MIGRATIONS
+            .iter()
+            .find(|migration| migration.from == SCHEMA_VERSION - 1)
+            .expect("the immediate predecessor migration is declared");
+
+        assert!(
+            !predecessor.introduced_relations.is_empty(),
+            "rewinding only the component stamp must leave a relation that the migration preflight can classify as divergence"
+        );
+    }
+
+    /// The declared 53 -> 58 migration, which every case below perturbs.
     fn migration() -> &'static SchemaMigration {
         SCHEMA_MIGRATIONS
             .iter()
@@ -1174,7 +1293,7 @@ mod tests {
     fn report(findings: Vec<SchemaFinding>) -> SchemaReport {
         SchemaReport {
             schema: Some("public".to_string()),
-            expected_version: 57,
+            expected_version: 58,
             found_version: Some(53),
             findings,
         }
@@ -1185,7 +1304,7 @@ mod tests {
     fn published_53_findings() -> Vec<SchemaFinding> {
         vec![
             SchemaFinding::VersionMismatch {
-                expected: 57,
+                expected: 58,
                 found: Some(53),
             },
             SchemaFinding::MissingTable {
@@ -1214,6 +1333,34 @@ mod tests {
             SchemaFinding::MissingUniqueGuard {
                 table: "lash_runtime_effect_replay".to_string(),
                 expected: declared_guard(),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_session_meta".to_string(),
+                expected: column("created_at_ms", true, ColumnValueSource::Supplied),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_session_meta".to_string(),
+                expected: column("last_commit_at_ms", true, ColumnValueSource::Supplied),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_deleted_sessions".to_string(),
+                expected: column("created_at_ms", true, ColumnValueSource::Supplied),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_deleted_sessions".to_string(),
+                expected: column("last_commit_at_ms", true, ColumnValueSource::Supplied),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_deleted_sessions".to_string(),
+                expected: column("head_revision", true, ColumnValueSource::Supplied),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_deleted_sessions".to_string(),
+                expected: column("relation_kind", true, ColumnValueSource::Supplied),
+            },
+            SchemaFinding::MissingColumn {
+                table: "lash_deleted_sessions".to_string(),
+                expected: column("parent_session_id", true, ColumnValueSource::Supplied),
             },
         ]
     }

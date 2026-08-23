@@ -20,6 +20,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
         };
+        let created_at_ms = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, &request.session_id)
             .await?;
@@ -41,6 +42,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             &mut tx,
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
+            created_at_ms,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -477,10 +479,12 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
         };
+        let created_at_ms = self.clock.timestamp_ms();
         crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
+            created_at_ms,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -489,6 +493,13 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             node_id: request.node_id.clone(),
             source_session_id,
         })
+    }
+
+    async fn list_sessions(
+        &self,
+        filter: &SessionListFilter,
+    ) -> Result<Vec<SessionSummary>, StoreError> {
+        crate::session_catalog::list_sessions(&self.pool, filter).await
     }
 }
 
@@ -720,8 +731,26 @@ pub(crate) async fn delete_session_tx(
     if materialized {
         // Permanent identity evidence for host-facing session ids.
         sqlx::query(
-            "INSERT INTO lash_deleted_sessions (session_id)
-             VALUES ($1)
+            "INSERT INTO lash_deleted_sessions
+             (session_id, created_at_ms, last_commit_at_ms, head_revision,
+              relation_kind, parent_session_id)
+             SELECT meta.session_id, meta.created_at_ms, meta.last_commit_at_ms,
+                    COALESCE(session.head_revision, 0), meta.relation_kind,
+                    meta.parent_session_id
+             FROM lash_session_meta AS meta
+             LEFT JOIN lash_sessions AS session ON session.session_id = meta.session_id
+             WHERE meta.session_id = $1
+             ON CONFLICT (session_id) DO NOTHING",
+        )
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        sqlx::query(
+            "INSERT INTO lash_deleted_sessions
+             (session_id, created_at_ms, last_commit_at_ms, head_revision,
+              relation_kind, parent_session_id)
+             VALUES ($1, 0, NULL, 0, 'root', NULL)
              ON CONFLICT (session_id) DO NOTHING",
         )
         .bind(session_id)
@@ -897,9 +926,15 @@ pub(crate) async fn delete_process_sessions_tx(
         // Permanent identity evidence for every materialized id in the batch,
         // recorded before the rows go away so the reclaim arm below can see it.
         sqlx::query(
-            "INSERT INTO lash_deleted_sessions (session_id)
-         SELECT target.session_id
+            "INSERT INTO lash_deleted_sessions
+         (session_id, created_at_ms, last_commit_at_ms, head_revision,
+          relation_kind, parent_session_id)
+         SELECT target.session_id, COALESCE(meta.created_at_ms, 0),
+                meta.last_commit_at_ms, COALESCE(session.head_revision, 0),
+                COALESCE(meta.relation_kind, 'root'), meta.parent_session_id
          FROM unnest($1::TEXT[]) AS target(session_id)
+         LEFT JOIN lash_session_meta AS meta ON meta.session_id = target.session_id
+         LEFT JOIN lash_sessions AS session ON session.session_id = target.session_id
          WHERE EXISTS (
                    SELECT 1 FROM lash_session_meta AS meta
                    WHERE meta.session_id = target.session_id

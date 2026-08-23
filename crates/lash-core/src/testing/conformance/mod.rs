@@ -52,6 +52,7 @@ mod session_execution_lease_renewal;
 mod session_graph_append;
 mod session_graph_state_machine;
 mod session_store_factory;
+mod session_store_factory_enumeration;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -611,10 +612,14 @@ mod tests {
     #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
         let unbound = crate::InMemorySessionStore::default();
-        session_store_factory("in-memory", Some(Arc::new(unbound)), || {
-            Arc::new(crate::InMemorySessionStoreFactory::new())
-                as Arc<dyn crate::SessionStoreFactory>
-        })
+        crate::testing::conformance::session_store_factory(
+            "in-memory",
+            Some(Arc::new(unbound)),
+            || {
+                Arc::new(crate::InMemorySessionStoreFactory::new())
+                    as Arc<dyn crate::SessionStoreFactory>
+            },
+        )
         .await;
     }
 

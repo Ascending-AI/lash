@@ -7,16 +7,16 @@ pub(crate) use lash_core::runtime::{
     EffectHost, RuntimeEffectController, RuntimeSessionState, ScopedEffectController,
 };
 pub(crate) use lash_core::{
-    LiveReplayStore, MessageRole, ProcessExecutionEnvStore, ProcessHandleView, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, facade_support::DurableProcessWorker,
-    facade_support::DurableProcessWorkerConfig, facade_support::InMemoryLiveReplayStore,
-    facade_support::LashRuntime, facade_support::PluginHost, facade_support::PluginSpec,
-    facade_support::PluginStack, facade_support::ProcessWorkDriver,
-    facade_support::QueuedWorkDriver, facade_support::QueuedWorkRunHandle,
-    facade_support::QueuedWorkRunRequest, facade_support::RuntimeEnvironment,
-    facade_support::RuntimeHandle, facade_support::RuntimeHostConfig,
-    facade_support::RuntimeObservation, facade_support::SessionSpec,
-    facade_support::WorkerSlotSupplier,
+    LiveReplayStore, MessageRole, ProcessExecutionEnvStore, ProcessHandleView, SessionListFilter,
+    SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionSummary,
+    facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
+    facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
+    facade_support::PluginHost, facade_support::PluginSpec, facade_support::PluginStack,
+    facade_support::ProcessWorkDriver, facade_support::QueuedWorkDriver,
+    facade_support::QueuedWorkRunHandle, facade_support::QueuedWorkRunRequest,
+    facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
+    facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
+    facade_support::SessionSpec, facade_support::WorkerSlotSupplier,
 };
 pub(crate) use tokio::sync::mpsc;
 pub(crate) use tokio::task::JoinHandle;

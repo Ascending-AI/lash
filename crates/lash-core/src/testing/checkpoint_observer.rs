@@ -320,6 +320,13 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
         self.inner.read_session(session_id).await
     }
 
+    async fn list_sessions(
+        &self,
+        filter: &crate::SessionListFilter,
+    ) -> Result<Vec<crate::SessionSummary>, StoreError> {
+        self.inner.list_sessions(filter).await
+    }
+
     async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }

@@ -21,6 +21,7 @@ pub struct InMemorySessionStoreFactory {
     pub(super) checkpoint_blob_roots: super::SharedCheckpointBlobRoots,
     pub(super) tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
     pub(super) deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+    pub(super) session_catalog: super::SharedSessionCatalog,
     /// Factory-global attachment GC condemnation state: the digest is global to
     /// the factory, so every store it creates shares this map and the writer's
     /// intent insert meets the sweeper's condemn CAS in one place.
@@ -48,6 +49,7 @@ impl InMemorySessionStoreFactory {
             checkpoint_blob_roots: Arc::new(Mutex::new(HashMap::new())),
             tombstoned_node_ids: Arc::new(Mutex::new(HashSet::new())),
             deleted_session_ids: Arc::new(Mutex::new(HashSet::new())),
+            session_catalog: Arc::new(Mutex::new(HashMap::new())),
             attachment_condemnations: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(any(test, feature = "testing"))]
             fail_next_session_blob_delete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -103,6 +105,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
     ) -> Result<Arc<dyn RuntimePersistence>, crate::StoreError> {
         let binding = crate::SessionBinding::from_create_request(request);
         binding.validate()?;
+        let created_at_ms = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         if self
             .deleted_session_ids
@@ -128,6 +131,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     Arc::clone(&self.checkpoint_blob_roots),
                     Arc::clone(&self.tombstoned_node_ids),
                     Arc::clone(&self.deleted_session_ids),
+                    Arc::clone(&self.session_catalog),
                     Arc::clone(&self.attachment_condemnations),
                 ));
                 *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
@@ -138,6 +142,18 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 store
             })
             .clone();
+        self.session_catalog
+            .lock_recover()
+            .entry(request.session_id.clone())
+            .or_insert_with(|| crate::SessionSummary {
+                session_id: request.session_id.clone(),
+                created_at_ms,
+                last_commit_at_ms: None,
+                head_revision: 0,
+                relation: crate::SessionRelationKind::from_relation(&binding.relation),
+                parent_session_id: binding.relation.parent_session_id().map(ToOwned::to_owned),
+                deleted: false,
+            });
         Ok(store as Arc<dyn RuntimePersistence>)
     }
 
@@ -164,6 +180,25 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(crate::store::load_persisted_session_state(store.as_ref())
             .await?
             .map(|state| state.read_view()))
+    }
+
+    async fn list_sessions(
+        &self,
+        filter: &crate::SessionListFilter,
+    ) -> Result<Vec<crate::SessionSummary>, crate::StoreError> {
+        let mut summaries = self
+            .session_catalog
+            .lock_recover()
+            .values()
+            .filter(|summary| filter.matches(summary))
+            .cloned()
+            .collect::<Vec<_>>();
+        summaries.sort_by(|left, right| {
+            left.created_at_ms
+                .cmp(&right.created_at_ms)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+        });
+        Ok(summaries)
     }
 
     async fn has_claimable_queued_work(
@@ -258,6 +293,9 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             self.deleted_session_ids
                 .lock_recover()
                 .insert(session_id.to_string());
+            if let Some(summary) = self.session_catalog.lock_recover().get_mut(session_id) {
+                summary.deleted = true;
+            }
             // Sever exactly this session's component edges, then delete only
             // candidates with no surviving session or anchor edge.
             self.checkpoint_blob_roots.lock_recover().remove(session_id);
@@ -415,6 +453,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         &self,
         request: &crate::ForkSessionRequest,
     ) -> Result<crate::ForkSessionReceipt, crate::StoreError> {
+        let created_at_ms = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         // Keep the fork fences in the shared order: exists -> deleted ->
         // retained -> live -> frame.
@@ -536,6 +575,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             Arc::clone(&self.checkpoint_blob_roots),
             Arc::clone(&self.tombstoned_node_ids),
             Arc::clone(&self.deleted_session_ids),
+            Arc::clone(&self.session_catalog),
             Arc::clone(&self.attachment_condemnations),
         ));
         *store.bound_session_id.lock_recover() = Some(request.session_id.clone());
@@ -569,6 +609,18 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
         });
+        self.session_catalog.lock_recover().insert(
+            request.session_id.clone(),
+            crate::SessionSummary {
+                session_id: request.session_id.clone(),
+                created_at_ms,
+                last_commit_at_ms: None,
+                head_revision: 0,
+                relation: crate::SessionRelationKind::from_relation(&request.relation),
+                parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
+                deleted: false,
+            },
+        );
         self.stores
             .lock_recover()
             .insert(request.session_id.clone(), store);

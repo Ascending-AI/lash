@@ -30,6 +30,8 @@ mod queued_drain_policy;
 mod queued_work_driver;
 pub mod scenario_contracts;
 mod session_api;
+mod session_catalog;
+pub use session_catalog::*;
 pub(crate) mod session_execution_lease;
 mod session_manager;
 #[cfg(any(test, feature = "testing"))]
@@ -1428,6 +1430,20 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     ) -> Result<Option<crate::SessionReadView>, crate::StoreError> {
         Err(crate::StoreError::UnsupportedStoreOperation {
             operation: "read_session",
+        })
+    }
+
+    /// Enumerate durable catalog rows without opening a session or acquiring
+    /// execution authority.
+    ///
+    /// Results are ordered by `created_at_ms`, then `session_id`. Permanent
+    /// deletion tombstones remain visible with `deleted == true`.
+    async fn list_sessions(
+        &self,
+        _filter: &SessionListFilter,
+    ) -> Result<Vec<SessionSummary>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "list_sessions",
         })
     }
 

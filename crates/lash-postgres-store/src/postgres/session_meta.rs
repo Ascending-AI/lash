@@ -46,6 +46,7 @@ pub(crate) async fn write_session_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     meta: &SessionMeta,
     mode: SessionMetaWrite,
+    created_at_ms: u64,
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = match mode {
@@ -57,9 +58,9 @@ pub(crate) async fn write_session_meta_tx(
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind)
+              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                     $14, $15, $16, $17, $18, $19)
+                     $14, $15, $16, $17, $18, $19, $20, NULL)
              ON CONFLICT (session_id) DO NOTHING"
         }
         SessionMetaWrite::Replace => {
@@ -70,9 +71,9 @@ pub(crate) async fn write_session_meta_tx(
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind)
+              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                     $14, $15, $16, $17, $18, $19)
+                     $14, $15, $16, $17, $18, $19, $20, NULL)
              ON CONFLICT (session_id) DO UPDATE SET
                relation_kind = EXCLUDED.relation_kind,
                observer_intent_depth = EXCLUDED.observer_intent_depth,
@@ -114,6 +115,7 @@ pub(crate) async fn write_session_meta_tx(
         .bind(&stored.source_session_id)
         .bind(&stored.source_node_id)
         .bind(&stored.observer_inheritance_kind)
+        .bind(i64::try_from(created_at_ms).unwrap_or(i64::MAX))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

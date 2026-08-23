@@ -62,13 +62,13 @@
         <strong>Start fresh when the version moves</strong>
         <p>This release uses these store schema versions:</p>
         <ul>
-          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">38</span></li>
+          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">39</span></li>
           <li>SQLite process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span></li>
           <li>SQLite effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span></li>
           <li>SQLite trigger version <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span></li>
-          <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">57</span></li>
+          <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">58</span></li>
         </ul>
-        <p>The current durable-core and Postgres generations add indexed checkpoint-manifest component edges and checkpoint-root indexes for bounded session-owner blob reclaim. Session deletion considers only the deleted session's checkpoint and trigger-artifact candidates. Exact head, anchor, artifact, and manifest edges gate each deletion. The operation never invokes the factory-global blob auditor.</p>
+        <p>The current durable-core and Postgres generations add read-only session-catalog metadata for creation time, last commit time, relation, parent, and permanent deletion tombstones. The preceding generations added indexed checkpoint-manifest component edges and checkpoint-root indexes for bounded session-owner blob reclaim. Session deletion considers only the deleted session's checkpoint and trigger-artifact candidates. Exact head, anchor, artifact, and manifest edges gate each deletion. The operation never invokes the factory-global blob auditor.</p>
         <ul>
           <li>Process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> retains pending process-parent teardown atomically.</li>
           <li>Effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span> persists versioned tool-intent carriers, typed execution outcomes, and the durable effect-group journal. SQLite reaches it by reject-and-recreate.</li>
@@ -76,8 +76,9 @@
           <li>Version 55 adds the loser drain's unsettled-children index.</li>
           <li>Version 56 adds nullable trigger-occurrence reclaim eligibility and its partial maintenance index.</li>
           <li>Version 57 adds the exact blob-edge projection.</li>
+          <li>Version 58 adds the session-enumeration catalog projection.</li>
         </ul>
-        <p>All Postgres additions are creation-only, so the published component-50 through component-56 shapes upgrade before workers open. The trigger migration arms legacy zero-fan-out occurrences while live-fan-out rows use the normal terminal transition. The immediately preceding SQLite durable-core generation has one exact in-place arming migration. It decodes every manifest reachable from a session head or node anchor. Its component edges are inserted in the same transaction that stamps the current generation.</p>
+        <p>All Postgres additions are creation-only, so the published component-50 through component-57 shapes upgrade before workers open. The trigger migration arms legacy zero-fan-out occurrences while live-fan-out rows use the normal terminal transition. This SQLite durable-core generation is a reject-and-recreate boundary; it does not carry the preceding checkpoint-edge migration forward.</p>
         <p>Earlier durable-core generations and SQLite trigger databases below version 6 remain reject-and-recreate boundaries. If target artifacts already exist over an older Postgres stamp, Lash refuses the divergent store before migration DDL. Inspection and recreation replace any guess at an intermediate state.</p>
         <p>Each exact version is pinned in its store crate. A refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when no explicit migration exists; adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>
@@ -127,6 +128,112 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .build(crate::example_process_owner())?;</code></pre>
+    </div>
+
+    <div class="section" id="enumerate-sessions">
+      <div class="section-header">
+        <h2>Enumerate Sessions</h2>
+        <p>Read the durable catalog through <code>LashCore</code> without opening or hydrating any session. The default includes live sessions and deletion tombstones; use a relation/deletion filter when a host needs a narrower roster.</p>
+      </div>
+      <pre data-lang="rust" data-snippet="persistence#enumerate-sessions"><code>use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
+
+let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    .provider(ProviderHandle::unconfigured())
+    .model(
+        lash::ModelSpec::builder("docs-session-enumeration")
+            .context_window_tokens(4_096)
+            .build()?,
+    )
+    .store_factory(Arc::new(
+        lash::persistence::InMemorySessionStoreFactory::new(),
+    ))
+    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    .process_env_store(Arc::new(
+        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+    ))
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(crate::example_process_owner())?;
+
+let root = core.session("catalog-root").open().await?;
+let child = core
+    .session("catalog-child")
+    .parent("catalog-root")
+    .open()
+    .await?;
+drop((root, child));
+
+let summaries: Vec&lt;SessionSummary&gt; = core.sessions().await?;
+assert_eq!(summaries.len(), 2);
+assert!(summaries.windows(2).all(|pair| {
+    (pair[0].created_at_ms, pair[0].session_id.as_str())
+        &lt;= (pair[1].created_at_ms, pair[1].session_id.as_str())
+}));
+let root_summary = summaries
+    .iter()
+    .find(|summary| summary.session_id == "catalog-root")
+    .expect("root session is listed");
+let root_json = serde_json::to_value::&lt;SessionSummary&gt;(root_summary.clone())?;
+assert_eq!(root_json["session_id"], "catalog-root");
+assert_eq!(root_summary.head_revision, 0);
+assert_eq!(root_summary.last_commit_at_ms, None);
+assert_eq!(root_summary.relation, SessionRelationKind::Root);
+assert_eq!(root_summary.parent_session_id, None);
+assert!(!root_summary.deleted);
+
+let child_filter = SessionListFilter {
+    relation: Some(SessionRelationKind::Child),
+    deleted: Some(false),
+};
+let child_filter_json = serde_json::to_value::&lt;SessionListFilter&gt;(child_filter.clone())?;
+assert_eq!(child_filter_json["relation"], "child");
+assert_eq!(child_filter_json["deleted"], false);
+let children = core.sessions_filtered(child_filter).await?;
+assert_eq!(children.len(), 1);
+assert_eq!(children[0].relation, SessionRelationKind::Child);
+assert_eq!(
+    children[0].parent_session_id.as_deref(),
+    Some("catalog-root")
+);
+let fork_relation_json =
+    serde_json::to_value::&lt;SessionRelationKind&gt;(SessionRelationKind::Fork)?;
+assert_eq!(fork_relation_json, serde_json::json!("fork"));
+let forks = core
+    .sessions_filtered(SessionListFilter {
+        relation: Some(SessionRelationKind::Fork),
+        deleted: None,
+    })
+    .await?;
+assert!(forks.is_empty());
+
+let effect_host = core.effect_host();
+let scope = effect_host.scoped(core.session_delete_scope("catalog-child").await?)?;
+core.delete_session("catalog-child", scope).await?;
+let deleted = core
+    .sessions_filtered(SessionListFilter {
+        relation: None,
+        deleted: Some(true),
+    })
+    .await?;
+assert_eq!(deleted.len(), 1);
+assert!(deleted[0].deleted);
+assert_eq!(core.sessions().await?.len(), 2);
+assert_eq!(
+    core.sessions_filtered(SessionListFilter {
+        relation: Some(SessionRelationKind::Child),
+        deleted: Some(true),
+    })
+    .await?
+    .len(),
+    1
+);
+assert_eq!(
+    serde_json::to_value(SessionRelationKind::Fork)?,
+    serde_json::json!("fork")
+);
+let decoded_fork = serde_json::from_value::&lt;SessionRelationKind&gt;(fork_relation_json)?;
+assert_eq!(decoded_fork, SessionRelationKind::Fork);</code></pre>
     </div>
 
     <div class="section" id="wiring">

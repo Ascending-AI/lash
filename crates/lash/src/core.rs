@@ -1377,3 +1377,32 @@ impl PromptLayerSink for LashCoreBuilder {
         self.prompt.get_or_insert_with(PromptLayer::new)
     }
 }
+
+impl LashCore {
+    /// Enumerate every durable session catalog entry.
+    ///
+    /// This is a read-only catalog query. It does not open sessions, acquire
+    /// execution leases, hydrate checkpoints, or mutate catalog generations.
+    /// Results are ordered by creation time and then session id, and include
+    /// permanent deletion tombstones.
+    pub async fn sessions(&self) -> Result<Vec<SessionSummary>> {
+        self.sessions_filtered(SessionListFilter::default()).await
+    }
+
+    /// Enumerate durable session catalog entries matching `filter`.
+    ///
+    /// Like [`Self::sessions`], this query never opens a session or acquires
+    /// execution authority.
+    pub async fn sessions_filtered(
+        &self,
+        filter: SessionListFilter,
+    ) -> Result<Vec<SessionSummary>> {
+        let Some(store_factory) = self.store_factory.as_ref() else {
+            return Err(EmbedError::MissingSessionStoreFactory);
+        };
+        store_factory
+            .list_sessions(&filter)
+            .await
+            .map_err(Into::into)
+    }
+}

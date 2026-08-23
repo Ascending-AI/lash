@@ -390,6 +390,111 @@ fn assert_facade_exports_typed_attachment_parse_errors() {
     assert!(<InvalidMediaType as Error>::source(&invalid_media_type).is_none());
 }
 
+async fn enumerate_sessions() -> anyhow::Result<()> {
+    // docs:start:enumerate-sessions
+    use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
+
+    let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .provider(ProviderHandle::unconfigured())
+        .model(
+            lash::ModelSpec::builder("docs-session-enumeration")
+                .context_window_tokens(4_096)
+                .build()?,
+        )
+        .store_factory(Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::new(),
+        ))
+        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .build(crate::example_process_owner())?;
+
+    let root = core.session("catalog-root").open().await?;
+    let child = core
+        .session("catalog-child")
+        .parent("catalog-root")
+        .open()
+        .await?;
+    drop((root, child));
+
+    let summaries: Vec<SessionSummary> = core.sessions().await?;
+    assert_eq!(summaries.len(), 2);
+    assert!(summaries.windows(2).all(|pair| {
+        (pair[0].created_at_ms, pair[0].session_id.as_str())
+            <= (pair[1].created_at_ms, pair[1].session_id.as_str())
+    }));
+    let root_summary = summaries
+        .iter()
+        .find(|summary| summary.session_id == "catalog-root")
+        .expect("root session is listed");
+    let root_json = serde_json::to_value::<SessionSummary>(root_summary.clone())?;
+    assert_eq!(root_json["session_id"], "catalog-root");
+    assert_eq!(root_summary.head_revision, 0);
+    assert_eq!(root_summary.last_commit_at_ms, None);
+    assert_eq!(root_summary.relation, SessionRelationKind::Root);
+    assert_eq!(root_summary.parent_session_id, None);
+    assert!(!root_summary.deleted);
+
+    let child_filter = SessionListFilter {
+        relation: Some(SessionRelationKind::Child),
+        deleted: Some(false),
+    };
+    let child_filter_json = serde_json::to_value::<SessionListFilter>(child_filter.clone())?;
+    assert_eq!(child_filter_json["relation"], "child");
+    assert_eq!(child_filter_json["deleted"], false);
+    let children = core.sessions_filtered(child_filter).await?;
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].relation, SessionRelationKind::Child);
+    assert_eq!(
+        children[0].parent_session_id.as_deref(),
+        Some("catalog-root")
+    );
+    let fork_relation_json =
+        serde_json::to_value::<SessionRelationKind>(SessionRelationKind::Fork)?;
+    assert_eq!(fork_relation_json, serde_json::json!("fork"));
+    let forks = core
+        .sessions_filtered(SessionListFilter {
+            relation: Some(SessionRelationKind::Fork),
+            deleted: None,
+        })
+        .await?;
+    assert!(forks.is_empty());
+
+    let effect_host = core.effect_host();
+    let scope = effect_host.scoped(core.session_delete_scope("catalog-child").await?)?;
+    core.delete_session("catalog-child", scope).await?;
+    let deleted = core
+        .sessions_filtered(SessionListFilter {
+            relation: None,
+            deleted: Some(true),
+        })
+        .await?;
+    assert_eq!(deleted.len(), 1);
+    assert!(deleted[0].deleted);
+    assert_eq!(core.sessions().await?.len(), 2);
+    assert_eq!(
+        core.sessions_filtered(SessionListFilter {
+            relation: Some(SessionRelationKind::Child),
+            deleted: Some(true),
+        })
+        .await?
+        .len(),
+        1
+    );
+    assert_eq!(
+        serde_json::to_value(SessionRelationKind::Fork)?,
+        serde_json::json!("fork")
+    );
+    let decoded_fork = serde_json::from_value::<SessionRelationKind>(fork_relation_json)?;
+    assert_eq!(decoded_fork, SessionRelationKind::Fork);
+    // docs:end:enumerate-sessions
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +546,8 @@ mod tests {
         .expect("shared-factory snippet must build");
 
         assert_facade_exports_typed_attachment_parse_errors();
+        enumerate_sessions()
+            .await
+            .expect("session enumeration snippet must preserve catalog state");
     }
 }

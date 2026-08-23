@@ -112,6 +112,7 @@ type InMemoryNodeAnchorRecord = (crate::BlobRef, crate::HydratedSessionCheckpoin
 type InMemoryNodeAnchors = Arc<Mutex<HashMap<String, InMemoryNodeAnchorRecord>>>;
 /// Session id -> component blob refs its live checkpoint references.
 pub(crate) type SharedCheckpointBlobRoots = Arc<Mutex<HashMap<String, HashSet<crate::BlobRef>>>>;
+pub(crate) type SharedSessionCatalog = Arc<Mutex<HashMap<String, crate::SessionSummary>>>;
 
 #[cfg(any(test, feature = "testing"))]
 pub type RawPendingTurnInputForTesting = (
@@ -171,6 +172,7 @@ pub struct InMemorySessionStore {
     /// Permanent per-factory deletion ledger. Maintenance never prunes this:
     /// an id, once used and deleted in this store, must never be reused.
     deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+    session_catalog: SharedSessionCatalog,
     pub(crate) checkpoint: Mutex<Option<crate::HydratedSessionCheckpoint>>,
     checkpoint_component_blobs: Arc<Mutex<HashMap<crate::BlobRef, Vec<u8>>>>,
     /// Factory-global reference edges from a session to the component blobs its
@@ -273,6 +275,7 @@ impl InMemorySessionStore {
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashSet::new())),
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
         )
     }
 
@@ -288,6 +291,7 @@ impl InMemorySessionStore {
         checkpoint_blob_roots: SharedCheckpointBlobRoots,
         tombstoned_node_ids: Arc<Mutex<HashSet<String>>>,
         deleted_session_ids: Arc<Mutex<HashSet<String>>>,
+        session_catalog: SharedSessionCatalog,
         attachment_condemnations: SharedAttachmentCondemnations,
     ) -> Self {
         Self {
@@ -303,6 +307,7 @@ impl InMemorySessionStore {
             node_anchors,
             tombstoned_node_ids,
             deleted_session_ids,
+            session_catalog,
             checkpoint: Mutex::new(None),
             checkpoint_component_blobs,
             checkpoint_blob_roots,
@@ -1422,6 +1427,32 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             transaction_now,
         );
         *meta = Some(plan.head_meta(checkpoint_ref.clone()));
+        let head_revision = meta
+            .as_ref()
+            .expect("fresh commit publishes session head metadata")
+            .head_revision;
+        let relation = self
+            .session_meta
+            .lock_recover()
+            .as_ref()
+            .map(|meta| meta.relation.clone())
+            .unwrap_or(crate::SessionRelation::Root);
+        self.session_catalog
+            .lock_recover()
+            .entry(session_id.clone())
+            .and_modify(|summary| {
+                summary.last_commit_at_ms = Some(transaction_now);
+                summary.head_revision = head_revision;
+            })
+            .or_insert_with(|| crate::SessionSummary {
+                session_id: session_id.clone(),
+                created_at_ms: transaction_now,
+                last_commit_at_ms: Some(transaction_now),
+                head_revision,
+                relation: crate::SessionRelationKind::from_relation(&relation),
+                parent_session_id: relation.parent_session_id().map(ToOwned::to_owned),
+                deleted: false,
+            });
         *self.runtime_commit_count.lock_recover() += 1;
         let result = plan.result(checkpoint_ref, manifest, staged_enqueued_queue_batches);
         let receipt = plan.receipt_write(&result);
@@ -1515,7 +1546,16 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         meta: crate::store::SessionMeta,
     ) -> Result<(), crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
-        self.replace_session_meta(meta)
+        self.replace_session_meta(meta.clone())?;
+        if let Some(summary) = self
+            .session_catalog
+            .lock_recover()
+            .get_mut(&meta.session_id)
+        {
+            summary.relation = crate::SessionRelationKind::from_relation(&meta.relation);
+            summary.parent_session_id = meta.relation.parent_session_id().map(ToOwned::to_owned);
+        }
+        Ok(())
     }
 
     async fn load_session_meta(
