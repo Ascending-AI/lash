@@ -3,8 +3,8 @@ use std::sync::Arc;
 use lash_core::SessionError;
 use lash_lashlang_runtime::{LashlangArtifactStore, LashlangSurface, SharedDeferredToolResolver};
 
-use super::{CellTags, DialectSession, RlmDialect, RlmDialectSession};
-use crate::executor::{RlmLashlangExecutionTraceConfig, SourceDialect};
+use super::{CellTags, DialectSession, RlmDialect, RlmDialectSession, SourceDialect};
+use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::ProjectionResolver;
 
 pub(crate) const LANGUAGE_ID: &str = "lashlang";

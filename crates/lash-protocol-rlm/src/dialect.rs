@@ -10,8 +10,59 @@ use lash_rlm_types::RlmGlobalsPatchPluginBody;
 pub(crate) use lashlang::{LashlangDialect, LashlangDialectServices};
 pub(crate) use typescript::TypescriptDialect;
 
-use crate::executor::{RlmExecutionState, SourceDialect, execute_code_with_dialect_and_bounds};
+use crate::executor::{RlmExecutionState, execute_code_with_dialect_and_bounds};
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
+
+/// The source dialect a cell is written in.
+///
+/// This is the one two-way choice the RLM protocol makes per session, and it
+/// is carried as a value rather than as a second copy of every body that would
+/// otherwise fork on it: the execution session, the prompt vocabulary and the
+/// bound-variable filter all read it off this type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceDialect {
+    Lashlang,
+    Typescript,
+}
+
+impl SourceDialect {
+    /// The language id an execution trace record carries.
+    ///
+    /// Every record said `lashlang` regardless, so a TypeScript session's
+    /// `lashlang-execution.jsonl` described its own executions as Lashlang —
+    /// the same "evidence that disagrees with its own label" defect the
+    /// transcript badge had. The substrate under both dialects is the Lashlang
+    /// VM, which is why the file name and the graph API keep their names; what
+    /// was wrong is the claim about the *source* that ran.
+    pub(crate) fn language_id(self) -> &'static str {
+        match self {
+            Self::Lashlang => crate::dialect::lashlang::LANGUAGE_ID,
+            Self::Typescript => crate::dialect::typescript::LANGUAGE_ID,
+        }
+    }
+
+    /// The words and call forms this dialect's prompt fragments are written in.
+    pub(crate) fn prompt_vocabulary(self) -> crate::dialect::DialectPromptVocabulary {
+        match self {
+            Self::Lashlang => crate::dialect::lashlang::LASHLANG_PROMPT_VOCABULARY,
+            Self::Typescript => crate::dialect::typescript::TYPESCRIPT_PROMPT_VOCABULARY,
+        }
+    }
+
+    /// The name prefix whose bindings never reach the model.
+    ///
+    /// A TypeScript block-scoped binding that shadows an outer name is lowered
+    /// to a generated slot. It is the author's value under a name the author
+    /// never wrote, and it is dead by the time any turn boundary renders, so it
+    /// is never a bound variable the model should see. Lashlang has no such
+    /// lowering and hides nothing.
+    pub(crate) fn hidden_binding_prefix(self) -> Option<&'static str> {
+        match self {
+            Self::Lashlang => None,
+            Self::Typescript => Some(lash_typescript::GENERATED_BINDING_PREFIX),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CellTags {
