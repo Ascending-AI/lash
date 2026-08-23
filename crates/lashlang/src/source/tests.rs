@@ -231,6 +231,111 @@ fn canonical_program_source_handles_unlinked_programs_without_requirements() {
 }
 
 #[test]
+fn canonical_source_round_trips_after_printing() {
+    let program = parse(
+        r#"
+        process worker() {
+          value = { if: "keyword", sleep: "contextual" }
+          finish value
+        }
+
+        result = worker()
+        finish result
+        "#,
+    )
+    .expect("parse");
+    let rendered = canonical_program_source(&program).expect("render source");
+    let reparsed = parse(&rendered).expect("parse rendered source");
+    assert_eq!(
+        canonical_program_ir(reparsed),
+        canonical_program_ir(program)
+    );
+}
+
+#[test]
+fn canonical_source_round_trips_contextual_assignment_targets() {
+    let program = parse(
+        r#"
+        let = 1
+        yield = 1
+        wake = 1
+        fail = 1
+        finish = 1
+        break = 1
+        continue = 1
+        while = 1
+        parallel = 1
+        sleep = 1
+        start = 1
+        Type = 1
+        wait_signal = 1
+        signal_run = 1
+        finish null
+        "#,
+    )
+    .expect("contextual names are legal assignment targets");
+    let rendered = canonical_program_source(&program).expect("render source");
+    let reparsed = parse(&rendered).expect("parse rendered source");
+    assert_eq!(
+        canonical_program_ir(reparsed),
+        canonical_program_ir(program)
+    );
+}
+
+#[test]
+fn hard_keyword_cannot_be_an_assignment_target() {
+    parse("if = 1").expect_err("a lexer hard keyword cannot be an assignment target");
+}
+
+#[test]
+fn canonical_source_rejects_every_parser_reserved_name() {
+    const RESERVED_NAMES: [&str; 29] = [
+        "if",
+        "else",
+        "for",
+        "in",
+        "await",
+        "cancel",
+        "submit",
+        "print",
+        "call",
+        "and",
+        "or",
+        "not",
+        "true",
+        "false",
+        "null",
+        "let",
+        "yield",
+        "wake",
+        "fail",
+        "finish",
+        "break",
+        "continue",
+        "while",
+        "parallel",
+        "sleep",
+        "start",
+        "Type",
+        "wait_signal",
+        "signal_run",
+    ];
+
+    for name in RESERVED_NAMES {
+        let err = canonical_expression_source(&Expr::Variable(name.into()))
+            .expect_err("a parser-reserved name must not print as a bare variable");
+        assert_eq!(
+            err,
+            CanonicalSourceError::InvalidIdentifier {
+                context: "variable",
+                name: name.to_string(),
+            },
+            "reserved name: {name}"
+        );
+    }
+}
+
+#[test]
 fn host_descriptor_constructor_requires_requirements_context() {
     let linked = assert_linked_source_round_trip(
         r#"source = timer.Schedule({ expr: "0 8 * * *" })

@@ -2048,6 +2048,45 @@ fn static_signal_name_arg(expr: &Expr, call: &'static str) -> Result<AstString, 
     })
 }
 
+/// Whether a bare name is consumed by the parser as a keyword or special form
+/// instead of being returned as an identifier.
+pub(crate) fn is_parser_reserved_name(name: &str) -> bool {
+    is_lexer_hard_keyword(name)
+        || matches!(
+            name,
+            // Contextual statement forms.
+            "let"
+            | "yield"
+            | "wake"
+            | "fail"
+            | "finish"
+            | "break"
+            | "continue"
+            | "while"
+            // Primary-expression special forms.
+            | "parallel"
+            | "sleep"
+            | "start"
+            | "Type"
+            | "wait_signal"
+            | "signal_run"
+        )
+}
+
+/// Whether a valid bare identifier spelling is tokenized as a hard keyword.
+pub(crate) fn is_lexer_hard_keyword(name: &str) -> bool {
+    matches!(
+        lex(name).as_deref(),
+        Ok([
+            Token { kind, .. },
+            Token {
+                kind: TokenKind::Eof,
+                ..
+            }
+        ]) if !matches!(kind, TokenKind::Ident(_))
+    )
+}
+
 fn token_can_be_key(kind: &TokenKind) -> bool {
     matches!(kind, TokenKind::Ident(_) | TokenKind::String(_)) || keyword_key_name(kind).is_some()
 }
