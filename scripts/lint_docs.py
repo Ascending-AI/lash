@@ -91,21 +91,33 @@ MOVED_STUBS = {
     "plugins-tools.html",
 }
 
-ADR_FILENAME_RE = re.compile(r"^(?P<number>\d{4})-[^/]+\.md$")
+ADR_FILENAME_RE = re.compile(r"^(?P<number>[0-9]{4})-[^/]+\.md$")
+ADR_NON_ADR_ALLOWLIST: frozenset[str] = frozenset()
 
 
-def check_adr_number_uniqueness(errors: list[str]) -> None:
-    """Every ADR filename has one unique four-digit number prefix."""
+def check_adr_number_uniqueness(
+    errors: list[str], *, adr_dir: Path | None = None
+) -> None:
+    """Every ADR file has a canonical name and one unique number prefix."""
+    adr_dir = adr_dir or DOCS / "adr"
     by_number: dict[str, list[Path]] = {}
-    for path in sorted((DOCS / "adr").glob("*.md")):
-        match = ADR_FILENAME_RE.fullmatch(path.name)
+    for path in sorted(candidate for candidate in adr_dir.rglob("*") if candidate.is_file()):
+        relative = path.relative_to(adr_dir).as_posix()
+        if relative in ADR_NON_ADR_ALLOWLIST:
+            continue
+        match = ADR_FILENAME_RE.fullmatch(relative)
         if match is None:
+            errors.append(
+                f"docs/adr/{relative}: filename must match NNNN-slug.md"
+            )
             continue
         by_number.setdefault(match.group("number"), []).append(path)
 
     for number, paths in sorted(by_number.items()):
         if len(paths) > 1:
-            listed = ", ".join(path.relative_to(ROOT).as_posix() for path in paths)
+            listed = ", ".join(
+                f"docs/adr/{path.relative_to(adr_dir).as_posix()}" for path in paths
+            )
             errors.append(f"docs/adr: duplicate ADR number {number}: {listed}")
 
 
