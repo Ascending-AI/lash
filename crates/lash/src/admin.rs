@@ -343,7 +343,11 @@ impl SessionAdmin {
         let processes = runtime.process_service()?;
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         processes
-            .signal(
+            .validate_visible(&session_id, &[process_id.to_string()], scope.clone())
+            .await
+            .map_err(EmbedError::Plugin)?;
+        processes
+            .signal_possessed(
                 &session_id,
                 process_id,
                 signal_name,
@@ -613,8 +617,12 @@ impl SessionAdmin {
         let session_id = runtime.session_id().to_string();
         let processes = runtime.process_service()?;
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
+        processes
+            .validate_visible(&session_id, &[process_id.to_string()], scope.clone())
+            .await
+            .map_err(EmbedError::Plugin)?;
         let summary = processes
-            .cancel_visible(&session_id, process_id, scope)
+            .cancel(&session_id, process_id, scope)
             .await
             .map(lash_core::ProcessCancelReceipt::from_record)
             .map_err(EmbedError::Plugin)?;

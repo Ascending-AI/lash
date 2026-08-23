@@ -175,17 +175,6 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<crate::ToolIntentParentEndOutcome, PluginError>;
 
-    async fn cancel_visible(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
-        self.validate_visible(session_id, &[process_id.to_string()], scope.clone())
-            .await?;
-        self.cancel(session_id, process_id, scope).await
-    }
-
     async fn cancel_all_visible(
         &self,
         session_id: &str,
@@ -207,16 +196,6 @@ pub trait ProcessService: Send + Sync {
         }
         Ok(cancelled)
     }
-
-    async fn signal(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError>;
 
     /// Journal-first signal used only by the recorded intent protocol.
     async fn signal_recorded_intent(
@@ -254,11 +233,6 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessEvent, PluginError>;
 
-    /// Signal a process whose handle is possessed by the current run.
-    ///
-    /// Run-local possession is the capability, so this bypasses observer-edge
-    /// and tier-2 tool filtering. Implementations that do not distinguish
-    /// possession may retain their ordinary signal behavior.
     async fn signal_possessed(
         &self,
         session_id: &str,
@@ -267,17 +241,7 @@ pub trait ProcessService: Send + Sync {
         signal_id: String,
         payload: serde_json::Value,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError> {
-        self.signal(
-            session_id,
-            process_id,
-            signal_name,
-            signal_id,
-            payload,
-            scope,
-        )
-        .await
-    }
+    ) -> Result<ProcessEvent, PluginError>;
 
     async fn transfer(
         &self,
@@ -384,7 +348,7 @@ impl ProcessService for UnavailableProcessService {
         ))
     }
 
-    async fn signal(
+    async fn signal_possessed(
         &self,
         _session_id: &str,
         _process_id: &str,
@@ -597,7 +561,7 @@ mod tests {
             self.cancel(session_id, process_id, scope).await
         }
 
-        async fn signal(
+        async fn signal_possessed(
             &self,
             _session_id: &str,
             _process_id: &str,
@@ -618,7 +582,7 @@ mod tests {
             payload: serde_json::Value,
             scope: ProcessOpScope<'_>,
         ) -> Result<ProcessEvent, PluginError> {
-            self.signal(
+            self.signal_possessed(
                 session_id,
                 process_id,
                 signal_name,
@@ -680,41 +644,6 @@ mod tests {
             )
             .expect("test execution scope"),
         )
-    }
-
-    #[tokio::test]
-    async fn cancel_visible_validates_visibility_and_calls_primitive() {
-        let service =
-            RecordingProcessService::new(["process-1".to_string()], cancelled_record("process-1"));
-
-        let record = service
-            .cancel_visible(
-                "session-1",
-                "process-1",
-                test_process_scope("cancel-visible"),
-            )
-            .await
-            .expect("cancel process");
-
-        assert_eq!(record.status.label(), "cancelled");
-        assert_eq!(
-            service.validate_calls(),
-            vec![vec!["process-1".to_string()]]
-        );
-        assert_eq!(service.cancel_calls(), vec!["process-1".to_string()]);
-    }
-
-    #[tokio::test]
-    async fn cancel_visible_rejects_invisible_process_without_cancel() {
-        let service = RecordingProcessService::new(Vec::<String>::new(), cancelled_record("p1"));
-
-        let err = service
-            .cancel_visible("session-1", "p1", test_process_scope("cancel-hidden"))
-            .await
-            .expect_err("hidden process should be rejected");
-
-        assert!(err.to_string().contains("not visible"), "{err}");
-        assert!(service.cancel_calls().is_empty());
     }
 
     #[tokio::test]

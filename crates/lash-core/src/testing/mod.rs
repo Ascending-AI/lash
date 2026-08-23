@@ -1049,7 +1049,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         }
     }
 
-    async fn signal(
+    async fn signal_possessed(
         &self,
         _session_id: &str,
         process_id: &str,
@@ -1083,7 +1083,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal(
+        self.signal_possessed(
             session_id,
             process_id,
             signal_name,
@@ -1507,7 +1507,7 @@ impl crate::ProcessService for MockSessionManager {
         .await
     }
 
-    async fn signal(
+    async fn signal_possessed(
         &self,
         _session_id: &str,
         process_id: &str,
@@ -1537,7 +1537,7 @@ impl crate::ProcessService for MockSessionManager {
         payload: serde_json::Value,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, PluginError> {
-        self.signal(
+        self.signal_possessed(
             session_id,
             process_id,
             signal_name,

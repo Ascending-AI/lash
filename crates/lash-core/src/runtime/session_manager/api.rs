@@ -410,29 +410,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .await
     }
 
-    async fn signal(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.services
-            .processes
-            .signal_process(
-                &self.services.current,
-                session_id,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
-            .await
-    }
-
     async fn signal_recorded_intent(
         &self,
         _session_id: &str,
@@ -722,37 +699,6 @@ impl crate::ProcessService for ModelToolSessionProcessService {
             &host, session_id, identity, process_id, policy, reason, scope,
         )
         .await
-    }
-
-    async fn signal(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.services
-            .processes
-            .validate_model_tool_process_handles(
-                &self.services.current,
-                session_id,
-                &[process_id.to_string()],
-            )
-            .await?;
-        self.services
-            .processes
-            .signal_possessed_process(
-                &self.services.current,
-                session_id,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
-            .await
     }
 
     async fn signal_recorded_intent(

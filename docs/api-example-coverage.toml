@@ -29,7 +29,7 @@ gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
 # vanishes among thousands; see the comment above the tombstones themselves.
-removal_verdicts_recorded = 769
+removal_verdicts_recorded = 771
 
 # The number of `file.rs::Symbol::path` citations the reasons carry. The citation
 # check only reads a reference that names a symbol, so stripping the `::path` off
@@ -28703,15 +28703,6 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
-symbol = "lash::process::ProcessService::cancel_visible"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::ProcessService::cancel_visible"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
-
-[[api]]
 symbol = "lash::process::ProcessService::complete_external"
 kind = "function"
 availability = "default+all-features"
@@ -28737,15 +28728,6 @@ aliases = ["lash_core::ProcessService::emit_event_recorded_intent"]
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host contract for journal-first tool-intent realization; application examples consume the coordinator rather than implement process substrates."
-
-[[api]]
-symbol = "lash::process::ProcessService::signal"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::ProcessService::signal"]
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
 symbol = "lash::process::ProcessService::signal_recorded_intent"
@@ -71224,7 +71206,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:772#vec![lash_core::facade_support::InjectedTurnInput { id, message }],"
+usage = "crates/lash/src/admin.rs:780#vec![lash_core::facade_support::InjectedTurnInput { id, message }],"
 
 [[api]]
 symbol = "lash_core::facade_support::InjectedTurnInput::id"
@@ -71232,7 +71214,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:772#vec![lash_core::facade_support::InjectedTurnInput { id, message }],"
+usage = "crates/lash/src/admin.rs:780#vec![lash_core::facade_support::InjectedTurnInput { id, message }],"
 
 [[api]]
 symbol = "lash_core::facade_support::InjectedTurnInput::message"
@@ -71240,7 +71222,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:772#vec![lash_core::facade_support::InjectedTurnInput { id, message }],"
+usage = "crates/lash/src/admin.rs:780#vec![lash_core::facade_support::InjectedTurnInput { id, message }],"
 
 [[api]]
 symbol = "lash_core::facade_support::InlineProcessRunHandle"
@@ -71603,7 +71585,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:477#) -> Result<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>> {"
+usage = "crates/lash/src/admin.rs:1319#Ok(lash_core::facade_support::PluginOperationReceipt {"
 
 [[api]]
 symbol = "lash_core::facade_support::PluginOperationReceipt::events"
@@ -71611,7 +71593,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1313#events: receipt.events,"
+usage = "crates/lash/src/admin.rs:1321#events: receipt.events,"
 
 [[api]]
 symbol = "lash_core::facade_support::PluginOperationReceipt::output"
@@ -71619,7 +71601,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1312#output: decode_plugin_output::<Op>(receipt.output)?,"
+usage = "crates/lash/src/admin.rs:1320#output: decode_plugin_output::<Op>(receipt.output)?,"
 
 [[api]]
 symbol = "lash_core::facade_support::PluginOperationReceipt::pending_turn_inputs"
@@ -71627,7 +71609,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1314#pending_turn_inputs: receipt.pending_turn_inputs,"
+usage = "crates/lash/src/admin.rs:1322#pending_turn_inputs: receipt.pending_turn_inputs,"
 
 [[api]]
 symbol = "lash_core::facade_support::PluginLifecycleEventHook"
@@ -71643,7 +71625,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:1375#fn encode_plugin_args<Op: lash_core::facade_support::PluginOperation>("
+usage = "crates/lash/src/admin.rs:1383#fn encode_plugin_args<Op: lash_core::facade_support::PluginOperation>("
 
 [[api]]
 symbol = "lash_core::facade_support::PluginOperation::Args"
@@ -73747,7 +73729,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:734#Ok(self.tool_state().await?.generation())"
+usage = "crates/lash/src/admin.rs:742#Ok(self.tool_state().await?.generation())"
 
 [[api]]
 symbol = "lash_core::facade_support::ToolStateFacadeOps::get"
@@ -73771,7 +73753,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/admin.rs:716#Ok(self.tool_state().await?.tool_manifests())"
+usage = "crates/lash/src/admin.rs:724#Ok(self.tool_state().await?.tool_manifests())"
 
 [[api]]
 symbol = "lash_core::facade_support::TriggerManifestMembership"
@@ -88162,6 +88144,14 @@ kind = "function"
 [[removal_verdict]]
 symbol = "lash::plugins::PluginSpec::orchestrating_tools"
 kind = "field"
+
+[[removal_verdict]]
+symbol = "lash::process::ProcessService::cancel_visible"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash::process::ProcessService::signal"
+kind = "function"
 
 [[removal_verdict]]
 symbol = "lash::provider::LlmRequest::drop_foreign_replay"

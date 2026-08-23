@@ -367,7 +367,7 @@ mod tests {
             ))
         }
 
-        async fn signal(
+        async fn signal_possessed(
             &self,
             _session_id: &str,
             _process_id: &str,
@@ -696,8 +696,8 @@ mod tests {
         let args = json!({
             "task": "continue with background work",
             "seed": {
-                "one": { "__handle__": "process", "id": "h1", "tool": "slow" },
-                "nested": [{ "h": { "__handle__": "process", "id": "h2", "tool": "slow" } }]
+                "one": { "__handle__": "process", "id": "h1" },
+                "nested": [{ "h": { "__handle__": "process", "id": "h2" } }]
             }
         });
         let result = run_continue_as(&provider, manager.clone(), &args).await;
@@ -721,11 +721,11 @@ mod tests {
         };
         assert_eq!(
             seed.globals["one"],
-            json!({ "__handle__": "process", "id": "h1", "tool": "slow" })
+            json!({ "__handle__": "process", "id": "h1" })
         );
         assert_eq!(
             seed.globals["nested"],
-            json!([{ "h": { "__handle__": "process", "id": "h2", "tool": "slow" } }])
+            json!([{ "h": { "__handle__": "process", "id": "h2" } }])
         );
     }
 
@@ -750,7 +750,7 @@ mod tests {
 
         let args = json!({
             "task": "continue",
-            "seed": { "h": { "__handle__": "process", "id": "missing", "tool": "slow" } }
+            "seed": { "h": { "__handle__": "process", "id": "missing" } }
         });
         let result = run_continue_as(&provider, manager.clone(), &args).await;
 

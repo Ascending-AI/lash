@@ -2170,7 +2170,7 @@ mod tests {
             ))
         }
 
-        async fn signal(
+        async fn signal_possessed(
             &self,
             session_id: &str,
             process_id: &str,
@@ -2185,7 +2185,7 @@ mod tests {
             // await key the TypeScript program is parked on has to resolve
             // with the delivered payload.
             let event = lash_core::testing::effect_backed_process_service(self.registry.clone())
-                .signal(
+                .signal_possessed(
                     session_id,
                     process_id,
                     signal_name.clone(),

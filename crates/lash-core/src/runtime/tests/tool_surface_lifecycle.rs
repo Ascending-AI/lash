@@ -339,17 +339,22 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         vec!["allowed-process"],
         "the filter must narrow and must not widen with a foreign id"
     );
-    for result in [
+    let filtered_cancel = async {
         service
             .validate_visible(session_id, &["filtered-process".to_string()], scope())
-            .await
-            .map(|_| ()),
+            .await?;
         service
-            .cancel_visible(session_id, "filtered-process", scope())
+            .cancel(session_id, "filtered-process", scope())
             .await
-            .map(|_| ()),
+            .map(|_| ())
+    }
+    .await;
+    let filtered_signal = async {
         service
-            .signal(
+            .validate_visible(session_id, &["filtered-process".to_string()], scope())
+            .await?;
+        service
+            .signal_possessed(
                 session_id,
                 "filtered-process",
                 "ready".to_string(),
@@ -358,7 +363,16 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                 scope(),
             )
             .await
+            .map(|_| ())
+    }
+    .await;
+    for result in [
+        service
+            .validate_visible(session_id, &["filtered-process".to_string()], scope())
+            .await
             .map(|_| ()),
+        filtered_cancel,
+        filtered_signal,
     ] {
         let error = result.expect_err("filtered tool operation must be hidden");
         assert!(
@@ -393,7 +407,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         "admin/host reads must not consult the tool filter"
     );
     host_service
-        .signal(
+        .signal_possessed(
             session_id,
             "filtered-process",
             "ready".to_string(),
@@ -404,7 +418,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .await
         .expect("host signal bypasses model-tool filter");
     host_service
-        .cancel_visible(session_id, "filtered-cancel", scope())
+        .cancel(session_id, "filtered-cancel", scope())
         .await
         .expect("host cancel bypasses model-tool filter");
     registry
@@ -536,11 +550,11 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
 
     for error in [
         service
-            .cancel_visible(session_id, process_id, scope())
+            .cancel(session_id, process_id, scope())
             .await
             .expect_err("cancel must return its tombstone outcome"),
         service
-            .signal(
+            .signal_possessed(
                 session_id,
                 process_id,
                 "ready".to_string(),

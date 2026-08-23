@@ -234,7 +234,14 @@ impl InternalProcessAdmin<'_> {
         process_id: &str,
     ) -> Result<crate::ProcessCancelReceipt, PluginError> {
         self.processes
-            .cancel_visible(&self.session_id, process_id, self.process_scope())
+            .validate_visible(
+                &self.session_id,
+                &[process_id.to_string()],
+                self.process_scope(),
+            )
+            .await?;
+        self.processes
+            .cancel(&self.session_id, process_id, self.process_scope())
             .await
             .map(crate::ProcessCancelReceipt::from_record)
     }
@@ -253,7 +260,14 @@ impl InternalProcessAdmin<'_> {
             .clone()
             .unwrap_or_else(|| format!("adhoc-{}", uuid::Uuid::new_v4()));
         self.processes
-            .signal(
+            .validate_visible(
+                &self.session_id,
+                &[process_id.to_string()],
+                self.process_scope(),
+            )
+            .await?;
+        self.processes
+            .signal_possessed(
                 &self.session_id,
                 process_id,
                 signal_name.to_string(),
@@ -272,7 +286,14 @@ impl InternalProcessAdmin<'_> {
         payload: serde_json::Value,
     ) -> Result<crate::ProcessEvent, PluginError> {
         self.processes
-            .signal(
+            .validate_visible(
+                &self.session_id,
+                &[process_id.to_string()],
+                self.process_scope(),
+            )
+            .await?;
+        self.processes
+            .signal_possessed(
                 &self.session_id,
                 process_id,
                 signal_name.to_string(),
