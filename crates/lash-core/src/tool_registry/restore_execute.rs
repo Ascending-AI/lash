@@ -252,6 +252,10 @@ impl ToolProvider for ToolRegistry {
             let mut state = self
                 .state
                 .write_recover();
+            if let Some(existing) = state.surface.get(&manifest.id) {
+                return (existing.binding.source_key() == Some(&source_id))
+                    .then(|| existing.view_manifest());
+            }
             if let Some((_, existing)) = state.surface.get_by_name(&manifest.name) {
                 return (existing.binding.source_key() == Some(&source_id))
                     .then(|| existing.view_manifest());

@@ -1566,6 +1566,50 @@ mod tests {
     }
 
     #[test]
+    fn lazy_resolution_by_id_returns_existing_manifest_when_resolved_id_is_occupied() {
+        struct IdOccupiedProvider;
+
+        #[async_trait::async_trait]
+        impl ToolProvider for IdOccupiedProvider {
+            fn tool_manifests(&self) -> Vec<ToolManifest> {
+                manifests(vec![test_tool("occupied", "advertised manifest")])
+            }
+
+            fn resolve_manifest_by_id(&self, id: &crate::ToolId) -> Option<ToolManifest> {
+                (id == &tool_id("alias")).then(|| {
+                    ToolDefinition::raw(
+                        "tool:occupied",
+                        "resolved_alias",
+                        "lazy alias manifest",
+                        ToolDefinition::default_input_schema(),
+                        json!({ "type": "string" }),
+                    )
+                    .manifest()
+                })
+            }
+
+            fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
+                None
+            }
+
+            async fn execute(&self, _call: ToolCall<'_>) -> ToolOutcome {
+                ToolOutcome::ok(json!("unreachable"))
+            }
+        }
+
+        let registry =
+            ToolRegistry::from_tool_provider(Arc::new(IdOccupiedProvider)).expect("registry");
+
+        let manifest = registry
+            .resolve_manifest_by_id(&tool_id("alias"))
+            .expect("occupied id resolves to the manifest already bound to this source");
+
+        assert_eq!(manifest.id, tool_id("occupied"));
+        assert_eq!(manifest.name, "occupied");
+        assert_eq!(manifest.description, "advertised manifest");
+    }
+
+    #[test]
     fn unknown_manifest_without_host_resolver_is_unavailable() {
         let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
 
