@@ -67,7 +67,8 @@ mod tests {
                 TypeExpr::Null,
             )
             .expect("host catalog operation must not conflict");
-        crate::add_trigger_resource_operations(&mut catalog);
+        crate::add_trigger_resource_operations(&mut catalog)
+            .expect("trigger resource operations are unique");
         catalog
             .add_trigger_source_constructor(
                 ["timer", "Schedule"],
@@ -215,7 +216,8 @@ mod tests {
 
     fn resources_with_timer_event(event_type: NamedDataType) -> LashlangHostCatalog {
         let mut catalog = LashlangHostCatalog::new();
-        crate::add_trigger_resource_operations(&mut catalog);
+        crate::add_trigger_resource_operations(&mut catalog)
+            .expect("trigger resource operations are unique");
         catalog
             .add_trigger_source_constructor(
                 ["timer", "Schedule"],
@@ -1539,13 +1541,13 @@ mod tests {
         assert_eq!(
             catalog
                 .resolve_module_operation("Inbox", "inbox.work", "send")
-                .map(|binding| binding.host_operation.as_str()),
+                .map(|binding| binding.host_operation),
             Some("inbox__work__send")
         );
         assert_eq!(
             catalog
                 .resolve_module_operation("Inbox", "inbox.personal", "send")
-                .map(|binding| binding.host_operation.as_str()),
+                .map(|binding| binding.host_operation),
             Some("inbox__personal__send")
         );
     }
@@ -1586,26 +1588,37 @@ mod tests {
         );
     }
 
+    include!("catalog_tests.rs");
+
     #[test]
-    fn identical_module_operation_binding_is_idempotent() {
+    fn identical_module_operation_binding_is_refused_by_name() {
         let mut catalog = LashlangHostCatalog::new();
-        for _ in 0..2 {
-            catalog
-                .add_module_operation(
-                    ["directory"],
-                    "Directory",
-                    "lookup",
-                    "directory_lookup",
-                    TypeExpr::Any,
-                    TypeExpr::Any,
-                )
-                .expect("host catalog operation must not conflict");
-        }
+        catalog
+            .add_module_operation(
+                ["directory"],
+                "Directory",
+                "lookup",
+                "directory_lookup",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            )
+            .expect("first operation is valid");
+        assert!(matches!(
+            catalog.add_module_operation(
+                ["directory"],
+                "Directory",
+                "lookup",
+                "directory_lookup",
+                TypeExpr::Any,
+                TypeExpr::Any,
+            ),
+            Err(LashlangHostCatalogError::ConflictingModuleOperation { .. })
+        ));
 
         assert_eq!(
             catalog
                 .resolve_module_operation("Directory", "directory", "lookup")
-                .map(|binding| binding.host_operation.as_str()),
+                .map(|binding| binding.host_operation),
             Some("directory_lookup")
         );
     }

@@ -124,7 +124,8 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
             )
             .expect("fluency typescript runtime binding");
     }
-    lashlang::add_trigger_resource_operations(&mut catalog);
+    lashlang::add_trigger_resource_operations(&mut catalog)
+        .expect("trigger resource operations are unique");
     catalog
         .add_trigger_source_constructor(
             ["timer", "Schedule"],

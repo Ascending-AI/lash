@@ -192,7 +192,8 @@ fn typescript_prompt_programs() -> Vec<String> {
 /// a TypeScript call path is the Lashlang one.
 fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = workbench_lashlang_resources();
-    lashlang::add_trigger_resource_operations(&mut resources);
+    lashlang::add_trigger_resource_operations(&mut resources)
+        .expect("trigger resource operations are unique");
     let modules: [(&[&str], &str, &[&str]); 5] = [
         (&["agents"], "Agents", &["spawn"]),
         (&["web"], "Web", &["search", "fetch"]),

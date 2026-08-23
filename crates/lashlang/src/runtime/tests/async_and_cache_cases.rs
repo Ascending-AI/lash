@@ -41,15 +41,17 @@ impl ExecutionHost for AsyncHost {
 #[tokio::test(flavor = "current_thread")]
 async fn linked_value_constructor_wraps_host_descriptor() {
     let mut resources = crate::LashlangHostCatalog::new();
-    resources.add_value_constructor(
-        ["timer", "Schedule"],
-        crate::TypeExpr::Object(vec![crate::TypeField {
-            name: "expr".into(),
-            ty: crate::TypeExpr::Str,
-            optional: false,
-        }]),
-        crate::TypeExpr::Ref("timer.Schedule".into()),
-    );
+    resources
+        .add_value_constructor(
+            ["timer", "Schedule"],
+            crate::TypeExpr::Object(vec![crate::TypeField {
+                name: "expr".into(),
+                ty: crate::TypeExpr::Str,
+                optional: false,
+            }]),
+            crate::TypeExpr::Ref("timer.Schedule".into()),
+        )
+        .expect("value constructor is unique");
     let surface = crate::LashlangHostEnvironment::new(resources, crate::LashlangAbilities::all());
     let program = crate::parse(
         r#"

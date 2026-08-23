@@ -57,8 +57,8 @@ pub use lexer::{LexError, Span, Token, TokenKind, lex};
 pub use linker::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostCatalogError, LashlangHostEnvironment,
     LashlangLanguageFeatures, LinkError, LinkedModule, NamedDataType, NamedDataTypeError,
-    OutputFromInputBinding, ResourceOperationBinding, ResourceTypeCatalog, TriggerSourceBinding,
-    ValueConstructorBinding,
+    OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
+    TriggerSourceBinding, ValueConstructorBinding,
 };
 pub use parser::{ParseError, parse, parse_expression, parse_type_expression};
 pub use runtime::{

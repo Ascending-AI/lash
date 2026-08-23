@@ -29,7 +29,7 @@ gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
 # vanishes among thousands; see the comment above the tombstones themselves.
-removal_verdicts_recorded = 771
+removal_verdicts_recorded = 773
 
 # The number of `file.rs::Symbol::path` citations the reasons carry. The citation
 # check only reads a reference that names a symbol, so stripping the `::path` off
@@ -44590,14 +44590,6 @@ disposition = "unused-add"
 reason = "Add lash::rlm::LashlangHostCatalog::ensure_resource_type to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::rlm::LashlangHostCatalog::extend"
-kind = "function"
-availability = "all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::rlm::LashlangHostCatalog::extend to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
 symbol = "lash::rlm::LashlangHostCatalog::has_named_data_type"
 kind = "function"
 availability = "all-features"
@@ -44781,14 +44773,6 @@ availability = "all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::rlm::LashlangHostCatalog::try_extend to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::rlm::LashlangHostCatalog::union"
-kind = "function"
-availability = "all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::rlm::LashlangHostCatalog::union to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::rlm::LashlangHostCatalog::value_constructors"
@@ -48988,7 +48972,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::into_trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2565#.into_trigger()?"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2570#.into_trigger()?"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49426,7 +49410,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2568#Ok(lash_core::RuntimeEffectOutcome::Trigger {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2573#Ok(lash_core::RuntimeEffectOutcome::Trigger {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49436,7 +49420,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger::result"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2569#result: Box::new(result),"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2574#result: Box::new(result),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -63257,7 +63241,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::List::filter"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lashlang/src/linker/lower_expr.rs:682#let trigger_operation = trigger_operation.filter(|operation| {"
+usage = "crates/lashlang/src/linker/lower_expr.rs:671#let trigger_operation = trigger_operation.filter(|operation| {"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::List::owner_scope"
@@ -74267,7 +74251,7 @@ kind = "function"
 availability = "default+all-features"
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lashlang/src/linker/pass_validation.rs:1257#lash_core::facade_support::derived_trigger_subscription_key("
+usage = "crates/lashlang/src/linker/pass_validation.rs:1247#lash_core::facade_support::derived_trigger_subscription_key("
 
 [[api]]
 symbol = "lash_core::facade_support::deterministic_delivery_process_id"
@@ -84978,7 +84962,7 @@ availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:311#.rlm_config()"
-assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:380#transcript_code_languages(&projected),"
+assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:381#transcript_code_languages(&projected),"
 
 [[api]]
 symbol = "lash::plugins::PluginSessionContext::protocol_turn_options"
@@ -88155,6 +88139,14 @@ kind = "function"
 
 [[removal_verdict]]
 symbol = "lash::provider::LlmRequest::drop_foreign_replay"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash::rlm::LashlangHostCatalog::extend"
+kind = "function"
+
+[[removal_verdict]]
+symbol = "lash::rlm::LashlangHostCatalog::union"
 kind = "function"
 
 [[removal_verdict]]
@@ -92073,7 +92065,7 @@ availability = "all-features"
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/chat_projection.rs:311#.rlm_config()"
-assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:380#transcript_code_languages(&projected),"
+assertion = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs:381#transcript_code_languages(&projected),"
 
 [[api]]
 symbol = "lash::rlm::RlmSessionConfigError"

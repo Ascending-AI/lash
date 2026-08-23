@@ -720,36 +720,26 @@ impl<'module> Linker<'module> {
                             None,
                         )
                     };
-                if let Some(alias) = receiver_alias.as_deref()
-                    && self
+                let binding = match receiver_alias.as_deref() {
+                    Some(alias) => self
                         .surface
                         .resources
                         .resolve_module_operation(&resource_type, alias, operation.as_str())
-                        .is_none()
-                {
-                    return Err(LinkError::UnknownResourceOperation {
-                        resource_type: resource_type.clone(),
-                        operation: operation.to_string(),
-                        suggestions: self
-                            .surface
-                            .resources
-                            .operation_suggestions_for_resource_type(&resource_type),
-                        span: scope.span,
-                    });
-                }
-                let binding = self
-                    .surface
-                    .resources
-                    .resolve_operation(&resource_type, operation)
-                    .ok_or_else(|| LinkError::UnknownResourceOperation {
-                        resource_type: resource_type.clone(),
-                        operation: operation.to_string(),
-                        suggestions: self
-                            .surface
-                            .resources
-                            .operation_suggestions_for_resource_type(&resource_type),
-                        span: scope.span,
-                    })?;
+                        .map(|resolved| resolved.binding),
+                    None => self
+                        .surface
+                        .resources
+                        .resolve_operation(&resource_type, operation),
+                };
+                let binding = binding.ok_or_else(|| LinkError::UnknownResourceOperation {
+                    resource_type: resource_type.clone(),
+                    operation: operation.to_string(),
+                    suggestions: self
+                        .surface
+                        .resources
+                        .operation_suggestions_for_resource_type(&resource_type),
+                    span: scope.span,
+                })?;
                 if crate::is_trigger_resource_type(&resource_type)
                     && let Some(trigger_operation) =
                         crate::TriggerHostOperation::from_receiver_method(operation.as_str())

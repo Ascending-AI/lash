@@ -521,15 +521,14 @@ mod tests {
     /// A TypeScript session must be told what it may register a trigger on.
     ///
     /// The section used to render tool signatures and stop, so a host that
-    /// declared `cron.Schedule` and the `triggers.*` operations advertised them
-    /// in its own prompt copy while the substrate told the model nothing. A
-    /// judged row watched a model search for `cron.Schedule`, find nothing, and
+    /// declared `cron.Schedule` left the `triggers.*` operations out of the
+    /// substrate's prompt while the host prompt copy advertised them. A judged
+    /// row watched a model search for `cron.Schedule`, find nothing, and
     /// conclude the trigger APIs did not exist — a VOID row produced by a
     /// prompt that denied a capability the session actually had.
     #[test]
     fn the_execution_section_declares_the_hosts_trigger_surface() {
         let mut resources = lashlang::LashlangHostCatalog::new();
-        lashlang::add_trigger_resource_operations(&mut resources);
         resources
             .add_trigger_source_constructor(
                 ["cron", "Schedule"],
