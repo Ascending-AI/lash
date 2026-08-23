@@ -80,41 +80,70 @@ fn resolve_contract_for_indexed_manifest(
 
 /// One or more providers behind a single registry source, indexed by tool id:
 /// an unknown id is refused here rather than delegated to a provider.
+#[derive(Default)]
+struct ToolProviderIndex {
+    by_id: BTreeMap<ToolId, (ToolManifest, usize)>,
+    by_name: BTreeMap<String, ToolId>,
+}
+
+impl ToolProviderIndex {
+    fn from_providers(providers: &[Arc<dyn ToolProvider>]) -> Self {
+        let mut index = Self::default();
+        for (provider_idx, provider) in providers.iter().enumerate() {
+            for manifest in provider.tool_manifests() {
+                index.by_id.insert(manifest.id.clone(), (manifest, provider_idx));
+            }
+        }
+        index.rebuild_name_index();
+        index
+    }
+
+    fn rebuild_name_index(&mut self) {
+        self.by_name.clear();
+        for (id, (manifest, _)) in &self.by_id {
+            self.by_name
+                .entry(manifest.name.clone())
+                .or_insert_with(|| id.clone());
+        }
+    }
+
+    fn insert(&mut self, manifest: ToolManifest, provider_idx: usize) {
+        self.by_id
+            .insert(manifest.id.clone(), (manifest, provider_idx));
+        self.rebuild_name_index();
+    }
+
+    fn get_by_name(&self, name: &str) -> Option<&(ToolManifest, usize)> {
+        let id = self.by_name.get(name)?;
+        self.by_id.get(id)
+    }
+}
+
 struct ToolProviderSource {
     id: String,
-    tools: RwLock<BTreeMap<ToolId, (ToolManifest, usize)>>,
+    tools: RwLock<ToolProviderIndex>,
     providers: Vec<Arc<dyn ToolProvider>>,
 }
 
 impl ToolProviderSource {
     fn new(id: impl Into<String>, providers: Vec<Arc<dyn ToolProvider>>) -> Self {
-        let mut tools = BTreeMap::new();
-        for (provider_idx, provider) in providers.iter().enumerate() {
-            for manifest in provider.tool_manifests() {
-                tools.insert(manifest.id.clone(), (manifest, provider_idx));
-            }
-        }
         Self {
             id: id.into(),
-            tools: RwLock::new(tools),
+            tools: RwLock::new(ToolProviderIndex::from_providers(&providers)),
             providers,
         }
     }
 
     fn read_advertised_tools(&self) -> Vec<ToolManifest> {
-        let mut tools = BTreeMap::new();
-        for (provider_idx, provider) in self.providers.iter().enumerate() {
-            for manifest in provider.tool_manifests() {
-                tools.insert(manifest.id.clone(), (manifest, provider_idx));
-            }
-        }
-        let manifests = tools
+        let index = ToolProviderIndex::from_providers(&self.providers);
+        let manifests = index
+            .by_id
             .values()
             .map(|(manifest, _)| manifest.clone())
             .collect::<Vec<_>>();
         *self
             .tools
-            .write_recover() = tools;
+            .write_recover() = index;
         manifests
     }
 
@@ -122,8 +151,7 @@ impl ToolProviderSource {
         self.resolve_manifest(name).and_then(|_| {
             self.tools
                 .read_recover()
-                .values()
-                .find(|(manifest, _)| manifest.name == name)
+                .get_by_name(name)
                 .map(|(_, provider_idx)| *provider_idx)
         })
     }
@@ -140,6 +168,7 @@ impl ToolProviderSource {
         if let Some((manifest, provider_idx)) = self
             .tools
             .read_recover()
+            .by_id
             .get(id)
         {
             return Some((manifest.clone(), *provider_idx));
@@ -148,7 +177,7 @@ impl ToolProviderSource {
             if let Some(manifest) = provider.resolve_manifest_by_id(id) {
                 self.tools
                     .write_recover()
-                    .insert(id.clone(), (manifest.clone(), provider_idx));
+                    .insert(manifest.clone(), provider_idx);
                 return Some((manifest, provider_idx));
             }
         }
@@ -167,19 +196,14 @@ impl ToolSourceExecutor for ToolProviderSource {
     }
 
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        if let Some((manifest, _)) = self
-            .tools
-            .read_recover()
-            .values()
-            .find(|(manifest, _)| manifest.name == name)
-        {
+        if let Some((manifest, _)) = self.tools.read_recover().get_by_name(name) {
             return Some(manifest.clone());
         }
         for (provider_idx, provider) in self.providers.iter().enumerate() {
             if let Some(manifest) = provider.resolve_manifest(name) {
                 self.tools
                     .write_recover()
-                    .insert(manifest.id.clone(), (manifest.clone(), provider_idx));
+                    .insert(manifest.clone(), provider_idx);
                 return Some(manifest);
             }
         }

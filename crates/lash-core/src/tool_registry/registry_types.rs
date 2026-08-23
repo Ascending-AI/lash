@@ -60,6 +60,69 @@ impl ToolRegistryEntry {
     }
 }
 
+#[derive(Clone, Default)]
+struct ToolSurface {
+    by_id: BTreeMap<ToolId, ToolRegistryEntry>,
+    by_name: BTreeMap<String, ToolId>,
+}
+
+#[derive(Debug)]
+enum ToolSurfaceInsertError {
+    DuplicateId,
+    DuplicateName { name: String },
+}
+
+impl ToolSurface {
+    fn insert(&mut self, entry: ToolRegistryEntry) -> Result<(), ToolSurfaceInsertError> {
+        let id = entry.manifest.id.clone();
+        let name = entry.manifest.name.clone();
+        match (self.by_id.contains_key(&id), self.by_name.get(&name)) {
+            (true, _) => Err(ToolSurfaceInsertError::DuplicateId),
+            (false, Some(_)) => Err(ToolSurfaceInsertError::DuplicateName { name }),
+            (false, None) => {
+                let previous_name = self.by_name.insert(name, id.clone());
+                let previous_entry = self.by_id.insert(id, entry);
+                debug_assert!(previous_name.is_none());
+                debug_assert!(previous_entry.is_none());
+                Ok(())
+            }
+        }
+    }
+
+    fn remove(&mut self, id: &ToolId) -> Option<ToolRegistryEntry> {
+        let entry = self.by_id.remove(id)?;
+        let removed_name = self.by_name.remove(&entry.manifest.name);
+        debug_assert_eq!(removed_name.as_ref(), Some(id));
+        Some(entry)
+    }
+
+    fn get(&self, id: &ToolId) -> Option<&ToolRegistryEntry> {
+        self.by_id.get(id)
+    }
+
+    fn get_mut(&mut self, id: &ToolId) -> Option<&mut ToolRegistryEntry> {
+        self.by_id.get_mut(id)
+    }
+
+    fn get_by_name(&self, name: &str) -> Option<(&ToolId, &ToolRegistryEntry)> {
+        let id = self.by_name.get(name)?;
+        self.by_id.get(id).map(|entry| (id, entry))
+    }
+
+    fn debug_assert_invariant(&self) {
+        debug_assert_eq!(self.by_id.len(), self.by_name.len());
+        for (id, entry) in &self.by_id {
+            debug_assert_eq!(self.by_name.get(&entry.manifest.name), Some(id));
+        }
+        for (name, id) in &self.by_name {
+            debug_assert_eq!(
+                self.by_id.get(id).map(|entry| &entry.manifest.name),
+                Some(name)
+            );
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ToolRegistrationKind {
@@ -89,7 +152,7 @@ impl std::fmt::Display for ToolSourceKey {
 #[derive(Clone)]
 struct ToolRegistryState {
     generation: u64,
-    tools: BTreeMap<ToolId, ToolRegistryEntry>,
+    surface: ToolSurface,
     next_live_source_id: u64,
 }
 

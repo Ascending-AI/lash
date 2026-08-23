@@ -4,7 +4,7 @@ impl ToolRegistry {
         let is_member = self
             .state
             .read_recover()
-            .tools
+            .surface
             .get(&manifest.id)
             .is_some_and(ToolRegistryEntry::is_member);
         is_member
@@ -20,7 +20,7 @@ impl ToolRegistry {
         self.refresh_sources().ok()?;
         self.state
             .read_recover()
-            .tools
+            .surface
             .get(tool_id)
             .filter(|entry| !entry.is_orphaned())
             .map(ToolRegistryEntry::view_manifest)
@@ -42,7 +42,7 @@ impl ToolRegistry {
                 .state
                 .read_recover();
             state
-                .tools
+                .surface
                 .get(tool_id)
                 .map(ToolRegistryEntry::is_member)
                 .unwrap_or(true)
@@ -56,7 +56,7 @@ impl ToolRegistry {
             let state = self
                 .state
                 .read_recover();
-            state.tools.get(tool_id).map(|entry| entry.binding.clone())
+            state.surface.get(tool_id).map(|entry| entry.binding.clone())
         };
         let source_key = match binding {
             Some(ToolBinding::Bound { source_key }) => source_key,
@@ -153,7 +153,8 @@ impl ToolProvider for ToolRegistry {
             .state
             .read_recover();
         state
-            .tools
+            .surface
+            .by_id
             .values()
             .filter(|entry| entry.is_member())
             .map(ToolRegistryEntry::view_manifest)
@@ -166,9 +167,8 @@ impl ToolProvider for ToolRegistry {
                 .state
                 .read_recover();
             state
-                .tools
-                .iter()
-                .find(|(_, entry)| entry.manifest.name == name)
+                .surface
+                .get_by_name(name)
                 .map(|(id, entry)| (id.clone(), entry.is_orphaned(), entry.view_manifest()))
         };
         match known {
@@ -193,28 +193,28 @@ impl ToolProvider for ToolRegistry {
             let mut state = self
                 .state
                 .write_recover();
-            if let Some(existing) = state.tools.get(&manifest.id) {
+            if let Some(existing) = state.surface.get(&manifest.id) {
                 return (existing.binding.source_key() == Some(&source_id))
                     .then(|| existing.view_manifest());
             }
-            if let Some((_, existing)) = state
-                .tools
-                .iter()
-                .find(|(_, entry)| entry.manifest.name == manifest.name)
-            {
+            if let Some((_, existing)) = state.surface.get_by_name(&manifest.name) {
                 return (existing.binding.source_key() == Some(&source_id))
                     .then(|| existing.view_manifest());
             }
-            state.tools.insert(
-                manifest.id.clone(),
-                bound_tool_entry(
+            if state
+                .surface
+                .insert(bound_tool_entry(
                     manifest.clone(),
                     source_id,
                     source.registration_kind(),
                     &self.hidden_tool_names,
-                ),
-            );
+                ))
+                .is_err()
+            {
+                return None;
+            }
             state.generation += 1;
+            state.surface.debug_assert_invariant();
             return Some(manifest);
         }
         None
@@ -226,7 +226,7 @@ impl ToolProvider for ToolRegistry {
                 .state
                 .read_recover();
             state
-                .tools
+                .surface
                 .get(id)
                 .map(|entry| (entry.is_orphaned(), entry.view_manifest()))
         };
@@ -252,24 +252,28 @@ impl ToolProvider for ToolRegistry {
             let mut state = self
                 .state
                 .write_recover();
-            if let Some((_, existing)) = state
-                .tools
-                .iter()
-                .find(|(_, entry)| entry.manifest.name == manifest.name)
-            {
+            if let Some(existing) = state.surface.get(&manifest.id) {
                 return (existing.binding.source_key() == Some(&source_id))
                     .then(|| existing.view_manifest());
             }
-            state.tools.insert(
-                id.clone(),
-                bound_tool_entry(
+            if let Some((_, existing)) = state.surface.get_by_name(&manifest.name) {
+                return (existing.binding.source_key() == Some(&source_id))
+                    .then(|| existing.view_manifest());
+            }
+            if state
+                .surface
+                .insert(bound_tool_entry(
                     manifest.clone(),
                     source_id,
                     source.registration_kind(),
                     &self.hidden_tool_names,
-                ),
-            );
+                ))
+                .is_err()
+            {
+                return None;
+            }
             state.generation += 1;
+            state.surface.debug_assert_invariant();
             return Some(manifest);
         }
         None
@@ -287,7 +291,7 @@ impl ToolProvider for ToolRegistry {
                 .state
                 .read_recover();
             state
-                .tools
+                .surface
                 .get(id)
                 .and_then(|entry| entry.binding.source_key().cloned())
         }?;
