@@ -54,7 +54,7 @@ pub(crate) fn emit_llm_trace_completed(
     call_record: Option<&crate::LlmCallRecord>,
     clock: &dyn crate::Clock,
 ) {
-    emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
+    super::emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
     crate::trace::emit_trace(
         trace_sink,
         base_context,
@@ -82,6 +82,18 @@ pub(crate) struct LlmTraceFailure {
     terminal_reason: crate::LlmTerminalReason,
     code: Option<String>,
     raw: Option<String>,
+}
+
+impl LlmTraceFailure {
+    pub(crate) fn invalid_structured_output(message: String) -> Self {
+        Self {
+            message,
+            retryable: false,
+            terminal_reason: crate::LlmTerminalReason::ProviderError,
+            code: Some("invalid_structured_output".to_string()),
+            raw: None,
+        }
+    }
 }
 
 impl From<&LlmTransportError> for LlmTraceFailure {
@@ -117,7 +129,7 @@ pub(crate) fn emit_llm_trace_failed(
     call_record: Option<&crate::LlmCallRecord>,
     clock: &dyn crate::Clock,
 ) {
-    emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
+    super::emit_provider_replay_drops(trace_sink, base_context, &context, call_record, clock);
     crate::trace::emit_trace(
         trace_sink,
         base_context,

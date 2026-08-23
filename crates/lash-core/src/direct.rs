@@ -1,12 +1,11 @@
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec,
-    LlmRequest, LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmTerminalReason,
-    LlmToolChoice,
+    LlmRequest, LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
 };
 use crate::provider::{ModelCapability, ModelEffortValidationCategory, ProviderHandle};
 use crate::{LashSchema, SchemaContract};
-use lash_trace::{TraceContext, TraceError, TraceEvent, TraceSink};
+use lash_trace::{TraceContext, TraceSink};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -208,22 +207,6 @@ impl DirectLlmClient {
         &mut self.provider
     }
 
-    fn terminal_trace_context(
-        &self,
-        llm_call_id: String,
-        call_record: &crate::LlmCallRecord,
-    ) -> TraceContext {
-        let context = TraceContext::default().for_llm_call(llm_call_id);
-        crate::runtime::effect::emit_provider_replay_drops(
-            &self.trace_sink,
-            &self.trace_context,
-            &context,
-            Some(call_record),
-            self.clock.as_ref(),
-        );
-        context
-    }
-
     pub async fn complete(
         &mut self,
         mut request: DirectRequest,
@@ -244,13 +227,11 @@ impl DirectLlmClient {
         let llm_request = build_llm_request(&self.provider, request, model);
         let llm_call_id = if self.trace_sink.is_some() {
             let id = uuid::Uuid::new_v4().to_string();
-            crate::trace::emit_trace(
+            crate::runtime::effect::emit_llm_trace_started(
                 &self.trace_sink,
                 &self.trace_context,
                 TraceContext::default().for_llm_call(id.clone()),
-                TraceEvent::LlmCallStarted {
-                    request: crate::trace::trace_llm_request(&llm_request),
-                },
+                &llm_request,
                 self.clock.as_ref(),
             );
             Some(id)
@@ -266,7 +247,6 @@ impl DirectLlmClient {
                 if let Err(message) =
                     validate_direct_output(&output_for_validation, &result.response)
                 {
-                    let attempts = crate::trace::trace_llm_attempts(Some(&result.llm_call));
                     let error = DirectLlmError::InvalidResponse {
                         message,
                         result: Box::new(result),
@@ -276,48 +256,29 @@ impl DirectLlmClient {
                             DirectLlmError::InvalidResponse { result, .. } => &result.llm_call,
                             _ => unreachable!("constructed InvalidResponse above"),
                         };
-                        let context = self.terminal_trace_context(llm_call_id, call_record);
-                        crate::trace::emit_trace(
+                        crate::runtime::effect::emit_llm_trace_failed(
                             &self.trace_sink,
                             &self.trace_context,
-                            context,
-                            TraceEvent::LlmCallFailed {
-                                error: TraceError {
-                                    message: error.to_string(),
-                                    retryable: false,
-                                    terminal_reason: Some(
-                                        LlmTerminalReason::ProviderError.code().to_string(),
-                                    ),
-                                    code: Some("invalid_structured_output".to_string()),
-                                    raw: None,
-                                },
-                                stream_summary: None,
-                                attempts,
-                            },
+                            TraceContext::default().for_llm_call(llm_call_id),
+                            crate::runtime::effect::LlmTraceFailure::invalid_structured_output(
+                                error.to_string(),
+                            ),
+                            None,
+                            Some(call_record),
                             self.clock.as_ref(),
                         );
                     }
                     return Err(error);
                 }
                 if let Some(llm_call_id) = llm_call_id {
-                    let context = self.terminal_trace_context(llm_call_id, &result.llm_call);
-                    crate::trace::emit_trace(
+                    crate::runtime::effect::emit_llm_trace_completed(
                         &self.trace_sink,
                         &self.trace_context,
-                        context,
-                        TraceEvent::LlmCallCompleted {
-                            response: crate::trace::trace_llm_response(
-                                result.full_text.clone(),
-                                0,
-                                Some(result.terminal_reason),
-                                crate::trace::trace_output_parts(&result.parts),
-                                result.generation_disposition,
-                            ),
-                            usage: Some(crate::trace::trace_usage_from_llm(&result.usage)),
-                            provider_usage: result.provider_usage.clone(),
-                            stream_summary: None,
-                            attempts: crate::trace::trace_llm_attempts(Some(&result.llm_call)),
-                        },
+                        TraceContext::default().for_llm_call(llm_call_id),
+                        &result.response,
+                        0,
+                        None,
+                        Some(&result.llm_call),
                         self.clock.as_ref(),
                     );
                 }
@@ -325,22 +286,13 @@ impl DirectLlmClient {
             }
             Err(error) => {
                 if let Some(llm_call_id) = llm_call_id {
-                    let context = self.terminal_trace_context(llm_call_id, &error.call_record);
-                    crate::trace::emit_trace(
+                    crate::runtime::effect::emit_llm_trace_failed(
                         &self.trace_sink,
                         &self.trace_context,
-                        context,
-                        TraceEvent::LlmCallFailed {
-                            error: TraceError {
-                                message: error.message.clone(),
-                                retryable: error.retryable,
-                                terminal_reason: Some(error.terminal_reason.code().to_string()),
-                                code: error.code.clone(),
-                                raw: error.raw.as_deref().cloned(),
-                            },
-                            stream_summary: None,
-                            attempts: crate::trace::trace_llm_attempts(Some(&error.call_record)),
-                        },
+                        TraceContext::default().for_llm_call(llm_call_id),
+                        crate::runtime::effect::LlmTraceFailure::from(&error.error),
+                        None,
+                        Some(&error.call_record),
                         self.clock.as_ref(),
                     );
                 }
