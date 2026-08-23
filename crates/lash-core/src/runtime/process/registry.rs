@@ -801,11 +801,12 @@ pub trait ProcessRegistry: Send + Sync {
 
     /// Set the durable, non-terminal Abandon Request marker (ADR 0019).
     ///
-    /// First-writer-wins: if a marker is already present the call is an
+    /// First-writer-wins: a repeat with the same requester and reason is an
     /// idempotent no-op returning the existing record unchanged, preserving the
-    /// original recorded authorization rather than letting a later requester
-    /// clobber it. Setting it on a terminal row is a model error — a terminal
-    /// process has already recorded its outcome, so there is nothing to abandon.
+    /// original request timestamp. A different requester or reason is a conflict
+    /// and cannot clobber the recorded authorization. Setting it on a terminal
+    /// row is a model error — a terminal process has already recorded its outcome,
+    /// so there is nothing to abandon.
     async fn request_process_abandon(
         &self,
         process_id: &str,

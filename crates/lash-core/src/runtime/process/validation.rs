@@ -79,6 +79,8 @@ pub enum ProcessTransitionPlan {
     Append(ProcessEventAppendRequest),
 }
 
+const FOLD_VALIDATION_REPLAY_KEY_SUFFIX: &str = ":fold-validation";
+
 /// Allocate the next process-event sequence from the live event tail and the
 /// durable sender floor retained for the wake target.
 ///
@@ -183,17 +185,22 @@ pub fn prepare_process_transition(
             }
             let mut append = ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref);
             if record.external_ref.is_some() {
-                route_transition_refusal_to_fold(&mut append);
+                route_transition_refusal_to_fold(&mut append)?;
             }
             append
         }
         ProcessTransition::RequestAbandon(request) => {
-            if !record.is_terminal() && record.abandon_request.as_deref() == Some(&request) {
+            if !record.is_terminal()
+                && record
+                    .abandon_request
+                    .as_deref()
+                    .is_some_and(|existing| abandon_requests_match(existing, &request))
+            {
                 return Ok(ProcessTransitionPlan::Unchanged);
             }
             let mut append = ProcessEventAppendRequest::abandon_requested(&record.id, &request);
             if record.is_terminal() || record.abandon_request.is_some() {
-                route_transition_refusal_to_fold(&mut append);
+                route_transition_refusal_to_fold(&mut append)?;
             }
             append
         }
@@ -209,7 +216,7 @@ pub fn prepare_process_transition(
             }
             let mut append = ProcessEventAppendRequest::wait_entered(&record.id, &wait);
             if record.is_terminal() || record.status == ProcessStatus::CallerDeparted {
-                route_transition_refusal_to_fold(&mut append);
+                route_transition_refusal_to_fold(&mut append)?;
             }
             append
         }
@@ -223,12 +230,21 @@ pub fn prepare_process_transition(
     Ok(ProcessTransitionPlan::Append(append))
 }
 
-fn route_transition_refusal_to_fold(append: &mut ProcessEventAppendRequest) {
-    let replay = append
-        .replay
-        .as_mut()
-        .expect("registry lifecycle transitions carry deterministic replay keys");
-    replay.key.push_str(":fold-validation");
+fn abandon_requests_match(existing: &AbandonRequest, requested: &AbandonRequest) -> bool {
+    existing.requested_by == requested.requested_by && existing.reason == requested.reason
+}
+
+fn route_transition_refusal_to_fold(
+    append: &mut ProcessEventAppendRequest,
+) -> Result<(), PluginError> {
+    let event_type = append.event_type.clone();
+    let replay = append.replay.as_mut().ok_or_else(|| {
+        PluginError::Session(format!(
+            "registry lifecycle transition event `{event_type}` requires a deterministic replay key"
+        ))
+    })?;
+    replay.key.push_str(FOLD_VALIDATION_REPLAY_KEY_SUFFIX);
+    Ok(())
 }
 
 pub fn apply_process_status_projection(
@@ -565,6 +581,14 @@ pub fn prepare_process_event_append(
         semantics.wake.clone(),
         wake_session_id,
     )?;
+    debug_assert!(
+        !is_runtime_lifecycle_event_type(&event.event_type)
+            || event
+                .invocation
+                .replay_key()
+                .is_none_or(|key| { !key.ends_with(FOLD_VALIDATION_REPLAY_KEY_SUFFIX) }),
+        "fold-validation replay keys must be refused before a process-event insert is planned"
+    );
     Ok(ProcessEventAppendPlan::Insert {
         event,
         projected_record,

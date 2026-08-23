@@ -585,3 +585,25 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
     assert!(record.external_ref.is_some());
     assert!(record.abandon_request.is_some());
 }
+
+#[test]
+fn host_signal_replay_key_with_fold_validation_suffix_does_not_panic() {
+    let registration = fixture_registration("host-signal-fold-validation-key")
+        .with_extra_event_types([crate::ProcessEventType {
+            name: "signal.ready".to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        }]);
+    let record = ProcessRecord::from_registration(registration);
+    let request = ProcessEventAppendRequest::new(
+        "signal.ready",
+        serde_json::json!({
+            "value": "ready",
+        }),
+    )
+    .with_replay_key("host-supplied:fold-validation");
+
+    let plan = prepare_process_event_append(&record, request, 1, None, None, 42, None)
+        .expect("host-supplied signal replay key should retain the existing append contract");
+    assert!(matches!(plan, ProcessEventAppendPlan::Insert { .. }));
+}
