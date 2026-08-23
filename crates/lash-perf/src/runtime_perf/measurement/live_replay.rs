@@ -306,6 +306,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
             ("trim_gaps".to_string(), trim_gaps as u64),
             ("unavailable_gaps".to_string(), unavailable_gaps as u64),
         ]),
+        metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,
@@ -537,6 +538,7 @@ async fn run_once_trace_jsonl(
         session_nodes: state.session_graph.nodes.len(),
         active_path_messages: state.read_view().messages().len(),
         extra_counters: trace_counters,
+        metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,

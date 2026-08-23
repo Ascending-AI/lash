@@ -16,6 +16,11 @@
 //! runs. Nothing here can fail a run — the signal is advisory by construction,
 //! which is what keeps it from re-litigating FIG-1385.
 //!
+//! Records also carry duration-valued whole-scenario scheduler observations
+//! (`process.cpu_ms` and, where available, `runtime.worker_busy_ms`). They use
+//! the same advisory series logic. Ratios, worker counts, queue depths, and
+//! park counts do not fit this duration contract and are not trended here.
+//!
 //! # What this signal does not see
 //!
 //! **It is a transition detector, not a level check.** A step change is loud
@@ -124,7 +129,13 @@ pub(crate) const RETAINED_RUNS_PER_SERIES: usize = 50;
 /// carried through any rewrite byte-for-byte, because an older binary meets
 /// newer records on any revert or rerun of a pre-bump commit, and it is not
 /// entitled to destroy them.
-pub(crate) const HISTORY_RECORD_VERSION: u32 = 1;
+pub(crate) const HISTORY_RECORD_VERSION: u32 = 2;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DurationMetricHistoryValue {
+    pub(crate) median_ms: f64,
+    pub(crate) p95_ms: f64,
+}
 
 /// One durable observation: one scenario's median and p95 wall clock from one
 /// perf run.
@@ -151,6 +162,10 @@ pub(crate) struct DurationHistoryRecord {
     /// percentile reporting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) total_p95_ms: Option<f64>,
+    /// Additional whole-scenario duration observations. Ratios and counters
+    /// deliberately stay out of this wall-clock-duration trend contract.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) duration_metrics_ms: BTreeMap<String, DurationMetricHistoryValue>,
 }
 
 fn first_record_version() -> u32 {
@@ -216,6 +231,7 @@ impl fmt::Display for DriftVerdict {
 pub(crate) struct DurationTrendRow {
     pub(crate) scenario: String,
     pub(crate) profile: String,
+    pub(crate) metric: String,
     pub(crate) current_ms: f64,
     pub(crate) current_p95_ms: Option<f64>,
     pub(crate) baseline_median_ms: Option<f64>,
@@ -242,6 +258,20 @@ pub(crate) fn records_for_run(
             recorded_at: recorded_at.clone(),
             total_ms: summary.total_ms.median,
             total_p95_ms: Some(summary.total_ms.p95),
+            duration_metrics_ms: summary
+                .metric_summary
+                .iter()
+                .filter(|(key, _)| key.ends_with("_ms"))
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        DurationMetricHistoryValue {
+                            median_ms: value.median,
+                            p95_ms: value.p95,
+                        },
+                    )
+                })
+                .collect(),
         })
         .collect()
 }
@@ -414,39 +444,51 @@ fn rewrite_temp_path(path: &Path) -> std::path::PathBuf {
     path.with_extension("jsonl.rewrite")
 }
 
-/// One trend row per `(profile, scenario)` series present in the history,
+/// One trend row per `(profile, scenario, duration metric)` series present in the history,
 /// ordered for stable output.
 pub(crate) fn trend_rows(
     history: &[DurationHistoryRecord],
     profile_filter: Option<&str>,
 ) -> Vec<DurationTrendRow> {
-    let mut series: BTreeMap<(&str, &str), Vec<&DurationHistoryRecord>> = BTreeMap::new();
+    let mut series = BTreeMap::<(String, String, String), Vec<(f64, Option<f64>)>>::new();
     for record in history {
         if profile_filter.is_some_and(|profile| profile != record.profile) {
             continue;
         }
         series
-            .entry((record.profile.as_str(), record.scenario.as_str()))
+            .entry((
+                record.profile.clone(),
+                record.scenario.clone(),
+                "total_ms".to_string(),
+            ))
             .or_default()
-            .push(record);
+            .push((record.total_ms, record.total_p95_ms));
+        for (metric, value) in &record.duration_metrics_ms {
+            series
+                .entry((
+                    record.profile.clone(),
+                    record.scenario.clone(),
+                    metric.clone(),
+                ))
+                .or_default()
+                .push((value.median_ms, Some(value.p95_ms)));
+        }
     }
     series
         .into_iter()
-        .filter_map(|((profile, scenario), records)| {
+        .filter_map(|((profile, scenario, metric), records)| {
             let values = records
                 .iter()
-                .map(|record| record.total_ms)
+                .map(|(median, _)| *median)
                 .collect::<Vec<_>>();
             let current_ms = *values.last()?;
             let baseline_median_ms = baseline_median(&values, values.len() - 1);
             Some(DurationTrendRow {
-                scenario: scenario.to_string(),
-                profile: profile.to_string(),
+                scenario,
+                profile,
+                metric,
                 current_ms: round3(current_ms),
-                current_p95_ms: records
-                    .last()
-                    .and_then(|record| record.total_p95_ms)
-                    .map(round3),
+                current_p95_ms: records.last().and_then(|(_, p95)| *p95).map(round3),
                 baseline_median_ms: baseline_median_ms.map(round3),
                 delta_pct: baseline_median_ms
                     .filter(|median| *median > 0.0)
@@ -541,9 +583,15 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
         .max()
         .unwrap_or(7)
         .max("profile".len());
+    let metric_width = rows
+        .iter()
+        .map(|row| row.metric.len())
+        .max()
+        .unwrap_or(6)
+        .max("metric".len());
     out.push_str(&format!(
-        "  {:scenario_width$}  {:profile_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {}\n",
-        "scenario", "profile", "current_ms", "p95_ms", "median_ms", "delta", "verdict"
+        "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {}\n",
+        "scenario", "profile", "metric", "current_ms", "p95_ms", "median_ms", "delta", "verdict"
     ));
     for row in rows {
         let p95 = row
@@ -559,8 +607,8 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
             .map(|value| format!("{value:+.1}%"))
             .unwrap_or_else(|| "-".to_string());
         out.push_str(&format!(
-            "  {:scenario_width$}  {:profile_width$}  {:>12.3}  {:>12}  {:>12}  {:>9}  {}\n",
-            row.scenario, row.profile, row.current_ms, p95, median, delta, row.verdict
+            "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:>12.3}  {:>12}  {:>12}  {:>9}  {}\n",
+            row.scenario, row.profile, row.metric, row.current_ms, p95, median, delta, row.verdict
         ));
     }
     out
@@ -584,8 +632,9 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
             .map(|value| format!("{value:+.1}%"))
             .unwrap_or_else(|| "unknown".to_string());
         let message = format!(
-            "runtime perf duration drift: {} ({}) is {} against a trailing median of {} ms over the last {} runs ({})",
+            "runtime perf duration drift: {} {} ({}) is {} against a trailing median of {} ms over the last {} runs ({})",
             row.scenario,
+            row.metric,
             row.profile,
             delta,
             row.baseline_median_ms
@@ -978,6 +1027,7 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].version, 1);
         assert_eq!(loaded[0].total_p95_ms, None);
+        assert!(loaded[0].duration_metrics_ms.is_empty());
     }
 
     #[test]
@@ -993,7 +1043,9 @@ mod tests {
         assert!(loaded.skipped.is_empty(), "{:?}", loaded.skipped);
         // Unreadable is not the same as unwanted: it is held, not counted.
         assert_eq!(loaded.preserved.len(), 1);
-        assert!(loaded.preserved[0].contains("\"version\":2"));
+        assert!(
+            loaded.preserved[0].contains(&format!("\"version\":{}", HISTORY_RECORD_VERSION + 1))
+        );
     }
 
     /// An older build restored onto a newer history — a revert push, or a
@@ -1230,6 +1282,7 @@ mod tests {
             recorded_at: format!("2026-01-01T{:02}:{:02}:00Z", index / 60, index % 60),
             total_ms,
             total_p95_ms: Some(total_ms + 5.0),
+            duration_metrics_ms: BTreeMap::new(),
         }
     }
 }

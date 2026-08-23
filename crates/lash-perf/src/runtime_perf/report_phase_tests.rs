@@ -6,6 +6,7 @@ use super::budgets::{
 };
 use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
+use crate::perf_support::stack::StackProfile;
 use crate::runtime_perf::measurement::{
     HighTrafficConfig, RuntimePerfPhaseProbe, phase_name, run_once,
 };
@@ -96,6 +97,113 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
             "{} emitted no decorated store calls: {:?}",
             scenario.name(),
             result.extra_counters
+        );
+
+        for (call_key, calls) in result.extra_counters.iter().filter(|(key, _)| {
+            key.starts_with("store_calls.") && key.as_str() != "store_calls.total"
+        }) {
+            let operation = call_key
+                .strip_prefix("store_calls.")
+                .expect("filtered store call key");
+            let family = format!("store.op.{operation}.observed_micros");
+            assert!(
+                !family.contains("transaction") && !family.contains("pool_wait"),
+                "decorator latency key overclaims its bracket: {family}"
+            );
+            assert_eq!(
+                result.extra_counters.get(&format!("{family}.count")),
+                Some(calls),
+                "{family} count must match the existing decorator call count"
+            );
+            assert!(
+                result
+                    .extra_counters
+                    .contains_key(&format!("{family}.total")),
+                "{family} is missing total observed microseconds"
+            );
+            assert_eq!(
+                result.metric_samples.get(&family).map(Vec::len),
+                Some(*calls as usize),
+                "{family} must retain one latency sample per decorated call"
+            );
+        }
+
+        let summaries = super::summarize(
+            std::slice::from_ref(&result),
+            std::slice::from_ref(&scenario),
+            1,
+            &StackProfile::capture(None, None),
+        );
+        for family in result
+            .metric_samples
+            .keys()
+            .filter(|key| key.starts_with("store.op."))
+        {
+            let latency = &summaries[0].metric_summary[family];
+            assert!(latency.p50 >= 0.0);
+            assert!(latency.p95 >= latency.p50);
+            assert!(latency.max >= latency.p95);
+        }
+
+        for key in [
+            "process.cpu_ms",
+            "process.cpu_utilization",
+            "runtime.workers",
+            "runtime.global_queue_depth_max",
+        ] {
+            assert!(
+                result.metric_samples.contains_key(key),
+                "{} omitted scheduler metric {key}",
+                scenario.name()
+            );
+        }
+        let cpu_ms = result.metric_samples["process.cpu_ms"][0];
+        let available_cores =
+            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) as f64;
+        assert!(
+            cpu_ms <= result.total_ms * available_cores,
+            "process CPU {cpu_ms} ms exceeds {} ms across {available_cores} cores",
+            result.total_ms
+        );
+        assert!(result.metric_samples["process.cpu_utilization"][0] >= 0.0);
+        assert!(result.metric_samples["runtime.workers"][0] >= 1.0);
+
+        #[cfg(target_has_atomic = "64")]
+        {
+            for key in [
+                "runtime.worker_busy_ms",
+                "runtime.busy_fraction",
+                "runtime.worker_park_count",
+            ] {
+                assert!(
+                    result.metric_samples.contains_key(key),
+                    "{} omitted 64-bit scheduler metric {key}",
+                    scenario.name()
+                );
+            }
+            let busy_fraction = result.metric_samples["runtime.busy_fraction"][0];
+            assert!(
+                (0.0..=1.0).contains(&busy_fraction),
+                "busy fraction out of bounds: {busy_fraction}"
+            );
+        }
+        #[cfg(not(target_has_atomic = "64"))]
+        for key in [
+            "runtime.worker_busy_ms",
+            "runtime.busy_fraction",
+            "runtime.worker_park_count",
+        ] {
+            assert!(
+                !result.metric_samples.contains_key(key),
+                "{} must omit unavailable 64-bit scheduler metric {key}",
+                scenario.name()
+            );
+        }
+
+        let report = serde_json::to_string(&result).expect("runtime perf result serializes");
+        assert!(
+            !report.contains("turn.cpu"),
+            "per-turn CPU attribution must never appear in a report"
         );
     }
 }

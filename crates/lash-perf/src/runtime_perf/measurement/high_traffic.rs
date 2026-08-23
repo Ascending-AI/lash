@@ -362,6 +362,7 @@ async fn run_once_high_traffic(
         session_nodes: 0,
         active_path_messages: 0,
         extra_counters,
+        metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,

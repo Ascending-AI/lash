@@ -354,6 +354,7 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
                 rendered_payload_bytes as u64,
             ),
         ]),
+        metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,

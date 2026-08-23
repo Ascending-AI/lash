@@ -33,6 +33,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::perf_support::memory::{ProcessMemorySample, diff_opt_i64, process_memory_sample};
 use crate::perf_support::metrics::BasicMetricSummary as RuntimePerfMetricSummary;
+use crate::perf_support::scheduler::RuntimeSchedulerSample;
 use crate::perf_support::stack::StackProfile;
 use crate::perf_support::tempdir::make_temp_bench_dir;
 use crate::perf_support::time::{elapsed_ms, round3};

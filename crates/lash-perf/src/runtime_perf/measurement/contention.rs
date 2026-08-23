@@ -380,6 +380,7 @@ pub(crate) async fn run_once_writer_contention(
             ("writer_contention.operation_kinds".to_string(), 3),
             ("writer_contention.session_shapes".to_string(), 2),
         ]),
+        metric_samples: BTreeMap::new(),
         metric_samples_ms,
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,
@@ -556,6 +557,7 @@ pub(crate) async fn run_once_async_process_settlement(
                 open_spans_after_drain as u64,
             ),
         ]),
+        metric_samples: BTreeMap::new(),
         metric_samples_ms,
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,

@@ -478,7 +478,12 @@ fn summarize(
                 sample_session_nodes: matching[0].session_nodes,
                 sample_active_path_messages: matching[0].active_path_messages,
                 sample_extra_counters: matching[0].extra_counters.clone(),
-                metric_summary_ms: summarize_metric_samples(&matching),
+                metric_summary: summarize_metric_samples(&matching, |result| {
+                    &result.metric_samples
+                }),
+                metric_summary_ms: summarize_metric_samples(&matching, |result| {
+                    &result.metric_samples_ms
+                }),
             })
         })
         .collect()
@@ -486,10 +491,11 @@ fn summarize(
 
 fn summarize_metric_samples(
     results: &[&RuntimePerfRunResult],
+    samples_for: fn(&RuntimePerfRunResult) -> &BTreeMap<String, Vec<f64>>,
 ) -> BTreeMap<String, RuntimePerfMetricSummary> {
     let mut samples_by_key = BTreeMap::<String, Vec<f64>>::new();
     for result in results {
-        for (key, samples) in &result.metric_samples_ms {
+        for (key, samples) in samples_for(result) {
             samples_by_key
                 .entry(key.clone())
                 .or_default()
@@ -741,6 +747,7 @@ mod tests {
             session_nodes: 1,
             active_path_messages: 1,
             extra_counters: BTreeMap::new(),
+            metric_samples: BTreeMap::new(),
             metric_samples_ms: BTreeMap::new(),
             memory: memory_run(),
             allocations: allocation_run(bytes_allocated),
@@ -1007,20 +1014,39 @@ mod tests {
     fn runtime_perf_ledger_keeps_the_summary_median_and_p95() {
         let scenario = RuntimePerfScenario::TurnCheckpoint;
         let stack_profile = stack_profile(2 * 1024 * 1024);
-        let summary = summarize(
-            &[run_result(scenario, 10.0, 100)],
-            &[scenario],
-            1,
-            &stack_profile,
-        )
-        .into_iter()
-        .next()
-        .expect("summary exists");
+        let mut result = run_result(scenario, 10.0, 100);
+        result
+            .metric_samples
+            .insert("process.cpu_ms".to_string(), vec![4.0, 6.0]);
+        result
+            .metric_samples
+            .insert("runtime.worker_busy_ms".to_string(), vec![2.0, 3.0]);
+        result
+            .metric_samples
+            .insert("process.cpu_utilization".to_string(), vec![0.5]);
+        let summary = summarize(&[result], &[scenario], 1, &stack_profile)
+            .into_iter()
+            .next()
+            .expect("summary exists");
 
         let records = duration_trend::records_for_run(std::slice::from_ref(&summary), "full");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].total_ms, summary.total_ms.median);
         assert_eq!(records[0].total_p95_ms, Some(summary.total_ms.p95));
+        assert_eq!(
+            records[0].duration_metrics_ms["process.cpu_ms"].median_ms,
+            5.0
+        );
+        assert!(
+            records[0]
+                .duration_metrics_ms
+                .contains_key("runtime.worker_busy_ms")
+        );
+        assert!(
+            !records[0]
+                .duration_metrics_ms
+                .contains_key("process.cpu_utilization")
+        );
         assert_ne!(summary.total_ms.p95, 0.0);
     }
 
