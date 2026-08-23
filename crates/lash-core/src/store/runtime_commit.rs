@@ -560,31 +560,34 @@ pub struct RuntimeCommitReceipt {
     pub receipt_replayed: bool,
 }
 
+/// Versioned semantic identity of one append-session-nodes request.
+///
+/// The identity is stored as a unit so a receipt cannot carry only part of the
+/// version, hash, count, and ancestor tuple.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AppendRequestIdentity {
+    /// Version of the canonical append-request encoding.
+    #[serde(rename = "identity_encoding_version")]
+    pub encoding_version: u32,
+    /// SHA-256 identity of the semantic append request.
+    #[serde(rename = "request_identity_hash")]
+    pub request_hash: String,
+    /// Number of semantic nodes supplied by the append caller.
+    pub requested_node_count: u64,
+    /// Branch ancestor named by the append caller, when one was required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_ancestor_node_id: Option<String>,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeTurnCommitStamp {
     pub operation: OperationId,
-    /// Version of the append-request canonical encoding, or `None` for a
-    /// non-append operation or a legacy receipt.
+    /// Versioned append-request identity, or `None` for a non-append operation
+    /// or a legacy receipt.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity_encoding_version: Option<u32>,
-    /// SHA-256 identity of the semantic append request, or `None` when exact
-    /// commit-hash replay semantics apply.
-    ///
-    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_identity_hash: Option<String>,
-    /// Number of semantic nodes supplied by the append caller.
-    ///
-    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requested_node_count: Option<usize>,
-    /// Branch ancestor named by the append caller, when one was required.
-    ///
-    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requested_ancestor_node_id: Option<String>,
+    #[serde(default, flatten)]
+    pub append_request_identity: Option<AppendRequestIdentity>,
 }
 
 impl RuntimeTurnCommitStamp {
@@ -593,10 +596,7 @@ impl RuntimeTurnCommitStamp {
     pub fn new(operation: OperationId) -> Self {
         Self {
             operation,
-            identity_encoding_version: None,
-            request_identity_hash: None,
-            requested_node_count: None,
-            requested_ancestor_node_id: None,
+            append_request_identity: None,
         }
     }
 
@@ -612,12 +612,14 @@ impl RuntimeTurnCommitStamp {
         )?;
         Ok(Self {
             operation,
-            identity_encoding_version: Some(
-                commit_identity::append_request_identity_encoding_version(nodes),
-            ),
-            request_identity_hash: Some(request_identity_hash),
-            requested_node_count: Some(nodes.len()),
-            requested_ancestor_node_id: requested_ancestor_node_id.map(str::to_string),
+            append_request_identity: Some(AppendRequestIdentity {
+                encoding_version: commit_identity::append_request_identity_encoding_version(nodes),
+                request_hash: request_identity_hash,
+                requested_node_count: u64::try_from(nodes.len()).map_err(|_| {
+                    StoreError::Backend("append requested-node count does not fit u64".to_string())
+                })?,
+                requested_ancestor_node_id: requested_ancestor_node_id.map(str::to_string),
+            }),
         })
     }
 }

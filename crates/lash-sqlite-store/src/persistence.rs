@@ -533,14 +533,14 @@ impl SessionCommitStore for Store {
                             stored_requested_node_count,
                         )) = prior
                         {
-                            let stored_count = stored_requested_node_count
-                                .map(u64::try_from)
-                                .transpose()
-                                .map_err(|_| {
-                                    StoreError::Backend(
-                                        "stored append requested-node count is negative".to_string(),
-                                    )
-                                })?;
+                            // One codec owns the unit-shape and integer-range checks.
+                            // The ancestor stays write-only because the request hash binds it.
+                            let append_request_identity =
+                                lash_core::store_backend_support::decode_append_request_identity(
+                                    stored_identity,
+                                    stored_version,
+                                    stored_requested_node_count,
+                                )?;
                             let result = serde_json::from_str(&result_json).map_err(|err| {
                                 StoreError::Backend(format!(
                                     "failed to decode runtime turn commit result: {err}"
@@ -549,10 +549,7 @@ impl SessionCommitStore for Store {
                             let prior = lash_core::store::RuntimeCommitReceiptRecord {
                                 turn_commit_hash: stored_hash,
                                 result,
-                                request_identity_hash: stored_identity,
-                                identity_encoding_version: stored_version
-                                    .and_then(|version| u32::try_from(version).ok()),
-                                requested_node_count: stored_count,
+                                append_request_identity,
                             };
                             if let Some(replay) = planner.decide_receipt(Some(prior))? {
                                 if let Some(completion) =
@@ -599,7 +596,7 @@ impl SessionCommitStore for Store {
                         .transpose()?
                         .flatten();
                     let requested_ancestor_is_active = match (
-                        commit.turn_commit.requested_ancestor_node_id.as_deref(),
+                        requested_append_ancestor(&commit.turn_commit),
                         parent_node_facts.as_ref(),
                     ) {
                         (None, _) => true,
@@ -1094,14 +1091,17 @@ impl SessionCommitStore for Store {
                                 receipt.turn_commit_hash,
                                 encode_json(receipt.result)?,
                                 now as i64,
-                                receipt.request_identity_hash,
-                                receipt.requested_node_count.map(|count| count as i64),
-                                receipt.requested_ancestor_node_id,
-                                receipt.identity_encoding_version.map(i64::from),
+                                receipt.append_request_identity.map(|identity| identity.request_hash.as_str()),
+                                receipt.append_request_identity.map(|identity| identity.requested_node_count as i64),
+                                receipt.append_request_identity.and_then(|identity| identity.requested_ancestor_node_id.as_deref()),
+                                receipt.append_request_identity.map(|identity| i64::from(identity.encoding_version)),
                             ],
                         )
                         .map_err(sqlite_error)?;
                     }
+                    // Receipt SQL remains the same four nullable identity columns.
+                    // The aggregate exists only in Rust; no durable layout moved.
+                    // An absent aggregate still writes four NULL values for legacy receipts.
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                         let _release_was_current =
                             release_session_execution_lease_conn(tx, completion)?;
@@ -4139,4 +4139,11 @@ fn release_session_execution_lease_conn(
         )
         .map_err(sqlite_error)?;
     Ok(released == 1)
+}
+
+fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Option<&str> {
+    stamp
+        .append_request_identity
+        .as_ref()
+        .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
 }

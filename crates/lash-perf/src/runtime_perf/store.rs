@@ -695,9 +695,7 @@ impl SessionCommitStore for RuntimePerfStore {
             let prior = store::RuntimeCommitReceiptRecord {
                 turn_commit_hash: stored_hash,
                 result,
-                request_identity_hash: None,
-                identity_encoding_version: None,
-                requested_node_count: None,
+                append_request_identity: None,
             };
             let replay = planner
                 .decide_receipt(Some(prior))?
@@ -712,9 +710,11 @@ impl SessionCommitStore for RuntimePerfStore {
         let graph_snapshot = self.session_graph.lock_recover().clone();
         let requested_ancestor_is_active = commit
             .turn_commit
-            .requested_ancestor_node_id
-            .as_deref()
+            .append_request_identity
+            .as_ref()
+            .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
             .is_none_or(|required| graph_snapshot.active_path_contains(required));
+
         let occupied_node_ids = commit
             .graph
             .nodes

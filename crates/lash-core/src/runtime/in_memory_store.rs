@@ -1036,21 +1036,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         planner.validate_node_derivation()?;
         let key = (session_id.clone(), planner.operation_key().to_string());
         if let Some(stored) = self.runtime_turn_commits.lock_recover().get(&key).cloned() {
-            let stored_count = stored
-                .requested_node_count
-                .map(u64::try_from)
-                .transpose()
-                .map_err(|_| {
-                    crate::store::StoreError::Backend(
-                        "stored append requested-node count does not fit u64".to_string(),
-                    )
-                })?;
             let prior = crate::store::RuntimeCommitReceiptRecord {
                 turn_commit_hash: stored.turn_commit_hash,
                 result: stored.result,
-                request_identity_hash: stored.request_identity_hash,
-                identity_encoding_version: stored.identity_encoding_version,
-                requested_node_count: stored_count,
+                append_request_identity: stored.append_request_identity,
             };
             let replay = planner
                 .decide_receipt(Some(prior))?
@@ -1103,8 +1092,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let old_leaf_node_id = meta.as_ref().and_then(|head| head.leaf_node_id.clone());
         let requested_ancestor_is_active = commit
             .turn_commit
-            .requested_ancestor_node_id
-            .as_deref()
+            .append_request_identity
+            .as_ref()
+            .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
             .is_none_or(|required| {
                 self.session_graph
                     .lock_recover()
@@ -1441,10 +1431,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 turn_commit_hash: receipt.turn_commit_hash.to_string(),
                 result: result.clone(),
                 committed_at_ms: transaction_now,
-                request_identity_hash: receipt.request_identity_hash.map(str::to_string),
-                requested_node_count: receipt.requested_node_count,
-                _requested_ancestor_node_id: receipt.requested_ancestor_node_id.map(str::to_string),
-                identity_encoding_version: receipt.identity_encoding_version,
+                append_request_identity: receipt.append_request_identity.cloned(),
             },
         );
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {

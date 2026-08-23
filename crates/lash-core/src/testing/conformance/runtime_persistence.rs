@@ -1434,7 +1434,12 @@ async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn Runtim
     )];
     let (first, _) = append_request_commit(&mut state, "count-cross-check", &nodes, None);
     let mut corrupt_retry = first.clone();
-    corrupt_retry.turn_commit.requested_node_count = Some(nodes.len() + 1);
+    corrupt_retry
+        .turn_commit
+        .append_request_identity
+        .as_mut()
+        .expect("append identity")
+        .requested_node_count += 1;
     commit_runtime_state_for_test(&store, first, "count-cross-check-first")
         .await
         .expect("first count-cross-check append");
@@ -1451,6 +1456,46 @@ async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn Runtim
             ..
         }
     ));
+}
+
+/// Prove that a SQL backend refuses a receipt whose stored append-identity
+/// encoding version cannot be represented by the public identity type.
+///
+/// `corrupt` installs the backend-native malformed value after the canonical
+/// first receipt has been written and before an exact retry reads it.
+pub async fn append_receipt_corrupt_identity_encoding_version_is_refused<F, Fut>(
+    store: Arc<dyn RuntimePersistence>,
+    corrupt: F,
+) where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let mut state = seed_append_receipt_state(&store).await;
+    let nodes = vec![crate::SessionAppendNode::plugin(
+        "append-receipt",
+        serde_json::json!({"value": "corrupt-identity-version"}),
+    )];
+    let (first, _) = append_request_commit(&mut state, "corrupt-identity-version", &nodes, None);
+    let exact_retry = first.clone();
+    commit_runtime_state_for_test(&store, first, "corrupt-identity-version-first")
+        .await
+        .expect("write canonical append receipt");
+
+    corrupt().await;
+
+    let error = store
+        .commit_runtime_state(exact_retry)
+        .await
+        .expect_err("corrupt stored append identity version must be refused");
+    assert!(
+        matches!(
+            &error,
+            StoreError::StoredDataCorrupt { record_kind, message }
+                if *record_kind == "RuntimeCommitReceipt append identity"
+                    && message.contains("identity_encoding_version")
+        ),
+        "corrupt stored append identity version must be a typed refusal, got {error:?}"
+    );
 }
 
 async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
@@ -1671,12 +1716,19 @@ async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(
     )];
     let (mut future_version, _) =
         append_request_commit(&mut state, "version-mismatch", &nodes, None);
-    future_version.turn_commit.identity_encoding_version = future_version
+    future_version
         .turn_commit
-        .identity_encoding_version
-        .map(|version| version + 1);
+        .append_request_identity
+        .as_mut()
+        .expect("append identity")
+        .encoding_version += 1;
     let mut exact_retry = future_version.clone();
-    exact_retry.turn_commit.identity_encoding_version = Some(1);
+    exact_retry
+        .turn_commit
+        .append_request_identity
+        .as_mut()
+        .expect("append identity")
+        .encoding_version = 1;
     commit_runtime_state_for_test(&store, future_version, "version-mismatch-first")
         .await
         .expect("first future-version receipt");

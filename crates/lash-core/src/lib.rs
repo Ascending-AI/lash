@@ -51,8 +51,10 @@ pub mod triggers;
 
 #[doc(hidden)]
 pub mod store_backend_support {
+    mod append_identity;
     mod session_meta;
 
+    pub use append_identity::decode_append_request_identity;
     pub use session_meta::{CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredRelation};
 
     /// Construct queued-work claim data with the predecessor identity that an
@@ -1049,22 +1051,22 @@ pub(crate) use session_model::RuntimeSessionPolicy;
 pub use session_model::{NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
-    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence, BlobRef,
-    CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload,
-    DurableScan, DurableScanPage, DurableSurface, GcReport, HydratedCheckpointComponent,
-    HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
-    MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
-    OperationId, OrphanedTurnInputScope, QueuedWorkClaimOutcome, QueuedWorkClaimRefusal,
-    QueuedWorkStore, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-    RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome, SessionAdmission,
-    SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
-    SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
-    StoreBackend, StoreError, StoreMaintenance, StorePreflight, StoreSchemaDatabase,
-    StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId, TurnInputStore,
-    VacuumReport, WorkClaim, WorkCompletion,
+    AppendRequestIdentity, AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent,
+    AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind, AttachmentWriteFence,
+    BlobRef, CheckpointComponentDescriptor, CommitBudget, CommitBudgetLimit, DurableItem,
+    DurablePayload, DurableScan, DurableScanPage, DurableSurface, GcReport,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
+    MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop,
+    MaintenanceSweep, OperationId, OrphanedTurnInputScope, QueuedWorkClaimOutcome,
+    QueuedWorkClaimRefusal, QueuedWorkStore, RuntimeCommit, RuntimePersistence,
+    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity, ScanCoverage,
+    SelectedQueuedWorkClaimOutcome, SessionAdmission, SessionBinding, SessionBlobReclaimReport,
+    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
+    SessionExecutionLeaseDisplacement, SessionExecutionLeaseRenewalInstallMismatch,
+    SessionExecutionLeaseStore, SessionMeta, StoreBackend, StoreError, StoreMaintenance,
+    StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
+    TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{
