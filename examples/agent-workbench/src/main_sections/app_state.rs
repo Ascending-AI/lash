@@ -1111,12 +1111,18 @@ fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkE
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AppErrorVerdict {
+    Retryable,
+    Terminal,
+    Ambiguous,
+}
+
 #[derive(Debug)]
 struct AppError {
     status: StatusCode,
     message: String,
-    retryable: bool,
-    terminal: bool,
+    verdict: AppErrorVerdict,
 }
 
 impl AppError {
@@ -1124,8 +1130,7 @@ impl AppError {
         Self {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
-            retryable: false,
-            terminal: true,
+            verdict: AppErrorVerdict::Terminal,
         }
     }
 
@@ -1133,8 +1138,7 @@ impl AppError {
         Self {
             status: StatusCode::CONFLICT,
             message: message.into(),
-            retryable: false,
-            terminal: true,
+            verdict: AppErrorVerdict::Terminal,
         }
     }
 
@@ -1142,8 +1146,7 @@ impl AppError {
         Self {
             status: StatusCode::NOT_FOUND,
             message: message.into(),
-            retryable: false,
-            terminal: true,
+            verdict: AppErrorVerdict::Terminal,
         }
     }
 
@@ -1152,8 +1155,7 @@ impl AppError {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: "internal server error".to_string(),
-            retryable: false,
-            terminal: false,
+            verdict: AppErrorVerdict::Ambiguous,
         }
     }
 
@@ -1170,8 +1172,7 @@ impl AppError {
         Self {
             status: StatusCode::FORBIDDEN,
             message: message.into(),
-            retryable: false,
-            terminal: true,
+            verdict: AppErrorVerdict::Terminal,
         }
     }
 
@@ -1179,32 +1180,29 @@ impl AppError {
         Self {
             status: StatusCode::GATEWAY_TIMEOUT,
             message: message.into(),
-            retryable: false,
-            terminal: false,
+            verdict: AppErrorVerdict::Ambiguous,
         }
     }
 
     fn runtime(error: lash::EmbedError) -> Self {
-        let retryable = error.is_retryable();
-        let terminal = error.is_terminal();
-        debug_assert!(
-            !(retryable && terminal),
-            "an embed error cannot be both retryable and terminal: {error}"
-        );
+        let verdict = match (error.is_retryable(), error.is_terminal()) {
+            (true, false) => AppErrorVerdict::Retryable,
+            (false, true) => AppErrorVerdict::Terminal,
+            (false, false) => AppErrorVerdict::Ambiguous,
+            (true, true) => AppErrorVerdict::Ambiguous,
+        };
         if let Some((session_id, context)) = deleted_session_details(&error) {
             log_deleted_session_refusal(session_id, context);
             return Self {
                 status: StatusCode::CONFLICT,
                 message: deleted_session_message(session_id),
-                retryable,
-                terminal,
+                verdict,
             };
         }
         eprintln!("agent-workbench runtime request failure: {error}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            retryable,
-            terminal,
+            verdict,
             message: "internal server error".to_string(),
         }
     }
