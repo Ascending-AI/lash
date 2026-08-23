@@ -636,7 +636,7 @@ impl<'a> SourceFormatter<'a> {
     }
 
     fn assign_target_source(&self, target: &AssignTarget) -> Result<String, CanonicalSourceError> {
-        let mut out = format_identifier("assignment target", target.root.as_str())?;
+        let mut out = format_assignment_target_identifier(target.root.as_str())?;
         for step in &target.steps {
             match step {
                 AssignPathStep::Field(field) => {
@@ -864,6 +864,16 @@ fn format_identifier(context: &'static str, name: &str) -> Result<String, Canoni
     })
 }
 
+fn format_assignment_target_identifier(name: &str) -> Result<String, CanonicalSourceError> {
+    if is_identifier_shape(name) && !crate::parser::is_lexer_hard_keyword(name) {
+        return Ok(name.to_string());
+    }
+    Err(CanonicalSourceError::InvalidIdentifier {
+        context: "assignment target",
+        name: name.to_string(),
+    })
+}
+
 fn format_key_name(name: &str) -> String {
     if is_bare_key(name) {
         name.to_string()
@@ -902,6 +912,10 @@ fn format_receiver_path(
 }
 
 fn is_identifier(name: &str) -> bool {
+    is_identifier_shape(name) && !crate::parser::is_parser_reserved_name(name)
+}
+
+fn is_identifier_shape(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -910,7 +924,6 @@ fn is_identifier(name: &str) -> bool {
         return false;
     }
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-        && !crate::parser::is_parser_reserved_name(name)
 }
 
 fn is_bare_key(name: &str) -> bool {
