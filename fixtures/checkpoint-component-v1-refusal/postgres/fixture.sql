@@ -886,7 +886,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 -- Data for Name: lash_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"schema_version":3,"session_id":"durable-read-fixture","config":{"provider_id":"","model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"turn_budget":"unbounded"},"current_frame_node_id":"frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f"}', '0c4f83520319c70de3fc63168a222322a4564ea2a47c00b7cb5998bde5b1b708', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
+INSERT INTO lash_durable_read_fixture.lash_sessions VALUES ('durable-read-fixture', 3, '{"schema_version":4,"session_id":"durable-read-fixture","config":{"provider_id":"","model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"turn_budget":"unbounded"},"current_frame_node_id":"frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f"}', '0c4f83520319c70de3fc63168a222322a4564ea2a47c00b7cb5998bde5b1b708', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9');
 
 
 --

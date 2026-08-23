@@ -80,7 +80,7 @@ pub use work_claim::{WorkClaim, WorkCompletion};
 fn default_root_session_id() -> String {
     "root".to_string()
 }
-pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 3;
+pub const SESSION_HEAD_META_SCHEMA_VERSION: u32 = 4;
 
 #[cfg(test)]
 mod prompt_persistence_compat_tests;
@@ -823,6 +823,7 @@ fn persisted_session_state_from_head(
     if let Some(prompt) = head.config.prompt.as_ref() {
         state.policy.prompt = prompt.clone();
     }
+    state.policy.generation = head.config.generation.clone();
     crate::runtime::state::apply_session_checkpoint(&mut state, checkpoint)?;
     Ok(state)
 }
@@ -1282,10 +1283,13 @@ pub trait QueuedWorkStore: Send + Sync {
             .map(crate::QueuedWorkEnqueueOutcome::Inserted)
     }
 
-    /// Claim a leading ready session-command batch for `owner_id`.
+    /// Claim leading ready session-command work for `owner_id`.
     ///
     /// A command claim is returned only when the earliest ready claimable batch
-    /// is classified as [`QueuedWorkClass::SessionCommand`].
+    /// is classified as [`QueuedWorkClass::SessionCommand`]. Non-config
+    /// commands remain one-batch claims; an adjacent `ApplyConfigPatch` prefix
+    /// is claimed together so the runtime can commit it once while completing
+    /// every accepted batch.
     /// Backends derive the class from queued payloads; no schema column is
     /// required.
     async fn claim_leading_ready_session_command(
@@ -1393,6 +1397,17 @@ pub trait QueuedWorkStore: Send + Sync {
         session_id: &str,
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError>;
+
+    /// Whether `batch_id` has a durable completion marker written atomically
+    /// with a session-command head commit. Cancellation removes the queued row
+    /// without writing this marker, so an accepted batch that has vanished can
+    /// be classified without mistaking cancellation for completion.
+    #[doc(hidden)]
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, StoreError>;
 
     /// Project the earliest pending session-command and next-turn-input ordering
     /// keys without hydrating either payload family. The session-command side is

@@ -1008,6 +1008,7 @@ impl SessionCommitStore for PostgresSessionStore {
         {
             let receipt = plan.receipt_write(&result);
             let columns = append_identity_columns(receipt.append_request_identity)?;
+            let result_json = encode_json(receipt.result)?;
             sqlx::query(
                 "INSERT INTO lash_runtime_turn_commits (
                     session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
@@ -1019,7 +1020,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .bind(receipt.session_id)
             .bind(receipt.operation_key)
             .bind(receipt.turn_commit_hash)
-            .bind(encode_json(receipt.result)?)
+            .bind(&result_json)
             .bind(now as i64)
             .bind(columns.0)
             .bind(columns.1)
@@ -1028,6 +1029,34 @@ impl SessionCommitStore for PostgresSessionStore {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
+            if commit.turn_commit.operation.key == "session-command" {
+                for batch_id in commit
+                    .completed_queue_claims
+                    .iter()
+                    .flat_map(|completion| &completion.batch_ids)
+                {
+                    let marker =
+                        lash_core::store_backend_support::session_command_batch_completion_key(
+                            &commit.session_id,
+                            batch_id,
+                        )?;
+                    sqlx::query(
+                        "INSERT INTO lash_runtime_turn_commits (
+                            session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+                            request_identity_hash, requested_node_count,
+                            requested_ancestor_node_id, identity_encoding_version
+                         ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULL, NULL)",
+                    )
+                    .bind(&commit.session_id)
+                    .bind(marker)
+                    .bind(receipt.turn_commit_hash)
+                    .bind(&result_json)
+                    .bind(now as i64)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+                }
+            }
         }
         // Receipt SQL remains the same four nullable identity columns.
         // The aggregate exists only in Rust; no durable layout moved.
@@ -1578,7 +1607,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         ))
         .bind(session_id)
         .bind(sql_session_lease_generation(generation)?)
-        .bind(claim_scan_limit(1))
+        .bind(claim_scan_limit(MAX_SESSION_COMMAND_BATCHES_PER_CLAIM))
         .fetch_all(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -2242,6 +2271,27 @@ impl QueuedWorkStore for PostgresSessionStore {
             .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Some(batch))
+    }
+
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        let marker = lash_core::store_backend_support::session_command_batch_completion_key(
+            session_id, batch_id,
+        )?;
+        sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1 FROM lash_runtime_turn_commits
+                WHERE session_id = $1 AND turn_id = $2
+             )",
+        )
+        .bind(session_id)
+        .bind(marker)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(store_sqlx_error)
     }
 
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {

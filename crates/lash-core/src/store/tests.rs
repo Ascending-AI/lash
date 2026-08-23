@@ -245,7 +245,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "d266d4d8fcffc1dfc740d03dccb65a964cb394e2b5d53ff271fc175a25b15817"
+        "a29052d6d60cb1d126fe8a34ba073bd390830f1cc5540a01926f1236ab354e81"
     );
 }
 

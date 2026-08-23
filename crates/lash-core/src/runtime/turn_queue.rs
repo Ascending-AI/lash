@@ -5,16 +5,25 @@ use crate::{PluginMessage, TurnCause, TurnInput};
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionCommand {
+    /// Apply durable session-policy intent at the command drain. Consecutive
+    /// config patches may share one head commit, but every enclosing queued
+    /// batch remains present in the atomic completion.
+    ApplyConfigPatch {
+        patch: Box<super::ApplyConfigPatch>,
+    },
     // No generation guard: the command drains asynchronously, so any
     // generation observed at enqueue time may legitimately have advanced by
     // drain time, and the refresh recomputes the surface from live sources
     // regardless — a guard could only fail spuriously.
-    RefreshToolCatalog { reason: String },
+    RefreshToolCatalog {
+        reason: String,
+    },
 }
 
 impl SessionCommand {
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::ApplyConfigPatch { .. } => "apply_config_patch",
             Self::RefreshToolCatalog { .. } => "refresh_tool_catalog",
         }
     }
@@ -29,6 +38,36 @@ pub struct SessionCommandReceipt {
     pub session_id: String,
     pub batch_id: String,
     pub source_key: String,
+}
+
+impl std::fmt::Display for SessionCommandReceipt {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "batch `{}` for session `{}`",
+            self.batch_id, self.session_id
+        )
+    }
+}
+
+/// An accepted session command waiting for its queue completion to be
+/// committed atomically with the new session head.
+#[derive(Clone, Debug)]
+pub(crate) struct SessionCommandSettlementHandle {
+    pub(crate) receipt: SessionCommandReceipt,
+}
+
+/// The semantically distinct outcomes of config-command submission. Rejection
+/// happens before durable queue acceptance; `Durable` means the command's
+/// completion and session head committed together. `Pending` preserves an
+/// accepted receipt when the configured settlement deadline expires, while
+/// `Cancelled` reports a queued command withdrawn before that commit.
+#[derive(Clone, Debug)]
+pub(crate) enum SessionCommandSettlement {
+    Rejected(crate::RuntimeError),
+    Durable(SessionCommandReceipt),
+    Pending(SessionCommandReceipt),
+    Cancelled(SessionCommandReceipt),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -736,6 +775,24 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
             QueuedWorkPayload::SessionCommand { command } => Some((batch, command.as_ref())),
             _ => None,
         }
+    }
+
+    /// Extract every independently receipted command in a coalesced
+    /// session-command claim. Every batch remains exactly one control item;
+    /// only the enclosing commit is shared.
+    pub fn session_commands(&self) -> Option<Vec<(&QueuedWorkBatch, &SessionCommand)>> {
+        let mut commands = Vec::with_capacity(self.batches.len());
+        for batch in &self.batches {
+            if batch.kind != QueuedWorkKind::Control || batch.items.len() != 1 {
+                return None;
+            }
+            let item = batch.items.first()?;
+            let QueuedWorkPayload::SessionCommand { command } = &item.payload else {
+                return None;
+            };
+            commands.push((batch, command.as_ref()));
+        }
+        (!commands.is_empty()).then_some(commands)
     }
 
     /// Materializes turn-producing input from a claim for queued-work driver implementors.

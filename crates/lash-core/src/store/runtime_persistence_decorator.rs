@@ -392,6 +392,16 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
             .await
     }
 
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        self.inner()
+            .queued_work_batch_completed(session_id, batch_id)
+            .await
+    }
+
     async fn pending_session_work_ordering(
         &self,
         session_id: &str,
@@ -863,6 +873,14 @@ where
         batch_id: &str,
     ) -> Result<Option<crate::QueuedWorkBatch>, StoreError> {
         RuntimePersistenceDecorator::cancel_queued_work_batch(self, session_id, batch_id).await
+    }
+
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        RuntimePersistenceDecorator::queued_work_batch_completed(self, session_id, batch_id).await
     }
 
     async fn pending_session_work_ordering(

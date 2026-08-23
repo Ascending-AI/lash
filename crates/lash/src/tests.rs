@@ -645,6 +645,14 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
         Ok(None)
     }
 
+    async fn queued_work_batch_completed(
+        &self,
+        _session_id: &str,
+        _batch_id: &str,
+    ) -> std::result::Result<bool, lash_core::store::StoreError> {
+        Ok(false)
+    }
+
     async fn pending_session_work_ordering(
         &self,
         _session_id: &str,
@@ -1225,6 +1233,14 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
         lash_core::store::StoreError,
     > {
         Ok(None)
+    }
+
+    async fn queued_work_batch_completed(
+        &self,
+        _session_id: &str,
+        _batch_id: &str,
+    ) -> std::result::Result<bool, lash_core::store::StoreError> {
+        Ok(false)
     }
 
     async fn pending_session_work_ordering(

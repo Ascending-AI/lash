@@ -430,8 +430,11 @@ fn unstamped_conversation_bodies_keep_loading() {
     // Re-encoding stamps it, which is the whole reason a fixture cannot keep an
     // unstamped row: the next writer to touch it makes it current.
     let restamped = decoded.encode_storage_body().expect("re-encode");
-    assert!(
-        restamped.contains(r#""schema_version":1"#),
+    let restamped: serde_json::Value =
+        serde_json::from_str(&restamped).expect("re-encoded body is JSON");
+    assert_eq!(
+        restamped["schema_version"],
+        serde_json::json!(SESSION_NODE_BODY_SCHEMA_VERSION),
         "an unstamped body re-encodes at this build's generation: {restamped}"
     );
 }

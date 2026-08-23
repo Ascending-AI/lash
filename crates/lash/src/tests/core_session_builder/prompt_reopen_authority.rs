@@ -393,10 +393,20 @@ async fn sqlite_store_from_literal_legacy_head(
     )
     .await;
     let raw = rusqlite::Connection::open(factory.catalog_path()).expect("open SQLite catalog");
+    // The literal keeps the pre-prompt config bytes for the field-defaulting
+    // probe, while the real store decoder still requires this binary's exact
+    // session-head envelope generation.
+    let current_schema_head_json = LEGACY_PROMPTLESS_HEAD_JSON.replace(
+        "\"schema_version\": 3",
+        &format!(
+            "\"schema_version\": {}",
+            crate::formats::SESSION_HEAD_META_SCHEMA_VERSION
+        ),
+    );
     assert_eq!(
         raw.execute(
             "UPDATE session_head SET head_json = ?1 WHERE session_id = ?2",
-            rusqlite::params![LEGACY_PROMPTLESS_HEAD_JSON, "legacy-promptless"],
+            rusqlite::params![current_schema_head_json, "legacy-promptless"],
         )
         .expect("install literal historical head"),
         1

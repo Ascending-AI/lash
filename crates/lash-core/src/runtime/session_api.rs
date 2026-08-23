@@ -494,29 +494,32 @@ impl LashRuntime {
             .await
     }
 
-    pub(super) async fn apply_session_config_mutations(&mut self, previous: SessionPolicy) {
+    pub(super) async fn resolve_session_config_mutations(
+        &self,
+        previous: SessionPolicy,
+        candidate: SessionPolicy,
+    ) -> SessionPolicy {
         let Some(session) = self.session.as_ref() else {
-            return;
+            return candidate;
         };
-        let current = self.session_policy();
-        if current == previous {
-            return;
+        if candidate == previous {
+            return candidate;
         }
         let Ok(services) = self.runtime_session_services() else {
-            return;
+            return candidate;
         };
-        self.state.policy = session
+        session
             .plugins()
             .mutate_session_config(
                 SessionConfigChangedContext {
                     session_id: self.state.session_id.clone(),
                     previous,
-                    current,
+                    current: candidate.clone(),
                     sessions: services.state_service(),
                 },
-                self.state.effective_policy().clone(),
+                candidate,
             )
-            .await;
+            .await
     }
 }
 
@@ -542,12 +545,17 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     Ok(enqueued)
 }
 
+enum AcceptedSessionCommand {
+    Inline(crate::SessionCommandReceipt),
+    Queued(crate::runtime::SessionCommandSettlementHandle),
+}
+
 impl LashRuntime {
-    pub async fn submit_session_command(
+    async fn accept_session_command(
         &mut self,
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
-    ) -> Result<crate::SessionCommandReceipt, RuntimeError> {
+    ) -> Result<AcceptedSessionCommand, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
         let idempotency_key = idempotency_key.into();
         if idempotency_key.trim().is_empty() {
@@ -563,13 +571,14 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.history_store())
         else {
-            let batch_id = format!("inline-command:{}", uuid::Uuid::new_v4());
-            self.apply_session_command(command, None, None).await?;
-            return Ok(crate::SessionCommandReceipt {
+            let receipt = crate::SessionCommandReceipt {
                 session_id,
-                batch_id,
+                batch_id: format!("inline-command:{}", uuid::Uuid::new_v4()),
                 source_key,
-            });
+            };
+            self.apply_session_command(vec![command], None, None)
+                .await?;
+            return Ok(AcceptedSessionCommand::Inline(receipt));
         };
         let draft = crate::QueuedWorkBatchDraft::new(
             session_id.clone(),
@@ -580,9 +589,193 @@ impl LashRuntime {
         let enqueued = store.enqueue_queued_work(draft).await.map_err(|err| {
             RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
         })?;
+        Ok(AcceptedSessionCommand::Queued(
+            crate::runtime::SessionCommandSettlementHandle {
+                receipt: crate::SessionCommandReceipt {
+                    session_id,
+                    batch_id: enqueued.batch_id,
+                    source_key,
+                },
+            },
+        ))
+    }
+
+    pub(super) async fn submit_apply_config_patch(
+        &mut self,
+        patch: super::ApplyConfigPatch,
+    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
+        self.submit_apply_config_patch_with_idempotency_key(
+            patch,
+            format!("config-patch:{}", uuid::Uuid::new_v4()),
+        )
+        .await
+    }
+
+    pub(super) async fn submit_apply_config_patch_with_idempotency_key(
+        &mut self,
+        patch: super::ApplyConfigPatch,
+        idempotency_key: impl Into<String>,
+    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
+        let publish_patch = patch.clone();
+        let accepted = match self
+            .accept_session_command(
+                crate::SessionCommand::ApplyConfigPatch {
+                    patch: Box::new(patch),
+                },
+                idempotency_key,
+            )
+            .await
+        {
+            Ok(accepted) => accepted,
+            Err(rejection) => {
+                return Ok(crate::runtime::SessionCommandSettlement::Rejected(
+                    rejection,
+                ));
+            }
+        };
+        match accepted {
+            AcceptedSessionCommand::Inline(receipt) => {
+                Ok(crate::runtime::SessionCommandSettlement::Durable(receipt))
+            }
+            AcceptedSessionCommand::Queued(handle) => {
+                self.await_session_command_settlement(handle, &publish_patch)
+                    .await
+            }
+        }
+    }
+
+    async fn await_session_command_settlement(
+        &mut self,
+        handle: crate::runtime::SessionCommandSettlementHandle,
+        publish_patch: &super::ApplyConfigPatch,
+    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
+        let store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::StoreCommitFailed,
+                    "accepted session command lost its persistent store",
+                )
+            })?;
+        // Session-command settlement is a control-plane wait. Reuse the
+        // host-configured lease TTL as its deadline: the default is the same
+        // 30-second operational window, and hosts that tighten durable-control
+        // timings through `with_lease_timings` tighten this wait as well.
+        let settlement_timeout = self.host.core.control.lease_timings.ttl();
+        let settlement_started = self.host.core.clock.now();
+        loop {
+            let still_pending = store
+                .list_queued_work(&handle.receipt.session_id)
+                .await
+                .map_err(super::runtime_error_from_store_commit)?
+                .iter()
+                .any(|batch| batch.batch_id == handle.receipt.batch_id);
+            if !still_pending {
+                let completed = store
+                    .queued_work_batch_completed(
+                        &handle.receipt.session_id,
+                        &handle.receipt.batch_id,
+                    )
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+                if !completed {
+                    return Ok(crate::runtime::SessionCommandSettlement::Cancelled(
+                        handle.receipt,
+                    ));
+                }
+                self.refresh_session_graph_from_store()
+                    .await
+                    .map_err(|error| {
+                        RuntimeError::new(
+                            RuntimeErrorCode::SessionCommandPostDriveRefresh,
+                            error.to_string(),
+                        )
+                    })?;
+                // The existing refresh path deliberately preserves three
+                // live-owned policy fields (FIG-1875's adoption half remains
+                // out of scope). Once this command's durable completion is
+                // observed, publish the exact settled patch locally.
+                publish_patch.apply_to(&mut self.state.policy);
+                return Ok(crate::runtime::SessionCommandSettlement::Durable(
+                    handle.receipt,
+                ));
+            }
+
+            if self
+                .host
+                .core
+                .clock
+                .now()
+                .saturating_duration_since(settlement_started)
+                >= settlement_timeout
+            {
+                return Ok(crate::runtime::SessionCommandSettlement::Pending(
+                    handle.receipt,
+                ));
+            }
+
+            let lease = super::session_execution_lease::SessionExecutionLeaseGuard::try_acquire_for_executor(
+                Arc::clone(&store),
+                &self.state.session_id,
+                &self.runtime_lease_owner,
+                &self.runtime_lease_executor_id,
+                self.host.core.control.lease_timings,
+                Arc::clone(&self.host.core.clock),
+            )
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+            if let Some(lease) = lease {
+                let fence = lease.fence();
+                while self.drain_next_session_command(&fence).await?.is_some() {
+                    let target_pending = store
+                        .list_queued_work(&handle.receipt.session_id)
+                        .await
+                        .map_err(super::runtime_error_from_store_commit)?
+                        .iter()
+                        .any(|batch| batch.batch_id == handle.receipt.batch_id);
+                    if !target_pending {
+                        break;
+                    }
+                }
+                lease
+                    .release_if_live()
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
+            } else if let Some(driver) = self.host.queued_work_driver.as_ref() {
+                driver.notify_pending_work(Some(&handle.receipt.session_id), "config_settlement");
+            }
+            let remaining = settlement_timeout.saturating_sub(
+                self.host
+                    .core
+                    .clock
+                    .now()
+                    .saturating_duration_since(settlement_started),
+            );
+            self.host
+                .core
+                .clock
+                .sleep(remaining.min(std::time::Duration::from_millis(10)))
+                .await;
+        }
+    }
+
+    pub async fn submit_session_command(
+        &mut self,
+        command: crate::SessionCommand,
+        idempotency_key: impl Into<String>,
+    ) -> Result<crate::SessionCommandReceipt, RuntimeError> {
+        let accepted = self
+            .accept_session_command(command, idempotency_key)
+            .await?;
+        let receipt = match accepted {
+            AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
+            AcceptedSessionCommand::Queued(handle) => handle.receipt,
+        };
         if let Some(driver) = self.host.queued_work_driver.as_ref() {
             driver
-                .claim_and_run_pending(Some(&session_id), "session_command")
+                .claim_and_run_pending(Some(&receipt.session_id), "session_command")
                 .await
                 .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?;
             // An inline or external driver may have committed the command
@@ -599,11 +792,7 @@ impl LashRuntime {
                     )
                 })?;
         }
-        Ok(crate::SessionCommandReceipt {
-            session_id,
-            batch_id: enqueued.batch_id,
-            source_key,
-        })
+        Ok(receipt)
     }
 
     pub async fn drain_next_session_command(
@@ -629,34 +818,42 @@ impl LashRuntime {
         let Some(claim) = claim else {
             return Ok(None);
         };
-        let Some((batch, command)) = claim.exclusive_session_command() else {
+        let Some(commands) = claim.session_commands() else {
             return Err(RuntimeError::new(
                 crate::RuntimeErrorCode::SessionCommandClaim,
                 format!(
-                    "queued-work claim `{}` did not contain exactly one session command batch",
+                    "queued-work claim `{}` did not contain only single-command control batches",
                     claim.claim_id
                 ),
             ));
         };
-        let batch_id = batch.batch_id.clone();
-        let source_key = batch.source_key.clone().unwrap_or_else(|| batch_id.clone());
-        let command = command.clone();
+        let receipts = commands
+            .iter()
+            .map(|(batch, _)| {
+                let batch_id = batch.batch_id.clone();
+                crate::SessionCommandReceipt {
+                    session_id: self.state.session_id.clone(),
+                    source_key: batch.source_key.clone().unwrap_or_else(|| batch_id.clone()),
+                    batch_id,
+                }
+            })
+            .collect::<Vec<_>>();
+        let commands = commands
+            .into_iter()
+            .map(|(_, command)| command.clone())
+            .collect::<Vec<_>>();
         self.apply_session_command(
-            command,
+            commands,
             Some(claim.completion()),
             Some(session_execution_lease),
         )
         .await?;
-        Ok(Some(crate::SessionCommandReceipt {
-            session_id: self.state.session_id.clone(),
-            batch_id,
-            source_key,
-        }))
+        Ok(receipts.into_iter().next())
     }
 
     async fn apply_session_command(
         &mut self,
-        command: crate::SessionCommand,
+        commands: Vec<crate::SessionCommand>,
         completion: Option<crate::QueuedWorkCompletion>,
         session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
     ) -> Result<(), RuntimeError> {
@@ -668,25 +865,52 @@ impl LashRuntime {
                     err.to_string(),
                 )
             })?;
-        let crate::SessionCommand::RefreshToolCatalog { .. } = command;
-        self.refresh_session_tool_catalog().await.map_err(|err| {
-            RuntimeError::new(
-                crate::RuntimeErrorCode::SessionCommandRefreshTools,
-                err.to_string(),
-            )
-        })?;
+        let config_only = commands
+            .iter()
+            .all(|command| matches!(command, crate::SessionCommand::ApplyConfigPatch { .. }));
+        let mut next_config_state = config_only.then(|| self.state.clone());
+        if let Some(next_state) = next_config_state.as_mut() {
+            for command in &commands {
+                let crate::SessionCommand::ApplyConfigPatch { patch } = command else {
+                    unreachable!("config-only command group was checked above")
+                };
+                patch.validate()?;
+                patch.apply_to(&mut next_state.policy);
+            }
+        } else {
+            debug_assert_eq!(commands.len(), 1, "non-config commands remain exclusive");
+            for command in commands {
+                match command {
+                    crate::SessionCommand::RefreshToolCatalog { .. } => {
+                        self.refresh_session_tool_catalog().await.map_err(|err| {
+                            RuntimeError::new(
+                                crate::RuntimeErrorCode::SessionCommandRefreshTools,
+                                err.to_string(),
+                            )
+                        })?;
+                    }
+                    crate::SessionCommand::ApplyConfigPatch { .. } => {
+                        unreachable!("config commands use the cloned publication path")
+                    }
+                }
+            }
+        }
         let Some(store) = self
             .session
             .as_ref()
             .and_then(|session| session.history_store())
         else {
+            if let Some(next_state) = next_config_state {
+                self.state = next_state;
+            }
             return Ok(());
         };
         let operation = completion
             .as_ref()
             .and_then(|completion| completion.batch_ids.first())
             .map(|batch_id| {
-                crate::OperationId::new(self.state.queue_drain_scope(batch_id), "session-command")
+                let state = next_config_state.as_ref().unwrap_or(&self.state);
+                crate::OperationId::new(state.queue_drain_scope(batch_id), "session-command")
             })
             .ok_or_else(|| {
                 RuntimeError::new(
@@ -694,9 +918,10 @@ impl LashRuntime {
                     "persisted session commands require a claimed queue boundary",
                 )
             })?;
+        let commit_state = next_config_state.as_mut().unwrap_or(&mut self.state);
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
-                &mut self.state,
+                commit_state,
                 &[],
                 operation,
                 self.host.core.durability.commit_budget,
@@ -716,8 +941,11 @@ impl LashRuntime {
         let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
-        self.state.apply_persisted_commit_result(result);
-        self.state.mark_node_ids_persisted(persisted_node_ids);
+        commit_state.apply_persisted_commit_result(result);
+        commit_state.mark_node_ids_persisted(persisted_node_ids);
+        if let Some(next_state) = next_config_state {
+            self.state = next_state;
+        }
         Ok(())
     }
 }

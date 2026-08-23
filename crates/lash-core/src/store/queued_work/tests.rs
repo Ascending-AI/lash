@@ -60,6 +60,7 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
         claim_fencing_token: 0,
         prior_claim_id: None,
         work_class: QueuedWorkClass::TurnWork,
+        config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,
         authority: QueuedWorkAuthority::new("principal"),
@@ -156,6 +157,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                 claim_fencing_token: 0,
                 prior_claim_id: None,
                 work_class,
+                config_patch_command: false,
                 delivery_policy,
                 kind,
                 authority,
@@ -784,6 +786,23 @@ fn leading_session_command_blocks_turn_work_claim() {
 }
 
 #[test]
+fn adjacent_config_commands_share_one_claim_but_not_other_commands() {
+    let mut first = candidate(1, None);
+    first.work_class = QueuedWorkClass::SessionCommand;
+    first.kind = QueuedWorkKind::Control;
+    first.config_patch_command = true;
+    let mut second = first.clone();
+    second.batch_id = "qwb-2".to_string();
+    second.enqueue_seq = 2;
+    let mut refresh = second.clone();
+    refresh.batch_id = "qwb-3".to_string();
+    refresh.enqueue_seq = 3;
+    refresh.config_patch_command = false;
+
+    assert_eq!(select_leading_session_command(&[first, second, refresh]), 2);
+}
+
+#[test]
 fn overdue_head_is_claimed_alone_at_claim_time() {
     let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
     assert_eq!(
@@ -806,6 +825,7 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
         claim_fencing_token: 2,
         prior_claim_id: None,
         work_class: QueuedWorkClass::TurnWork,
+        config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,
         authority: QueuedWorkAuthority::default(),

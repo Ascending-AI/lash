@@ -498,6 +498,20 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         Ok(Some(queued.remove(index).batch))
     }
 
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, crate::StoreError> {
+        let marker = crate::store_backend_support::session_command_batch_completion_key(
+            session_id, batch_id,
+        )?;
+        Ok(self
+            .runtime_turn_commits
+            .lock_recover()
+            .contains_key(&(session_id.to_string(), marker)))
+    }
+
     async fn list_queued_work(
         &self,
         session_id: &str,

@@ -220,7 +220,7 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 1;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 2;
 
 /// Generation of a body written before the stamp existed.
 ///
@@ -355,6 +355,10 @@ pub struct PersistedSessionConfig {
     /// serialized so reopen authority can distinguish it from legacy absence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<crate::PromptLayer>,
+    /// Generation controls required to continue a cold-loaded session with
+    /// the options it last committed.
+    #[serde(default)]
+    pub generation: crate::GenerationOptions,
 }
 
 impl PersistedSessionConfig {
@@ -370,6 +374,7 @@ impl PersistedSessionConfig {
             model: crate::ModelSpec::default(),
             turn_budget,
             prompt: None,
+            generation: crate::GenerationOptions::default(),
         }
     }
 }
@@ -381,6 +386,7 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             model: policy.model.clone(),
             turn_budget: policy.turn_budget,
             prompt: Some(policy.prompt.clone()),
+            generation: policy.generation.clone(),
         }
     }
 }
