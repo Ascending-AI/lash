@@ -110,10 +110,10 @@ pub fn validate_typescript_regexp_shape(
     Ok(())
 }
 
-fn compile_regexp(pattern: &str, flags: &str) -> Result<regress::Regex, regress::Error> {
-    regress::Regex::with_flags(
+fn compile_regexp(pattern: &str, flags: &str) -> Result<lash_regress::Regex, lash_regress::Error> {
+    lash_regress::Regex::with_flags(
         pattern,
-        regress::Flags {
+        lash_regress::Flags {
             icase: flags.contains('i'),
             multiline: flags.contains('m'),
             dot_all: flags.contains('s'),
@@ -131,8 +131,8 @@ struct CapturedMatch {
     named: Vec<(String, Option<std::ops::Range<usize>>)>,
 }
 
-impl From<regress::Match> for CapturedMatch {
-    fn from(found: regress::Match) -> Self {
+impl From<lash_regress::Match> for CapturedMatch {
+    fn from(found: lash_regress::Match) -> Self {
         let named = found
             .named_groups()
             .map(|(name, range)| (name.to_string(), range))
@@ -146,12 +146,12 @@ impl From<regress::Match> for CapturedMatch {
 }
 
 fn collect_regress_match(
-    found: Result<regress::Match, regress::MatchError>,
+    found: Result<lash_regress::Match, lash_regress::MatchError>,
 ) -> Result<CapturedMatch, RuntimeError> {
     found
         .map(CapturedMatch::from)
         .map_err(
-            |regress::MatchError::Exhausted| RuntimeError::RegExpBudgetExceeded {
+            |lash_regress::MatchError::Exhausted| RuntimeError::RegExpBudgetExceeded {
                 limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
             },
         )
@@ -167,7 +167,7 @@ fn collect_bounded_regress_matches<I>(
     max_matches: Option<usize>,
 ) -> Result<Vec<CapturedMatch>, RuntimeError>
 where
-    I: Iterator<Item = Result<regress::Match, regress::MatchError>>,
+    I: Iterator<Item = Result<lash_regress::Match, lash_regress::MatchError>>,
 {
     let mut collected = Vec::new();
     let mut transient_bytes = 0_u64;
@@ -370,7 +370,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
-    fn regexp_program(&mut self, receiver: HeapId) -> Result<regress::Regex, RuntimeError> {
+    fn regexp_program(&mut self, receiver: HeapId) -> Result<lash_regress::Regex, RuntimeError> {
         let (pattern, flags, cached) = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => (
                 regexp.pattern.clone(),
@@ -493,7 +493,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .transpose()
         }
         .map_err(
-            |regress::MatchError::Exhausted| RuntimeError::RegExpBudgetExceeded {
+            |lash_regress::MatchError::Exhausted| RuntimeError::RegExpBudgetExceeded {
                 limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
             },
         )?
@@ -764,7 +764,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         start: usize,
     ) -> Result<Value, RuntimeError>
     where
-        I: Iterator<Item = Result<regress::Match, regress::MatchError>>,
+        I: Iterator<Item = Result<lash_regress::Match, lash_regress::MatchError>>,
     {
         let mut values = Vec::new();
         let mut expected = start;
@@ -867,17 +867,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
         mut matches: I,
     ) -> Result<Value, RuntimeError>
     where
-        I: Iterator<Item = Result<regress::Match, regress::MatchError>>,
+        I: Iterator<Item = Result<lash_regress::Match, lash_regress::MatchError>>,
     {
         if units.is_empty() {
-            let found = matches
-                .next()
-                .transpose()
-                .map_err(
-                    |regress::MatchError::Exhausted| RuntimeError::RegExpBudgetExceeded {
-                        limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
-                    },
-                )?;
+            let found =
+                matches
+                    .next()
+                    .transpose()
+                    .map_err(|lash_regress::MatchError::Exhausted| {
+                        RuntimeError::RegExpBudgetExceeded {
+                            limit: TYPESCRIPT_REGEXP_EXECUTION_FUEL,
+                        }
+                    })?;
             return Ok(Value::List(
                 if found.is_some_and(|found| found.range().is_empty()) {
                     Vec::new()

@@ -110,6 +110,8 @@ done < <(
       -path '*/.tgt/*' -o \
       -path '*/vendor' -o \
       -path '*/vendor/*' -o \
+      -path '*/crates/lash-regress' -o \
+      -path '*/crates/lash-regress/*' -o \
       -path '*/vendored' -o \
       -path '*/vendored/*' -o \
       -path '*/generated' -o \

@@ -69,12 +69,12 @@ than by construct list:
   explicit signature-table entry, with `ryu-js` at the single
   number-to-string choke point because Rust's native formatting is not
   ECMA-exact at the edges.
-- **Regex** is ECMA semantics on a vendored, fuel-instrumented copy of the
-  `regress` engine: every bytecode dispatch and backtrack transition is
-  charged against a deterministic budget, because a backtracking engine
+- **Regex** is ECMA semantics on the published, fuel-instrumented
+  `lash-regress` fork of the `regress` engine: every bytecode dispatch and
+  backtrack transition is charged against a deterministic budget, because a backtracking engine
   running model-authored patterns on model-chosen inputs is otherwise an
-  unbounded-runtime hole. The patch is shaped for upstreaming; the vendored
-  copy is the fork.
+  unbounded-runtime hole. The instrumentation is shaped for upstreaming; the
+  workspace crate is the fork.
 - **TypeScript type syntax is erased, never checked.** Annotations,
   interfaces, aliases, generics, and casts parse and vanish, exactly as
   Deno, Node, and every SWC-based system does; `enum` is the one type-syntax

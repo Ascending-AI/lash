@@ -209,7 +209,7 @@ impl Match {
     /// # Examples
     ///
     /// ```rust
-    /// use regress::Regex;
+    /// use lash_regress::Regex;
     ///
     /// let re = Regex::new(r"\d+").unwrap();
     /// let text = "Price: $123";
@@ -444,7 +444,7 @@ impl Regex {
     /// Example:
     ///
     ///  ```rust
-    ///   use regress::Regex;
+    ///   use lash_regress::Regex;
     ///   let text = "xyxy";
     ///   let re = Regex::new(r"(?<=x)y").unwrap();
     ///   let t1 = re.find(&text[1..]).unwrap().range();
@@ -621,7 +621,7 @@ impl Regex {
     /// # Examples
     ///
     /// ```rust
-    /// use regress::Regex;
+    /// use lash_regress::Regex;
     ///
     /// let re = Regex::new(r"(\w+)\s+(\w+)").unwrap();
     /// let result = re.replace("hello world", "$2 $1");
@@ -653,7 +653,7 @@ impl Regex {
     /// # Examples
     ///
     /// ```rust
-    /// use regress::Regex;
+    /// use lash_regress::Regex;
     ///
     /// let re = Regex::new(r"(\w+)\s+(\w+)").unwrap();
     /// let result = re.replace_all("hello world foo bar", "$2-$1");
@@ -687,7 +687,7 @@ impl Regex {
     /// # Examples
     ///
     /// ```rust
-    /// use regress::Regex;
+    /// use lash_regress::Regex;
     ///
     /// let re = Regex::new(r"\d+").unwrap();
     /// let text = "Price: $123";
@@ -721,7 +721,7 @@ impl Regex {
     /// # Examples
     ///
     /// ```rust
-    /// use regress::Regex;
+    /// use lash_regress::Regex;
     ///
     /// let re = Regex::new(r"\d+").unwrap();
     /// let text = "Items: 5, 10, 15";
@@ -1054,7 +1054,7 @@ pub mod backends {
 /// # Example
 ///
 /// ```
-/// use regress::escape;
+/// use lash_regress::escape;
 ///
 /// let escaped = escape("Hello. How are you?");
 /// assert_eq!(escaped, "Hello\\. How are you\\?");

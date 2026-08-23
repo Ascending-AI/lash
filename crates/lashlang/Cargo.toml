@@ -27,10 +27,10 @@ async-trait = { workspace = true }
 compact_str = { version = "0.9.0", features = ["serde"] }
 futures-executor = "0.3"
 lash-core = { workspace = true }
+lash-regress = { workspace = true }
 lash-sansio = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
-regress = { workspace = true }
 rustc-hash = "2"
 rmp-serde = { workspace = true }
 ryu-js = { workspace = true }

@@ -1,6 +1,6 @@
 #![allow(clippy::uninlined_format_args)]
 
-use regress::{Regex, escape};
+use lash_regress::{Regex, escape};
 
 #[test]
 fn test_escape_basic() {

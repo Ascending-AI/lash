@@ -223,11 +223,10 @@ language semantics:
   groups**, with `TS_REGEX_PATTERN_TOO_LONG` and
   `TS_REGEX_PATTERN_NESTING_LIMIT` repairs. Matching is capped at **1,000,000
   deterministic matcher steps** per operation; exhaustion is the uncatchable
-  `RegExpBudgetExceeded` execution-bound error. The pinned `regress` 0.11.1
-  engine is patched locally to charge bytecode dispatch and backtrack
-  transitions. The patch has not been filed upstream; until it is, the vendored
-  copy is the only place the charge exists, and a version bump has to carry it
-  forward by hand.
+  `RegExpBudgetExceeded` execution-bound error. The published `lash-regress`
+  workspace crate is a fork of `regress` 0.11.1 that charges bytecode dispatch
+  and backtrack transitions. The instrumentation has not been filed upstream;
+  the fork is released in lockstep with Lash.
 - RegExp flags `d` and `v` reject as `TS_REGEX_INDICES_FLAG_UNSUPPORTED` and
   `TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED`: match indices and Unicode-set syntax
   are not in the accepted surface. Use `match.index` plus capture lengths

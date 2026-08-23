@@ -1,19 +1,21 @@
 <!-- Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation. -->
-# regress - REGex in Rust with EcmaScript Syntax
+# lash-regress — fuel-metered regress for Lash
 
-## Lash vendor provenance
+## Lash fork provenance
 
-This fork is pinned to upstream commit
-`7e64ad5e6807b5503e5cc97a79e0f129b23c556b`. All 10 upstream integration test
-files are carried byte-for-byte. Stable workspace runs exercise 9 of those
-files, comprising 522 tests with the nextest filter `-E 'package(regress)'`.
-`pattern_tests.rs` is carried byte-for-byte but remains inert because it is
-gated by the nightly-only `pattern` feature, pending stabilization of Rust's
-pattern API.
+`lash-regress` is a publishable Lash workspace crate forked from `regress`
+0.11.1 at upstream commit
+`7e64ad5e6807b5503e5cc97a79e0f129b23c556b`. It adds the fuel/step-budget and
+anchored-matching APIs Lashlang needs. The upstream integration tests are
+carried with only the crate import renamed from `regress` to `lash_regress`;
+`pattern_tests.rs` remains inert because it is gated by the nightly-only
+`pattern` feature, pending stabilization of Rust's pattern API.
 
 The crate keeps upstream's `clippy::all` warning group suppressed for carried
-vendored sources so compiler upgrades do not require local rewrites. Rust
+forked sources so compiler upgrades do not require local rewrites. Rust
 compiler warnings and the workspace's non-Clippy gates remain enforced.
+
+See [PROVENANCE.md](PROVENANCE.md) for the upstream source and license record.
 
 
 ## Introduction

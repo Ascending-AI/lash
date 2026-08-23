@@ -361,6 +361,53 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+  # A dependency workspace's [patch] table is invisible to its consumers.
+  # Resolve lashlang from this checkout as a Git dependency in a fresh external
+  # crate so every dependency needed by downstream users is carried explicitly.
+  lashlang-git-consumer:
+    name: Lashlang Git consumer
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
+      - name: Check lashlang Git consumer without patch mirror
+        run: bash scripts/check-lashlang-git-consumer.sh "${GITHUB_SHA}"
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
   # Feature-set coverage the workspace check cannot reach, and the deliberately
   # non-default provider/protocol test features. Split out of test-doc: these
   # resolve their own feature graphs, so they neither reuse nor warm anything the

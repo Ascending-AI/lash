@@ -3,7 +3,7 @@
 #![cfg(feature = "pattern")]
 #![feature(pattern)]
 
-use regress::Regex;
+use lash_regress::Regex;
 
 #[test]
 fn test_pattern_find() {
