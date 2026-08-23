@@ -1,11 +1,23 @@
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use lash_core::{ToolCall, ToolDefinition, ToolFailure, ToolFailureClass, ToolOutcome, ToolValue};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
-    object_schema, require_str, retryable_io_failure,
+    non_empty_string, object_schema, retryable_io_failure, typed_args, typed_ok,
 };
+
+#[derive(Debug, Deserialize)]
+struct FetchUrlArgs {
+    url: String,
+}
+
+#[derive(Debug, Serialize)]
+struct FetchUrlOutput {
+    url: String,
+    content: String,
+}
 
 /// Fetch a URL and return its content as text.
 pub struct FetchUrl {
@@ -39,11 +51,13 @@ pub fn fetch_url_provider(api_key: impl Into<String>) -> StaticToolProvider<Fetc
 #[async_trait::async_trait]
 impl StaticToolExecute for FetchUrl {
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let args = call.args;
-        let url = match require_str(args, "url") {
-            Ok(s) => s,
-            Err(e) => return e,
+        let args = match typed_args::<FetchUrlArgs>(call.args) {
+            Ok(args) => args,
+            Err(err) => return err,
         };
+        if let Err(err) = non_empty_string(&args.url, "url") {
+            return err;
+        }
 
         if self.api_key.trim().is_empty() {
             return execution_failure(
@@ -54,7 +68,7 @@ impl StaticToolExecute for FetchUrl {
 
         let body = json!({
             "api_key": self.api_key,
-            "urls": [url],
+            "urls": [&args.url],
         });
 
         let resp = self
@@ -100,10 +114,10 @@ impl StaticToolExecute for FetchUrl {
             .and_then(|item| item.get("raw_content").or_else(|| item.get("content")))
             .and_then(|value| value.as_str())
             .unwrap_or_default();
-        ToolOutcome::ok(json!({
-            "url": url,
-            "content": content,
-        }))
+        typed_ok(FetchUrlOutput {
+            url: args.url,
+            content: content.to_string(),
+        })
     }
 }
 
@@ -185,5 +199,39 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::Execution);
         assert_eq!(failure.code, "tavily_api_key_missing");
         assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
+    }
+
+    #[tokio::test]
+    async fn missing_url_has_a_pinned_invalid_args_message() {
+        let result =
+            lash_core::testing::run_tool(&fetch_url_provider("unused"), "fetch_url", &json!({}))
+                .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("missing url must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+        assert_eq!(failure.code, "invalid_tool_args");
+        assert_eq!(
+            failure.message,
+            "Invalid tool arguments: missing field `url`"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_url_is_rejected_at_the_consumer_boundary() {
+        let result = lash_core::testing::run_tool(
+            &fetch_url_provider("unused"),
+            "fetch_url",
+            &json!({"url": ""}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("empty url must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+        assert_eq!(failure.code, "invalid_tool_args");
+        assert_eq!(failure.message, "Missing required parameter: url");
     }
 }
