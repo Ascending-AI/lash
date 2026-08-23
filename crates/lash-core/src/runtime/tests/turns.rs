@@ -1355,7 +1355,6 @@ async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
         store.clone() as Arc<dyn crate::RuntimePersistence>,
     )
     .await;
-    first.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     first.set_turn_phase_probe(Arc::new(FailCaptureAfterEffectLoop {
         executor: Arc::clone(&executor),
     }));
@@ -1394,7 +1393,6 @@ async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
         store.clone() as Arc<dyn crate::RuntimePersistence>,
     )
     .await;
-    peer.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
 
     let reclaimed = peer
         .stream_next_queued_work(TurnOptions::new(
@@ -1473,7 +1471,6 @@ async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_re
         store.clone() as Arc<dyn crate::RuntimePersistence>,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
         executor: Arc::clone(&executor),
         committed_turns: AtomicUsize::new(0),
@@ -1987,7 +1984,7 @@ async fn standard_runtime_with_transport_and_queue_store(
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let store = Arc::new(RecordingStore::default());
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+    let runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
@@ -1995,7 +1992,6 @@ async fn standard_runtime_with_transport_and_queue_store(
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     (runtime, store)
 }
 
@@ -2005,7 +2001,7 @@ async fn standard_runtime_with_transport_and_queue_store_clock(
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let store = Arc::new(RecordingStore::with_clock(clock));
     let runtime_store: Arc<dyn crate::store::RuntimePersistence> = store.clone();
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+    let runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
@@ -2013,7 +2009,6 @@ async fn standard_runtime_with_transport_and_queue_store_clock(
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     (runtime, store)
 }
 
@@ -2889,7 +2884,6 @@ async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     let admitted = enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
@@ -3029,7 +3023,6 @@ async fn checkpoint_attachment_failure_leaves_active_input_pending_without_appli
     )
     .await;
     runtime.host.core.attachment_source_policy = Arc::new(DenyHostCheckpointAttachments);
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     let admitted = enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         "root",
@@ -3807,7 +3800,6 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
 
     // The wake batch is the queued work the turn claims mid-flight at an
     // active-turn checkpoint.
@@ -3964,7 +3956,6 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     let first = enqueue_idle_turn_input(store.as_ref(), "root", "first queued turn").await;
 
     let first_result = runtime
@@ -4075,7 +4066,6 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     let inbound = enqueue_idle_turn_input(store.as_ref(), "root", "start switch").await;
     store.fail_next_exact_queue_claim();
 
@@ -4185,7 +4175,6 @@ async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_hando
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     enqueue_idle_turn_input(store.as_ref(), "root", "start cancellable switch").await;
 
     let terminal = runtime
@@ -4299,7 +4288,6 @@ async fn claimed_plugin_abort_commits_and_settles_input() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     let inbound = enqueue_idle_turn_input(store.as_ref(), "root", "abort this input").await;
 
     let terminal = runtime
@@ -4547,7 +4535,6 @@ async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAtSecondTurnFinalizedHook::new(
         Arc::clone(&clock),
     )));
@@ -4620,7 +4607,6 @@ async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     enqueue_idle_turn_input(store.as_ref(), "root", "stash the graph service").await;
 
     let output = runtime
@@ -4748,7 +4734,6 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
         &clock,
     ))));
@@ -4892,7 +4877,6 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
         &clock,
     ))));
@@ -5018,7 +5002,6 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
 
     let run = runtime
         .stream_turn_with_agent_frames(
@@ -5151,7 +5134,6 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     runtime.set_turn_phase_probe(Arc::new(ExpireLeaseAfterRetainedCommit::new(Arc::clone(
         &clock,
     ))));
@@ -5256,7 +5238,6 @@ async fn frame_switch_limit_commits_terminal_error_and_settles_claim() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     let inbound = enqueue_idle_turn_input(store.as_ref(), "root", "start bounded chain").await;
 
     let terminal = runtime
@@ -5354,7 +5335,6 @@ async fn frame_switch_limit_capture_abort_abandons_prompt_claim_before_returning
         store.clone() as Arc<dyn crate::RuntimePersistence>,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
     runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterCommittedTurns {
         executor,
         committed_turns: AtomicUsize::new(0),
@@ -6930,15 +6910,14 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
         crate::QueuedWorkBatchingConfig::new(1),
     )
     .with_clock(host_clock);
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        tools,
-        transport,
-        crate::EmbeddedRuntimeHost::new(config),
-        runtime_store,
-    )
-    .await;
-    runtime.host.process_registry = Some(registry.clone());
+    let mut runtime = TestRuntime::new(transport)
+        .plugins(Vec::new())
+        .tools(tools)
+        .host(crate::EmbeddedRuntimeHost::new(config))
+        .store(runtime_store)
+        .process_registry(registry.clone())
+        .build()
+        .await;
     let effect_loop_ended = Arc::new(AtomicBool::new(false));
     let release_effect_loop = Arc::new(AtomicBool::new(false));
     runtime.set_turn_phase_probe(Arc::new(PauseAfterEffectLoop {
@@ -6994,15 +6973,13 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
         crate::QueuedWorkBatchingConfig::new(1),
     )
     .with_clock(successor_clock);
-    let mut successor = runtime_with_plugins_and_tools_and_host_and_store(
-        Vec::new(),
-        Arc::new(EmptyTools),
-        successor_transport,
-        crate::EmbeddedRuntimeHost::new(successor_config),
-        successor_store,
-    )
-    .await;
-    successor.host.process_registry = Some(registry.clone());
+    let mut successor = TestRuntime::new(successor_transport)
+        .plugins(Vec::new())
+        .host(crate::EmbeddedRuntimeHost::new(successor_config))
+        .store(successor_store)
+        .process_registry(registry.clone())
+        .build()
+        .await;
     successor
         .run_turn_assembled(
             TurnInput::text("take over and win the head"),
@@ -7286,7 +7263,6 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
         runtime_store,
     )
     .await;
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
 
     enqueue_idle_turn_input(store.as_ref(), "root", "input held when the lease is lost").await;
     let registry = runtime

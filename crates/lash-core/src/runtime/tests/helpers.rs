@@ -547,20 +547,109 @@ impl crate::ToolProvider for EmptyTools {
     }
 }
 
+pub(crate) struct TestRuntime {
+    plugins: Vec<Arc<dyn crate::PluginFactory>>,
+    tools: Arc<dyn crate::ToolProvider>,
+    transport: TestProvider,
+    host: EmbeddedRuntimeHost,
+    store: Option<Arc<dyn crate::RuntimePersistence>>,
+    process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
+}
+
+impl TestRuntime {
+    pub(crate) fn new(transport: TestProvider) -> Self {
+        Self {
+            plugins: crate::testing::test_standard_protocol_factories(),
+            tools: Arc::new(EmptyTools),
+            transport,
+            host: test_host_config(),
+            store: None,
+            process_registry: Some(Arc::new(crate::TestLocalProcessRegistry::default())),
+        }
+    }
+
+    pub(crate) fn plugins(mut self, plugins: Vec<Arc<dyn crate::PluginFactory>>) -> Self {
+        self.plugins = plugins;
+        self
+    }
+
+    pub(crate) fn tools(mut self, tools: Arc<dyn crate::ToolProvider>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    pub(crate) fn host(mut self, host: EmbeddedRuntimeHost) -> Self {
+        self.host = host;
+        self
+    }
+
+    pub(crate) fn store(mut self, store: Arc<dyn crate::RuntimePersistence>) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    pub(crate) fn process_registry(
+        mut self,
+        process_registry: Arc<dyn crate::ProcessRegistry>,
+    ) -> Self {
+        self.process_registry = Some(process_registry);
+        self
+    }
+
+    pub(crate) fn without_process_registry(mut self) -> Self {
+        self.process_registry = None;
+        self
+    }
+
+    pub(crate) async fn build(self) -> LashRuntime {
+        let mut factories = self.plugins;
+        let tools = Arc::clone(&self.tools);
+        factories.push(Arc::new(StaticPluginFactory::new(
+            "test_tools",
+            crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
+        )));
+        let plugin_host = crate::PluginHost::new(factories);
+        let plugin_session = plugin_host.build_session("root", None).expect("plugins");
+        let mut runtime = match self.store {
+            Some(store) => LashRuntime::from_persistent_embedded_state(
+                standard_test_policy(),
+                self.host,
+                crate::PersistentRuntimeServices::new(plugin_session, store),
+                RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+                crate::testing::runtime_lease_owner(),
+            )
+            .await
+            .expect("runtime"),
+            None => LashRuntime::from_embedded_state(
+                standard_test_policy(),
+                self.host,
+                crate::RuntimeServices::new(plugin_session),
+                RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
+                crate::testing::runtime_lease_owner(),
+            )
+            .await
+            .expect("runtime"),
+        };
+        runtime.host.process_registry = self.process_registry;
+        set_runtime_provider(&mut runtime, self.transport.into_handle());
+        runtime
+    }
+}
+
+#[tokio::test]
+async fn test_runtime_process_registry_defaults_and_can_be_disabled() {
+    let runtime = TestRuntime::new(mock_provider(Vec::new())).build().await;
+    assert!(runtime.host.process_registry.is_some());
+
+    let runtime = TestRuntime::new(mock_provider(Vec::new()))
+        .without_process_registry()
+        .build()
+        .await;
+    assert!(runtime.host.process_registry.is_none());
+}
+
 pub(crate) async fn standard_runtime_with_transport(transport: TestProvider) -> LashRuntime {
-    let tools: Arc<dyn crate::ToolProvider> = Arc::new(EmptyTools);
-    let mut runtime = LashRuntime::from_embedded_state(
-        standard_test_policy(),
-        test_host_config(),
-        crate::RuntimeServices::new(plugin_session_with_tools("root", tools)),
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
-        crate::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("runtime");
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
-    set_runtime_provider(&mut runtime, transport.clone().into_handle());
-    runtime
+    TestRuntime::new(transport).build().await
 }
 pub(crate) type RuntimeTestPluginBuilder = dyn Fn(&crate::PluginSessionContext) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError>
     + Send
@@ -622,13 +711,7 @@ pub(crate) async fn runtime_with_plugins(
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     transport: TestProvider,
 ) -> LashRuntime {
-    runtime_with_plugins_and_tools_and_host(
-        plugins,
-        Arc::new(EmptyTools),
-        transport,
-        test_host_config(),
-    )
-    .await
+    TestRuntime::new(transport).plugins(plugins).build().await
 }
 
 pub(crate) async fn runtime_with_plugins_and_tools(
@@ -636,7 +719,11 @@ pub(crate) async fn runtime_with_plugins_and_tools(
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
 ) -> LashRuntime {
-    runtime_with_plugins_and_tools_and_host(plugins, tools, transport, test_host_config()).await
+    TestRuntime::new(transport)
+        .plugins(plugins)
+        .tools(tools)
+        .build()
+        .await
 }
 
 pub(crate) async fn runtime_with_plugins_and_tools_and_host(
@@ -645,26 +732,12 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host(
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
 ) -> LashRuntime {
-    let mut factories = plugins;
-    let tools = Arc::clone(&tools);
-    factories.push(Arc::new(StaticPluginFactory::new(
-        "test_tools",
-        crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
-    )));
-    let plugin_host = crate::PluginHost::new(factories);
-    let plugin_session = plugin_host.build_session("root", None).expect("plugins");
-    let mut runtime = LashRuntime::from_embedded_state(
-        standard_test_policy(),
-        host,
-        crate::RuntimeServices::new(plugin_session),
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
-        crate::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("runtime");
-    runtime.host.process_registry = Some(Arc::new(crate::TestLocalProcessRegistry::default()));
-    set_runtime_provider(&mut runtime, transport.clone().into_handle());
-    runtime
+    TestRuntime::new(transport)
+        .plugins(plugins)
+        .tools(tools)
+        .host(host)
+        .build()
+        .await
 }
 
 pub(crate) async fn runtime_with_plugins_and_tools_and_host_and_store(
@@ -674,26 +747,13 @@ pub(crate) async fn runtime_with_plugins_and_tools_and_host_and_store(
     host: EmbeddedRuntimeHost,
     store: Arc<dyn crate::RuntimePersistence>,
 ) -> LashRuntime {
-    let mut factories = plugins;
-    let tools = Arc::clone(&tools);
-    factories.push(Arc::new(StaticPluginFactory::new(
-        "test_tools",
-        crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
-    )));
-    let plugin_host = crate::PluginHost::new(factories);
-    let plugin_session = plugin_host.build_session("root", None).expect("plugins");
-    let services = crate::PersistentRuntimeServices::new(plugin_session, store);
-    let mut runtime = LashRuntime::from_persistent_embedded_state(
-        standard_test_policy(),
-        host,
-        services,
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
-        crate::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("runtime");
-    set_runtime_provider(&mut runtime, transport.clone().into_handle());
-    runtime
+    TestRuntime::new(transport)
+        .plugins(plugins)
+        .tools(tools)
+        .host(host)
+        .store(store)
+        .build()
+        .await
 }
 
 pub(crate) struct EchoTool;
@@ -948,16 +1008,5 @@ pub(crate) async fn standard_runtime_with_transport_and_host(
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
 ) -> LashRuntime {
-    let tools: Arc<dyn crate::ToolProvider> = Arc::new(EmptyTools);
-    let mut runtime = LashRuntime::from_embedded_state(
-        standard_test_policy(),
-        host,
-        crate::RuntimeServices::new(plugin_session_with_tools("root", tools)),
-        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded)),
-        crate::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("runtime");
-    set_runtime_provider(&mut runtime, transport.clone().into_handle());
-    runtime
+    TestRuntime::new(transport).host(host).build().await
 }
