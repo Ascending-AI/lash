@@ -57,6 +57,21 @@ pub mod store_backend_support {
     pub use append_identity::decode_append_request_identity;
     pub use session_meta::{CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredRelation};
 
+    /// Reserved runtime-receipt identity used as the durable completion marker
+    /// for one settled session-command batch. Backends write one marker for
+    /// every batch in a coalesced command claim in the same transaction as the
+    /// head commit and queue deletion.
+    pub fn session_command_batch_completion_key(
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<String, crate::StoreError> {
+        crate::OperationId::new(
+            crate::ExecutionScope::queue_drain(session_id, batch_id),
+            "session-command-settlement",
+        )
+        .storage_key()
+    }
+
     /// Construct queued-work claim data with the predecessor identity that an
     /// abandoning store must restore. Store implementors pass `None` for fresh
     /// work and the interrupted `claim_id` for a redrive.

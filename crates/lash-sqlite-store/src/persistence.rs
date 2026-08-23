@@ -1078,6 +1078,7 @@ impl SessionCommitStore for Store {
                     );
                     {
                         let receipt = plan.receipt_write(&result);
+                        let result_json = encode_json(receipt.result)?;
                         tx.execute(
                             "INSERT INTO runtime_turn_commits (
                                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
@@ -1089,7 +1090,7 @@ impl SessionCommitStore for Store {
                                 receipt.session_id,
                                 receipt.operation_key,
                                 receipt.turn_commit_hash,
-                                encode_json(receipt.result)?,
+                                result_json,
                                 now as i64,
                                 receipt.append_request_identity.map(|identity| identity.request_hash.as_str()),
                                 receipt.append_request_identity.map(|identity| identity.requested_node_count as i64),
@@ -1098,6 +1099,34 @@ impl SessionCommitStore for Store {
                             ],
                         )
                         .map_err(sqlite_error)?;
+                        if commit.turn_commit.operation.key == "session-command" {
+                            for batch_id in commit
+                                .completed_queue_claims
+                                .iter()
+                                .flat_map(|completion| &completion.batch_ids)
+                            {
+                                let marker = lash_core::store_backend_support::session_command_batch_completion_key(
+                                    &commit.session_id,
+                                    batch_id,
+                                )?;
+                                tx.execute(
+                                    "INSERT INTO runtime_turn_commits (
+                                        session_id, turn_id, turn_commit_hash, result_json,
+                                        committed_at_ms, request_identity_hash,
+                                        requested_node_count, requested_ancestor_node_id,
+                                        identity_encoding_version
+                                     ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, NULL)",
+                                    params![
+                                        commit.session_id,
+                                        marker,
+                                        receipt.turn_commit_hash,
+                                        result_json,
+                                        now as i64,
+                                    ],
+                                )
+                                .map_err(sqlite_error)?;
+                            }
+                        }
                     }
                     // Receipt SQL remains the same four nullable identity columns.
                     // The aggregate exists only in Rust; no durable layout moved.
@@ -1568,7 +1597,7 @@ impl QueuedWorkStore for Store {
                                     session_id,
                                     now as i64,
                                     sql_session_lease_generation(generation)?,
-                                    claim_scan_limit(1)
+                                    claim_scan_limit(MAX_SESSION_COMMAND_BATCHES_PER_CLAIM)
                                 ],
                                 queued_batch_row_from_sql,
                             )
@@ -2389,6 +2418,31 @@ impl QueuedWorkStore for Store {
             })
             .await
             .map_err(sqlite_error)?
+    }
+
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        let session_id = session_id.to_string();
+        let marker = lash_core::store_backend_support::session_command_batch_completion_key(
+            &session_id,
+            batch_id,
+        )?;
+        self.conn
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS (
+                        SELECT 1 FROM runtime_turn_commits
+                        WHERE session_id = ?1 AND turn_id = ?2
+                     )",
+                    params![session_id, marker],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(sqlite_error)
     }
 
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {

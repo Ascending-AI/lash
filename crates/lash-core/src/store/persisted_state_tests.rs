@@ -13,6 +13,7 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
                 model: crate::ModelSpec::default(),
                 turn_budget: crate::TurnBudget::Unbounded,
                 prompt: Some(crate::PromptLayer::new()),
+                generation: crate::GenerationOptions::default(),
             },
             checkpoint_ref: None,
             token_ledger: Vec::new(),

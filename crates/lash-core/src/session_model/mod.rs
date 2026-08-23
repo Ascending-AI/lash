@@ -122,14 +122,10 @@ pub struct SessionPolicy {
     /// is session-wide truth: child sessions resolve their spec against this
     /// policy, and every carrier of a whole session policy carries it too.
     ///
-    /// It travels with the rest of the policy on reopen, which per ADR 0030
-    /// means the host's configuration is the authority wherever a host is
-    /// there to supply one: a facade reopen resolves the host's current spec
-    /// and reconciles it over loaded state, exactly as it does for the model
-    /// and the prompt. The persisted copy is what a session resumes with when
-    /// no live host reconciles it — the process/remote path, where
-    /// `RemoteProcessExecutionPolicy` mirrors this field, and core embedders
-    /// that hand [`crate::LashRuntime`] a loaded state directly.
+    /// The durable session-head copy restores this intent on a cold load. Per
+    /// ADR 0030, a live facade host may still reconcile its current spec over
+    /// loaded state at open time, exactly as it does for the model and prompt.
+    /// The process/remote policy carrier mirrors the same field.
     pub generation: crate::GenerationOptions,
 }
 
@@ -220,7 +216,8 @@ impl std::ops::DerefMut for RuntimeSessionPolicy {
 /// one value, so the default overlay is per-field: a child that caps output
 /// tokens keeps the temperature and seed its parent pinned. Discarding
 /// inherited intent stays available, but it has to be asked for.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "mode", content = "generation", rename_all = "snake_case")]
 pub enum GenerationOverlay {
     /// Layer the set options over the inherited ones. Options this overlay
     /// leaves unset keep the value they inherit.

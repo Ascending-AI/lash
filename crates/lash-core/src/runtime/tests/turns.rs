@@ -2114,6 +2114,209 @@ async fn enqueue_session_command(
     .expect("enqueue session command")
 }
 
+async fn enqueue_config_patch_command(
+    store: &RecordingStore,
+    session_id: &str,
+    patch: crate::runtime::ApplyConfigPatch,
+) -> crate::QueuedWorkBatch {
+    crate::store::QueuedWorkStore::enqueue_queued_work(
+        store,
+        crate::QueuedWorkBatchDraft::new(
+            session_id.to_string(),
+            crate::DeliveryPolicy::AfterCurrentTurnCommit,
+            vec![crate::QueuedWorkPayload::session_command(
+                crate::SessionCommand::ApplyConfigPatch {
+                    patch: Box::new(patch),
+                },
+            )],
+        ),
+    )
+    .await
+    .expect("enqueue config patch command")
+}
+
+#[tokio::test]
+async fn queued_config_patches_coalesce_into_one_head_commit() {
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+    let models = ["queued-model-a", "queued-model-b", "queued-model-c"];
+    for model in models {
+        enqueue_config_patch_command(
+            store.as_ref(),
+            "root",
+            crate::runtime::ApplyConfigPatch {
+                model: Some(
+                    crate::ModelSpec::builder(model)
+                        .context_window_tokens(32_000)
+                        .build()
+                        .expect("model"),
+                ),
+                ..crate::runtime::ApplyConfigPatch::default()
+            },
+        )
+        .await;
+    }
+    let commits_before = *store.runtime_commit_count.lock_recover();
+    let owner = lease_owner("config-patch-coalescing");
+    let lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        "root",
+        &owner,
+        "config-patch-coalescing-executor",
+        crate::LeaseTimings::default().ttl_ms(),
+    )
+    .await
+    .expect("claim session execution lease")
+    .acquired()
+    .expect("session execution lease");
+
+    runtime
+        .drain_next_session_command(&lease.fence())
+        .await
+        .expect("drain coalesced config patches")
+        .expect("one receipt from the coalesced claim");
+
+    assert_eq!(
+        *store.runtime_commit_count.lock_recover(),
+        commits_before + 1,
+        "N config commands must share exactly one head commit"
+    );
+    assert!(
+        crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+            .await
+            .expect("list settled config commands")
+            .is_empty(),
+        "every independently accepted command must settle its own batch"
+    );
+    assert_eq!(runtime.session_policy().model.id, "queued-model-c");
+}
+
+#[tokio::test]
+async fn config_settlement_distinguishes_enqueue_rejection_from_durable_completion() {
+    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    let original_model = runtime.session_policy().model.clone();
+    let outcome = runtime
+        .submit_apply_config_patch_with_idempotency_key(
+            crate::runtime::ApplyConfigPatch {
+                model: Some(
+                    crate::ModelSpec::builder("must-not-publish")
+                        .context_window_tokens(32_000)
+                        .build()
+                        .expect("model"),
+                ),
+                ..crate::runtime::ApplyConfigPatch::default()
+            },
+            "",
+        )
+        .await
+        .expect("typed submission outcome");
+
+    let crate::runtime::SessionCommandSettlement::Rejected(rejection) = outcome else {
+        panic!("empty idempotency key must be rejected before durable acceptance");
+    };
+    assert_eq!(
+        rejection.code,
+        crate::RuntimeErrorCode::SessionCommandIdempotencyKey
+    );
+    assert_eq!(runtime.session_policy().model, original_model);
+
+    let durable = runtime
+        .submit_apply_config_patch_with_idempotency_key(
+            crate::runtime::ApplyConfigPatch {
+                model: Some(
+                    crate::ModelSpec::builder("durable-inline")
+                        .context_window_tokens(32_000)
+                        .build()
+                        .expect("model"),
+                ),
+                ..crate::runtime::ApplyConfigPatch::default()
+            },
+            "durable-inline",
+        )
+        .await
+        .expect("durable settlement");
+    assert!(matches!(
+        durable,
+        crate::runtime::SessionCommandSettlement::Durable(_)
+    ));
+    assert_eq!(runtime.session_policy().model.id, "durable-inline");
+}
+
+fn turn_budget_config_mutator(turn_budget: crate::TurnBudget) -> Arc<dyn crate::PluginFactory> {
+    Arc::new(RuntimeTestPluginFactory {
+        build: Arc::new(move |_| {
+            Ok(Arc::new(RuntimeTestPlugin {
+                before_turn: None,
+                checkpoint: None,
+                tool_result_projector: None,
+                runtime_event: None,
+                external_registrar: Some(Arc::new(move |reg| {
+                    reg.session()
+                        .config_mutator(Arc::new(move |_ctx, mut policy| {
+                            Box::pin(async move {
+                                policy.turn_budget = turn_budget;
+                                Ok(policy)
+                            })
+                        }));
+                    Ok(())
+                })),
+            }))
+        }),
+    })
+}
+
+#[tokio::test]
+async fn plugin_turn_budget_mutation_survives_park_and_reload() {
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let persisted_budget = crate::TurnBudget::bounded(7);
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        vec![turn_budget_config_mutator(persisted_budget)],
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        test_host_config(),
+        Arc::clone(&runtime_store),
+    )
+    .await;
+
+    runtime
+        .update_session_config(crate::SessionConfigPatch {
+            model: Some(
+                crate::ModelSpec::builder("turn-budget-mutation-trigger")
+                    .context_window_tokens(32_000)
+                    .build()
+                    .expect("model"),
+            ),
+            ..crate::SessionConfigPatch::default()
+        })
+        .await
+        .expect("plugin turn-budget mutation settles");
+    assert_eq!(runtime.session_policy().turn_budget, persisted_budget);
+    drop(runtime.park().await.expect("park mutated session"));
+
+    let reloaded_state = crate::load_persisted_session_state(runtime_store.as_ref())
+        .await
+        .expect("load parked session")
+        .expect("parked session exists");
+    let plugins = crate::PluginHost::new(vec![turn_budget_config_mutator(persisted_budget)])
+        .build_session("root", reloaded_state.plugin_snapshot())
+        .expect("reloaded plugins");
+    let reloaded = crate::LashRuntime::from_persistent_embedded_state(
+        standard_test_policy(),
+        test_host_config(),
+        crate::PersistentRuntimeServices::new(plugins, runtime_store),
+        reloaded_state,
+        crate::testing::runtime_lease_owner(),
+    )
+    .await
+    .expect("reload parked runtime");
+    assert_eq!(
+        reloaded.session_policy().turn_budget,
+        persisted_budget,
+        "plugin-mutated durable budget must survive cold reload"
+    );
+}
+
 #[tokio::test]
 async fn every_session_config_patch_emits_a_lifecycle_event() {
     let observed = Arc::new(tokio::sync::Mutex::new(Vec::new()));

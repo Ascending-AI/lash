@@ -46,8 +46,13 @@ impl AppState {
     fn session_builder(&self, session_id: impl Into<String>) -> lash::SessionBuilder {
         let session_id = session_id.into();
         let dialect = self.requested_dialect(&session_id);
+        let model = model_spec_from_selection(self.selected_model());
         self.core
             .session(session_id)
+            // Model selection is host authority on every open. Supplying it in
+            // the spec also lets queued turns consume their existing FIFO head
+            // without inserting a config command behind that same turn.
+            .session_spec(lash::SessionSpec::new().model(model))
             .plugin_option(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras {
@@ -907,7 +912,8 @@ async fn apply_model_selection_to_session(
             ..lash::SessionConfigPatch::default()
         })
         .await
-        // Audited: session configuration updates only resident state and its current implementation is infallible.
+        // The setter returns only after the model override is durable; queue
+        // rejection or settlement failure remains an internal control error.
         .map_err(AppError::internal)?;
     state.trace_for_session(
         &session.session_id(),

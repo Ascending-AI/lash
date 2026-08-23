@@ -9,6 +9,9 @@ use super::session_store_factory_vacuum::{
 };
 use super::*;
 
+#[path = "session_store_factory_config_commands.rs"]
+mod config_commands;
+
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
 /// empty factory on each call.
@@ -41,6 +44,10 @@ pub async fn session_store_factory<F>(
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
+    config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
+    config_commands::session_store_factory_bounds_config_command_claims(make()).await;
+    config_commands::session_config_settlement_timeout_is_typed(make()).await;
+    config_commands::cancelled_session_config_settlement_is_typed(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     attachment_ownership_isolation(make()).await;

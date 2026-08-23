@@ -1140,6 +1140,7 @@ pub(super) fn apply_persisted_session_config(
     if let Some(prompt) = config.prompt.as_ref() {
         policy.prompt = prompt.clone();
     }
+    policy.generation = config.generation.clone();
 }
 
 /// Restore-time headroom shared by every bare next-turn `turn_index + 1`.

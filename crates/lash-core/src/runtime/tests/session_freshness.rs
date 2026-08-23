@@ -171,7 +171,7 @@ async fn freshness_hydrates_when_revision_changed() {
 }
 
 #[tokio::test]
-async fn resident_refresh_does_not_revert_live_uncommitted_prompt() {
+async fn resident_refresh_preserves_live_prompt_under_existing_adoption_rule() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;
     runtime
@@ -243,10 +243,10 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
 }
 
 #[tokio::test]
-async fn resident_refresh_does_not_revert_live_uncommitted_model() {
+async fn resident_refresh_preserves_live_model_under_existing_adoption_rule() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;
-    let live_model = crate::ModelSpec::builder("live-uncommitted-model")
+    let live_model = crate::ModelSpec::builder("settled-live-model")
         .context_window_tokens(123_456)
         .build()
         .expect("live model");
@@ -279,11 +279,11 @@ async fn resident_refresh_does_not_revert_live_uncommitted_model() {
 }
 
 #[tokio::test]
-async fn resident_refresh_does_not_revert_live_uncommitted_provider() {
+async fn resident_refresh_preserves_live_provider_under_existing_adoption_rule() {
     let (mut runtime, store) = freshness_runtime().await;
     append_history(&mut runtime, 2).await;
     let live_provider = TestProvider::builder()
-        .kind("live-uncommitted-provider")
+        .kind("settled-live-provider")
         .complete_error("provider must not be called by refresh")
         .build()
         .into_handle();
@@ -311,7 +311,7 @@ async fn resident_refresh_does_not_revert_live_uncommitted_provider() {
 
     assert_eq!(
         runtime.state.effective_policy().provider_id,
-        "live-uncommitted-provider"
+        "settled-live-provider"
     );
 }
 

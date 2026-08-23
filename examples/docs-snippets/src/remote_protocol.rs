@@ -1334,6 +1334,7 @@ mod asserted_tool_examples {
             model: lash::ModelSpec::default(),
             turn_budget: core_budget,
             prompt: Some(lash::prompt::PromptLayer::new()),
+            generation: lash::direct::GenerationOptions::default(),
         };
         assert_eq!(persisted.turn_budget, core_budget);
         let encoded = serde_json::to_value(&persisted).expect("serialize persisted config");
@@ -1341,6 +1342,7 @@ mod asserted_tool_examples {
         let round_tripped: lash::persistence::PersistedSessionConfig =
             serde_json::from_value(encoded).expect("deserialize persisted config");
         assert_eq!(round_tripped.prompt, persisted.prompt);
+        assert_eq!(round_tripped.generation, persisted.generation);
 
         let cap_code = lash::runtime::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded;
         assert!(cap_code.is_retryable());

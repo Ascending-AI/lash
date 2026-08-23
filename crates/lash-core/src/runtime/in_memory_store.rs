@@ -545,7 +545,7 @@ impl InMemorySessionStore {
         now: u64,
     ) -> Result<crate::QueuedWorkClaimOutcome, crate::store::StoreError> {
         let max_batches = match &kind {
-            InMemoryQueuedWorkClaimKind::LeadingSessionCommand => 1,
+            InMemoryQueuedWorkClaimKind::LeadingSessionCommand => usize::MAX,
             InMemoryQueuedWorkClaimKind::TurnWork { policy, .. } => policy.max_rows,
         };
         if max_batches == 0 {
@@ -1425,15 +1425,37 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         *self.runtime_commit_count.lock_recover() += 1;
         let result = plan.result(checkpoint_ref, manifest, staged_enqueued_queue_batches);
         let receipt = plan.receipt_write(&result);
-        self.runtime_turn_commits.lock_recover().insert(
-            (session_id, receipt.operation_key.to_string()),
-            RuntimeTurnCommitRecord {
-                turn_commit_hash: receipt.turn_commit_hash.to_string(),
-                result: result.clone(),
-                committed_at_ms: transaction_now,
-                append_request_identity: receipt.append_request_identity.cloned(),
-            },
+        let stored_receipt = RuntimeTurnCommitRecord {
+            turn_commit_hash: receipt.turn_commit_hash.to_string(),
+            result: result.clone(),
+            committed_at_ms: transaction_now,
+            append_request_identity: receipt.append_request_identity.cloned(),
+        };
+        let mut runtime_turn_commits = self.runtime_turn_commits.lock_recover();
+        runtime_turn_commits.insert(
+            (session_id.clone(), receipt.operation_key.to_string()),
+            stored_receipt.clone(),
         );
+        if commit.turn_commit.operation.key == "session-command" {
+            for batch_id in commit
+                .completed_queue_claims
+                .iter()
+                .flat_map(|completion| &completion.batch_ids)
+            {
+                let marker = crate::store_backend_support::session_command_batch_completion_key(
+                    &session_id,
+                    batch_id,
+                )?;
+                runtime_turn_commits.insert(
+                    (session_id.clone(), marker),
+                    RuntimeTurnCommitRecord {
+                        append_request_identity: None,
+                        ..stored_receipt.clone()
+                    },
+                );
+            }
+        }
+        drop(runtime_turn_commits);
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 self.release_session_execution_lease_in_memory(completion, false);

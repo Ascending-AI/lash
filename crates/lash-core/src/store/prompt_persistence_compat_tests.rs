@@ -14,6 +14,7 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         model: crate::ModelSpec::default(),
         turn_budget: crate::TurnBudget::Unbounded,
         prompt: Some(committed_prompt_layer()),
+        generation: crate::GenerationOptions::default(),
     };
     let mut old_writer_value = serde_json::to_value(config).expect("serialize current config");
     let old_writer_object = old_writer_value
@@ -22,6 +23,10 @@ fn legacy_config_keeps_prompt_absence_distinct() {
     assert!(
         old_writer_object.remove("prompt").is_some(),
         "the compatibility probe strips exactly the field introduced by FIG-1376"
+    );
+    assert!(
+        old_writer_object.remove("generation").is_some(),
+        "the compatibility probe also strips the field introduced by FIG-1895"
     );
     assert_eq!(
         old_writer_value,
@@ -43,6 +48,11 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         restored.prompt, None,
         "an absent field must remain distinguishable from an explicit empty layer"
     );
+    assert_eq!(
+        restored.generation,
+        crate::GenerationOptions::default(),
+        "a head written before generation persistence must restore neutral intent"
+    );
 }
 
 #[test]
@@ -52,6 +62,7 @@ fn explicit_empty_prompt_is_serialized_as_present() {
         model: crate::ModelSpec::default(),
         turn_budget: crate::TurnBudget::Unbounded,
         prompt: Some(crate::PromptLayer::new()),
+        generation: crate::GenerationOptions::default(),
     })
     .expect("serialize explicit empty prompt");
 
@@ -73,6 +84,7 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
             model: crate::ModelSpec::default(),
             turn_budget: crate::TurnBudget::Unbounded,
             prompt: Some(expected_prompt.clone()),
+            generation: crate::GenerationOptions::default(),
         },
         current_frame_node_id: None,
     })
@@ -98,4 +110,47 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
     .expect("cold-load committed session");
 
     assert_eq!(restored.policy.prompt, expected_prompt);
+}
+
+#[test]
+fn committed_generation_cold_loads_into_the_runtime_policy() {
+    let expected_generation = crate::GenerationOptions {
+        seed: Some(1895),
+        output_token_cap: std::num::NonZeroUsize::new(1_895),
+        ..crate::GenerationOptions::default()
+    };
+    let committed_head_json = serde_json::to_string(&SessionHeadPayload {
+        schema_version: SESSION_HEAD_META_SCHEMA_VERSION,
+        session_id: "committed-generation".to_string(),
+        config: crate::PersistedSessionConfig {
+            provider_id: "stored-provider".to_string(),
+            model: crate::ModelSpec::default(),
+            turn_budget: crate::TurnBudget::Unbounded,
+            prompt: Some(crate::PromptLayer::new()),
+            generation: expected_generation.clone(),
+        },
+        current_frame_node_id: None,
+    })
+    .expect("serialize committed session head");
+    let decoded: SessionHeadPayload = decode_versioned_json_record(
+        &committed_head_json,
+        "SessionHeadMeta",
+        SESSION_HEAD_META_SCHEMA_VERSION,
+    )
+    .expect("decode committed session head");
+    let restored = persisted_session_state_from_head(
+        SessionHead {
+            session_id: decoded.session_id,
+            head_revision: 7,
+            current_frame_node_id: decoded.current_frame_node_id,
+            graph: crate::SessionGraph::default(),
+            config: decoded.config,
+            checkpoint_ref: None,
+            token_ledger: Vec::new(),
+        },
+        None,
+    )
+    .expect("cold-load committed generation");
+
+    assert_eq!(restored.policy.generation, expected_generation);
 }

@@ -104,6 +104,10 @@ pub enum SessionError {
         #[source]
         source: crate::StoreError,
     },
+    #[error("session config command has not settled yet: {0}")]
+    SessionCommandPending(crate::SessionCommandReceipt),
+    #[error("session config command was cancelled before settlement: {0}")]
+    SessionCommandCancelled(crate::SessionCommandReceipt),
     #[error("protocol error: {0}")]
     Protocol(String),
 }

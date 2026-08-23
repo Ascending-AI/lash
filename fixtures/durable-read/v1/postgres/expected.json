@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 24,
+  "fixture_schema_version": 25,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
@@ -27,7 +27,8 @@
         }
       },
       "turn_budget": "unbounded",
-      "prompt": {}
+      "prompt": {},
+      "generation": {}
     },
     "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
     "graph": {
@@ -153,7 +154,8 @@
         }
       },
       "turn_budget": "unbounded",
-      "prompt": {}
+      "prompt": {},
+      "generation": {}
     },
     "current_frame_node_id": "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
     "graph": {

@@ -4,7 +4,7 @@ mod builder;
 pub(crate) mod causal;
 mod clock;
 mod config_ops;
-pub use config_ops::SessionConfigPatch;
+pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
 pub(crate) mod effect;
 #[doc(hidden)]
 pub use effect::await_event_coordinator;
@@ -447,6 +447,7 @@ pub use turn_queue::{
     SessionCommandReceipt, process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
     process_wake_source_key,
 };
+pub(crate) use turn_queue::{SessionCommandSettlement, SessionCommandSettlementHandle};
 pub use usage::{
     SessionUsageReport, TokenLedgerEntry, UsageReportRow, UsageTotals, diff_token_ledger,
     diff_usage_reports,

@@ -873,7 +873,8 @@ async fn reset_chat(
             ..lash::SessionConfigPatch::default()
         })
         .await
-        // Audited: session configuration updates only resident state and its current implementation is infallible.
+        // The setter returns only after the model override is durable; queue
+        // rejection or settlement failure remains an internal control error.
         .map_err(AppError::internal)?;
     state.messages.lock_recover().clear();
     state.lashlang_execution.clear();

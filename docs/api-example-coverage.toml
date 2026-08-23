@@ -29,7 +29,7 @@ gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
 # vanishes among thousands; see the comment above the tombstones themselves.
-removal_verdicts_recorded = 773
+removal_verdicts_recorded = 775
 
 # The number of `file.rs::Symbol::path` citations the reasons carry. The citation
 # check only reads a reference that names a symbol, so stripping the `::path` off
@@ -870,7 +870,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::validate_process_wake_source"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1539#.validate_process_wake_source()"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1568#.validate_process_wake_source()"
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkStore::enqueue_queued_work_with_outcome"
@@ -879,7 +879,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkStore::enqueue_queued_work_with_outcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1548#async fn enqueue_queued_work_with_outcome("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1577#async fn enqueue_queued_work_with_outcome("
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES"
@@ -952,7 +952,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1986#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2015#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"
@@ -961,7 +961,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1986#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2015#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 
 [[api]]
 symbol = "lash::persistence::StoreError::checked_monotonic_increment"
@@ -979,7 +979,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::raw_session_owned_artifact_refs_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2810#async fn raw_session_owned_artifact_refs_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2860#async fn raw_session_owned_artifact_refs_for_testing("
 
 [[api]]
 symbol = "lash::persistence::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"
@@ -988,7 +988,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2791#async fn seed_session_trigger_manifest_ref_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2841#async fn seed_session_trigger_manifest_ref_for_testing("
 
 [[api]]
 symbol = "lash::plugins::PluginSpec::orchestrating_tools"
@@ -1934,7 +1934,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1286#let error = AppError::session_open(lash::EmbedError::Session("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1292#let error = AppError::session_open(lash::EmbedError::Session("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -2025,8 +2025,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1285#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1285#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -2320,7 +2320,7 @@ reason = "Concrete host class: third-party protocol and tool implementors distin
 symbol = "lash::GenerationOverlay"
 kind = "enum"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::GenerationOverlay"]
+aliases = ["lash_core::facade_support::GenerationOverlay", "lash_core::session_model::GenerationOverlay"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::GenerationOverlay to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -2329,7 +2329,7 @@ reason = "Add lash::GenerationOverlay to the docs-snippets remote/direct protoco
 symbol = "lash::GenerationOverlay::Merge"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::GenerationOverlay::Merge"]
+aliases = ["lash_core::facade_support::GenerationOverlay::Merge", "lash_core::session_model::GenerationOverlay::Merge"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::GenerationOverlay::Merge to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -2338,7 +2338,7 @@ reason = "Add lash::GenerationOverlay::Merge to the docs-snippets remote/direct 
 symbol = "lash::GenerationOverlay::Merge::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::GenerationOverlay::Merge::0"]
+aliases = ["lash_core::facade_support::GenerationOverlay::Merge::0", "lash_core::session_model::GenerationOverlay::Merge::0"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::GenerationOverlay::Merge::0 to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -2347,7 +2347,7 @@ reason = "Add lash::GenerationOverlay::Merge::0 to the docs-snippets remote/dire
 symbol = "lash::GenerationOverlay::Replace"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::GenerationOverlay::Replace"]
+aliases = ["lash_core::facade_support::GenerationOverlay::Replace", "lash_core::session_model::GenerationOverlay::Replace"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::GenerationOverlay::Replace to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -2356,7 +2356,7 @@ reason = "Add lash::GenerationOverlay::Replace to the docs-snippets remote/direc
 symbol = "lash::GenerationOverlay::Replace::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::GenerationOverlay::Replace::0"]
+aliases = ["lash_core::facade_support::GenerationOverlay::Replace::0", "lash_core::session_model::GenerationOverlay::Replace::0"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::GenerationOverlay::Replace::0 to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -2365,7 +2365,7 @@ reason = "Add lash::GenerationOverlay::Replace::0 to the docs-snippets remote/di
 symbol = "lash::GenerationOverlay::resolve"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::GenerationOverlay::resolve"]
+aliases = ["lash_core::facade_support::GenerationOverlay::resolve", "lash_core::session_model::GenerationOverlay::resolve"]
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::GenerationOverlay::resolve to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
@@ -4119,7 +4119,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::outcome"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2570#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2620#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelReceipt::target"
@@ -4128,7 +4128,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::target"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2570#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2620#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget"
@@ -4183,7 +4183,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1130#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1122#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -4221,7 +4221,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2588#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2638#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes"
@@ -4240,7 +4240,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2613#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2663#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes::outcomes"
@@ -4882,6 +4882,25 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: `lash::SessionCommand` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::WorkClaim::exclusive_session_command` because its canonical identity is the lash-core one. Consumer class: facade agent-scenario tests and the performance harness -- this type is exercised in-repo at crates/lash/src/tests/control_admin.rs::session_commands_enqueue_idempotently_by_source_key#`assert_eq!(`, crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::run_once_queued_work_claim_stress#`reason: format!(\"other queued work {index}\"),`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
+symbol = "lash::SessionCommand::ApplyConfigPatch"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionCommand::ApplyConfigPatch", "lash_core::facade_support::SessionCommand::ApplyConfigPatch", "lash_core::runtime::turn_queue::SessionCommand::ApplyConfigPatch"]
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "crates/lash-core/src/testing/conformance/session_store_factory_config_commands.rs:23#crate::SessionCommand::ApplyConfigPatch {"
+reason = "Relocate: the feature-gated session-store conformance suite constructs this versioned command directly to pin adjacent config-command claim coalescing across every durable backend; if no external queue producer adopts the facade path, keep the production variant while removing that unused export."
+
+[[api]]
+symbol = "lash::SessionCommand::ApplyConfigPatch::patch"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionCommand::ApplyConfigPatch::patch", "lash_core::facade_support::SessionCommand::ApplyConfigPatch::patch", "lash_core::runtime::turn_queue::SessionCommand::ApplyConfigPatch::patch"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable queue producers inspect or manufacture the typed versioned payload while ordinary hosts stay on settled SessionConfigPatch setters; the shipped conformance suite exercises it inside the defining crate, so no cross-crate anchor can honestly claim consumption."
+
+[[api]]
 symbol = "lash::SessionCommand::RefreshToolCatalog"
 kind = "variant"
 availability = "default+all-features"
@@ -4915,7 +4934,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::SessionCommand::source_key", "lash_core::facade_support::SessionCommand::source_key", "lash_core::runtime::turn_queue::SessionCommand::source_key"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::SessionCommand::source_key` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::exclusive_session_command`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/session_api.rs::LashRuntime::submit_session_command#`let source_key = command.source_key(&idempotency_key);`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::SessionCommand::source_key` directly; the gate reaches the same item a second time through `lash_core::WorkClaim::exclusive_session_command`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/session_api.rs::LashRuntime::accept_session_command#`let source_key = command.source_key(&idempotency_key);`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::SessionCommandAdmin"
@@ -4941,7 +4960,7 @@ reason = "Used by the agent-workbench example at examples/agent-workbench/src/ma
 symbol = "lash::SessionCommandReceipt"
 kind = "struct"
 availability = "default+all-features"
-aliases = ["lash::prelude::SessionCommandReceipt", "lash_core::facade_support::SessionCommandReceipt"]
+aliases = ["lash::prelude::SessionCommandReceipt", "lash_core::facade_support::SessionCommandReceipt", "lash_core::runtime::turn_queue::SessionCommandReceipt"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::SessionCommandReceipt to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -4950,7 +4969,7 @@ reason = "Add lash::SessionCommandReceipt to the docs-snippets embedding/turns e
 symbol = "lash::SessionCommandReceipt::batch_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::SessionCommandReceipt::batch_id", "lash_core::facade_support::SessionCommandReceipt::batch_id"]
+aliases = ["lash::prelude::SessionCommandReceipt::batch_id", "lash_core::facade_support::SessionCommandReceipt::batch_id", "lash_core::runtime::turn_queue::SessionCommandReceipt::batch_id"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::SessionCommandReceipt::batch_id to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -4959,7 +4978,7 @@ reason = "Add lash::SessionCommandReceipt::batch_id to the docs-snippets embeddi
 symbol = "lash::SessionCommandReceipt::session_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::SessionCommandReceipt::session_id", "lash_core::facade_support::SessionCommandReceipt::session_id"]
+aliases = ["lash::prelude::SessionCommandReceipt::session_id", "lash_core::facade_support::SessionCommandReceipt::session_id", "lash_core::runtime::turn_queue::SessionCommandReceipt::session_id"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::SessionCommandReceipt::session_id to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -4968,7 +4987,7 @@ reason = "Add lash::SessionCommandReceipt::session_id to the docs-snippets embed
 symbol = "lash::SessionCommandReceipt::source_key"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::SessionCommandReceipt::source_key", "lash_core::facade_support::SessionCommandReceipt::source_key"]
+aliases = ["lash::prelude::SessionCommandReceipt::source_key", "lash_core::facade_support::SessionCommandReceipt::source_key", "lash_core::runtime::turn_queue::SessionCommandReceipt::source_key"]
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add lash::SessionCommandReceipt::source_key to the docs-snippets embedding/turns example and assert its externally observable result."
@@ -5289,7 +5308,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1210#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1216#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5363,6 +5382,42 @@ aliases = ["lash_core::SessionError::Protocol::0"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
+
+[[api]]
+symbol = "lash::SessionError::SessionCommandCancelled"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::SessionError::SessionCommandCancelled"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime embedders distinguish a durably accepted config command withdrawn before its head commit from rejection or successful settlement."
+
+[[api]]
+symbol = "lash::SessionError::SessionCommandCancelled::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SessionError::SessionCommandCancelled::0"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime embedders inspect the accepted session-command receipt to identify the cancelled durable queue batch."
+
+[[api]]
+symbol = "lash::SessionError::SessionCommandPending"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::SessionError::SessionCommandPending"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime embedders distinguish a durably accepted config command that exceeded the settlement deadline from rejection or cancellation."
+
+[[api]]
+symbol = "lash::SessionError::SessionCommandPending::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::SessionError::SessionCommandPending::0"]
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "Concrete host class: runtime embedders inspect the accepted session-command receipt to identify the batch that remains pending."
 
 [[api]]
 symbol = "lash::SessionError::ProviderMismatch"
@@ -5452,7 +5507,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1210#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1216#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5462,8 +5517,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1288#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1296#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1294#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1302#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -5472,8 +5527,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1289#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1296#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1295#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1302#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionSpec"
@@ -5839,7 +5894,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::event", "lash_core::TurnActivity::event"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1339#match &activity.event {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1340#match &activity.event {"
 
 [[api]]
 symbol = "lash::TurnActivity::id"
@@ -5858,8 +5913,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::independent", "lash_core::TurnActivity::independent"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1423#sink.emit(TurnActivity::independent("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1442#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1424#sink.emit(TurnActivity::independent("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1443#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivity::new"
@@ -5868,7 +5923,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::new", "lash_core::TurnActivity::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1409#sink.emit(TurnActivity::new("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1410#sink.emit(TurnActivity::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5898,7 +5953,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId", "lash_core::TurnActivityId"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1410#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1411#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5917,7 +5972,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId::new", "lash_core::TurnActivityId::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1410#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1411#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6504,7 +6559,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta", "lash_core::TurnEvent::AssistantProseDelta"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1340#TurnEvent::AssistantProseDelta { text } => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1341#TurnEvent::AssistantProseDelta { text } => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6514,8 +6569,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta::text", "lash_core::TurnEvent::AssistantProseDelta::text"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1412#text: \"kept \".into(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1442#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1413#text: \"kept \".into(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1443#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage"
@@ -13742,7 +13797,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GcReport::root_count"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2979#root_count,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3029#root_count,"
 
 [[api]]
 symbol = "lash::persistence::CheckpointComponentDescriptor"
@@ -14582,7 +14637,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::ingress"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2406#let state = match draft.ingress {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2456#let state = match draft.ingress {"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input"
@@ -14591,7 +14646,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::input"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2413#let input_json = encode_json(&draft.input)?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2463#let input_json = encode_json(&draft.input)?;"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input_id"
@@ -14618,7 +14673,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2386#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2436#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::source_key"
@@ -14627,7 +14682,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::source_key"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2401#draft.source_key.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2451#draft.source_key.as_deref(),"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::submitted_content_matches"
@@ -14636,7 +14691,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::submitted_content_matches"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2440#if !draft.submitted_content_matches(&input).map_err(|err| {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2490#if !draft.submitted_content_matches(&input).map_err(|err| {"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::with_input_id"
@@ -14666,6 +14721,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
+symbol = "lash::persistence::PersistedSessionConfig::generation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PersistedSessionConfig::generation"]
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store and attachment backend implementers persist generation intent as part of the session head; the docs-snippets test pins its wire behavior, but claiming that test as example coverage would raise the frozen example-test ratchet."
+
+[[api]]
 symbol = "lash::persistence::PersistedSessionConfig::model"
 kind = "field"
 availability = "default+all-features"
@@ -14691,7 +14755,7 @@ aliases = ["lash_core::PersistedSessionConfig::prompt"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:1336#prompt: Some(lash::prompt::PromptLayer::new()),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1340#assert!(encoded.get(\"prompt\").is_some());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1341#assert!(encoded.get(\"prompt\").is_some());"
 
 [[api]]
 symbol = "lash::persistence::PersistedSessionConfig::provider_id"
@@ -14710,7 +14774,7 @@ aliases = ["lash_core::PersistedSessionConfig::turn_budget"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:1335#turn_budget: core_budget,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1338#assert_eq!(persisted.turn_budget, core_budget);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1339#assert_eq!(persisted.turn_budget, core_budget);"
 
 [[api]]
 symbol = "lash::persistence::PersistedSessionRead"
@@ -15479,6 +15543,15 @@ aliases = ["lash_core::QueuedWorkStore::pending_session_work_ordering"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store implementers must project the two payload-free ordering keys used by the idle drain; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::QueuedWorkStore::queued_work_batch_completed"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::QueuedWorkStore::queued_work_batch_completed"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers expose the per-batch completion evidence that lets config setters distinguish committed queue removal from cancellation."
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkStore::list_queued_work"
@@ -16469,7 +16542,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAdmission::Created"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1065#lash_core::SessionAdmission::Created"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1094#lash_core::SessionAdmission::Created"
 
 [[api]]
 symbol = "lash::persistence::SessionAdmission::Rebound"
@@ -16478,7 +16551,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAdmission::Rebound"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1067#lash_core::SessionAdmission::Rebound"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1096#lash_core::SessionAdmission::Rebound"
 
 [[api]]
 symbol = "lash::persistence::SessionAttachmentStore"
@@ -19326,8 +19399,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1285#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1285#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -19337,8 +19410,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1276#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1282#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1285#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -19948,7 +20021,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::applications"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3436#applications: Vec::new(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3486#applications: Vec::new(),"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::inputs"
@@ -19957,7 +20030,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3435#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3485#inputs,"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
@@ -19966,7 +20039,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::mode"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2661#let restored_state = match claim.mode {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2711#let restored_state = match claim.mode {"
 
 [[api]]
 symbol = "lash::persistence::TurnInputCompletion"
@@ -20593,6 +20666,15 @@ aliases = ["lash_core::WorkClaim::record_initial_turn_application"]
 area = "stores"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+
+[[api]]
+symbol = "lash::persistence::WorkClaim::session_commands"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::WorkClaim::session_commands"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete store-implementor seam: custom durable queue backends use this projection to distinguish a coalescible config-command claim from exclusive commands; the shipped conformance suite proves the contract inside the defining crate, so no cross-crate anchor can honestly claim consumption."
 
 [[api]]
 symbol = "lash::persistence::WorkClaim::session_id"
@@ -21950,7 +22032,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::Runtime"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1353#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1355#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -21960,8 +22042,8 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginError::Runtime::0"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1353#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1353#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1355#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1355#lash::plugins::PluginError::Runtime(ref error) if error.is_retryable()"
 
 [[api]]
 symbol = "lash::plugins::PluginError::RuntimeEffectController"
@@ -22956,7 +23038,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::mutate_session_config", "lash_core::plugin::session_obj::PluginSession::mutate_session_config"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::mutate_session_config` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/session_api.rs::LashRuntime::apply_session_config_mutations#`.mutate_session_config(`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginSession::mutate_session_config` directly; the gate reaches the same item a second time through `lash_core::ProcessEngineRunContext::plugins`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/runtime/session_api.rs::LashRuntime::resolve_session_config_mutations#`.mutate_session_config(`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::PluginSession::plugin_operations"
@@ -25756,7 +25838,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessAwaitOutput::terminal_status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1157#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1158#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:212#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -27240,7 +27322,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::originator_id"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:313#originator_id: Some(session_id.to_string()),"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:318#originator_id: Some(session_id.to_string()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1054#assert!(!rail.contains(&reclaimed), \"reclaimed work leaves the rail\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs::AppState::prune_processes_originated_by#`originator_id: Some(session_id.to_string()),`, which scopes session-delete retention to the rows that session originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs::process_work_tests::session_delete_reclaims_the_deleted_sessions_terminal_work_inner#`assert!(!rail.contains(&reclaimed), \"reclaimed work leaves the rail\");` in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the scoped row left the runtime-wide work rail."
 
@@ -27251,7 +27333,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:916#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:917#status: lash::process::ProcessStatusFilter::Any,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:212#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -27668,7 +27750,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessPruneReport::pruned_trigger_deliveries"]
 area = "triggers"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:261#\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:266#\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1051#assert_eq!(retention.pruned_trigger_deliveries, 0, \"no delivery reserved\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs::AppState::delete_session_and_reclaim_processes#`\"pruned_trigger_deliveries\": retention.pruned_trigger_deliveries,`, which records what session-delete retention reclaimed; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs::process_work_tests::session_delete_reclaims_the_deleted_sessions_terminal_work_inner#`assert_eq!(retention.pruned_trigger_deliveries, 0, \"no delivery reserved\");` in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that rows holding no trigger delivery reconcile none."
 
@@ -29273,7 +29355,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:916#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:917#status: lash::process::ProcessStatusFilter::Any,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -29670,7 +29752,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver", "lash_core::runtime::process_work_driver::ProcessWorkDriver"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1127#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1128#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:153#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -29689,7 +29771,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver::await_terminal", "lash_core::runtime::process_work_driver::ProcessWorkDriver::await_terminal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1127#state.process_work_driver.await_terminal(&process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1128#state.process_work_driver.await_terminal(&process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:153#lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!(\"done\")"
 
 [[api]]
@@ -29848,7 +29930,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkObserver::snapshot_all"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:915#.snapshot_all(&lash::process::ProcessListFilter {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:916#.snapshot_all(&lash::process::ProcessListFilter {"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:212#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -30000,7 +30082,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:309#.prune("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:314#.prune("
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:1049#assert_eq!(retention.pruned_processes, 1, \"one finished row reclaimed\");"
 reason = "Exercised by the agent-workbench example at examples/agent-workbench/src/main_sections/app_state.rs::AppState::prune_processes_originated_by#`.prune(`, where deleting a session reclaims the terminal process rows it originated; the assertion at examples/agent-workbench/src/main_sections/tests/process_work.rs::process_work_tests::session_delete_reclaims_the_deleted_sessions_terminal_work_inner#`assert_eq!(retention.pruned_processes, 1, \"one finished row reclaimed\");` in `session_delete_reclaims_the_deleted_sessions_terminal_work_inner` observes that the reclamation reports one pruned process."
 
@@ -33421,7 +33503,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1241#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1242#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -33430,7 +33512,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1241#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1242#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -33439,7 +33521,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1241#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1242#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::forward_session_observations#`let mut stream = session.observe().subscribe_recoverable_chat(cursor);`, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -33466,7 +33548,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1310#gap: Box::new(gap),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1311#gap: Box::new(gap),"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:725#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -33475,7 +33557,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1300#Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1301#Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:725#assert_eq!(gap.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -33484,7 +33566,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1280#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1281#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
 reason = "Syntax-only evidence: the agent-workbench distinguishes resident replacement from terminal settlement; the browser projection test asserts the non-terminal behavior outside this Rust anchor."
 
 [[api]]
@@ -33493,7 +33575,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1280#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1281#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
 reason = "The agent-workbench forwards the resident signal, but the recorded Rust anchor is a variant pattern rather than an independent outcome assertion."
 
 [[api]]
@@ -33510,7 +33592,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1280#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1281#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
 reason = "The agent-workbench forwards the resident snapshot cursor, but the recorded Rust anchor is a variant pattern rather than an independent outcome assertion."
 
 [[api]]
@@ -35071,8 +35153,8 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1381#RemoteLlmRequest::decode_json(&request_wire).expect(\"current request decodes\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1382#assert_eq!(decoded.request_id, \"request-version-first\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1383#RemoteLlmRequest::decode_json(&request_wire).expect(\"current request decodes\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1384#assert_eq!(decoded.request_id, \"request-version-first\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmRequest::attachments"
@@ -36319,7 +36401,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1242#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1243#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::forward_session_observations#`let mut sequence = 0;`, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -46387,7 +46469,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::queue_drain"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:8087#ExecutionScope::queue_drain(\"session\", \"drain\"),"
+usage = "crates/lash-restate/src/tests.rs:8097#ExecutionScope::queue_drain(\"session\", \"drain\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -46407,7 +46489,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::session_delete"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:8088#ExecutionScope::session_delete(\"session\"),"
+usage = "crates/lash-restate/src/tests.rs:8098#ExecutionScope::session_delete(\"session\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48306,7 +48388,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Direct::usage_source"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:5724#usage_source: \"test\".to_string(),"
+usage = "crates/lash-restate/src/tests.rs:5734#usage_source: \"test\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48461,7 +48543,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::SyncExecutionEnvironment::update_machine_config"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:5761#update_machine_config: true,"
+usage = "crates/lash-restate/src/tests.rs:5771#update_machine_config: true,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49672,8 +49754,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1214#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1220#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1285#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -49682,7 +49764,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::cause"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1217#return match error.cause.as_ref() {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1223#return match error.cause.as_ref() {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::code"
@@ -49701,8 +49783,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1214#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1279#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1220#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1285#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::is_retryable"
@@ -50554,8 +50636,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::ManagedTurnConcurrencyLimitExceeded"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1346#assert!(cap_code.is_retryable());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1346#assert!(cap_code.is_retryable());"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1348#assert!(cap_code.is_retryable());"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1348#assert!(cap_code.is_retryable());"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -51203,7 +51285,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::TurnTerminalAwaitTimeout"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:378#err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:383#err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -51249,7 +51331,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::as_str"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1219#Some((session_id.as_str(), Some(error.code.as_str())))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1225#Some((session_id.as_str(), Some(error.code.as_str())))"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::from_wire_code"
@@ -60519,7 +60601,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceContext::for_session"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:532#.map(|session_id| TraceContext::default().for_session(session_id))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:537#.map(|session_id| TraceContext::default().for_session(session_id))"
 
 [[api]]
 symbol = "lash::tracing::TraceContext::for_turn"
@@ -60875,7 +60957,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:536#TraceEvent::Custom {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:541#TraceEvent::Custom {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -60885,7 +60967,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom::name"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:537#name: format!(\"agent_workbench.{name}\"),"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:542#name: format!(\"agent_workbench.{name}\"),"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::Custom::payload"
@@ -60894,7 +60976,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::Custom::payload"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:119#payload,"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:124#payload,"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::EffectEnvelopeDiff"
@@ -61885,7 +61967,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1176#state.lashlang_execution.graphs(),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1177#state.lashlang_execution.graphs(),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::list_lashlang_graphs#`let session_id = query.resolve(&state)?;`, inside `list_lashlang_graphs`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `list_lashlang_graphs` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -64384,7 +64466,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::for_session"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1539#.for_session(session_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1540#.for_session(session_id),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -64583,9 +64665,8 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::TriggerOperationError::Store::message"]
 area = "triggers"
-disposition = "internal-test-only"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1280#assert_eq!(error.message, deleted_session_message(\"retired-session\"));"
-reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+disposition = "unused-remove"
+reason = "The former agent-workbench anchor observes AppError::message, not this Store payload field, and no qualified consumer remains. Breaking: remove this unconsumed public field together with the already-recorded Store variant cleanup."
 
 [[api]]
 symbol = "lash::triggers::TriggerOwnerScope"
@@ -65594,7 +65675,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::empty_trigger_source_key"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1514#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1515#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -70273,7 +70354,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1832#lash_core::TurnInputClaimMode::ActiveTurn {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1861#lash_core::TurnInputClaimMode::ActiveTurn {"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::ActiveTurn"
@@ -70281,7 +70362,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1832#lash_core::TurnInputClaimMode::ActiveTurn {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1861#lash_core::TurnInputClaimMode::ActiveTurn {"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::ActiveTurn::checkpoint"
@@ -70297,7 +70378,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1833#turn_id: turn_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1862#turn_id: turn_id.clone(),"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::NextTurn"
@@ -70305,7 +70386,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2652#lash_core::TurnInputClaimMode::NextTurn,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2702#lash_core::TurnInputClaimMode::NextTurn,"
 
 [[api]]
 symbol = "lash_core::TurnMachine"
@@ -71761,7 +71842,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/lib.rs:64#TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:739#ProcessStartPlan::AlreadyApplied => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessStartPlan::AlreadyApplied"
@@ -71825,7 +71906,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/lib.rs:65#facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:120#ProcessTransition::SetExternalRef(external_ref),"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessTransition::ClearWait"
@@ -71897,7 +71978,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/lib.rs:65#facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:122#ProcessTransitionPlan::Unchanged => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ProcessTransitionPlan::Append"
@@ -77184,7 +77265,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:12889#probe_slot.set_for_session("
+usage = "crates/lash-restate/src/tests.rs:12899#probe_slot.set_for_session("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -78684,7 +78765,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1354#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1383#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::executor_id"
@@ -78692,7 +78773,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1339#.zip(lease.executor_id.clone())"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1368#.zip(lease.executor_id.clone())"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::lease_token"
@@ -78700,7 +78781,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1282#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1311#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::owner"
@@ -78708,7 +78789,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1267#owner: &owner,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1296#owner: &owner,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::session_id"
@@ -78716,7 +78797,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1266#session_id: &session_id,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1295#session_id: &session_id,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts"
@@ -78724,7 +78805,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3800#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3850#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::executor_id"
@@ -78732,7 +78813,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3802#executor_id: current.executor_id.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3852#executor_id: current.executor_id.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::expires_at_epoch_ms"
@@ -78740,7 +78821,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3805#expires_at_epoch_ms: current.expires_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3855#expires_at_epoch_ms: current.expires_at_ms,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::fencing_token"
@@ -78748,7 +78829,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3804#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3854#fencing_token: current.fencing_token,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
@@ -78756,7 +78837,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3803#lease_token: current.lease_token.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3853#lease_token: current.lease_token.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::owner"
@@ -78764,7 +78845,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3801#owner: current.owner.as_ref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3851#owner: current.owner.as_ref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts"
@@ -78772,7 +78853,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1416#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1445#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::current_executor_id"
@@ -78820,7 +78901,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1416#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1445#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::minimum_expires_at_epoch_ms"
@@ -78860,7 +78941,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1412#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1441#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::ExecutionFence"
@@ -78876,7 +78957,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1492#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1521#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal"
@@ -78884,7 +78965,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1412#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1441#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::RenewalInstall"
@@ -78900,7 +78981,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2399#lash_core::store_backend_support::derive_pending_turn_input_id("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2449#lash_core::store_backend_support::derive_pending_turn_input_id("
 
 [[api]]
 symbol = "lash_core::store_backend_support::admitted_min_boundary_sql"
@@ -78908,7 +78989,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3006#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3056#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
 
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_abandon_restore_claim_id"
@@ -78916,7 +78997,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2156#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2185#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
 
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_claim_data"
@@ -78924,7 +79005,15 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1663#data: lash_core::store_backend_support::queued_work_claim_data("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1692#data: lash_core::store_backend_support::queued_work_claim_data("
+
+[[api]]
+symbol = "lash_core::store_backend_support::session_command_batch_completion_key"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1039#lash_core::store_backend_support::session_command_batch_completion_key("
 
 [[api]]
 symbol = "lash_core::store_backend_support::require_current_session_execution_lease"
@@ -78932,7 +79021,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3797#lash_core::store_backend_support::require_current_session_execution_lease("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3847#lash_core::store_backend_support::require_current_session_execution_lease("
 
 [[api]]
 symbol = "lash_core::store_backend_support::trace_session_execution_lease_refusal"
@@ -78940,7 +79029,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1411#lash_core::store_backend_support::trace_session_execution_lease_refusal("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1440#lash_core::store_backend_support::trace_session_execution_lease_refusal("
 
 [[api]]
 symbol = "lash_core::tool_dispatch::context::ToolTriggerEffectOutcome"
@@ -81047,6 +81136,63 @@ aliases = ["lash_core::StoreError::QueuedWorkRowExceedsContextWindow::rendered_t
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime embedders and custom durable-store implementors configure, persist, inspect, and enforce queued-work batching semantics at the public store boundary."
+
+[[api]]
+symbol = "lash_core::runtime::config_ops::ApplyConfigPatch"
+kind = "struct"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "crates/lash-core/src/testing/conformance/session_store_factory_config_commands.rs:24#patch: Box::new(crate::runtime::ApplyConfigPatch {"
+reason = "Relocate: the runtime owns this command payload, while only the feature-gated backend conformance suite consumes its public path directly; keep the production type at the drain seam but stop exporting the implementation module if no external queue implementation adopts it."
+
+[[api]]
+symbol = "lash_core::runtime::config_ops::ApplyConfigPatch::generation"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable command tooling can inspect or manufacture generation intent in the versioned config payload; the shipped runtime resolves this field internally and the facade setter keeps hosts on SessionConfigPatch."
+
+[[api]]
+symbol = "lash_core::runtime::config_ops::ApplyConfigPatch::model"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable command tooling can inspect or manufacture model selection in the versioned config payload; the shipped conformance suite exercises it inside the defining crate and ordinary hosts use SessionConfigPatch."
+
+[[api]]
+symbol = "lash_core::runtime::config_ops::ApplyConfigPatch::prompt"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable command tooling can inspect or manufacture the exact prompt replacement carried by a versioned config payload; the shipped runtime applies it internally and ordinary hosts use prompt setters."
+
+[[api]]
+symbol = "lash_core::runtime::config_ops::ApplyConfigPatch::provider_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable command tooling can inspect or manufacture provider selection in the versioned config payload; the shipped runtime applies it internally and ordinary hosts use SessionConfigPatch."
+
+[[api]]
+symbol = "lash_core::runtime::config_ops::ApplyConfigPatch::schema_version"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable command tooling reads this wire generation before decoding or replaying a persisted config command; the shipped runtime rejects mismatches internally."
+
+[[api]]
+symbol = "lash_core::runtime::config_ops::ApplyConfigPatch::turn_budget"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Concrete integrator class: custom durable command tooling can inspect or manufacture the exact turn budget carried by a versioned config payload; plugin mutations settle through this field and ordinary hosts use session config setters."
 
 [[api]]
 symbol = "lash_core::runtime::host::RuntimeDurabilityConfig::queued_work_batching"
@@ -83964,8 +84110,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1412#let reasoning_route = reasoning.origin.as_ref().expect(\"reasoning route\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1413#assert_eq!(reasoning_route.provider, \"anthropic\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1414#let reasoning_route = reasoning.origin.as_ref().expect(\"reasoning route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1415#assert_eq!(reasoning_route.provider, \"anthropic\");"
 reason = "The compiled remote-protocol example observes the complete typed minting route."
 
 [[api]]
@@ -83974,8 +84120,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::kind"
@@ -83983,8 +84129,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::minting_route"
@@ -83992,8 +84138,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1449#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1449#assert_eq!(drop_wire[1][\"minting_route\"][\"provider\"], \"anthropic\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::reason"
@@ -84001,8 +84147,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDrop::serving_route"
@@ -84010,8 +84156,8 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[0][\"serving_route\"][\"provider\"], \"openai\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDropReason"
@@ -84019,8 +84165,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDropReason::ForeignRoute"
@@ -84028,8 +84174,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1446#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[1][\"reason\"], \"foreign_route\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayDropReason::Unstamped"
@@ -84037,8 +84183,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1443#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[0][\"reason\"], \"unstamped\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind"
@@ -84046,8 +84192,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind::Reasoning"
@@ -84055,8 +84201,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1445#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1447#assert_eq!(drop_wire[1][\"kind\"], \"reasoning\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind::ResponseText"
@@ -84064,8 +84210,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1442#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1444#assert_eq!(drop_wire[0][\"kind\"], \"response_text\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayKind::ToolCall"
@@ -84073,8 +84219,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1448#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1450#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1450#assert_eq!(drop_wire[2][\"kind\"], \"tool_call\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderReplayMeta::origin"
@@ -84082,8 +84228,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1417#assert_eq!(tool_route.provider, \"google_oauth\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1417#assert_eq!(tool_route.provider, \"google_oauth\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1419#assert_eq!(tool_route.provider, \"google_oauth\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1419#assert_eq!(tool_route.provider, \"google_oauth\");"
 reason = "The compiled remote-protocol example observes the tool replay minting route."
 
 [[api]]
@@ -84092,8 +84238,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1416#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1416#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
 
 [[api]]
 symbol = "lash::remote::llm::RemoteProviderRouteIdentity::endpoint"
@@ -84101,8 +84247,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1387#endpoint: \"https://api.anthropic.com\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1414#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1389#endpoint: \"https://api.anthropic.com\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1416#assert_eq!(reasoning_route.endpoint, \"https://api.anthropic.com\");"
 reason = "The compiled remote-protocol example observes the normalized route endpoint."
 
 [[api]]
@@ -84111,8 +84257,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1388#model: \"claude-sonnet-4-6\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1415#assert_eq!(reasoning_route.model, \"claude-sonnet-4-6\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1390#model: \"claude-sonnet-4-6\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1417#assert_eq!(reasoning_route.model, \"claude-sonnet-4-6\");"
 reason = "The compiled remote-protocol example observes the route model."
 
 [[api]]
@@ -84121,8 +84267,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1386#provider: \"anthropic\".to_string(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1413#assert_eq!(reasoning_route.provider, \"anthropic\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1388#provider: \"anthropic\".to_string(),"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1415#assert_eq!(reasoning_route.provider, \"anthropic\");"
 reason = "The compiled remote-protocol example observes the route provider."
 
 [[api]]
@@ -84131,8 +84277,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1418#let response_route = response.origin.as_ref().expect(\"response route\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1419#assert_eq!(response_route.model, \"gpt-5.4\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1420#let response_route = response.origin.as_ref().expect(\"response route\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1421#assert_eq!(response_route.model, \"gpt-5.4\");"
 reason = "The compiled remote-protocol example observes the response-item minting route."
 
 [[api]]
@@ -88451,6 +88597,10 @@ symbol = "lash::triggers::TriggerOperationError::Store"
 kind = "variant"
 
 [[removal_verdict]]
+symbol = "lash::triggers::TriggerOperationError::Store::message"
+kind = "field"
+
+[[removal_verdict]]
 symbol = "lash::triggers::TriggerOwnerScope::namespace"
 kind = "function"
 
@@ -91579,6 +91729,10 @@ symbol = "lash_core::reconcile_pruned_trigger_deliveries"
 kind = "function"
 
 [[removal_verdict]]
+symbol = "lash_core::runtime::LashRuntime::apply_session_config_mutations"
+kind = "function"
+
+[[removal_verdict]]
 symbol = "lash_core::runtime::RuntimeTurnPhaseProbeSlot::get_for_scope"
 kind = "function"
 
@@ -92578,7 +92732,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:4069#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
+usage = "crates/lash-sqlite-store/src/persistence.rs:4123#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
 
 [[api]]
 symbol = "lash::EmptyQueuedDrainReason"
@@ -92685,7 +92839,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1005#.ran()"
+usage = "examples/agent-workbench/src/restate.rs:997#.ran()"
 reason = "Syntax-only evidence: the workbench drops the empty reason and forwards the turn it ran, and no executed assertion in the example observes the discarded arm. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -92792,7 +92946,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1684#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1713#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
 reason = "Internal seam: this is the contract every durable backend returns from an automatic claim, so its consumers are the backends themselves rather than an example."
 
 [[api]]
@@ -92802,7 +92956,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1780#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1809#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend reports the rows it claimed through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -92812,7 +92966,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1780#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1809#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend carries the claim it took in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -92822,7 +92976,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1679#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1708#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend names why it claimed nothing through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -92832,7 +92986,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1679#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1708#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend carries the refusal it computed in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -93139,7 +93293,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2852#lash_core::MaintenanceFailure::failed("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2902#lash_core::MaintenanceFailure::failed("
 reason = "FIG-1505: the Postgres vacuum reports the rows its first delete already committed when the second fails, which is the constructor's whole purpose; the consumer is a backend crate rather than an example."
 
 [[api]]
@@ -93177,7 +93331,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceResult"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:3126#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:3180#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
 reason = "FIG-1505: every store backend spells the maintenance levers' return type with this alias; the consumers are backend crates rather than examples. Host-facing projection: `lash::persistence::MaintenanceResult`."
 
 [[api]]

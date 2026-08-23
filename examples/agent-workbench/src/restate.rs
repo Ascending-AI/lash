@@ -973,14 +973,6 @@ async fn run_queued_turn(
         .await
         .map_err(AppError::session_open)?;
     let selected_model = model_spec_from_selection(state.selected_model());
-    session
-        .configure(lash::SessionConfigPatch {
-            model: Some(selected_model.clone()),
-            ..lash::SessionConfigPatch::default()
-        })
-        .await
-        // Audited: session configuration updates only resident state and its current implementation is infallible.
-        .map_err(AppError::internal)?;
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let ui_events = ChannelTurnEvents {
         turn_state: Arc::clone(&turn_state),

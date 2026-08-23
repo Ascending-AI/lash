@@ -5538,6 +5538,16 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
             .await
     }
 
+    async fn queued_work_batch_completed(
+        &self,
+        session_id: &str,
+        batch_id: &str,
+    ) -> Result<bool, lash_core::StoreError> {
+        self.inner
+            .queued_work_batch_completed(session_id, batch_id)
+            .await
+    }
+
     async fn pending_session_work_ordering(
         &self,
         session_id: &str,

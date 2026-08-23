@@ -311,6 +311,9 @@ pub struct ClaimCandidate {
     /// escaped into that generation's journaled command.
     pub prior_claim_id: Option<String>,
     pub work_class: QueuedWorkClass,
+    /// Whether this row is exactly one `ApplyConfigPatch` command and can
+    /// therefore share a drain commit with adjacent config patches.
+    pub config_patch_command: bool,
     pub delivery_policy: DeliveryPolicy,
     pub kind: QueuedWorkKind,
     pub authority: QueuedWorkAuthority,
@@ -328,6 +331,13 @@ impl ClaimCandidate {
     ) -> Self {
         let mut turn_causes = Vec::new();
         let mut input_texts = Vec::new();
+        let config_patch_command = matches!(
+            batch.items.as_slice(),
+            [crate::QueuedWorkItem {
+                payload: QueuedWorkPayload::SessionCommand { command },
+                ..
+            }] if matches!(command.as_ref(), crate::SessionCommand::ApplyConfigPatch { .. })
+        );
         for item in &batch.items {
             match &item.payload {
                 QueuedWorkPayload::ProcessWake { wake } => {
@@ -343,6 +353,7 @@ impl ClaimCandidate {
             claim_fencing_token,
             prior_claim_id,
             work_class: batch.work_class().unwrap_or(QueuedWorkClass::TurnWork),
+            config_patch_command,
             delivery_policy: batch.delivery_policy,
             kind: batch.kind,
             authority: batch.authority.clone(),
@@ -364,21 +375,36 @@ pub fn claim_scan_limit(max_batches: usize) -> i64 {
         + 32
 }
 
-/// Select a leading session-command batch.
+/// Maximum number of adjacent config commands one session-command claim may
+/// coalesce. A longer FIFO prefix remains queued and drains through later
+/// commits; bounding this claim also bounds every SQL candidate scan that
+/// feeds it.
+#[doc(hidden)]
+pub const MAX_SESSION_COMMAND_BATCHES_PER_CLAIM: usize = 64;
+
+/// Select a leading session-command claim.
 ///
-/// Returns `1` only when the earliest ready claimable batch is a
-/// [`QueuedWorkClass::SessionCommand`]. Session commands are intentionally
-/// claimed one batch at a time so the runtime applies each mutation and
-/// completion through its normal fenced commit path before moving to the next.
+/// Non-config commands remain exclusive. A leading `ApplyConfigPatch` extends
+/// through the complete adjacent config-patch prefix so one drain can apply N
+/// ordered patches in one head commit while completing all N batches.
 pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
-    if candidates
-        .first()
-        .is_some_and(|candidate| candidate.work_class == QueuedWorkClass::SessionCommand)
-    {
-        1
-    } else {
-        0
+    let Some(first) = candidates.first() else {
+        return 0;
+    };
+    if first.work_class != QueuedWorkClass::SessionCommand {
+        return 0;
     }
+    if !first.config_patch_command {
+        return 1;
+    }
+    candidates
+        .iter()
+        .take(MAX_SESSION_COMMAND_BATCHES_PER_CLAIM)
+        .take_while(|candidate| {
+            candidate.work_class == QueuedWorkClass::SessionCommand
+                && candidate.config_patch_command
+        })
+        .count()
 }
 
 /// Select the turn-work `candidates` that a single claim may take.
