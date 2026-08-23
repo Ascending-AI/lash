@@ -580,6 +580,10 @@ where
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
     queued_work_source_keys_are_idempotent_and_list_ordered(make("queued-work-source-keys")).await;
+    decorated_queued_work_source_key_replay_reports_absorbed(make(
+        "decorated-queued-work-source-key",
+    ))
+    .await;
     pending_session_work_ordering_agrees_across_ingress_families(make("pending-work-ordering"))
         .await;
     concurrent_queue_and_turn_input_claims_have_one_owner(make("concurrent-queue-input")).await;
@@ -4701,6 +4705,38 @@ async fn queued_work_source_keys_are_idempotent_and_list_ordered(
         vec![first.batch_id.as_str(), second.batch_id.as_str()]
     );
     assert!(listed[0].enqueue_seq < listed[1].enqueue_seq);
+}
+
+async fn decorated_queued_work_source_key_replay_reports_absorbed(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let store = crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(store);
+    let draft = || {
+        queued_draft(
+            "decorated-queued-work-source-key",
+            "decorated source-key replay",
+            DeliveryPolicy::EarliestSafeBoundary,
+        )
+        .with_source_key("source:decorated-replay")
+    };
+
+    let first = store
+        .enqueue_queued_work_with_outcome(draft())
+        .await
+        .expect("enqueue decorated source-key batch");
+    assert!(
+        matches!(first, crate::QueuedWorkEnqueueOutcome::Inserted(_)),
+        "the first decorated enqueue must report inserted"
+    );
+
+    let replay = store
+        .enqueue_queued_work_with_outcome(draft())
+        .await
+        .expect("replay decorated source-key batch");
+    assert!(
+        matches!(replay, crate::QueuedWorkEnqueueOutcome::Existing(_)),
+        "the second decorated enqueue must report absorbed"
+    );
 }
 
 /// The projection reports each family's earliest pending row verbatim, and a

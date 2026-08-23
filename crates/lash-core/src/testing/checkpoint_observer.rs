@@ -5,21 +5,10 @@ use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use crate::runtime::{
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-};
-use crate::store::{
-    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, PersistedSessionRead,
-    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, SessionCommitStore, StoreError,
-};
+use crate::store::{RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, StoreError};
 use crate::{
-    AttachmentId, BlobRef, CheckpointKind, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    GcReport, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
-    SessionAdmission, SessionBinding, SessionExecutionLease, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta, SessionMeta,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreMaintenance, TurnInputApplication,
-    TurnInputClaim, TurnInputStore, VacuumReport,
+    AttachmentId, BlobRef, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
+    SessionStoreCreateRequest, SessionStoreFactory,
 };
 use serde::{Deserialize, Serialize};
 
@@ -294,7 +283,7 @@ impl ObservedSessionStoreFactory {
 
 /// Give conformance roles distinct outer handles over one in-memory substrate
 /// without adding `Clone` or shared-field semantics to the production store.
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn fresh_runtime_persistence_handle(
     inner: Arc<dyn RuntimePersistence>,
 ) -> Arc<dyn RuntimePersistence> {
@@ -385,75 +374,10 @@ struct ObservedSessionStore {
     collector: CheckpointWriteCollector,
 }
 
-impl AttachmentManifest for ObservedSessionStore {
-    fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
-        self.inner.record_intent(intent)
-    }
-
-    fn commit_refs(
-        &self,
-        session_id: &str,
-        attachment_ids: &[AttachmentId],
-    ) -> Result<(), StoreError> {
-        self.inner.commit_refs(session_id, attachment_ids)
-    }
-
-    fn list_uncommitted(
-        &self,
-        older_than_epoch_ms: u64,
-    ) -> Result<Vec<AttachmentManifestEntry>, StoreError> {
-        self.inner.list_uncommitted(older_than_epoch_ms)
-    }
-
-    fn forget_aged_uncommitted_intents(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<(), StoreError> {
-        self.inner
-            .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)
-    }
-
-    fn has_live_ref_for_id(
-        &self,
-        attachment_id: &AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        self.inner
-            .has_live_ref_for_id(attachment_id, intent_grace_cutoff_epoch_ms)
-    }
-
-    fn forget(&self, session_id: &str, attachment_id: &AttachmentId) -> Result<(), StoreError> {
-        self.inner.forget(session_id, attachment_id)
-    }
-
-    fn holds_ref(
-        &self,
-        session_id: &str,
-        attachment_id: &AttachmentId,
-    ) -> Result<bool, StoreError> {
-        self.inner.holds_ref(session_id, attachment_id)
-    }
-
-    fn list_all_refs(&self) -> Result<Vec<AttachmentId>, StoreError> {
-        self.inner.list_all_refs()
-    }
-}
-
 #[async_trait::async_trait]
-impl SessionCommitStore for ObservedSessionStore {
-    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
-        self.inner.load_session().await
-    }
-
-    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
-        self.inner.load_session_head_meta().await
-    }
-
-    async fn load_node(
-        &self,
-        node_id: &str,
-    ) -> Result<Option<crate::SessionNodeRecord>, StoreError> {
-        self.inner.load_node(node_id).await
+impl crate::store::RuntimePersistenceDecorator for ObservedSessionStore {
+    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+        self.inner.as_ref()
     }
 
     async fn commit_runtime_state(
@@ -494,23 +418,7 @@ impl SessionCommitStore for ObservedSessionStore {
         );
         Ok(result)
     }
-
-    async fn admit_and_bind_session(
-        &self,
-        binding: &SessionBinding,
-    ) -> Result<SessionAdmission, StoreError> {
-        self.inner.admit_and_bind_session(binding).await
-    }
-
-    async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        self.inner.save_session_meta(meta).await
-    }
-
-    async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        self.inner.load_session_meta().await
-    }
 }
-
 fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
     let checkpoint = &commit.checkpoint;
     let mut components = vec![CheckpointComponentWrite {
@@ -627,304 +535,6 @@ fn record_component(
     };
     if let Some(kind) = kind {
         components.push(CheckpointComponentWrite { component, kind });
-    }
-}
-
-#[async_trait::async_trait]
-impl TurnInputStore for ObservedSessionStore {
-    async fn enqueue_pending_turn_input(
-        &self,
-        input: PendingTurnInputDraft,
-    ) -> Result<PendingTurnInput, StoreError> {
-        self.inner.enqueue_pending_turn_input(input).await
-    }
-
-    async fn list_pending_turn_inputs(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<PendingTurnInput>, StoreError> {
-        self.inner.list_pending_turn_inputs(session_id).await
-    }
-
-    async fn list_turn_input_applications(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<TurnInputApplication>, StoreError> {
-        self.inner.list_turn_input_applications(session_id).await
-    }
-
-    async fn cancel_pending_turn_input(
-        &self,
-        session_id: &str,
-        input_id: &str,
-    ) -> Result<PendingTurnInputCancelOutcome, StoreError> {
-        self.inner
-            .cancel_pending_turn_input(session_id, input_id)
-            .await
-    }
-
-    async fn cancel_pending_turn_inputs(
-        &self,
-        session_id: &str,
-        targets: &[PendingTurnInputCancelTarget],
-    ) -> Result<Vec<PendingTurnInputCancelReceipt>, StoreError> {
-        self.inner
-            .cancel_pending_turn_inputs(session_id, targets)
-            .await
-    }
-
-    async fn cancel_pending_turn_input_suffix(
-        &self,
-        session_id: &str,
-        anchor: &PendingTurnInputCancelTarget,
-    ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError> {
-        self.inner
-            .cancel_pending_turn_input_suffix(session_id, anchor)
-            .await
-    }
-
-    async fn claim_active_turn_inputs(
-        &self,
-        session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &crate::TurnId,
-        checkpoint: CheckpointKind,
-        max_inputs: usize,
-    ) -> Result<Option<TurnInputClaim>, StoreError> {
-        self.inner
-            .claim_active_turn_inputs(
-                session_id,
-                session_execution_lease,
-                owner,
-                turn_id,
-                checkpoint,
-                max_inputs,
-            )
-            .await
-    }
-
-    async fn claim_next_turn_inputs(
-        &self,
-        session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<TurnInputClaim>, StoreError> {
-        self.inner
-            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
-            .await
-    }
-
-    async fn abandon_turn_input_claim(&self, claim: &TurnInputClaim) -> Result<(), StoreError> {
-        self.inner.abandon_turn_input_claim(claim).await
-    }
-
-    async fn abandon_turn_input_claims(&self, claims: &[TurnInputClaim]) -> Result<(), StoreError> {
-        self.inner.abandon_turn_input_claims(claims).await
-    }
-
-    async fn defer_orphaned_active_turn_inputs(
-        &self,
-        session_id: &str,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
-        scope: crate::OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, StoreError> {
-        self.inner
-            .defer_orphaned_active_turn_inputs(session_id, session_execution_lease, scope)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionExecutionLeaseStore for ObservedSessionStore {
-    async fn try_claim_session_execution_lease_with_token(
-        &self,
-        session_id: &str,
-        owner: &LeaseOwnerIdentity,
-        executor_id: &str,
-        claim_nonce: &crate::LeaseClaimNonce,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
-        self.inner
-            .try_claim_session_execution_lease_with_token(
-                session_id,
-                owner,
-                executor_id,
-                claim_nonce,
-                lease_ttl_ms,
-            )
-            .await
-    }
-
-    async fn renew_session_execution_lease(
-        &self,
-        fence: &SessionExecutionLeaseAuthority,
-        lease_ttl_ms: u64,
-    ) -> Result<SessionExecutionLease, StoreError> {
-        self.inner
-            .renew_session_execution_lease(fence, lease_ttl_ms)
-            .await
-    }
-
-    async fn release_session_execution_lease(
-        &self,
-        completion: &SessionExecutionLeaseAuthority,
-    ) -> Result<(), StoreError> {
-        self.inner.release_session_execution_lease(completion).await
-    }
-
-    async fn get_session_execution_lease(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<SessionExecutionLease>, StoreError> {
-        self.inner.get_session_execution_lease(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::QueuedWorkStore for ObservedSessionStore {
-    async fn enqueue_queued_work(
-        &self,
-        batch: QueuedWorkBatchDraft,
-    ) -> Result<QueuedWorkBatch, StoreError> {
-        self.inner.enqueue_queued_work(batch).await
-    }
-
-    async fn claim_leading_ready_session_command(
-        &self,
-        session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        owner: &LeaseOwnerIdentity,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        self.inner
-            .claim_leading_ready_session_command(session_id, session_execution_lease, owner)
-            .await
-    }
-
-    async fn claim_ready_queued_work(
-        &self,
-        session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: QueuedWorkClaimBoundary,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError> {
-        self.inner
-            .claim_ready_queued_work(session_id, session_execution_lease, owner, boundary, policy)
-            .await
-    }
-
-    async fn claim_checkpoint_work(
-        &self,
-        session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &crate::TurnId,
-        checkpoint: CheckpointKind,
-        max_inputs: usize,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
-        self.inner
-            .claim_checkpoint_work(
-                session_id,
-                session_execution_lease,
-                owner,
-                turn_id,
-                checkpoint,
-                max_inputs,
-                policy,
-            )
-            .await
-    }
-
-    async fn claim_ready_queued_work_by_batch_ids(
-        &self,
-        session_id: &str,
-        session_execution_lease: &SessionExecutionLeaseAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: QueuedWorkClaimBoundary,
-        batch_ids: &[String],
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, StoreError> {
-        self.inner
-            .claim_ready_queued_work_by_batch_ids(
-                session_id,
-                session_execution_lease,
-                owner,
-                boundary,
-                batch_ids,
-                policy,
-            )
-            .await
-    }
-
-    async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {
-        self.inner.abandon_queued_work_claim(claim).await
-    }
-
-    async fn abandon_queued_work_claims(
-        &self,
-        claims: &[QueuedWorkClaim],
-    ) -> Result<(), StoreError> {
-        self.inner.abandon_queued_work_claims(claims).await
-    }
-
-    async fn cancel_queued_work_batch(
-        &self,
-        session_id: &str,
-        batch_id: &str,
-    ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        self.inner
-            .cancel_queued_work_batch(session_id, batch_id)
-            .await
-    }
-
-    async fn pending_session_work_ordering(
-        &self,
-        session_id: &str,
-    ) -> Result<crate::store::PendingSessionWorkOrdering, StoreError> {
-        self.inner.pending_session_work_ordering(session_id).await
-    }
-
-    async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        self.inner.list_queued_work(session_id).await
-    }
-
-    async fn list_pending_queued_work(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        self.inner.list_pending_queued_work(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl StoreMaintenance for ObservedSessionStore {
-    async fn seed_session_trigger_manifest_ref_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<bool, StoreError> {
-        self.inner
-            .seed_session_trigger_manifest_ref_for_testing(session_id)
-            .await
-    }
-
-    async fn raw_session_owned_artifact_refs_for_testing(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<(String, String)>, StoreError> {
-        self.inner
-            .raw_session_owned_artifact_refs_for_testing(session_id)
-            .await
-    }
-
-    async fn vacuum(&self) -> crate::store::MaintenanceResult<VacuumReport> {
-        self.inner.vacuum().await
-    }
-
-    async fn gc_unreachable(&self) -> crate::store::MaintenanceResult<GcReport> {
-        self.inner.gc_unreachable().await
     }
 }
 

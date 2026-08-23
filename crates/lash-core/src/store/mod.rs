@@ -1521,5 +1521,8 @@ impl<T> RuntimePersistence for T where
 {
 }
 
+mod runtime_persistence_decorator;
+pub use runtime_persistence_decorator::RuntimePersistenceDecorator;
+
 #[cfg(test)]
 mod tests;
