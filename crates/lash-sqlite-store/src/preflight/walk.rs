@@ -28,12 +28,13 @@
 //! the crate's validating decoder, precisely so a manifest written by another
 //! build is walked past rather than raised as an error.
 //!
-//! The two framings a walk *does* unwrap are storage bookkeeping rather than
-//! durable format: the [`StoredBlobEnvelope`](crate::StoredBlobEnvelope) wrapper
-//! and its optional zlib frame. Those are this crate's own invention, no version
-//! manifest describes them, and a caller handed the wrapped bytes would be
-//! looking at a SQLite implementation detail instead of the payload. Unwrapping
-//! them is what "logical bytes" means in the trait contract.
+//! The framing a walk *does* unwrap is storage bookkeeping rather than durable
+//! format: the [`StoredBlobEnvelope`](crate::StoredBlobEnvelope) wrapper and its
+//! optional zlib frame. Those are this crate's own invention, no version manifest
+//! describes them, and a caller handed the wrapped bytes would be looking at a
+//! SQLite implementation detail instead of the payload. An item whose envelope
+//! cannot be read is reported as [`DurablePayload::Missing`], not as bare logical
+//! bytes, because the legacy bare-blob shape is not valid in an admitted database.
 //!
 //! **Why nothing here fails the page.** A dangling blob reference, an envelope
 //! that will not inflate, a manifest from a build that no longer exists: each is
@@ -546,18 +547,10 @@ fn logical_json_payload(stored: Vec<u8>) -> DurablePayload {
 
 /// The stored bytes with this crate's envelope and compression removed.
 ///
-/// The `unwrap_or(stored)` fallback mirrors the load path
-/// (`checkpoint_component_bodies_conn`) exactly, and mirroring it is the point:
-/// blobs written before the envelope existed are stored bare, and a walk that
-/// treated them as unreadable would report a healthy deployment as damaged. When
-/// there is no envelope to strip, the stored bytes already *are* the logical
-/// bytes.
+/// A malformed envelope is returned as a reason so the caller can report the
+/// item as [`DurablePayload::Missing`] without aborting the rest of the page.
 fn logical_bytes(stored: Vec<u8>) -> Result<Vec<u8>, String> {
-    match crate::decode_artifact_blob(&stored) {
-        Ok(Some(logical)) => Ok(logical),
-        Ok(None) => Ok(stored),
-        Err(error) => Err(error.to_string()),
-    }
+    crate::decode_artifact_blob(&stored).map_err(|error| error.to_string())
 }
 
 fn collect_page<I>(rows: I, limit: usize) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)>

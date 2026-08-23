@@ -570,6 +570,41 @@ mod walk {
     }
 
     #[tokio::test]
+    async fn a_bare_checkpoint_blob_is_reported_missing_with_a_decode_reason() {
+        let root = super::temp_root();
+        let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
+        Store::open(&core).await.expect("provision durable core");
+        let raw = rusqlite::Connection::open(&core).expect("open raw core");
+        raw.execute(
+            "INSERT INTO blobs (hash, content) VALUES ('bare-checkpoint', ?1)",
+            rusqlite::params![b"bare blob body".to_vec()],
+        )
+        .expect("install a bare checkpoint blob");
+        raw.execute(
+            "INSERT INTO session_head
+             (session_id, head_json, head_revision, leaf_node_id, checkpoint_ref)
+             VALUES ('bare-checkpoint-session', '{}', 0, NULL, 'bare-checkpoint')",
+            [],
+        )
+        .expect("install a session pointing at the bare blob");
+        drop(raw);
+
+        let page = SqliteStorePreflight::for_session_store_root(root.path())
+            .scan_durable(&DurableScan::first(DurableSurface::SessionCheckpoint, 10))
+            .await
+            .expect("a corrupt envelope must not fail the page");
+
+        assert_eq!(page.coverage, ScanCoverage::Scanned);
+        assert_eq!(page.items.len(), 1, "{page:?}");
+        match &page.items[0].payload {
+            DurablePayload::Missing { reason } => {
+                assert!(reason.contains("artifact blob envelope"), "{reason}");
+            }
+            other => panic!("expected a Missing payload, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn a_real_checkpoint_yields_logical_manifest_and_execution_state_bytes() {
         // Written through the store's own commit path so the bytes carry the
         // real envelope framing, which is what makes "logical bytes" a claim

@@ -1337,13 +1337,12 @@ fn encode_artifact_blob(
     )
 }
 
-fn decode_artifact_blob(bytes: &[u8]) -> Result<Option<Vec<u8>>, StoreError> {
-    let Some(envelope) = decode_msgpack::<StoredBlobEnvelope>(bytes) else {
-        return Ok(None);
-    };
+fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> {
+    let envelope = rmp_serde::from_slice::<StoredBlobEnvelope>(bytes)
+        .map_err(|error| stored_data_corrupt("artifact blob envelope", error))?;
     match envelope.compression {
-        BlobCompression::None => Ok(Some(envelope.content)),
-        BlobCompression::Zlib => decompress_blob(&envelope.content).map(Some),
+        BlobCompression::None => Ok(envelope.content),
+        BlobCompression::Zlib => decompress_blob(&envelope.content),
     }
 }
 

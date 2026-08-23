@@ -951,9 +951,7 @@ fn backfill_checkpoint_blob_refs(tx: &Transaction<'_>) -> rusqlite::Result<()> {
                     message: format!("rooted checkpoint manifest `{checkpoint_ref}` is missing"),
                 })
             })?;
-        let content = decode_artifact_blob(&bytes)
-            .map_err(sqlite_conversion_error)?
-            .unwrap_or(bytes);
+        let content = decode_artifact_blob(&bytes).map_err(sqlite_conversion_error)?;
         let manifest = decode_checkpoint(&content).map_err(sqlite_conversion_error)?;
         for descriptor in manifest.components.values() {
             tx.execute(

@@ -256,7 +256,7 @@ impl Store {
             let Some(bytes) = bytes else {
                 continue;
             };
-            let content = decode_artifact_blob(&bytes)?.unwrap_or(bytes);
+            let content = decode_artifact_blob(&bytes)?;
             let checkpoint = decode_checkpoint(&content)?;
             // GC interprets only the root's ref graph, never component bodies.
             // Retain refs even when a newer writer used an unknown component
