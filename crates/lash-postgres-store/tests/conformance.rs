@@ -2493,6 +2493,7 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     );
 }
 
+include!("conformance/append_identity.rs");
 #[path = "conformance/direct_turn_acceptance.rs"]
 mod direct_turn_acceptance;
 #[path = "conformance/injectors.rs"]

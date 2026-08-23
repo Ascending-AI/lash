@@ -619,22 +619,22 @@ impl SessionCommitStore for PostgresSessionStore {
                 let stored_identity: Option<String> = row.get(2);
                 let stored_version: Option<i32> = row.get(3);
                 let stored_requested_node_count: Option<i64> = row.get(4);
-                let stored_count = stored_requested_node_count
-                    .map(u64::try_from)
-                    .transpose()
-                    .map_err(|_| {
-                        StoreError::Backend(
-                            "stored append requested-node count is negative".to_string(),
-                        )
-                    })?;
+                // The shared codec owns both unit-shape and integer-range validation.
+                // In particular, a negative PostgreSQL INTEGER cannot become legacy replay.
+                // The ancestor column intentionally stays outside this receipt SELECT.
+                // Its semantic value is already bound by the stored request hash.
+                // Fresh-append ancestor fencing continues below, after receipt adjudication.
+                let append_request_identity =
+                    lash_core::store_backend_support::decode_append_request_identity(
+                        stored_identity,
+                        stored_version.map(i64::from),
+                        stored_requested_node_count,
+                    )?;
                 let result = store_decode_json(&result_json, "runtime turn commit result")?;
                 let prior = lash_core::store::RuntimeCommitReceiptRecord {
                     turn_commit_hash: hash,
                     result,
-                    request_identity_hash: stored_identity,
-                    identity_encoding_version: stored_version
-                        .and_then(|version| u32::try_from(version).ok()),
-                    requested_node_count: stored_count,
+                    append_request_identity,
                 };
                 if let Some(replay) = planner.decide_receipt(Some(prior))? {
                     crate::session_meta::write_session_meta_tx(
@@ -726,7 +726,7 @@ impl SessionCommitStore for PostgresSessionStore {
             None => None,
         };
         let requested_ancestor_is_active = match (
-            commit.turn_commit.requested_ancestor_node_id.as_deref(),
+            requested_append_ancestor(&commit.turn_commit),
             parent_node_facts.as_ref(),
         ) {
             (None, _) => true,
@@ -1007,6 +1007,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let result = plan.result(checkpoint_ref, manifest, enqueued_queue_batches);
         {
             let receipt = plan.receipt_write(&result);
+            let columns = append_identity_columns(receipt.append_request_identity);
             sqlx::query(
                 "INSERT INTO lash_runtime_turn_commits (
                     session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
@@ -1020,18 +1021,17 @@ impl SessionCommitStore for PostgresSessionStore {
             .bind(receipt.turn_commit_hash)
             .bind(encode_json(receipt.result)?)
             .bind(now as i64)
-            .bind(receipt.request_identity_hash)
-            .bind(receipt.requested_node_count.map(|count| count as i64))
-            .bind(receipt.requested_ancestor_node_id)
-            .bind(
-                receipt
-                    .identity_encoding_version
-                    .and_then(|version| i32::try_from(version).ok()),
-            )
+            .bind(columns.0)
+            .bind(columns.1)
+            .bind(columns.2)
+            .bind(columns.3)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
         }
+        // Receipt SQL remains the same four nullable identity columns.
+        // The aggregate exists only in Rust; no durable layout moved.
+        // An absent aggregate still writes four NULL values for legacy receipts.
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 release_session_execution_lease_tx(&mut tx, completion).await?;
@@ -3839,4 +3839,24 @@ async fn release_session_execution_lease_tx(
     .await
     .map_err(store_sqlx_error)?;
     Ok(released.rows_affected() == 1)
+}
+
+fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Option<&str> {
+    stamp
+        .append_request_identity
+        .as_ref()
+        .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
+}
+
+fn append_identity_columns(
+    identity: Option<&lash_core::AppendRequestIdentity>,
+) -> (Option<&str>, Option<i64>, Option<&str>, Option<i32>) {
+    identity.map_or((None, None, None, None), |identity| {
+        (
+            Some(identity.request_hash.as_str()),
+            Some(identity.requested_node_count as i64),
+            identity.requested_ancestor_node_id.as_deref(),
+            i32::try_from(identity.encoding_version).ok(),
+        )
+    })
 }

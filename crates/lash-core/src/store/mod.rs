@@ -57,8 +57,8 @@ pub use queued_work::{
 };
 pub use realization::commit_runtime_state_verified;
 pub use runtime_commit::{
-    RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-    RuntimeUsageDeltaIdentity,
+    AppendRequestIdentity, RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
 };
 #[doc(hidden)]
 pub use runtime_commit_plan::{
@@ -477,7 +477,7 @@ impl RuntimeCommit {
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
-        debug_assert!(turn_commit.request_identity_hash.is_some());
+        debug_assert!(turn_commit.append_request_identity.is_some());
         debug_assert!(
             completed_queue_claims.is_empty()
                 && completed_turn_input_claims.is_empty()
@@ -929,7 +929,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// clear staged rows that the original transaction never carried.
     ///
     /// A fresh identity-bearing append enforces
-    /// [`RuntimeTurnCommitStamp::requested_ancestor_node_id`] against the
+    /// [`AppendRequestIdentity::requested_ancestor_node_id`] against the
     /// transaction's active path, then atomically publishes graph, checkpoint,
     /// usage, queue/input settlements, attachment adoptions, and a receipt whose
     /// stored replay bit is `false`. Receipt lookup, fresh-only ancestor fencing,

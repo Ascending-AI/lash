@@ -253,11 +253,12 @@ pub mod persistence {
         };
     }
     pub use lash_core::store::{
-        CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent,
-        HydratedSessionCheckpoint, OperationId, OrphanedTurnInputScope, PersistedSessionRead,
-        RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-        RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHead, SessionHeadMeta,
-        SessionHeadPayload, commit_runtime_state_verified, load_persisted_session_state,
+        AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
+        HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
+        OrphanedTurnInputScope, PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt,
+        RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint,
+        SessionHead, SessionHeadMeta, SessionHeadPayload, commit_runtime_state_verified,
+        load_persisted_session_state,
     };
     pub use lash_core::{
         AttachmentCondemnation, AttachmentDeleteArming, AttachmentReclamationPolicy,

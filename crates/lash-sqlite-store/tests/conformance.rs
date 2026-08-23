@@ -2495,3 +2495,5 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
          update this count (and the derivation check) when adding one"
     );
 }
+
+include!("conformance/append_identity.rs");

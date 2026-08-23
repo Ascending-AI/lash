@@ -9,9 +9,9 @@
 use std::collections::HashSet;
 
 use super::{
-    BlobRef, RuntimeCommit, RuntimeCommitReceipt, RuntimeCommitReceiptDecision,
-    RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload, StoreError,
-    decide_runtime_commit_receipt,
+    AppendRequestIdentity, BlobRef, RuntimeCommit, RuntimeCommitReceipt,
+    RuntimeCommitReceiptDecision, RuntimeUsageDeltaIdentity, SessionCheckpoint, SessionHeadMeta,
+    SessionHeadPayload, StoreError, decide_runtime_commit_receipt,
 };
 
 /// Durable receipt fields read by a backend before attempting a commit.
@@ -24,11 +24,7 @@ pub struct RuntimeCommitReceiptRecord {
     /// Canonical result stored by the first commit attempt.
     pub result: RuntimeCommitReceipt,
     /// Versioned append-request identity, when this is an append receipt.
-    pub request_identity_hash: Option<String>,
-    /// Canonical append identity encoding version.
-    pub identity_encoding_version: Option<u32>,
-    /// Semantic node count recorded for append corruption detection.
-    pub requested_node_count: Option<u64>,
+    pub append_request_identity: Option<AppendRequestIdentity>,
 }
 
 /// Backend observations needed to validate a fresh runtime commit.
@@ -129,13 +125,7 @@ pub struct RuntimeCommitReceiptWrite<'a> {
     /// Canonical result encoded into the durable receipt.
     pub result: &'a RuntimeCommitReceipt,
     /// Versioned append-request identity, when applicable.
-    pub request_identity_hash: Option<&'a str>,
-    /// Semantic append node count, when applicable.
-    pub requested_node_count: Option<usize>,
-    /// Append ancestor fence recorded for diagnostics and replay identity.
-    pub requested_ancestor_node_id: Option<&'a str>,
-    /// Canonical append identity encoding version.
-    pub identity_encoding_version: Option<u32>,
+    pub append_request_identity: Option<&'a AppendRequestIdentity>,
 }
 
 /// Prepared semantic identity for one attempted runtime commit.
@@ -234,26 +224,11 @@ impl RuntimeCommitPlanner {
         let Some(prior) = prior else {
             return Ok(None);
         };
-        let attempted_count = self
-            .commit
-            .turn_commit
-            .requested_node_count
-            .map(u64::try_from)
-            .transpose()
-            .map_err(|_| {
-                StoreError::Backend(
-                    "attempted append requested-node count does not fit u64".to_string(),
-                )
-            })?;
         match decide_runtime_commit_receipt(
             &prior.turn_commit_hash,
             &self.turn_commit_hash,
-            prior.identity_encoding_version,
-            self.commit.turn_commit.identity_encoding_version,
-            prior.request_identity_hash.as_deref(),
-            self.commit.turn_commit.request_identity_hash.as_deref(),
-            prior.requested_node_count,
-            attempted_count,
+            prior.append_request_identity.as_ref(),
+            self.commit.turn_commit.append_request_identity.as_ref(),
         ) {
             RuntimeCommitReceiptDecision::Replay => {
                 let mut result = prior.result;
@@ -294,15 +269,22 @@ impl RuntimeCommitPlanner {
         &self,
         facts: FreshRuntimeCommitFacts,
     ) -> Result<RuntimeCommitPlan<'_>, StoreError> {
-        if self.commit.turn_commit.requested_ancestor_node_id.is_some()
+        if self
+            .commit
+            .turn_commit
+            .append_request_identity
+            .as_ref()
+            .and_then(|identity| identity.requested_ancestor_node_id.as_ref())
+            .is_some()
             && !facts.requested_ancestor_is_active
         {
             return Err(StoreError::AppendAncestorNotActive {
                 required_node_id: self
                     .commit
                     .turn_commit
-                    .requested_ancestor_node_id
-                    .clone()
+                    .append_request_identity
+                    .as_ref()
+                    .and_then(|identity| identity.requested_ancestor_node_id.clone())
                     .expect("checked append ancestor"),
             });
         }
@@ -559,14 +541,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             operation_key: &self.operation_key,
             turn_commit_hash: &self.turn_commit_hash,
             result,
-            request_identity_hash: self.commit.turn_commit.request_identity_hash.as_deref(),
-            requested_node_count: self.commit.turn_commit.requested_node_count,
-            requested_ancestor_node_id: self
-                .commit
-                .turn_commit
-                .requested_ancestor_node_id
-                .as_deref(),
-            identity_encoding_version: self.commit.turn_commit.identity_encoding_version,
+            append_request_identity: self.commit.turn_commit.append_request_identity.as_ref(),
         }
     }
 }

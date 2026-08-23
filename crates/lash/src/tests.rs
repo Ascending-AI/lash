@@ -265,7 +265,11 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 turn_id: operation_key,
             });
         }
-        if let Some(required_node_id) = commit.turn_commit.requested_ancestor_node_id.as_deref()
+        if let Some(required_node_id) = commit
+            .turn_commit
+            .append_request_identity
+            .as_ref()
+            .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
             && !read
                 .as_ref()
                 .is_some_and(|read| read.graph.active_path_contains(required_node_id))
