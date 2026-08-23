@@ -336,6 +336,169 @@ fn canonical_source_rejects_every_parser_reserved_name() {
 }
 
 #[test]
+fn hard_keyword_remains_refused_at_every_identifier_position() {
+    let statement = canonical_expression_source(&Expr::Variable("if".into()));
+    let declaration_lead =
+        canonical_program_source(&Program::block(vec![Expr::Variable("if".into())]));
+    let primary = canonical_program_source(&Program::block(vec![Expr::Assign {
+        target: AssignTarget::variable("x".into()),
+        expr: Box::new(Expr::Variable("if".into())),
+    }]));
+
+    let mut declaration = parse("type Name = str").expect("parse declaration fixture");
+    let Declaration::Type(type_decl) = &mut declaration.declarations[0] else {
+        panic!("expected type declaration");
+    };
+    type_decl.name = "if".into();
+    let declaration = canonical_program_source(&declaration);
+
+    for (result, context) in [
+        (statement, "variable"),
+        (declaration_lead, "variable"),
+        (primary, "variable"),
+        (declaration, "type name"),
+    ] {
+        assert_eq!(
+            result,
+            Err(CanonicalSourceError::InvalidIdentifier {
+                context,
+                name: "if".to_string(),
+            })
+        );
+    }
+}
+
+macro_rules! statement_lead_reserved_name_test {
+    ($test_name:ident, $name:literal) => {
+        #[test]
+        fn $test_name() {
+            let program = Program::block(vec![Expr::Variable($name.into())]);
+            let err = canonical_program_source(&program)
+                .expect_err("a declaration-leading name must not print as a bare statement");
+            assert_eq!(
+                err,
+                CanonicalSourceError::InvalidIdentifier {
+                    context: "variable",
+                    name: $name.to_string(),
+                }
+            );
+        }
+    };
+}
+
+statement_lead_reserved_name_test!(statement_lead_type_is_refused, "type");
+statement_lead_reserved_name_test!(statement_lead_process_is_refused, "process");
+statement_lead_reserved_name_test!(statement_lead_fn_is_refused, "fn");
+statement_lead_reserved_name_test!(statement_lead_trigger_is_refused, "trigger");
+
+#[test]
+fn declaration_leading_names_round_trip_in_expression_and_member_positions() {
+    for name in ["type", "process", "fn", "trigger"] {
+        for source in [format!("x = {name}"), format!("x = holder.{name}")] {
+            let program = parse(&source).expect("name is legal away from statement lead");
+            let rendered = canonical_program_source(&program).expect("render source");
+            let reparsed = parse(&rendered).expect("parse rendered source");
+            assert_eq!(
+                canonical_program_ir(reparsed),
+                canonical_program_ir(program),
+                "{source} rendered as {rendered}"
+            );
+        }
+    }
+
+    let trigger_event = parse("x = trigger.event").expect("trigger event member expression");
+    let rendered = canonical_program_source(&trigger_event).expect("render trigger event");
+    let reparsed = parse(&rendered).expect("parse rendered trigger event");
+    assert_eq!(
+        canonical_program_ir(reparsed),
+        canonical_program_ir(trigger_event)
+    );
+}
+
+fn test_label() -> LabelMetadata {
+    LabelMetadata {
+        title: "test".into(),
+        description: None,
+    }
+}
+
+fn labeled_statement(expr: Expr) -> Expr {
+    Expr::LabelAnnotated {
+        label: test_label(),
+        expr: Box::new(expr),
+    }
+}
+
+fn process_with_body(body: Expr) -> Program {
+    let mut program = parse("process worker() { finish true }").expect("parse process fixture");
+    let Declaration::Process(process) = &mut program.declarations[0] else {
+        panic!("expected process declaration");
+    };
+    process.body = body;
+    program
+}
+
+#[test]
+fn labeled_statements_round_trip_at_module_and_block_level() {
+    for source in [
+        "@label(title: \"test\") finish true",
+        "process worker() { @label(title: \"test\") finish true }",
+    ] {
+        let program = parse(source).expect("parse labeled statement");
+        let rendered = canonical_program_source(&program).expect("render labeled statement");
+        let reparsed = parse(&rendered).expect("parse rendered labeled statement");
+        assert_eq!(
+            canonical_program_ir(reparsed),
+            canonical_program_ir(program)
+        );
+    }
+}
+
+#[test]
+fn labeled_statement_declaration_leads_are_refused_at_module_and_block_level() {
+    for name in ["type", "process", "fn", "trigger"] {
+        let expected = CanonicalSourceError::InvalidIdentifier {
+            context: "variable",
+            name: name.to_string(),
+        };
+        assert_eq!(
+            canonical_program_source(&Program::block(vec![labeled_statement(Expr::Variable(
+                name.into(),
+            ))])),
+            Err(expected.clone()),
+            "module-level label target: {name}"
+        );
+        assert_eq!(
+            canonical_program_source(&process_with_body(Expr::Block(vec![labeled_statement(
+                Expr::Variable(name.into()),
+            )]))),
+            Err(expected),
+            "block-level label target: {name}"
+        );
+    }
+}
+
+#[test]
+fn labeled_assignment_declaration_leads_are_refused() {
+    for name in ["type", "process", "fn", "trigger"] {
+        let expr = labeled_statement(Expr::Assign {
+            target: AssignTarget::variable(name.into()),
+            expr: Box::new(Expr::Number(1.0)),
+        });
+        let err = canonical_program_source(&process_with_body(Expr::Block(vec![expr])))
+            .expect_err("labeled assignment roots must be reserved at label targets");
+        assert_eq!(
+            err,
+            CanonicalSourceError::InvalidIdentifier {
+                context: "assignment target",
+                name: name.to_string(),
+            },
+            "assignment root: {name}"
+        );
+    }
+}
+
+#[test]
 fn host_descriptor_constructor_requires_requirements_context() {
     let linked = assert_linked_source_round_trip(
         r#"source = timer.Schedule({ expr: "0 8 * * *" })

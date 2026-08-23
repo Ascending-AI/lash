@@ -64,6 +64,43 @@ pub enum TokenKind {
     Eof,
 }
 
+macro_rules! define_hard_keywords {
+    ($($name:literal => $kind:ident),+ $(,)?) => {
+        #[cfg(test)]
+        const HARD_KEYWORD_NAMES: &[&str] = &[$($name),+];
+
+        fn hard_keyword_kind(text: &str) -> Option<TokenKind> {
+            Some(match text {
+                $($name => TokenKind::$kind,)+
+                _ => return None,
+            })
+        }
+    };
+}
+
+define_hard_keywords! {
+    "if" => If,
+    "else" => Else,
+    "for" => For,
+    "in" => In,
+    "await" => Await,
+    "cancel" => Cancel,
+    "submit" => Submit,
+    "print" => Print,
+    "call" => Call,
+    "and" => And,
+    "or" => Or,
+    "not" => Not,
+    "true" => True,
+    "false" => False,
+    "null" => Null,
+}
+
+#[cfg(test)]
+pub(crate) fn hard_keyword_names() -> &'static [&'static str] {
+    HARD_KEYWORD_NAMES
+}
+
 #[derive(Debug, Error, PartialEq)]
 pub enum LexError {
     #[error("unexpected `{ch}`")]
@@ -293,24 +330,7 @@ impl<'a> Lexer<'a> {
             self.bump();
         }
         let text = &self.source[start..end];
-        let kind = match text {
-            "if" => TokenKind::If,
-            "else" => TokenKind::Else,
-            "for" => TokenKind::For,
-            "in" => TokenKind::In,
-            "await" => TokenKind::Await,
-            "cancel" => TokenKind::Cancel,
-            "submit" => TokenKind::Submit,
-            "print" => TokenKind::Print,
-            "call" => TokenKind::Call,
-            "and" => TokenKind::And,
-            "or" => TokenKind::Or,
-            "not" => TokenKind::Not,
-            "true" => TokenKind::True,
-            "false" => TokenKind::False,
-            "null" => TokenKind::Null,
-            _ => TokenKind::Ident(text.into()),
-        };
+        let kind = hard_keyword_kind(text).unwrap_or_else(|| TokenKind::Ident(text.into()));
         Token {
             kind,
             span: Span { start, end },

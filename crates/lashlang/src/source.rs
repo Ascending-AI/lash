@@ -5,6 +5,7 @@ use crate::ast::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, LabelMetadata,
     ListComprehensionClause, ProcessDecl, Program, ResourceRefExpr, TypeExpr, TypeField, UnaryOp,
 };
+use crate::parser::IdentifierPosition;
 
 /// Error returned when canonical IR cannot be represented as Lashlang source.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -125,7 +126,11 @@ impl<'a> SourceFormatter<'a> {
             Declaration::Type(type_decl) => {
                 let mut out = String::new();
                 out.push_str("type ");
-                out.push_str(&format_identifier("type name", type_decl.name.as_str())?);
+                out.push_str(&format_identifier(
+                    "type name",
+                    type_decl.name.as_str(),
+                    IdentifierPosition::Identifier,
+                )?);
                 out.push_str(" = ");
                 out.push_str(&self.type_source(&type_decl.ty)?);
                 Ok(out)
@@ -149,7 +154,11 @@ impl<'a> SourceFormatter<'a> {
         function: &FunctionDecl,
     ) -> Result<(), CanonicalSourceError> {
         out.push_str("fn ");
-        out.push_str(&format_identifier("function name", function.name.as_str())?);
+        out.push_str(&format_identifier(
+            "function name",
+            function.name.as_str(),
+            IdentifierPosition::Identifier,
+        )?);
         out.push('(');
         for (index, param) in function.params.iter().enumerate() {
             if index > 0 {
@@ -158,6 +167,7 @@ impl<'a> SourceFormatter<'a> {
             out.push_str(&format_identifier(
                 "function parameter",
                 param.name.as_str(),
+                IdentifierPosition::Identifier,
             )?);
             out.push_str(": ");
             out.push_str(&self.type_source(&param.ty)?);
@@ -179,7 +189,11 @@ impl<'a> SourceFormatter<'a> {
             out.push('\n');
         }
         out.push_str("process ");
-        out.push_str(&format_identifier("process name", process.name.as_str())?);
+        out.push_str(&format_identifier(
+            "process name",
+            process.name.as_str(),
+            IdentifierPosition::Identifier,
+        )?);
         out.push('(');
         for (index, param) in process.params.iter().enumerate() {
             if index > 0 {
@@ -188,6 +202,7 @@ impl<'a> SourceFormatter<'a> {
             out.push_str(&format_identifier(
                 "process parameter",
                 param.name.as_str(),
+                IdentifierPosition::Identifier,
             )?);
             out.push_str(": ");
             out.push_str(&self.type_source(&param.ty)?);
@@ -218,10 +233,18 @@ impl<'a> SourceFormatter<'a> {
         match main {
             Expr::Block(expressions) => {
                 let mut out = String::new();
-                self.write_statements(&mut out, expressions, 0)?;
+                for expr in expressions {
+                    out.push_str(&self.statement_line(
+                        expr,
+                        0,
+                        IdentifierPosition::DeclarationLead,
+                    )?);
+                }
                 Ok(trim_trailing_newline(out))
             }
-            expr => self.statement_line(expr, 0).map(trim_trailing_newline),
+            expr => self
+                .statement_line(expr, 0, IdentifierPosition::DeclarationLead)
+                .map(trim_trailing_newline),
         }
     }
 
@@ -229,7 +252,11 @@ impl<'a> SourceFormatter<'a> {
         let Expr::Block(expressions) = expr else {
             let mut out = String::new();
             out.push_str("{\n");
-            out.push_str(&self.statement_line(expr, indent + 1)?);
+            out.push_str(&self.statement_line(
+                expr,
+                indent + 1,
+                IdentifierPosition::StatementLead,
+            )?);
             out.push_str(&indent_string(indent));
             out.push('}');
             return Ok(out);
@@ -252,12 +279,17 @@ impl<'a> SourceFormatter<'a> {
         indent: usize,
     ) -> Result<(), CanonicalSourceError> {
         for expr in expressions {
-            out.push_str(&self.statement_line(expr, indent)?);
+            out.push_str(&self.statement_line(expr, indent, IdentifierPosition::StatementLead)?);
         }
         Ok(())
     }
 
-    fn statement_line(&self, expr: &Expr, indent: usize) -> Result<String, CanonicalSourceError> {
+    fn statement_line(
+        &self,
+        expr: &Expr,
+        indent: usize,
+        identifier_position: IdentifierPosition,
+    ) -> Result<String, CanonicalSourceError> {
         let prefix = indent_string(indent);
         let mut out = String::new();
         match expr {
@@ -265,7 +297,11 @@ impl<'a> SourceFormatter<'a> {
                 out.push_str(&prefix);
                 out.push_str(&label_source(label));
                 out.push('\n');
-                out.push_str(&self.statement_line(expr, indent)?);
+                out.push_str(&self.statement_line(
+                    expr,
+                    indent,
+                    IdentifierPosition::LabelTarget,
+                )?);
             }
             Expr::If {
                 condition,
@@ -283,7 +319,11 @@ impl<'a> SourceFormatter<'a> {
             } => {
                 out.push_str(&prefix);
                 out.push_str("for ");
-                out.push_str(&format_identifier("for binding", binding.as_str())?);
+                out.push_str(&format_identifier(
+                    "for binding",
+                    binding.as_str(),
+                    IdentifierPosition::Identifier,
+                )?);
                 out.push_str(" in ");
                 out.push_str(&self.expr_source(iterable)?);
                 out.push(' ');
@@ -300,7 +340,7 @@ impl<'a> SourceFormatter<'a> {
             }
             _ => {
                 out.push_str(&prefix);
-                out.push_str(&self.statement_expr_source(expr)?);
+                out.push_str(&self.statement_expr_source_at(expr, identifier_position)?);
                 out.push('\n');
             }
         }
@@ -338,9 +378,21 @@ impl<'a> SourceFormatter<'a> {
     }
 
     fn statement_expr_source(&self, expr: &Expr) -> Result<String, CanonicalSourceError> {
+        self.statement_expr_source_at(expr, IdentifierPosition::StatementLead)
+    }
+
+    fn statement_expr_source_at(
+        &self,
+        expr: &Expr,
+        identifier_position: IdentifierPosition,
+    ) -> Result<String, CanonicalSourceError> {
         match expr {
             Expr::Assign { target, expr } => {
-                let mut out = self.assign_target_source(target)?;
+                let target_position = match identifier_position {
+                    IdentifierPosition::LabelTarget => IdentifierPosition::LabelTarget,
+                    _ => IdentifierPosition::Identifier,
+                };
+                let mut out = self.assign_target_source_at(target, target_position)?;
                 out.push_str(" = ");
                 out.push_str(&self.expr_source(expr)?);
                 Ok(out)
@@ -356,11 +408,19 @@ impl<'a> SourceFormatter<'a> {
             Expr::Block(_) => {
                 Err(CanonicalSourceError::NonSourceableExpression { kind: "bare block" })
             }
-            expr => self.expr_source(expr),
+            expr => self.expr_source_at(expr, identifier_position),
         }
     }
 
     fn expr_source(&self, expr: &Expr) -> Result<String, CanonicalSourceError> {
+        self.expr_source_at(expr, IdentifierPosition::PrimaryExpression)
+    }
+
+    fn expr_source_at(
+        &self,
+        expr: &Expr,
+        identifier_position: IdentifierPosition,
+    ) -> Result<String, CanonicalSourceError> {
         match expr {
             Expr::Block(_) => Err(CanonicalSourceError::NonSourceableExpression { kind: "block" }),
             Expr::LabelAnnotated { .. } => Err(CanonicalSourceError::NonSourceableExpression {
@@ -373,7 +433,9 @@ impl<'a> SourceFormatter<'a> {
             Expr::Bool(value) => Ok(value.to_string()),
             Expr::Number(value) => format_number(*value),
             Expr::String(value) => Ok(format_string(value.as_str())),
-            Expr::Variable(name) => format_identifier("variable", name.as_str()),
+            Expr::Variable(name) => {
+                format_identifier("variable", name.as_str(), identifier_position)
+            }
             Expr::Tuple(items) => Ok(self.tuple_source(items)?),
             Expr::List(items) => {
                 let items = items
@@ -390,7 +452,11 @@ impl<'a> SourceFormatter<'a> {
                     match clause {
                         ListComprehensionClause::For { binding, iterable } => {
                             out.push_str(" for ");
-                            out.push_str(&format_identifier("comprehension binding", binding)?);
+                            out.push_str(&format_identifier(
+                                "comprehension binding",
+                                binding,
+                                IdentifierPosition::Identifier,
+                            )?);
                             out.push_str(" in ");
                             out.push_str(&self.expr_source(iterable)?);
                         }
@@ -461,20 +527,26 @@ impl<'a> SourceFormatter<'a> {
                     .collect::<Result<Vec<_>, CanonicalSourceError>>()?;
                 Ok(format!(
                     "start {}({})",
-                    format_identifier("process name", start.process.as_str())?,
+                    format_identifier(
+                        "process name",
+                        start.process.as_str(),
+                        IdentifierPosition::Identifier,
+                    )?,
                     args.join(", ")
                 ))
             }
-            Expr::ProcessRef { process } => format_identifier("process name", process.as_str()),
+            Expr::ProcessRef { process } => {
+                format_identifier("process name", process.as_str(), identifier_position)
+            }
             Expr::HostDescriptorConstructor { type_name, input } => {
                 let path = self.constructor_path(type_name.as_str())?;
                 Ok(format!(
                     "{}({})",
-                    format_receiver_path("constructor", &path)?,
+                    format_receiver_path("constructor", &path, identifier_position)?,
                     self.expr_source(input)?
                 ))
             }
-            Expr::ResourceRef(resource) => self.resource_ref_source(resource),
+            Expr::ResourceRef(resource) => self.resource_ref_source(resource, identifier_position),
             Expr::ReceiverCall {
                 receiver,
                 operation,
@@ -486,7 +558,7 @@ impl<'a> SourceFormatter<'a> {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(format!(
                     "{}.{}({})",
-                    self.postfix_target_source(receiver)?,
+                    self.postfix_target_source_at(receiver, identifier_position)?,
                     format_key_name(operation.as_str()),
                     args.join(", ")
                 ))
@@ -501,7 +573,10 @@ impl<'a> SourceFormatter<'a> {
                 format_string(name),
                 self.expr_source(payload)?
             )),
-            Expr::ResultUnwrap(expr) => Ok(format!("{}?", self.postfix_target_source(expr)?)),
+            Expr::ResultUnwrap(expr) => Ok(format!(
+                "{}?",
+                self.postfix_target_source_at(expr, identifier_position)?
+            )),
             Expr::Cancel(expr) => Ok(format!("cancel {}", self.expr_source(expr)?)),
             Expr::Print(expr) => Ok(format!("print {}", self.expr_source(expr)?)),
             Expr::Yield(expr) => Ok(format!("yield {}", self.expr_source(expr)?)),
@@ -515,7 +590,7 @@ impl<'a> SourceFormatter<'a> {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(format!(
                     "{}({})",
-                    format_identifier("builtin", name.as_str())?,
+                    format_identifier("builtin", name.as_str(), identifier_position)?,
                     args.join(", ")
                 ))
             }
@@ -526,7 +601,7 @@ impl<'a> SourceFormatter<'a> {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(format!(
                     "{}({})",
-                    format_identifier("function", function.as_str())?,
+                    format_identifier("function", function.as_str(), identifier_position)?,
                     args.join(", ")
                 ))
             }
@@ -550,12 +625,12 @@ impl<'a> SourceFormatter<'a> {
             }),
             Expr::Field { target, field } => Ok(format!(
                 "{}.{}",
-                self.postfix_target_source(target)?,
+                self.postfix_target_source_at(target, identifier_position)?,
                 format_key_name(field.as_str())
             )),
             Expr::Index { target, index } => Ok(format!(
                 "{}[{}]",
-                self.postfix_target_source(target)?,
+                self.postfix_target_source_at(target, identifier_position)?,
                 self.expr_source(index)?
             )),
             Expr::Unary { op, expr } => {
@@ -582,7 +657,11 @@ impl<'a> SourceFormatter<'a> {
         }
     }
 
-    fn postfix_target_source(&self, expr: &Expr) -> Result<String, CanonicalSourceError> {
+    fn postfix_target_source_at(
+        &self,
+        expr: &Expr,
+        identifier_position: IdentifierPosition,
+    ) -> Result<String, CanonicalSourceError> {
         match expr {
             Expr::Null
             | Expr::Bool(_)
@@ -603,7 +682,7 @@ impl<'a> SourceFormatter<'a> {
             | Expr::Field { .. }
             | Expr::Index { .. }
             | Expr::ResultUnwrap(_)
-            | Expr::TypeLiteral(_) => self.expr_source(expr),
+            | Expr::TypeLiteral(_) => self.expr_source_at(expr, identifier_position),
             _ => Ok(format!("({})", self.expr_source(expr)?)),
         }
     }
@@ -636,7 +715,15 @@ impl<'a> SourceFormatter<'a> {
     }
 
     fn assign_target_source(&self, target: &AssignTarget) -> Result<String, CanonicalSourceError> {
-        let mut out = format_assignment_target_identifier(target.root.as_str())?;
+        self.assign_target_source_at(target, IdentifierPosition::Identifier)
+    }
+
+    fn assign_target_source_at(
+        &self,
+        target: &AssignTarget,
+        position: IdentifierPosition,
+    ) -> Result<String, CanonicalSourceError> {
+        let mut out = format_assignment_target_identifier(target.root.as_str(), position)?;
         for step in &target.steps {
             match step {
                 AssignPathStep::Field(field) => {
@@ -735,6 +822,7 @@ impl<'a> SourceFormatter<'a> {
     fn resource_ref_source(
         &self,
         resource: &ResourceRefExpr,
+        identifier_position: IdentifierPosition,
     ) -> Result<String, CanonicalSourceError> {
         if !resource.path.is_empty() {
             return format_receiver_path(
@@ -744,6 +832,7 @@ impl<'a> SourceFormatter<'a> {
                     .iter()
                     .map(|segment| segment.to_string())
                     .collect::<Vec<_>>(),
+                identifier_position,
             );
         }
         if resource.alias.is_empty() {
@@ -759,6 +848,7 @@ impl<'a> SourceFormatter<'a> {
                 .split('.')
                 .map(ToString::to_string)
                 .collect::<Vec<_>>(),
+            identifier_position,
         )
     }
 
@@ -854,8 +944,12 @@ fn format_string(value: &str) -> String {
     out
 }
 
-fn format_identifier(context: &'static str, name: &str) -> Result<String, CanonicalSourceError> {
-    if is_identifier(name) {
+fn format_identifier(
+    context: &'static str,
+    name: &str,
+    position: IdentifierPosition,
+) -> Result<String, CanonicalSourceError> {
+    if is_identifier(name, position) {
         return Ok(name.to_string());
     }
     Err(CanonicalSourceError::InvalidIdentifier {
@@ -864,8 +958,11 @@ fn format_identifier(context: &'static str, name: &str) -> Result<String, Canoni
     })
 }
 
-fn format_assignment_target_identifier(name: &str) -> Result<String, CanonicalSourceError> {
-    if is_identifier_shape(name) && !crate::parser::is_lexer_hard_keyword(name) {
+fn format_assignment_target_identifier(
+    name: &str,
+    position: IdentifierPosition,
+) -> Result<String, CanonicalSourceError> {
+    if is_identifier(name, position) {
         return Ok(name.to_string());
     }
     Err(CanonicalSourceError::InvalidIdentifier {
@@ -884,7 +981,10 @@ fn format_key_name(name: &str) -> String {
 
 fn format_type_ref(name: &str) -> Result<String, CanonicalSourceError> {
     let segments = name.split('.').collect::<Vec<_>>();
-    if segments.iter().all(|segment| is_identifier(segment)) {
+    if segments
+        .iter()
+        .all(|segment| is_identifier(segment, IdentifierPosition::Identifier))
+    {
         return Ok(name.to_string());
     }
     Err(CanonicalSourceError::InvalidPath {
@@ -896,6 +996,7 @@ fn format_type_ref(name: &str) -> Result<String, CanonicalSourceError> {
 fn format_receiver_path(
     context: &'static str,
     path: &[String],
+    position: IdentifierPosition,
 ) -> Result<String, CanonicalSourceError> {
     let Some((root, rest)) = path.split_first() else {
         return Err(CanonicalSourceError::InvalidPath {
@@ -903,7 +1004,7 @@ fn format_receiver_path(
             path: String::new(),
         });
     };
-    let mut out = format_identifier(context, root)?;
+    let mut out = format_identifier(context, root, position)?;
     for segment in rest {
         out.push('.');
         out.push_str(&format_key_name(segment));
@@ -911,8 +1012,8 @@ fn format_receiver_path(
     Ok(out)
 }
 
-fn is_identifier(name: &str) -> bool {
-    is_identifier_shape(name) && !crate::parser::is_parser_reserved_name(name)
+fn is_identifier(name: &str, position: IdentifierPosition) -> bool {
+    is_identifier_shape(name) && !crate::parser::is_parser_reserved_name(name, position)
 }
 
 fn is_identifier_shape(name: &str) -> bool {
