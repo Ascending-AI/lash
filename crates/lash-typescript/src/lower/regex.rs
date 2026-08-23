@@ -36,7 +36,7 @@ impl Lowerer {
                 let [regexp] = args else {
                     return Err(regex_arity(method, "one global RegExp argument"));
                 };
-                if self.iterable_sink_depth == 0 {
+                if self.position.iterable_sink_depth == 0 {
                     Err(Diagnostic::with_repair(
                         DiagnosticCode::RegexIteratorPosition,
                         "String.matchAll iterators may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries",

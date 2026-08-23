@@ -178,10 +178,10 @@ impl Lowerer {
                     name: signal.as_str().into(),
                     payload: Box::new(self.lower_expr(payload)?),
                 }),
-                ("sleep", [milliseconds]) if self.await_depth > 0 => {
+                ("sleep", [milliseconds]) if self.position.await_depth > 0 => {
                     Ok(LashExpr::SleepFor(Box::new(self.lower_expr(milliseconds)?)))
                 }
-                ("waitSignal", [Expr::String(name)]) if self.await_depth > 0 => {
+                ("waitSignal", [Expr::String(name)]) if self.position.await_depth > 0 => {
                     Ok(LashExpr::WaitSignal {
                         name: name.as_str().into(),
                     })
@@ -190,7 +190,7 @@ impl Lowerer {
                 ("start", [Expr::Ident(target), Expr::Object(entries)]) => {
                     self.lower_start(target, entries)
                 }
-                ("registerTrigger", [config]) if self.await_depth > 0 => {
+                ("registerTrigger", [config]) if self.position.await_depth > 0 => {
                     Ok(LashExpr::ReceiverCall {
                         receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::unresolved(
                             vec!["triggers".into()],
@@ -204,7 +204,9 @@ impl Lowerer {
                     "defineProcess must initialize a top-level binding",
                     None,
                 )),
-                ("sleep" | "waitSignal" | "registerTrigger", _) if self.await_depth == 0 => {
+                ("sleep" | "waitSignal" | "registerTrigger", _)
+                    if self.position.await_depth == 0 =>
+                {
                     Err(Diagnostic::new(
                         DiagnosticCode::AwaitRequired,
                         format!("agent primitive `{name}` requires await"),
@@ -273,7 +275,7 @@ impl Lowerer {
                             None,
                         ));
                     }
-                    "all" | "allSettled" if self.await_depth == 0 => {
+                    "all" | "allSettled" if self.position.await_depth == 0 => {
                         return Err(Diagnostic::new(
                             DiagnosticCode::AwaitRequired,
                             format!("Promise.{method} must be awaited directly"),
@@ -449,7 +451,7 @@ impl Lowerer {
             if !receiver_is_module_authority
                 && matches!(method.as_str(), "entries" | "keys" | "values")
                 && static_stdlib_owner(object).is_none()
-                && self.iterable_sink_depth > 0
+                && self.position.iterable_sink_depth > 0
             {
                 let exotic = match object.as_ref() {
                     Expr::New { constructor, .. }
@@ -539,7 +541,7 @@ impl Lowerer {
             if !receiver_is_module_authority
                 && matches!(method.as_str(), "entries" | "keys" | "values")
                 && static_stdlib_owner(object).is_none()
-                && self.iterable_sink_depth == 0
+                && self.position.iterable_sink_depth == 0
             {
                 return Err(Diagnostic::refusal(DiagnosticCode::MethodUnsupported, "Unsupported: iterator methods may only be consumed directly by for-of / spread / Array.from / new Map|Set / Object.fromEntries", None).with_hint("wrap it at the point of use: `[...expr]`"));
             }
@@ -778,7 +780,7 @@ impl Lowerer {
                 ));
             }
 
-            if self.await_depth == 0 {
+            if self.position.await_depth == 0 {
                 return Err(Diagnostic::new(
                     DiagnosticCode::AwaitRequired,
                     format!(
@@ -811,7 +813,7 @@ impl Lowerer {
             && self
                 .binding(name)
                 .is_ok_and(|binding| binding.role == BindingRole::AsyncHelper)
-            && self.await_depth == 0
+            && self.position.await_depth == 0
         {
             return Err(Diagnostic::new(
                 DiagnosticCode::AwaitRequired,

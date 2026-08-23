@@ -139,6 +139,43 @@ rejection_test!(
     Code::AwaitRequired
 );
 rejection_test!(rejects_unawaited_sleep, "sleep(1);", Code::AwaitRequired);
+
+#[test]
+fn await_permission_stops_at_nested_function_boundaries() {
+    let operations = [
+        "sleep(1)",
+        "waitSignal('ready')",
+        "registerTrigger({})",
+        "web.fetch({ url: 'https://example.test' })",
+    ];
+    for operation in operations {
+        for source in [
+            format!("await (async () => {{ {operation}; }})();"),
+            format!("await Promise.all([1].map(async (item) => {{ {operation}; return item; }}));"),
+        ] {
+            let error = lash_typescript::validate(&source).expect_err(&source);
+            assert_eq!(error.code, Code::AwaitRequired, "{source}: {error}");
+        }
+    }
+}
+
+#[test]
+fn nested_async_shapes_accept_locally_awaited_effects() {
+    for source in [
+        "await (async () => { await sleep(1); })();",
+        "await Promise.all([1].map(async (item) => { await sleep(1); return item; }));",
+    ] {
+        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
+
+#[test]
+fn iterable_sink_permission_stops_at_nested_function_boundaries() {
+    let source = "Array.from(function nested() { return 'a'.matchAll(/a/g); });";
+    let error = lash_typescript::validate(source).expect_err(source);
+    assert_eq!(error.code, Code::RegexIteratorPosition, "{error}");
+}
+
 rejection_test!(
     rejects_missing_literal_method,
     "'x'.missing();",
