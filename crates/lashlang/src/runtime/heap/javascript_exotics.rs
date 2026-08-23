@@ -85,7 +85,7 @@ pub(crate) struct ErrorObject {
 /// restore.
 #[derive(Clone, Debug)]
 pub(crate) struct RegExpProgramCache {
-    pub(crate) program: regress::Regex,
+    pub(crate) program: lash_regress::Regex,
 }
 
 #[derive(Debug)]
@@ -376,7 +376,7 @@ impl Heap {
     pub(crate) fn set_regexp_program(
         &mut self,
         id: HeapId,
-        program: regress::Regex,
+        program: lash_regress::Regex,
     ) -> Result<(), RuntimeError> {
         let object = self
             .slots

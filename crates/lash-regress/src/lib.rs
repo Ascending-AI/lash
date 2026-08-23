@@ -1,4 +1,4 @@
-// Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation; crate-root clippy allow (vendored code is tested, not linted).
+// Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation; crate-root clippy allow (forked code is tested, not linted).
 /*!
 
 # regress - REGex in Rust with EcmaScript Syntax
@@ -8,7 +8,7 @@ This crate provides a regular expression engine which targets EcmaScript (aka Ja
 # Example: test if a string contains a match
 
 ```rust
-use regress::Regex;
+use lash_regress::Regex;
 let re = Regex::new(r"\d{4}").unwrap();
 let matched = re.find("2020-20-05").is_some();
 assert!(matched);
@@ -19,7 +19,7 @@ assert!(matched);
 Here we use a backreference to find doubled characters:
 
 ```rust
-use regress::Regex;
+use lash_regress::Regex;
 let re = Regex::new(r"(\w)\1").unwrap();
 let text = "Frankly, Miss Piggy, I don't give a hoot!";
 for m in re.find_iter(text) {
@@ -37,7 +37,7 @@ Capture groups are available in the `Match` object produced by a successful matc
 A capture group is a range of byte indexes into the original string.
 
 ```rust
-use regress::Regex;
+use lash_regress::Regex;
 let re = Regex::new(r"(\d{4})").unwrap();
 let text = "Today is 2020-20-05";
 let m = re.find(text).unwrap();
@@ -52,7 +52,7 @@ When the `pattern` feature is enabled and using nightly Rust, `Regex` can be use
 
 ```rust,ignore
 #![feature(pattern)]
-use regress::Regex;
+use lash_regress::Regex;
 let re = Regex::new(r"\d+").unwrap();
 let text = "abc123def456";
 
@@ -68,7 +68,7 @@ assert_eq!(parts, vec!["abc", "def", ""]);
 Use the `escape` function to escape special regex characters in a string:
 
 ```rust
-use regress::{escape, Regex};
+use lash_regress::{escape, Regex};
 let user_input = "How much $ do you have? (in dollars)";
 let escaped = escape(user_input);
 let re = Regex::new(&escaped).unwrap();
@@ -91,7 +91,7 @@ Note the parser assumes the `u` (Unicode) flag, as the non-Unicode path is tied 
 regress supports Unicode case folding. For example:
 
 ```rust
-use regress::Regex;
+use lash_regress::Regex;
 let re = Regex::with_flags("\u{00B5}", "i").unwrap();
 assert!(re.find("\u{03BC}").is_some());
 ```
@@ -101,7 +101,7 @@ Here the U+00B5 (micro sign) was case-insensitively matched against U+03BC (smal
 regress does NOT perform normalization. For example,  e-with-accute-accent can be precomposed or decomposed, and these are treated as not equivalent:
 
 ```rust
-use regress::{Regex, Flags};
+use lash_regress::{Regex, Flags};
 let re = Regex::new("\u{00E9}").unwrap();
 assert!(re.find("\u{0065}\u{0301}").is_none());
 ```
@@ -116,7 +116,7 @@ This may provide improved performance if you do not need Unicode semantics, beca
 Example:
 
 ```rust
-use regress::Regex;
+use lash_regress::Regex;
 let re = Regex::with_flags("BC", "i").unwrap();
 assert!(re.find("abcd").is_some());
 ```
@@ -152,7 +152,7 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 )]
 // Clippy's manual_range_contains suggestion produces worse codegen.
 #![allow(clippy::manual_range_contains)]
-// Vendored code is tested, not linted: silence upstream's clippy::all group so
+// Forked code is tested, not linted: silence upstream's clippy::all group so
 // toolchain bumps cannot fail the workspace gate inside upstream sources.
 #![allow(clippy::all)]
 

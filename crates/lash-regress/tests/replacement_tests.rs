@@ -1,4 +1,4 @@
-use regress::Regex;
+use lash_regress::Regex;
 
 #[test]
 fn test_replace_basic() {

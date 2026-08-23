@@ -2,18 +2,18 @@
 
 /// Test that \p pattern fails to parse with default flags.
 pub fn test_parse_fails(pattern: &str) {
-    let res = regress::Regex::new(pattern);
+    let res = lash_regress::Regex::new(pattern);
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
 }
 
 /// Test that \p pattern fails to parse with flags.
 pub fn test_parse_fails_flags(pattern: &str, flags: &str) {
-    let res = regress::Regex::with_flags(pattern, flags);
+    let res = lash_regress::Regex::with_flags(pattern, flags);
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
 }
 
 /// Format a Match by inserting commas between all capture groups.
-fn format_match(r: &regress::Match, input: &str) -> String {
+fn format_match(r: &lash_regress::Match, input: &str) -> String {
     let mut result = input[r.range()].to_string();
     for cg in r.captures.iter() {
         result.push(',');
@@ -31,7 +31,7 @@ pub fn to_utf16(input: &str) -> Vec<u16> {
 
 /// Given a range of a string encoded as UTF16, return the corresponding
 /// range in the original string (UTF-8).
-pub fn range_from_utf16(utf16: &[u16], r: regress::Range) -> regress::Range {
+pub fn range_from_utf16(utf16: &[u16], r: lash_regress::Range) -> lash_regress::Range {
     use std::char::decode_utf16;
     // Figure out start.
     let start_utf8: usize = decode_utf16(utf16[0..r.start].iter().copied())
@@ -69,15 +69,15 @@ impl VecTestHelpers for Vec<&str> {
 /// A compiled regex which remembers a TestConfig.
 #[derive(Debug, Clone)]
 pub struct TestCompiledRegex {
-    re: regress::Regex,
+    re: lash_regress::Regex,
     tc: TestConfig,
 }
 
 impl TestCompiledRegex {
     /// Search for self in \p input, returning a list of all matches.
     #[track_caller]
-    pub fn matches(&'_ self, input: &'_ str, start: usize) -> Vec<regress::Match> {
-        use regress::backends as rbe;
+    pub fn matches(&'_ self, input: &'_ str, start: usize) -> Vec<lash_regress::Match> {
+        use lash_regress::backends as rbe;
         #[cfg(feature = "utf16")]
         {
             // We don't test the PikeVM backend with UTF16 or UCS2.
@@ -116,7 +116,7 @@ impl TestCompiledRegex {
     /// 'start' is given as the byte offset into the UTF8 string.
     #[cfg(feature = "utf16")]
     #[track_caller]
-    pub fn match_utf16(&self, input: &str, start: usize) -> Vec<regress::Match> {
+    pub fn match_utf16(&self, input: &str, start: usize) -> Vec<lash_regress::Match> {
         // convert the input and start to UTF16.
         let u16_start = input[..start].chars().map(char::len_utf16).sum();
         let u16_input = to_utf16(input);
@@ -134,7 +134,7 @@ impl TestCompiledRegex {
     /// Encode a string as UTF16, and match against it as UCS2.
     #[cfg(feature = "utf16")]
     #[track_caller]
-    pub fn match_ucs2(&self, input: &str, start: usize) -> Vec<regress::Match> {
+    pub fn match_ucs2(&self, input: &str, start: usize) -> Vec<lash_regress::Match> {
         let u16_start = input[..start].chars().map(char::len_utf16).sum();
         let u16_input = to_utf16(input);
         let mut matches: Vec<_> = self.re.find_from_ucs2(&u16_input, u16_start).collect();
@@ -150,19 +150,19 @@ impl TestCompiledRegex {
 
     /// Search for self in \p input, returning the first Match, or None if
     /// none.
-    pub fn find(&self, input: &str) -> Option<regress::Match> {
+    pub fn find(&self, input: &str) -> Option<lash_regress::Match> {
         self.matches(input, 0).into_iter().next()
     }
 
     /// Like find(), but for UTF-16.
     #[cfg(feature = "utf16")]
-    pub fn find_utf16(&self, input: &str) -> Option<regress::Match> {
+    pub fn find_utf16(&self, input: &str) -> Option<lash_regress::Match> {
         self.match_utf16(input, 0).into_iter().next()
     }
 
     /// Like find(), but for UCS2.
     #[cfg(feature = "utf16")]
-    pub fn find_ucs2(&self, input: &str) -> Option<regress::Match> {
+    pub fn find_ucs2(&self, input: &str) -> Option<lash_regress::Match> {
         self.match_ucs2(input, 0).into_iter().next()
     }
 
@@ -193,7 +193,7 @@ impl TestCompiledRegex {
     /// for unmatched groups, or the matched strings.
     pub fn match1_vec<'b>(&self, input: &'b str) -> Vec<Option<&'b str>> {
         let mut result = Vec::new();
-        let m: regress::Match = self.find(input).expect("Failed to match");
+        let m: lash_regress::Match = self.find(input).expect("Failed to match");
         result.push(Some(&input[m.range()]));
         for cr in m.captures {
             result.push(cr.map(|r| &input[r]));
@@ -215,7 +215,7 @@ impl TestCompiledRegex {
 
     /// Return a list of all non-overlapping total match ranges from a given
     /// start.
-    pub fn match_all_from(&'_ self, input: &'_ str, start: usize) -> Vec<regress::Range> {
+    pub fn match_all_from(&'_ self, input: &'_ str, start: usize) -> Vec<lash_regress::Range> {
         self.matches(input, start)
             .into_iter()
             .map(move |m| m.range())
@@ -286,10 +286,10 @@ impl TestConfig {
     /// Compile a pattern to a regex, with given flags.
     #[track_caller]
     pub fn compilef(&self, pattern: &str, flags_str: &str) -> TestCompiledRegex {
-        let mut flags = regress::Flags::from(flags_str);
+        let mut flags = lash_regress::Flags::from(flags_str);
         flags.no_opt = !self.optimize;
 
-        let re = regress::Regex::with_flags(pattern, flags);
+        let re = lash_regress::Regex::with_flags(pattern, flags);
         assert!(
             re.is_ok(),
             "Failed to parse! flags: {} pattern: {}, error: {}",

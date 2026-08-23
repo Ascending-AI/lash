@@ -153,6 +153,25 @@ class PublishWorkspaceTest(unittest.TestCase):
         layers = publish_workspace.compute_layers(packages)
         self.assertEqual(layers, [["a", "b"], ["top"]])
 
+    def test_lash_regress_publishes_before_lashlang(self) -> None:
+        publish_workspace = load_publish_workspace_module()
+        packages = {
+            "lash-regress": {
+                "id": "lash-regress",
+                "name": "lash-regress",
+                "version": "1",
+                "workspace_dependencies": set(),
+            },
+            "lashlang": {
+                "id": "lashlang",
+                "name": "lashlang",
+                "version": "1",
+                "workspace_dependencies": {"lash-regress"},
+            },
+        }
+        layers = publish_workspace.compute_layers(packages)
+        self.assertEqual(layers, [["lash-regress"], ["lashlang"]])
+
     def test_compute_layers_skips_already_completed_crates(self) -> None:
         # A resumed run seeds the already-visible crate as completed, so the
         # dependent lands in the first computed layer.

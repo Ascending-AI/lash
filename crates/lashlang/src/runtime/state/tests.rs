@@ -1121,7 +1121,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
         unreachable!()
     };
     regexp_object.compiled_program = Some(Box::new(super::super::heap::RegExpProgramCache {
-        program: regress::Regex::new("a+").expect("compiled test regexp"),
+        program: lash_regress::Regex::new("a+").expect("compiled test regexp"),
     }));
     let match_groups = heap
         .allocate_record(

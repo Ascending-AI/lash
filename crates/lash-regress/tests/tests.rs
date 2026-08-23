@@ -2000,7 +2000,7 @@ mod utf16_tests {
         // TODO: we improperly match this in UTF-16 mode, because our API is
         // kind of bad. We ought to infer UTF-16 vs UCS2 from the "u" flag,
         // matching the JS spec.
-        let re = regress::Regex::new(r"[\uD800-\uDBFF]").unwrap();
+        let re = lash_regress::Regex::new(r"[\uD800-\uDBFF]").unwrap();
 
         // High surrogate.
         let matched = re.find_from_ucs2(&[0xD800], 0).next();
@@ -2013,7 +2013,7 @@ mod utf16_tests {
         assert_eq!(matched.unwrap().range, 0..1);
 
         // Low surrogate.
-        let re = regress::Regex::new(r"[\uDC00-\uDFFF]").unwrap();
+        let re = lash_regress::Regex::new(r"[\uDC00-\uDFFF]").unwrap();
         let matched = re.find_from_ucs2(&[1, 2, 3, 0xDC00], 0).next();
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 3..4);
@@ -2220,7 +2220,7 @@ fn test_duplicate_named_groups() {
 // Test that duplicates in the SAME alternative are still rejected
 #[test]
 fn test_duplicate_named_groups_same_alternative_rejected() {
-    use regress::Regex;
+    use lash_regress::Regex;
 
     // Should reject duplicates in the same alternative
     assert!(Regex::new(r"(?<name>a)(?<name>b)").is_err());
@@ -2284,7 +2284,7 @@ fn test_duplicate_named_groups_distinct_alternations_backref_tc(tc: TestConfig) 
 #[test]
 fn test_regression_142() {
     // Regression test for issue #142.
-    use regress::Regex;
+    use lash_regress::Regex;
     let _ = Regex::with_flags(r"\p{scx=Cyrl}", "u").expect("Should succeed");
 }
 
