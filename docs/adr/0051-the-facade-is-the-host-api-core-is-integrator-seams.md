@@ -84,6 +84,89 @@ integrator surface. Compatibility between an integrator and the runtime is
 expressed through trait contracts, data shapes, and the schema-version
 machinery — never by gating on a package version.
 
+## Amendment: plugin authoring is facade surface (2026-08-23, FIG-1921)
+
+Writing a plugin is not one of the four integrator classes, so a plugin crate
+must be able to compile against `lash` alone. The dividing rule inside
+`lash_core::plugin` is the closure rule applied to the plugin author as the
+implementor: **an item is authoring surface, and therefore has a
+`lash::plugins` home, when an in-tree example plugin or a downstream host
+plugin names it to compile** — in a trait it implements, in a handler signature
+it writes, or in a value it constructs or reads. Everything else in that module
+serves the runtime embedding path and stays core-only under the classes above.
+
+The re-exports are flat on `lash::plugins`, matching every other domain module
+(`tools`, `persistence`, `observe`). The facade has exactly one prelude,
+`lash::prelude`, for the daily core/session/turn vocabulary; a second,
+domain-scoped prelude would give plugin authoring two obvious ways in.
+
+FIG-1921 moved the plugin-operations vocabulary (`PluginOperation`,
+`PluginQuery`, `PluginCommand`, `PluginTask`, `SessionParam`,
+`PluginQueryContext`, `PluginCommandContext`, `PluginTaskContext`,
+`SessionReadService`, `ProcessReadService`, `PluginOperationOutcome`,
+`PluginRuntimeDirective`, `PluginOperationFailure`, `PluginOperationReceipt`,
+`PluginOwned`, `PluginOperationInvokeError`) and the plugin snapshot seam
+(`SnapshotWriter`, `SnapshotReader`, `PluginSnapshotMeta`,
+`SessionReadyContext`) to `lash::plugins`. `PluginOperationReceipt` and
+`PluginOperationInvokeError` were already in `lash`'s own signatures — on
+`PluginOperations` and on `EmbedError::Control` — with no path a host could
+name, which is the sharpest form the gap took.
+
+One home each: `lash::admin` used to re-export `PluginQuery`, `PluginCommand`
+and `PluginTask` so its operation runners' bounds were nameable. Those traits
+are authoring surface, so `lash::plugins` is now their only home and `admin`
+re-exports them no longer — a host satisfies the bound with its own type and
+never writes the trait name to invoke an operation.
+
+These plugin-namespace items are **integrator seams and stay core-only**:
+
+- **Protocol and process-engine extension points** (class 3):
+  `ProtocolSessionPlugin`, `ProtocolDriverPlugin`, `CodeExecutorPlugin`,
+  `AssistantProseProjectorPlugin`, `ProtocolRuntimeContext`,
+  `ProtocolSessionContext`, `ProtocolBeforeLlmCallContext`,
+  `ProtocolLlmCallAction`, `ProtocolSessionMaterialization`,
+  `ExecutionStateSnapshot`, `ExecutionStateComponentSnapshot`,
+  `HydratedExecutionState`, `ProcessEngineContributionContext`.
+- **Runtime embedding**: `RuntimeServices`, `SessionAuthorityContext`,
+  `PluginExtensions`. A plugin is handed services; it never assembles the set.
+- **Runtime-side turn composition**: `PrepareTurnRequest`, `TurnPreparation`,
+  `TurnFinalization`, `CheckpointApplication`, `PluginAbort`. These are how the
+  runtime drives the registered hooks, not what a hook receives.
+- **`ToolCatalogContext`, core-only for now and not because it is a seam.** It
+  is the argument of the `ToolCatalogContributor` hook a plugin registers
+  through `PluginRegistrar::tool_catalog().contribute(..)`, so by the rule it is authoring
+  surface. It stays on `lash-core` in this round because its fields transitively
+  drag `SessionToolAccess`, `SubagentSessionContext` and `PluginExtensions` onto
+  the facade, and those are seams; exporting the context without them would put
+  a type on `lash::plugins` whose fields a plugin cannot name.
+- **Plugin-session internals**: `PluginOperationRegistrations`,
+  `SessionContextOverlay`,
+  `SessionPluginSource`, `SessionRelation`, `SessionToolAccess`,
+  `SubagentSessionContext`, `AgentFrameAssignment`, `AgentFrameId`,
+  `AgentFrameReason`, `AgentFrameRecord`, `OpenAgentFrameRequest`,
+  `OpenAgentFrameResult`, `SessionObservedProcessOutcome`,
+  `SessionObservedProcessReceipt`.
+- **The persisted snapshot aggregate**: `PluginSessionSnapshot`,
+  `PluginSnapshotEntry`, `PluginSnapshotArtifact`. A plugin writes blobs and
+  returns its own `PluginSnapshotMeta`; the collection those land in is the
+  runtime's, and no plugin names it.
+
+**Known residual gap, follow-up owed.** Four items are authoring surface by the
+rule and still have no facade path: the three hook-argument types
+`ToolCatalogContext`, `ToolResultProjectionContext` and
+`AssistantStreamFinishedContext` — each one is what a hook a plugin registers
+receives — and `PluginSession::plugin_operations()`, which returns
+`Vec<PluginOperationDef>` with `PluginOperationDef` unnameable from `lash`. Each
+needs its own decision: export the type together with the seams its fields name,
+narrow the type first, or narrow the signature. They are listed here as debt,
+not as seams, so the next round starts from an honest inventory.
+
+The rule is enforced, not asserted:
+`facade_only_plugin_authoring::example_plugins_need_no_lash_core_import` in
+`examples/docs-snippets` fails when any in-tree example plugin module names
+`lash_core` in code. A plugin type that cannot be reached from `lash` is
+therefore a facade gap the next such module discovers, not a carve-out.
+
 ## Why
 
 Three defects in one week were unused-public-surface defects: a drain API with

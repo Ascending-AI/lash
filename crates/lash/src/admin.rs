@@ -1,10 +1,10 @@
 use crate::support::*;
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
-pub use lash_core::{
-    facade_support::AcceptedInjectedTurnInput, facade_support::PluginCommand,
-    facade_support::PluginQuery, facade_support::PluginTask,
-};
+// `PluginQuery` / `PluginCommand` / `PluginTask` bound the operation runners
+// below, but their home is `crate::plugins`: authoring surface a plugin
+// implements, not a name a host writes to invoke one (ADR 0051, FIG-1921).
+pub use lash_core::facade_support::AcceptedInjectedTurnInput;
 
 #[derive(Clone)]
 pub struct Completions {
