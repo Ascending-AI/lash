@@ -414,7 +414,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
         .register_process(registration(abandon_id))
         .await
         .expect("register abandon-refusal process");
-    registry
+    let first = registry
         .request_process_abandon(
             abandon_id,
             crate::AbandonRequest {
@@ -425,14 +425,48 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
         )
         .await
         .expect("record first abandon request");
+    let repeated = registry
+        .request_process_abandon(
+            abandon_id,
+            crate::AbandonRequest {
+                requested_by: "first-requester".to_string(),
+                requested_at_ms: 2,
+                reason: Some("first request".to_string()),
+            },
+        )
+        .await
+        .expect("repeat identical abandon request");
+    assert_eq!(repeated, first);
+    assert_eq!(
+        repeated
+            .abandon_request
+            .as_deref()
+            .expect("repeated request preserves first abandon request")
+            .requested_at_ms,
+        1,
+        "first-writer abandon timestamp must be preserved"
+    );
+    assert_session_refusal(
+        registry
+            .request_process_abandon(
+                abandon_id,
+                crate::AbandonRequest {
+                    requested_by: "first-requester".to_string(),
+                    requested_at_ms: 3,
+                    reason: Some("conflicting request".to_string()),
+                },
+            )
+            .await,
+        &format!("process `{abandon_id}` already has a different abandon request"),
+    );
     assert_session_refusal(
         registry
             .request_process_abandon(
                 abandon_id,
                 crate::AbandonRequest {
                     requested_by: "second-requester".to_string(),
-                    requested_at_ms: 2,
-                    reason: Some("conflicting request".to_string()),
+                    requested_at_ms: 4,
+                    reason: Some("first request".to_string()),
                 },
             )
             .await,
