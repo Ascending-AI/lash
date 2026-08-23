@@ -1,11 +1,24 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use lash_core::{ToolCall, ToolDefinition, ToolOutcome};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
-    object_schema, require_str, retryable_io_failure,
+    non_empty_string, object_schema, retryable_io_failure, typed_args, typed_ok,
 };
+
+#[derive(Debug, Deserialize)]
+struct WebSearchArgs {
+    query: String,
+    #[serde(default)]
+    limit: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct WebSearchOutput {
+    results: Vec<Value>,
+}
 
 /// Web search via Tavily API.
 pub struct WebSearch {
@@ -33,16 +46,14 @@ pub fn web_search_provider(api_key: impl Into<String>) -> StaticToolProvider<Web
 #[async_trait::async_trait]
 impl StaticToolExecute for WebSearch {
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        let args = call.args;
-        let query = match require_str(args, "query") {
-            Ok(query) => query,
+        let args = match typed_args::<WebSearchArgs>(call.args) {
+            Ok(args) => args,
             Err(err) => return err,
         };
-        let limit = args
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(5)
-            .clamp(1, 20);
+        if let Err(err) = non_empty_string(&args.query, "query") {
+            return err;
+        }
+        let limit = args.limit.unwrap_or(5).clamp(1, 20);
 
         if self.api_key.trim().is_empty() {
             return execution_failure(
@@ -52,7 +63,7 @@ impl StaticToolExecute for WebSearch {
         }
 
         let body = json!({
-            "query": query,
+            "query": args.query,
             "max_results": limit,
         });
 
@@ -65,9 +76,9 @@ impl StaticToolExecute for WebSearch {
             .await;
         match resp {
             Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
-                Ok(data) => ToolOutcome::ok(json!({
-                    "results": sanitize_results(data.get("results")),
-                })),
+                Ok(data) => typed_ok(WebSearchOutput {
+                    results: sanitize_results(data.get("results")),
+                }),
                 Err(err) => execution_failure(
                     "web_search_response_decode_failed",
                     format!("Failed to parse response: {err}"),
@@ -242,5 +253,46 @@ mod tests {
         assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
         assert_eq!(failure.code, "invalid_tool_args");
         assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
+        assert_eq!(
+            failure.message,
+            "Invalid tool arguments: missing field `query`"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_numeric_limit_has_a_pinned_invalid_args_message() {
+        let result = lash_core::testing::run_tool(
+            &web_search_provider("unused"),
+            "search_web",
+            &serde_json::json!({"query": "rust", "limit": "abc"}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("non-numeric limit must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+        assert_eq!(failure.code, "invalid_tool_args");
+        assert_eq!(
+            failure.message,
+            "Invalid tool arguments: limit: invalid type: string \"abc\", expected u64"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_query_is_rejected_at_the_consumer_boundary() {
+        let result = lash_core::testing::run_tool(
+            &web_search_provider("unused"),
+            "search_web",
+            &serde_json::json!({"query": ""}),
+        )
+        .await;
+
+        let lash_core::ToolCallOutcome::Failure(failure) = &result.as_output().outcome else {
+            panic!("empty query must fail");
+        };
+        assert_eq!(failure.class, lash_core::ToolFailureClass::InvalidRequest);
+        assert_eq!(failure.code, "invalid_tool_args");
+        assert_eq!(failure.message, "Missing required parameter: query");
     }
 }
