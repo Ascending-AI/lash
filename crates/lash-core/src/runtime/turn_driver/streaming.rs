@@ -90,8 +90,9 @@ fn record_protocol_owned_stop_suppression(
     call_record: Option<&mut crate::LlmCallRecord>,
 ) {
     fn suppress(disposition: &mut Option<crate::GenerationReceipt>) {
-        disposition.get_or_insert_default().stop_sequences =
-            crate::GenerationOptionOutcome::SuppressedProtocolOwned;
+        if let Some(disposition) = disposition {
+            disposition.stop_sequences = crate::GenerationOptionOutcome::SuppressedProtocolOwned;
+        }
     }
 
     match result {
@@ -1443,6 +1444,29 @@ mod clamp_report_tests {
         })
     }
 
+    fn attempt(generation_disposition: Option<crate::GenerationReceipt>) -> crate::AttemptRecord {
+        crate::AttemptRecord {
+            ordinal: 1,
+            started_at: 0,
+            duration: std::time::Duration::ZERO,
+            outcome: crate::AttemptOutcome::Completed,
+            protocol_position: crate::ProtocolPosition::OutputStarted,
+            retry_budget_consumed: false,
+            retry_decision: None,
+            error: None,
+            evidence: None,
+            generation_disposition,
+            usage: None,
+        }
+    }
+    fn call_record(attempts: Vec<crate::AttemptRecord>) -> crate::LlmCallRecord {
+        crate::LlmCallRecord {
+            call_id: crate::LlmCallId("call".to_string()),
+            label: None,
+            replay_drops: Vec::new(),
+            attempts,
+        }
+    }
     fn cap_of(disposition: Option<crate::GenerationReceipt>) -> crate::GenerationOptionOutcome {
         disposition
             .expect("a reported disposition")
@@ -1468,24 +1492,19 @@ mod clamp_report_tests {
                 ..LlmResponse::default()
             })),
         });
-        let mut call_record = crate::LlmCallRecord {
-            call_id: crate::LlmCallId("call".to_string()),
-            label: None,
-            replay_drops: Vec::new(),
-            attempts: vec![crate::AttemptRecord {
-                ordinal: 1,
-                started_at: 0,
-                duration: std::time::Duration::ZERO,
-                outcome: crate::AttemptOutcome::Failed,
-                protocol_position: crate::ProtocolPosition::OutputStarted,
-                retry_budget_consumed: true,
-                retry_decision: None,
-                error: None,
-                evidence: None,
-                generation_disposition: applied(),
-                usage: None,
-            }],
-        };
+        let mut call_record = call_record(vec![crate::AttemptRecord {
+            ordinal: 1,
+            started_at: 0,
+            duration: std::time::Duration::ZERO,
+            outcome: crate::AttemptOutcome::Failed,
+            protocol_position: crate::ProtocolPosition::OutputStarted,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: None,
+            evidence: None,
+            generation_disposition: applied(),
+            usage: None,
+        }]);
 
         record_clamped_output_token_cap(&mut result, Some(&mut call_record));
 
@@ -1534,24 +1553,7 @@ mod clamp_report_tests {
             generation_disposition: applied(),
             ..LlmResponse::default()
         });
-        let mut call_record = crate::LlmCallRecord {
-            call_id: crate::LlmCallId("call".to_string()),
-            label: None,
-            replay_drops: Vec::new(),
-            attempts: vec![crate::AttemptRecord {
-                ordinal: 1,
-                started_at: 0,
-                duration: std::time::Duration::ZERO,
-                outcome: crate::AttemptOutcome::Completed,
-                protocol_position: crate::ProtocolPosition::OutputStarted,
-                retry_budget_consumed: false,
-                retry_decision: None,
-                error: None,
-                evidence: None,
-                generation_disposition: applied(),
-                usage: None,
-            }],
-        };
+        let mut call_record = call_record(vec![attempt(applied())]);
 
         record_protocol_owned_stop_suppression(&mut result, Some(&mut call_record));
 
@@ -1567,6 +1569,26 @@ mod clamp_report_tests {
             call_record.attempts[0]
                 .generation_disposition
                 .expect("attempt disposition")
+                .stop_sequences,
+            crate::GenerationOptionOutcome::SuppressedProtocolOwned
+        );
+    }
+
+    #[test]
+    fn protocol_stop_suppression_leaves_unreported_attempts_absent() {
+        let mut result: Result<LlmResponse, LlmCallError> = Ok(LlmResponse {
+            generation_disposition: applied(),
+            ..LlmResponse::default()
+        });
+        let mut call_record = call_record(vec![attempt(None), attempt(applied())]);
+
+        record_protocol_owned_stop_suppression(&mut result, Some(&mut call_record));
+
+        assert!(call_record.attempts[0].generation_disposition.is_none());
+        assert_eq!(
+            call_record.attempts[1]
+                .generation_disposition
+                .expect("reported attempt disposition")
                 .stop_sequences,
             crate::GenerationOptionOutcome::SuppressedProtocolOwned
         );
