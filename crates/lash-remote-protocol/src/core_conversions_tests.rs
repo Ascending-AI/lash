@@ -2019,6 +2019,106 @@ fn observed_process() -> lash_core::facade_support::ObservedProcess {
     }
 }
 
+fn observed_work_item() -> lash_core::facade_support::ObservedWorkItem {
+    lash_core::facade_support::ObservedWorkItem {
+        process: observed_process(),
+        events: Vec::new(),
+        kind: "external".to_string(),
+        label: "External".to_string(),
+    }
+}
+
+#[test]
+fn observed_process_decode_rejects_terminal_that_contradicts_lifecycle() {
+    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
+    remote.terminal = true;
+
+    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
+        .expect_err("a running process marked terminal by its peer must be rejected");
+    assert!(
+        error.to_string().contains("terminal"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_process_decode_rejects_kind_that_contradicts_identity() {
+    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
+    remote.kind = "workflow".to_string();
+
+    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
+        .expect_err("a peer kind that contradicts process identity must be rejected");
+    assert!(
+        error.to_string().contains("kind"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_process_decode_rejects_status_label_that_is_not_a_lifecycle_label() {
+    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
+    remote.status_label = "still going".to_string();
+
+    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
+        .expect_err("a peer status label outside the lifecycle vocabulary must be rejected");
+    assert!(
+        error.to_string().contains("status label"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_process_decode_rejects_graph_key_that_contradicts_process_id() {
+    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
+    remote.graph_key = "process:someone-else".to_string();
+
+    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
+        .expect_err("a peer graph key that contradicts process id must be rejected");
+    assert!(
+        error.to_string().contains("graph key"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_process_decode_rejects_label_that_contradicts_identity() {
+    let mut remote = RemoteObservedProcess::try_from(observed_process()).expect("remote process");
+    remote.label = "Peer Override".to_string();
+
+    let error = lash_core::facade_support::ObservedProcess::try_from(remote)
+        .expect_err("a peer label that contradicts process identity must be rejected");
+    assert!(
+        error.to_string().contains("label"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_work_item_decode_rejects_kind_that_contradicts_process() {
+    let mut remote = RemoteProcessWorkItem::try_from(observed_work_item()).expect("remote item");
+    remote.kind = "workflow".to_string();
+
+    let error = lash_core::facade_support::ObservedWorkItem::try_from(remote)
+        .expect_err("a peer work-item kind that contradicts its process must be rejected");
+    assert!(
+        error.to_string().contains("work-item kind"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn observed_work_item_decode_rejects_label_that_contradicts_process() {
+    let mut remote = RemoteProcessWorkItem::try_from(observed_work_item()).expect("remote item");
+    remote.label = "Peer Override".to_string();
+
+    let error = lash_core::facade_support::ObservedWorkItem::try_from(remote)
+        .expect_err("a peer work-item label that contradicts its process must be rejected");
+    assert!(
+        error.to_string().contains("work-item label"),
+        "unexpected error: {error}"
+    );
+}
+
 #[test]
 fn remote_generation_options_round_trip_sampling_controls_losslessly() {
     let core = core_llm::GenerationOptions {

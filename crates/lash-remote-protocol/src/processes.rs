@@ -262,6 +262,18 @@ impl RemoteProcessStatus {
             Self::Completed | Self::Failed | Self::Cancelled | Self::Abandoned
         )
     }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Abandoned => "abandoned",
+            Self::CallerDeparted => "caller_departed",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -547,7 +559,32 @@ impl RemoteProcessWorkItem {
             event.validate(type_name)?;
         }
         require_non_empty(type_name, "kind", &self.kind)?;
-        require_non_empty(type_name, "label", &self.label)
+        if self.kind != self.process.identity.kind {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "work-item kind `{}` contradicts process identity kind `{}`",
+                    self.kind, self.process.identity.kind
+                ),
+            });
+        }
+        require_non_empty(type_name, "label", &self.label)?;
+        let expected_label = self
+            .process
+            .identity
+            .label
+            .as_deref()
+            .unwrap_or(self.process.identity.kind.as_str());
+        if self.label != expected_label {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "work-item label `{}` contradicts process identity; expected `{expected_label}`",
+                    self.label
+                ),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -592,9 +629,63 @@ impl RemoteObservedProcess {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
         require_non_empty(type_name, "graph_key", &self.graph_key)?;
+        let expected_graph_key = format!("process:{}", self.process_id);
+        if self.graph_key != expected_graph_key {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "process graph key `{}` contradicts process id `{}`; expected `{expected_graph_key}`",
+                    self.graph_key, self.process_id
+                ),
+            });
+        }
         require_non_empty(type_name, "kind", &self.kind)?;
         self.identity.validate(type_name)?;
+        if self.kind != self.identity.kind {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "process kind `{}` contradicts identity kind `{}`",
+                    self.kind, self.identity.kind
+                ),
+            });
+        }
+        require_non_empty(type_name, "label", &self.label)?;
+        let expected_label = self
+            .identity
+            .label
+            .as_deref()
+            .unwrap_or(self.identity.kind.as_str());
+        if self.label != expected_label {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "process label `{}` contradicts identity; expected `{expected_label}`",
+                    self.label
+                ),
+            });
+        }
         require_non_empty(type_name, "status_label", &self.status_label)?;
+        if self.status_label != self.lifecycle.label() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "process status label `{}` contradicts lifecycle `{:?}`; expected `{}`",
+                    self.status_label,
+                    self.lifecycle,
+                    self.lifecycle.label()
+                ),
+            });
+        }
+        if self.terminal != self.lifecycle.is_terminal() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name,
+                message: format!(
+                    "process terminal flag `{}` contradicts lifecycle `{:?}`",
+                    self.terminal, self.lifecycle
+                ),
+            });
+        }
         self.input.validate(type_name)?;
         self.originator.validate(type_name)?;
         if let Some(env_ref) = &self.env_ref {
@@ -609,7 +700,7 @@ impl RemoteObservedProcess {
         if let Some(child_session_id) = &self.child_session_id {
             require_non_empty(type_name, "child_session_id", child_session_id)?;
         }
-        require_non_empty(type_name, "label", &self.label)
+        Ok(())
     }
 }
 

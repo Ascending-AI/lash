@@ -67417,7 +67417,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/processes.rs:946#Self::Effect { effect_id, .. } => {"
+usage = "crates/lash-remote-protocol/src/processes.rs:1037#Self::Effect { effect_id, .. } => {"
 
 [[api]]
 symbol = "lash_core::EffectJournalRetirement"
