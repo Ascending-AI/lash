@@ -201,9 +201,9 @@ impl ProcessAwaiter {
         let record = match self.registry.get_process(process_id).await {
             Ok(Some(record)) => record,
             Ok(None) => {
-                return Err(PluginError::Session(format!(
-                    "unknown process `{process_id}`"
-                )));
+                return Err(PluginError::ProcessUnknown {
+                    process_id: process_id.to_string(),
+                });
             }
             Err(PluginError::ProcessNoLongerRetained {
                 terminal_label,

@@ -84,6 +84,9 @@ pub enum PluginError {
     ClockBeforeUnixEpoch { clock: String, epoch_ms: i64 },
     #[error("process handle `{process_id}` is not live or visible in this session")]
     ProcessNotVisible { process_id: String },
+    /// An operation referenced a process id that the registry never knew.
+    #[error("unknown process `{process_id}`")]
+    ProcessUnknown { process_id: String },
     #[error(transparent)]
     RuntimeEffectController(#[from] crate::RuntimeEffectControllerError),
     #[error("process `{process_id}` execution was already started by {by:?}")]

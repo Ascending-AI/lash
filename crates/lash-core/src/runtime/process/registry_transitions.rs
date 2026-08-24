@@ -336,7 +336,9 @@ pub fn process_no_longer_retained(stamp: ProcessTombstoneStamp) -> PluginError {
 
 /// Refusal for a process id no registry ever knew.
 pub fn unknown_process(process_id: &str) -> PluginError {
-    PluginError::Session(format!("unknown process `{process_id}`"))
+    PluginError::ProcessUnknown {
+        process_id: process_id.to_string(),
+    }
 }
 
 /// Classify a lookup that found no live process row.
@@ -1015,11 +1017,18 @@ mod tests {
     fn an_unknown_process_id_reports_the_unknown_refusal() {
         let error = absent_process_error("process", None);
         assert!(
-            matches!(&error, PluginError::Session(message) if message == "unknown process `process`"),
+            matches!(
+                &error,
+                PluginError::ProcessUnknown { process_id } if process_id == "process"
+            ),
             "unexpected refusal: {error}"
         );
         assert!(
-            matches!(unknown_process("other"), PluginError::Session(message) if message == "unknown process `other`")
+            matches!(
+                unknown_process("other"),
+                PluginError::ProcessUnknown { process_id } if process_id == "other"
+            ),
+            "unknown_process must preserve the refused id"
         );
     }
 

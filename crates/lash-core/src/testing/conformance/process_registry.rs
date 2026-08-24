@@ -1417,7 +1417,9 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         )
         .await
     {
-        Err(crate::PluginError::Session(_)) => {}
+        Err(crate::PluginError::ProcessUnknown { process_id }) => {
+            assert_eq!(process_id, "lease-never-registered");
+        }
         other => {
             panic!("claiming a lease for an unregistered process must be refused, got {other:?}")
         }
