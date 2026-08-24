@@ -814,6 +814,7 @@ fn rlm_exec_response(
         printed_images: Vec::new(),
         error: error.map(str::to_string),
         duration_ms: 1,
+        degraded_bindings: Vec::new(),
         terminal_finish,
     }
 }
@@ -844,6 +845,7 @@ fn rlm_exec_response_with_tool_calls(
         printed_images: Vec::new(),
         error: error.map(str::to_string),
         duration_ms,
+        degraded_bindings: Vec::new(),
         terminal_finish,
     }
 }

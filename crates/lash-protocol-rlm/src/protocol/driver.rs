@@ -524,6 +524,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
 
         match result {
             Ok(response) => {
+                if !response.degraded_bindings.is_empty() {
+                    actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
+                        "projection_rehydration",
+                        serde_json::json!({
+                            "degraded_bindings": response.degraded_bindings,
+                        }),
+                    )]));
+                }
                 let terminal_outcome = response
                     .tool_calls
                     .iter()

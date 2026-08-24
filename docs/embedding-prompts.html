@@ -114,7 +114,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
 let docs_ref = registry.register_memory(Arc::new(my_docs_projection));
 let input = TurnInput::text("Answer using docs only when needed.")
     .rlm_project(RlmProjectedBindings::new().bind_lazy("docs", docs_ref)?)?;</code></pre>
-          <p><code>ProjectionRegistry::register_memory(...)</code> returns refs that remain valid while that registry lives. After process loss, or if the RLM factory was built with a different resolver, execution fails with an unavailable-projection error rather than replacing the binding with <code>null</code>.</p>
+          <p><code>ProjectionRegistry::register_memory(...)</code> returns refs that remain valid while that registry lives. After process loss, or if the RLM factory was built with a different resolver, setup reports the degraded binding to the host and keeps restoring the others. Touching that binding produces the named unavailable-projection error; it is never replaced with <code>null</code>.</p>
           <h3>Reserved names and the read-only guard</h3>
           <p>Projected names are read-only; assignment inside lashlang raises a protocol error. The runtime reserves <code>history</code>; override by narrowing through your own projected handle, not by rebinding.</p>
           <p>Duplicate names between session and turn scopes are rejected at <code>run()</code> time. Pick one scope; merge at the source.</p>

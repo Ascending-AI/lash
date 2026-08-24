@@ -98,6 +98,7 @@ fn effect_outcome(marker: &str) -> lash_core::RuntimeEffectOutcome {
             printed_images: Vec::new(),
             error: None,
             duration_ms: 0,
+            degraded_bindings: Vec::new(),
             terminal_finish: Some(serde_json::json!(marker)),
         })),
     }

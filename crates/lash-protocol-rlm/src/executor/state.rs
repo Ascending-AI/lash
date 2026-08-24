@@ -34,47 +34,7 @@ enum PersistedValue {
     },
 }
 
-const ROOT_FIELDS: &[&str] = &["version", "engine", "globals", "deferred_resolutions"];
-const PERSISTED_VALUE_FIELDS: &[&str] = &["kind", "body", "component"];
-const DEFERRED_RESOLUTION_FIELDS: &[&str] = &["link_key", "resolutions"];
-const DEFERRED_LINK_KEY_FIELDS: &[&str] = &[
-    "session_id",
-    "turn_id",
-    "turn_index",
-    "protocol_iteration",
-    "effect_id",
-    "replay_key",
-];
-const RESOLUTION_FIELDS: &[&str] = &["kind", "definition", "source_id", "execution_binding"];
-const TOOL_DEFINITION_FIELDS: &[&str] = &[
-    "id",
-    "name",
-    "description",
-    "compact_contract",
-    "activation",
-    "bindings",
-    "argument_projection",
-    "retry_policy",
-    "input_schema",
-    "output_schema",
-    "output_contract",
-    "examples",
-];
-const SCHEMA_CONTRACT_FIELDS: &[&str] = &["canonical", "projection"];
-const SCHEMA_PROJECTION_FIELDS: &[&str] = &["mode", "overrides"];
-const SCHEMA_OVERRIDE_FIELDS: &[&str] = &["dialect", "schema"];
-const COMPACT_CONTRACT_FIELDS: &[&str] = &[
-    "name",
-    "signature",
-    "returns",
-    "parameters",
-    "return_fields",
-    "description",
-    "examples",
-];
-const RETRY_POLICY_FIELDS: &[&str] = &["type", "max_attempts", "base_delay_ms", "max_delay_ms"];
-const OUTPUT_CONTRACT_FIELDS: &[&str] = &["kind", "input_field", "default_schema"];
-const ARGUMENT_PROJECTION_FIELDS: &[&str] = &["kind", "field"];
+include!(concat!(env!("OUT_DIR"), "/rlm_snapshot_fields.rs"));
 
 fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
     if matches!(

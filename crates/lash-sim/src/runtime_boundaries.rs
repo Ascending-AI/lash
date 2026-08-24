@@ -453,6 +453,7 @@ impl RuntimeBoundaryHarness {
             printed_images: Vec::new(),
             error: (exit_code != 0).then(|| format!("exit code {exit_code}")),
             duration_ms: 0,
+            degraded_bindings: Vec::new(),
             terminal_finish: Some(json!({
                 "output": output,
                 "exit_code": exit_code,

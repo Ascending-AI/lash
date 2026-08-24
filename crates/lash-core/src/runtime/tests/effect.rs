@@ -371,6 +371,7 @@ impl RuntimeEffectController for RecordingEffectController {
                     printed_images: Vec::new(),
                     error: None,
                     duration_ms: 0,
+                    degraded_bindings: Vec::new(),
                     terminal_finish: Some(serde_json::json!("ok")),
                 })),
             }),
@@ -2364,6 +2365,7 @@ impl crate::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor {
             printed_images: Vec::new(),
             error: None,
             duration_ms: 1,
+            degraded_bindings: Vec::new(),
             terminal_finish: None,
         })
     }

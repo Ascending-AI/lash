@@ -410,6 +410,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                         printed_images: Vec::new(),
                         error: None,
                         duration_ms: 887,
+                        degraded_bindings: Vec::new(),
                         terminal_finish: Some(serde_json::json!({"fixture": 887})),
                     })),
                 })

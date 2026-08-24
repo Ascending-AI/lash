@@ -437,16 +437,17 @@ async fn execute_code_inner(
         let _phase = ctx.named_phase("rlm_lashlang.rehydrate_projected_globals");
         rehydrate_projected_globals(&mut state.rlm, Arc::clone(&projection_resolver)).await
     };
-    if let Err(err) = rehydrated {
-        return exec_setup_failure(err, start);
-    }
+    let degraded_bindings = match rehydrated {
+        Ok(rehydrated) => rehydrated.degraded_bindings,
+        Err(err) => return exec_setup_failure(err, start),
+    };
 
     let projected = {
         let _phase = ctx.named_phase("rlm_lashlang.resolve_projected_bindings");
         match projected_bindings(&ctx, session_projected_bindings, projection_resolver).await {
             Ok(projected) => projected,
             Err(err) => {
-                return exec_setup_failure(err, start);
+                return exec_setup_failure_with_degraded(err, start, degraded_bindings);
             }
         }
     };
@@ -502,6 +503,7 @@ async fn execute_code_inner(
                 ),
                 None,
                 start,
+                degraded_bindings.clone(),
             );
         }
         Err(error) => {
@@ -529,13 +531,28 @@ async fn execute_code_inner(
                 ))),
                 None,
                 start,
+                degraded_bindings.clone(),
             );
         }
     };
-    exec_response_from(host.into_collected(), None, terminal_finish, start)
+    exec_response_from(
+        host.into_collected(),
+        None,
+        terminal_finish,
+        start,
+        degraded_bindings,
+    )
 }
 
 fn exec_setup_failure(error: impl Into<String>, start: std::time::Instant) -> ExecResponse {
+    exec_setup_failure_with_degraded(error, start, Vec::new())
+}
+
+fn exec_setup_failure_with_degraded(
+    error: impl Into<String>,
+    start: std::time::Instant,
+    degraded_bindings: Vec<lash_core::DegradedBinding>,
+) -> ExecResponse {
     ExecResponse {
         observations: Vec::new(),
         observation_truncation: Vec::new(),
@@ -544,6 +561,7 @@ fn exec_setup_failure(error: impl Into<String>, start: std::time::Instant) -> Ex
         printed_images: Vec::new(),
         error: Some(error.into()),
         duration_ms: start.elapsed().as_millis() as u64,
+        degraded_bindings,
         terminal_finish: None,
     }
 }
@@ -553,6 +571,7 @@ fn exec_response_from(
     error: Option<String>,
     terminal_finish: Option<serde_json::Value>,
     start: std::time::Instant,
+    degraded_bindings: Vec<lash_core::DegradedBinding>,
 ) -> ExecResponse {
     ExecResponse {
         observations: collected.observations,
@@ -562,6 +581,7 @@ fn exec_response_from(
         printed_images: collected.printed_images,
         error,
         duration_ms: start.elapsed().as_millis() as u64,
+        degraded_bindings,
         terminal_finish,
     }
 }
@@ -3831,6 +3851,127 @@ mod tests {
                 expected
             );
             assert!(restored.globals().get("history").is_none());
+        });
+    }
+
+    fn restored_projection_degradation_fixture() -> (RlmExecutionState, Arc<ProjectionRegistry>) {
+        let registry = Arc::new(ProjectionRegistry::new());
+        let descriptor = Arc::new(SnapshotProjectedToolText::default());
+        let healthy_reference = registry.register_memory(descriptor.clone());
+        let dead_reference = ProjectionRef::new("memory", serde_json::json!("missing"))
+            .with_descriptor_type("string");
+        let mut source = RlmExecutionState::new();
+        for (name, reference) in [("healthy", healthy_reference), ("dead", dead_reference)] {
+            source
+                .rlm
+                .insert_global(
+                    name.to_string(),
+                    FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
+                        name,
+                        descriptor.clone(),
+                        serde_json::to_value(reference).expect("projection ref"),
+                    )),
+                )
+                .expect("insert projected global");
+        }
+        source
+            .rlm
+            .insert_global("ordinary".to_string(), FlowValue::String("kept".into()))
+            .expect("insert ordinary global");
+        let snapshot = hydrate_snapshot(
+            source
+                .snapshot_execution_state()
+                .expect("snapshot projected globals"),
+        );
+        let mut restored = RlmExecutionState::new();
+        restored
+            .restore_execution_state(&snapshot)
+            .expect("restore projected globals as unavailable references");
+        (restored, registry)
+    }
+
+    #[test]
+    fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_at_touch() {
+        block_on(async {
+            let (mut state, registry) = restored_projection_degradation_fixture();
+            let response = execute_code_unbounded_for_tests(
+                &mut state,
+                lash_core::testing::code_execution_context(),
+                ExecRequest {
+                    language: "lashlang".to_string(),
+                    code: "print healthy\nprint dead\nfinish ordinary".to_string(),
+                    accept_finish: true,
+                },
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                registry as Arc<dyn ProjectionResolver>,
+                RlmLashlangExecutionTraceConfig::default(),
+            )
+            .await;
+
+            assert_eq!(response.error, None);
+            assert_eq!(response.terminal_finish, Some(serde_json::json!("kept")));
+            assert_eq!(response.degraded_bindings.len(), 1);
+            assert_eq!(response.degraded_bindings[0].name, "dead");
+            assert!(
+                response.degraded_bindings[0]
+                    .reason
+                    .contains("projection ref unavailable")
+            );
+            let touched = response.observations.join("\n");
+            assert!(touched.contains("rendered tool text"), "{touched}");
+            assert!(
+                touched.contains("projected host descriptor `dead`"),
+                "{touched}"
+            );
+            assert!(
+                touched.contains("unavailable after snapshot restore"),
+                "{touched}"
+            );
+        });
+    }
+
+    #[test]
+    fn strict_host_policy_can_abort_on_the_degraded_binding_list() {
+        fn strict_host_policy(bindings: &[lash_core::DegradedBinding]) -> Result<(), String> {
+            if bindings.is_empty() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "strict host rejected degraded bindings: {}",
+                    bindings
+                        .iter()
+                        .map(|binding| binding.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+            }
+        }
+
+        block_on(async {
+            let (mut state, registry) = restored_projection_degradation_fixture();
+            let response = execute_code_unbounded_for_tests(
+                &mut state,
+                lash_core::testing::code_execution_context(),
+                ExecRequest {
+                    language: "lashlang".to_string(),
+                    code: "finish healthy".to_string(),
+                    accept_finish: true,
+                },
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                registry as Arc<dyn ProjectionResolver>,
+                RlmLashlangExecutionTraceConfig::default(),
+            )
+            .await;
+
+            let error = strict_host_policy(&response.degraded_bindings)
+                .expect_err("strict host policy must reject degraded setup");
+            assert_eq!(error, "strict host rejected degraded bindings: dead");
         });
     }
 

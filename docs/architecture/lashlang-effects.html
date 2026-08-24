@@ -42,7 +42,7 @@
           <h3 id="lazy-projected-values">Lazy projected values</h3>
           <dl class="def-list">
             <dt><code>ProjectionRef</code>, <code>ProjectionResolver</code>, <code>ProjectionRegistry</code></dt>
-            <dd>Stable lookup path for lazy host descriptors. A resolver turns a ref into an <code>Arc&lt;dyn ProjectedHostDescriptor&gt;</code> immediately before execution. The default registry supports memory refs via <code>register_memory</code>; those refs are only valid while the registry instance lives, and missing refs fail clearly.</dd>
+            <dd>Stable lookup path for lazy host descriptors. A resolver turns a ref into an <code>Arc&lt;dyn ProjectedHostDescriptor&gt;</code> immediately before execution. The default registry supports memory refs via <code>register_memory</code>; those refs are only valid while the registry instance lives. A missing ref degrades only its binding, is announced in the executor setup result, and fails clearly by name when touched.</dd>
             <dt><code>ProjectedValue</code></dt>
             <dd>Either a scalar <code>FlowValue</code> or a custom <code>Arc&lt;dyn ProjectedHostDescriptor&gt;</code> for non-trivial shapes (lazy field access, length, indexing). Custom values may carry opaque projection-ref metadata so snapshots and seeds can rehydrate them without materializing the content.</dd>
             <dt><code>ProjectedHostDescriptor</code></dt>

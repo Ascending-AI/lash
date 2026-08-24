@@ -713,6 +713,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             printed_images: Vec::new(),
             error: None,
             duration_ms: 1,
+            degraded_bindings: Vec::new(),
             terminal_finish: None,
         }),
     });
@@ -746,6 +747,63 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     assert_eq!(entry.output, vec!["hi\n".to_string()]);
     let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
     assert_eq!(checkpoint, CheckpointKind::AfterWork);
+}
+
+#[test]
+fn degraded_projection_bindings_are_announced_on_the_existing_diagnostic_path() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("use restored state")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(
+            "<lashlang>\nfinish healthy\n</lashlang>",
+        )])),
+    });
+    let effects = drain_effects(&mut machine);
+    let exec_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("exec effect");
+    let mut response = exec_response(&[], None, Some(serde_json::json!("healthy")));
+    response.degraded_bindings = vec![lash_core::DegradedBinding {
+        name: "dead".to_string(),
+        reason: "projection ref unavailable".to_string(),
+    }];
+    machine.handle_response(Response::ExecResult {
+        id: exec_id,
+        result: Ok(response),
+    });
+    drain_effects(&mut machine);
+
+    let diagnostic = machine.events().iter().find_map(|record| {
+        let lash_core::SessionHistoryRecord::Protocol(event) = record else {
+            return None;
+        };
+        match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+            Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                if diagnostic.phase == "projection_rehydration" =>
+            {
+                Some(diagnostic)
+            }
+            _ => None,
+        }
+    });
+    let diagnostic = diagnostic.expect("open-time projection degradation diagnostic");
+    assert_eq!(diagnostic.payload["degraded_bindings"][0]["name"], "dead");
+    assert_eq!(
+        diagnostic.payload["degraded_bindings"][0]["reason"],
+        "projection ref unavailable"
+    );
 }
 
 #[test]
@@ -829,6 +887,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             printed_images: Vec::new(),
             error: None,
             duration_ms: 3,
+            degraded_bindings: Vec::new(),
             terminal_finish: None,
         }),
     });
