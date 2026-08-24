@@ -284,12 +284,63 @@ fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
                     "{} is non-blocked CargoTest evidence but is not executed by scripts/confidence-gate.sh fast:fault-matrix; observed commands: {fault_matrix_commands:?}",
                     row.id
                 );
-                assert_real_cargo_filter_selects_tests(
-                    command.expect("command checked above"),
-                    row.id,
-                );
             }
         }
+    }
+}
+
+const REAL_CARGO_FILTER_CHUNKS: usize = 5;
+
+#[test]
+fn durable_fault_matrix_real_cargo_filters_chunk_0() {
+    assert_real_cargo_filter_chunk_selects_tests(0);
+}
+
+#[test]
+fn durable_fault_matrix_real_cargo_filters_chunk_1() {
+    assert_real_cargo_filter_chunk_selects_tests(1);
+}
+
+#[test]
+fn durable_fault_matrix_real_cargo_filters_chunk_2() {
+    assert_real_cargo_filter_chunk_selects_tests(2);
+}
+
+#[test]
+fn durable_fault_matrix_real_cargo_filters_chunk_3() {
+    assert_real_cargo_filter_chunk_selects_tests(3);
+}
+
+#[test]
+fn durable_fault_matrix_real_cargo_filters_chunk_4() {
+    assert_real_cargo_filter_chunk_selects_tests(4);
+}
+
+fn assert_real_cargo_filter_chunk_selects_tests(chunk_index: usize) {
+    assert!(chunk_index < REAL_CARGO_FILTER_CHUNKS);
+    let fault_matrix_commands = run_fast_gate_with_fake_cargo("fault-matrix");
+    let mut cargo_evidence_index = 0;
+
+    for row in DURABLE_FAULT_MATRIX {
+        let FaultEvidence::CargoTest(evidence) = row.evidence else {
+            continue;
+        };
+        let row_chunk = cargo_evidence_index % REAL_CARGO_FILTER_CHUNKS;
+        cargo_evidence_index += 1;
+        if row_chunk != chunk_index {
+            continue;
+        }
+
+        let command = fault_matrix_commands
+            .iter()
+            .find(|command| command_executes_evidence(command, evidence))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{} is non-blocked CargoTest evidence but is not executed by scripts/confidence-gate.sh fast:fault-matrix; observed commands: {fault_matrix_commands:?}",
+                    row.id
+                )
+            });
+        assert_real_cargo_filter_selects_tests(command, row.id);
     }
 }
 
