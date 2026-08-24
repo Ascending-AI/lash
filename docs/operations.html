@@ -307,7 +307,7 @@ for DrainBlocker {
       <pre data-lang="rust" data-snippet="fig1556_probe#not-scanned"><code>report
     .not_scanned
     .iter()
-    .map(|NotScanned { what, reason }| format!("{what}: {reason}"))
+    .map(|entry| format!("{}: {}", entry.what(), entry.reason()))
     .collect()</code></pre>
       <p>Backends supply the walk and nothing more: they return each item's logical bytes, its owner ids and a cursor, and lash owns every version comparison, so two backends cannot drift into disagreeing about the same boundary. Paging is keyset rather than offset (a cursor names the last item read), so concurrent writes cannot make a page skip or repeat rows. A surface a deployment cannot read reports itself as unscanned with a reason rather than as an empty page, because an empty page is an answer and "I could not look" is not.</p>
       <pre data-lang="rust" data-snippet="fig1556_probe#scan-surface"><code>if let Some(reason) = self.unreadable.get(&amp;scan.surface) {

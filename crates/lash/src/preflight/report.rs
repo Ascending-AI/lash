@@ -15,7 +15,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use serde::Serialize;
+use lash_core::DurableSurface;
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 
 use crate::formats::{DurableFormat, FormatProbe, FormatVersion};
 
@@ -61,8 +63,9 @@ pub enum PreflightOutcome {
     /// build refuses. Booting produces exactly that refusal, later and less
     /// legibly.
     Refused,
-    /// Nothing refuses, but something could not be read far enough to decide.
-    /// The evidence for a pass is missing, not present.
+    /// Nothing refuses, but something could not be read far enough to decide
+    /// or the report could not join a carried format to its carrier. The
+    /// evidence for a pass is missing, not present.
     Undecided,
 }
 
@@ -160,6 +163,10 @@ pub enum ComponentVerdict {
     /// The surfaces carrying this format were not walked in this run. The
     /// report's `not_scanned` list says why.
     NotScanned,
+    /// The report named a carrier for this format but could not find the
+    /// carrier's row. This is a broken in-process join, not evidence that a
+    /// durable surface was left unread.
+    CarrierJoinFailed,
 }
 
 impl ComponentVerdict {
@@ -171,6 +178,7 @@ impl ComponentVerdict {
             ComponentVerdict::Empty => "empty",
             ComponentVerdict::Undecodable => "undecodable",
             ComponentVerdict::NotScanned => "not scanned",
+            ComponentVerdict::CarrierJoinFailed => "carrier join failed",
         }
     }
 }
@@ -178,6 +186,9 @@ impl ComponentVerdict {
 /// One durable format's readability across everything the walk read.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ComponentReadability {
+    /// Typed identity used to join this row to other manifest-backed rows.
+    #[serde(skip)]
+    pub(crate) format_key: DurableFormat,
     /// The operator-facing format name, matching the manifest.
     pub format: String,
     /// The version this build writes, rendered the way it is compared.
@@ -255,12 +266,52 @@ pub struct DrainBlocker {
 /// Every report carries this list, including a clean one. A preflight's worst
 /// failure mode is a silent cap: a walk that stopped early and reported what it
 /// managed to see as if it were everything.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct NotScanned {
-    /// What was not read, in operator vocabulary.
-    pub what: String,
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum NotScanned {
+    /// A bounded durable surface was not walked.
+    Surface {
+        /// The typed surface identity.
+        surface: DurableSurface,
+        /// Why it was not read.
+        reason: String,
+    },
+    /// A durable format has no bounded surface to walk.
+    Format {
+        /// The typed format identity.
+        format: DurableFormat,
+        /// Why it was not read.
+        reason: String,
+    },
+}
+
+impl NotScanned {
+    /// What was not read, rendered in operator vocabulary.
+    pub fn what(&self) -> &'static str {
+        match self {
+            NotScanned::Surface { surface, .. } => surface.name(),
+            NotScanned::Format { format, .. } => format.name(),
+        }
+    }
+
     /// Why it was not read.
-    pub reason: String,
+    pub fn reason(&self) -> &str {
+        match self {
+            NotScanned::Surface { reason, .. } | NotScanned::Format { reason, .. } => reason,
+        }
+    }
+}
+
+impl Serialize for NotScanned {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("NotScanned", 2)?;
+        state.serialize_field("what", self.what())?;
+        state.serialize_field("reason", self.reason())?;
+        state.end()
+    }
 }
 
 /// The complete answer to "will this durable data open under this build?".
@@ -326,7 +377,7 @@ impl PreflightReport {
             // integer, and rendering an empty list would leave the operator
             // reading "`bytecode` is at  and this build writes ...".
             if component.found.is_empty() {
-                let remedy = if component.format == DurableFormat::ModuleArtifact.name() {
+                let remedy = if component.format_key == DurableFormat::ModuleArtifact {
                     "; recompile and republish the module"
                 } else {
                     ""
@@ -398,7 +449,12 @@ impl std::fmt::Display for PreflightReport {
             writeln!(f, "  drain: {}", blocker.detail)?;
         }
         for skipped in &self.not_scanned {
-            writeln!(f, "  not scanned: {} ({})", skipped.what, skipped.reason)?;
+            writeln!(
+                f,
+                "  not scanned: {} ({})",
+                skipped.what(),
+                skipped.reason()
+            )?;
         }
         Ok(())
     }
@@ -481,6 +537,7 @@ impl FormatTally {
             ComponentVerdict::AllReadable
         };
         ComponentReadability {
+            format_key: format,
             format: format.name().to_string(),
             expected: expected.to_string(),
             probe: probe_name(probe),
@@ -714,13 +771,35 @@ mod tests {
         let json = serde_json::to_value(row).expect("the row serializes");
         assert_eq!(json["evidence"]["kind"], "carried_by");
         assert_eq!(json["evidence"]["carrier"], "VM continuation");
+        assert!(json.get("format_key").is_none());
+    }
+
+    #[test]
+    fn skipped_surface_and_format_entries_keep_the_published_wire_shape() {
+        let surface = NotScanned::Surface {
+            surface: DurableSurface::SessionCheckpoint,
+            reason: "summary mode skips the per-session blob walk".to_string(),
+        };
+        let format = NotScanned::Format {
+            format: DurableFormat::SessionHeadMeta,
+            reason: "no bounded surface".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_string(&surface).expect("the skipped surface serializes"),
+            r#"{"what":"session checkpoints","reason":"summary mode skips the per-session blob walk"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&format).expect("the skipped format serializes"),
+            r#"{"what":"session head meta","reason":"no bounded surface"}"#
+        );
     }
 
     #[test]
     fn rendering_names_what_was_not_scanned() {
         let mut report = refused_report();
-        report.not_scanned.push(NotScanned {
-            what: "session checkpoints".to_string(),
+        report.not_scanned.push(NotScanned::Surface {
+            surface: DurableSurface::SessionCheckpoint,
             reason: "summary mode skips the per-session blob walk".to_string(),
         });
         let rendered = report.to_string();

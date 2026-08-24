@@ -87911,7 +87911,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:66#let options = PreflightOptions::deep().with_page_size(DEFAULT_PAGE_SIZE);"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:929#assert_eq!(first.limit, DEFAULT_PAGE_SIZE);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:944#assert_eq!(first.limit, DEFAULT_PAGE_SIZE);"
 
 [[api]]
 symbol = "lash::preflight::probe_store"
@@ -87936,7 +87936,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:81#options.mode.name(),"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:652#assert_eq!(report.mode, PreflightMode::Summary);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:667#assert_eq!(report.mode, PreflightMode::Summary);"
 
 [[api]]
 symbol = "lash::preflight::PreflightOptions::page_size"
@@ -87993,7 +87993,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:160#component.expected,"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:668#assert_eq!(handover.expected, writes);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:683#assert_eq!(handover.expected, writes);"
 
 [[api]]
 symbol = "lash::preflight::ComponentReadability::probe"
@@ -88002,7 +88002,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:161#component.probe,"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:664#assert_eq!(handover.probe, \"comparable\");"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:679#assert_eq!(handover.probe, \"comparable\");"
 
 [[api]]
 symbol = "lash::preflight::ComponentReadability::evidence"
@@ -88011,7 +88011,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:162#evidence_label(component.evidence)"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:665#assert_eq!(handover.evidence, FormatEvidence::Direct);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:680#assert_eq!(handover.evidence, FormatEvidence::Direct);"
 
 [[api]]
 symbol = "lash::preflight::ComponentReadability::verdict"
@@ -88020,7 +88020,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:159#component.verdict.name(),"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:658#assert_eq!(handover.verdict, ComponentVerdict::Refused);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:673#assert_eq!(handover.verdict, ComponentVerdict::Refused);"
 
 [[api]]
 symbol = "lash::preflight::ComponentReadability::scanned"
@@ -88029,7 +88029,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:164#write!(line, \" scanned={}\", component.scanned).expect(\"a String write cannot fail\");"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:669#assert_eq!(handover.scanned, 2);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:684#assert_eq!(handover.scanned, 2);"
 
 [[api]]
 symbol = "lash::preflight::ComponentReadability::found"
@@ -88046,7 +88046,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:168#if component.undecodable > 0 {"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:684#assert_eq!(handover.undecodable, 0);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:699#assert_eq!(handover.undecodable, 0);"
 
 [[api]]
 symbol = "lash::preflight::ComponentReadability::undecodable_reasons"
@@ -88063,7 +88063,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:172#if component.refused_without_version > 0 {"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:685#assert_eq!(handover.refused_without_version, 0);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:700#assert_eq!(handover.refused_without_version, 0);"
 
 [[api]]
 symbol = "lash::preflight::ComponentReadability::refuses_open"
@@ -88120,6 +88120,14 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:127#ComponentVerdict::NotScanned => \"nobody looked\","
+
+[[api]]
+symbol = "lash::preflight::ComponentVerdict::CarrierJoinFailed"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:577#ComponentVerdict::CarrierJoinFailed.name()"
 
 [[api]]
 symbol = "lash::preflight::ComponentVerdict::name"
@@ -88259,27 +88267,75 @@ usage = "examples/docs-snippets/src/fig1556_probe.rs:166#write!(line, \" found {
 
 [[api]]
 symbol = "lash::preflight::NotScanned"
-kind = "struct"
+kind = "enum"
 availability = "default+all-features"
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/fig1556_probe.rs:254#.map(|NotScanned { what, reason }| format!(\"{what}: {reason}\"))"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:566#pub fn coverage_gap(entry: &NotScanned) -> String {"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::Surface"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:568#NotScanned::Surface { surface, reason } => (surface.name(), reason.as_str()),"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::Surface::surface"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:568#NotScanned::Surface { surface, reason } => (surface.name(), reason.as_str()),"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::Surface::reason"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:568#NotScanned::Surface { surface, reason } => (surface.name(), reason.as_str()),"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::Format"
+kind = "variant"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:569#NotScanned::Format { format, reason } => (format.name(), reason.as_str()),"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::Format::format"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:569#NotScanned::Format { format, reason } => (format.name(), reason.as_str()),"
+
+[[api]]
+symbol = "lash::preflight::NotScanned::Format::reason"
+kind = "field"
+availability = "default+all-features"
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:569#NotScanned::Format { format, reason } => (format.name(), reason.as_str()),"
 
 [[api]]
 symbol = "lash::preflight::NotScanned::what"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/fig1556_probe.rs:254#.map(|NotScanned { what, reason }| format!(\"{what}: {reason}\"))"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:570#_ => (entry.what(), entry.reason()),"
 
 [[api]]
 symbol = "lash::preflight::NotScanned::reason"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/fig1556_probe.rs:254#.map(|NotScanned { what, reason }| format!(\"{what}: {reason}\"))"
+usage = "examples/docs-snippets/src/fig1556_probe.rs:570#_ => (entry.what(), entry.reason()),"
 
 [[api]]
 symbol = "lash::preflight::PreflightMode"
@@ -88352,7 +88408,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:49#report.outcome.name(),"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:663#assert_eq!(handover.verdict.name(), \"refused\");"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:678#assert_eq!(handover.verdict.name(), \"refused\");"
 
 [[api]]
 symbol = "lash::preflight::PreflightReport"
@@ -88377,7 +88433,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:50#report.mode.name()"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:652#assert_eq!(report.mode, PreflightMode::Summary);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:667#assert_eq!(report.mode, PreflightMode::Summary);"
 
 [[api]]
 symbol = "lash::preflight::PreflightReport::outcome"
@@ -88386,7 +88442,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:49#report.outcome.name(),"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:647#assert_eq!(report.outcome, PreflightOutcome::Refused);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:662#assert_eq!(report.outcome, PreflightOutcome::Refused);"
 
 [[api]]
 symbol = "lash::preflight::PreflightReport::schema"
@@ -88411,7 +88467,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:223#} in &report.drain"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:920#assert_eq!(report.drain.len(), 5, \"a paged walk drops nothing\");"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:935#assert_eq!(report.drain.len(), 5, \"a paged walk drops nothing\");"
 
 [[api]]
 symbol = "lash::preflight::PreflightReport::not_scanned"
@@ -88452,7 +88508,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:282#database.name, database.location, database.verdict, database.expected"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:663#assert_eq!(handover.verdict.name(), \"refused\");"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:678#assert_eq!(handover.verdict.name(), \"refused\");"
 
 [[api]]
 symbol = "lash::preflight::SchemaDatabaseReport::location"
@@ -88469,7 +88525,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:282#database.name, database.location, database.verdict, database.expected"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:668#assert_eq!(handover.expected, writes);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:683#assert_eq!(handover.expected, writes);"
 
 [[api]]
 symbol = "lash::preflight::SchemaDatabaseReport::verdict"
@@ -88478,7 +88534,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:282#database.name, database.location, database.verdict, database.expected"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:658#assert_eq!(handover.verdict, ComponentVerdict::Refused);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:673#assert_eq!(handover.verdict, ComponentVerdict::Refused);"
 
 [[api]]
 symbol = "lash::preflight::SchemaDatabaseReport::found"
@@ -88511,7 +88567,7 @@ availability = "default+all-features"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:262#let mut lines = vec![format!(\"schema: {}\", schema.outcome)];"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:647#assert_eq!(report.outcome, PreflightOutcome::Refused);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:662#assert_eq!(report.outcome, PreflightOutcome::Refused);"
 
 [[api]]
 symbol = "lash::preflight::SchemaReport::databases"
@@ -88673,7 +88729,7 @@ aliases = ["lash_core::DurableScan::surface"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:377#if let Some(reason) = self.unreadable.get(&scan.surface) {"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:927#assert_eq!(first.surface, DurableSurface::ParkedSegment);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:942#assert_eq!(first.surface, DurableSurface::ParkedSegment);"
 
 [[api]]
 symbol = "lash::persistence::DurableScan::after"
@@ -88683,7 +88739,7 @@ aliases = ["lash_core::DurableScan::after"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:393#let start = match &scan.after {"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:928#assert_eq!(first.after, None);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:943#assert_eq!(first.after, None);"
 
 [[api]]
 symbol = "lash::persistence::DurableScan::limit"
@@ -88693,7 +88749,7 @@ aliases = ["lash_core::DurableScan::limit"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:401#let items: Vec<DurableItem> = all.iter().skip(start).take(scan.limit).cloned().collect();"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:929#assert_eq!(first.limit, DEFAULT_PAGE_SIZE);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:944#assert_eq!(first.limit, DEFAULT_PAGE_SIZE);"
 
 [[api]]
 symbol = "lash::persistence::DurableScan::first"
@@ -88730,7 +88786,7 @@ aliases = ["lash_core::DurableScanPage::items"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:534#page.items.len(),"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:935#assert_eq!(page.items.len(), 1);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:950#assert_eq!(page.items.len(), 1);"
 
 [[api]]
 symbol = "lash::persistence::DurableScanPage::next"
@@ -88740,7 +88796,7 @@ aliases = ["lash_core::DurableScanPage::next"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:535#page.next"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:934#assert_eq!(page.next, None);"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:949#assert_eq!(page.next, None);"
 
 [[api]]
 symbol = "lash::persistence::DurableScanPage::coverage"
@@ -88750,7 +88806,7 @@ aliases = ["lash_core::DurableScanPage::coverage"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:527#let coverage = match &page.coverage {"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:933#assert!(matches!(page.coverage, ScanCoverage::Scanned));"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:948#assert!(matches!(page.coverage, ScanCoverage::Scanned));"
 
 [[api]]
 symbol = "lash::persistence::DurableSurface"
@@ -88823,7 +88879,7 @@ aliases = ["lash_core::DurableSurface::is_deep"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1556_probe.rs:427#.filter(|surface| surface.is_deep())"
-assertion = "examples/docs-snippets/src/fig1556_probe.rs:973#assert!(!DurableSurface::ParkedSegment.is_deep());"
+assertion = "examples/docs-snippets/src/fig1556_probe.rs:988#assert!(!DurableSurface::ParkedSegment.is_deep());"
 
 [[api]]
 symbol = "lash::persistence::ScanCoverage"

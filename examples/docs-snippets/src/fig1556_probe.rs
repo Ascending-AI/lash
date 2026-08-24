@@ -251,7 +251,7 @@ pub fn coverage_gaps(report: &PreflightReport) -> Vec<String> {
     report
         .not_scanned
         .iter()
-        .map(|NotScanned { what, reason }| format!("{what}: {reason}"))
+        .map(|entry| format!("{}: {}", entry.what(), entry.reason()))
         .collect()
     // docs:end:not-scanned
 }
@@ -560,6 +560,21 @@ pub fn item_summary(item: &DurableItem) -> String {
             "absent"
         }
     )
+}
+
+/// Render one typed coverage gap in the report's operator vocabulary.
+pub fn coverage_gap(entry: &NotScanned) -> String {
+    let (what, reason) = match entry {
+        NotScanned::Surface { surface, reason } => (surface.name(), reason.as_str()),
+        NotScanned::Format { format, reason } => (format.name(), reason.as_str()),
+        _ => (entry.what(), entry.reason()),
+    };
+    format!("{what}: {reason}")
+}
+
+/// The distinct label for an in-process carrier-join failure.
+pub fn carrier_join_failed_label() -> &'static str {
+    ComponentVerdict::CarrierJoinFailed.name()
 }
 
 #[cfg(test)]

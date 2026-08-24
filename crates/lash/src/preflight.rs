@@ -144,8 +144,8 @@ pub async fn probe_store(
         DurableSurface::SessionExecutionState,
     ] {
         if surface.is_deep() && options.mode == PreflightMode::Summary {
-            walk.not_scanned.push(NotScanned {
-                what: surface.name().to_string(),
+            walk.not_scanned.push(NotScanned::Surface {
+                surface,
                 reason: "summary mode skips the per-session blob walk; run a deep probe to read it"
                     .to_string(),
             });
@@ -182,8 +182,8 @@ impl Walk {
             };
             let page = handle.scan_durable(&scan).await?;
             if let ScanCoverage::NotScanned { reason } = &page.coverage {
-                self.not_scanned.push(NotScanned {
-                    what: surface.name().to_string(),
+                self.not_scanned.push(NotScanned::Surface {
+                    surface,
                     reason: reason.clone(),
                 });
                 return Ok(());
@@ -205,8 +205,8 @@ impl Walk {
                 // abandon the surface and report the formats behind it as
                 // unscanned.
                 Some(next) if cursor.as_deref() == Some(next.as_str()) => {
-                    self.not_scanned.push(NotScanned {
-                        what: surface.name().to_string(),
+                    self.not_scanned.push(NotScanned::Surface {
+                        surface,
                         reason: format!(
                             "the backend offered `{next}` again as the next page cursor; the walk \
                              stopped rather than paging forever"
@@ -285,9 +285,12 @@ impl Walk {
         let refused = schema.outcome() == StoreSchemaOutcome::Refused
             || components.iter().any(ComponentReadability::refuses_open);
         let undecided = schema.outcome() == StoreSchemaOutcome::Undecided
-            || components
-                .iter()
-                .any(|component| component.verdict == ComponentVerdict::Undecodable);
+            || components.iter().any(|component| {
+                matches!(
+                    component.verdict,
+                    ComponentVerdict::Undecodable | ComponentVerdict::CarrierJoinFailed
+                )
+            });
         let outcome = if refused {
             PreflightOutcome::Refused
         } else if undecided {
@@ -295,8 +298,7 @@ impl Walk {
         } else {
             PreflightOutcome::Ready
         };
-        self.not_scanned
-            .sort_by(|left, right| (&left.what, &left.reason).cmp(&(&right.what, &right.reason)));
+        self.not_scanned.sort();
         self.not_scanned.dedup();
         PreflightReport {
             backend: handle.backend().to_string(),
@@ -333,24 +335,21 @@ impl Walk {
         // Carried formats resolve in a second pass, because a carrier can
         // appear after the format it carries in manifest order and a
         // single-pass lookup would silently report the earlier row as unscanned.
-        let verdicts: BTreeMap<String, ComponentVerdict> = rows
+        let verdicts: BTreeMap<DurableFormat, ComponentVerdict> = rows
             .iter()
-            .map(|row| (row.format.clone(), row.verdict))
+            .map(|row| (row.format_key, row.verdict))
             .collect();
         for (row, entry) in rows.iter_mut().zip(durable_formats()) {
             if let Some(carrier) = carrier_of(entry.format) {
                 // A carried format has no evidence of its own by construction:
                 // its verdict is the carrier's, because the carrier's version
                 // moves whenever the carried format changes.
-                row.verdict = verdicts
-                    .get(carrier.name())
-                    .copied()
-                    .unwrap_or(ComponentVerdict::NotScanned);
+                row.verdict = carrier_verdict(&verdicts, carrier);
             }
         }
-        for (what, reason) in unwalkable_formats() {
-            self.not_scanned.push(NotScanned {
-                what: what.to_string(),
+        for (format, reason) in unwalkable_formats() {
+            self.not_scanned.push(NotScanned::Format {
+                format,
                 reason: reason.to_string(),
             });
         }
@@ -364,9 +363,9 @@ impl Walk {
     /// and only the first of those means a drain is unnecessary.
     fn walked(&self, format: DurableFormat) -> bool {
         let unwalked = |surface: DurableSurface| {
-            self.not_scanned
-                .iter()
-                .any(|skipped| skipped.what == surface.name())
+            self.not_scanned.iter().any(|skipped| {
+                matches!(skipped, NotScanned::Surface { surface: skipped_surface, .. } if *skipped_surface == surface)
+            })
         };
         match format {
             DurableFormat::ModuleArtifact => !unwalked(DurableSurface::ModuleArtifact),
@@ -382,6 +381,16 @@ impl Walk {
             _ => false,
         }
     }
+}
+
+fn carrier_verdict(
+    verdicts: &BTreeMap<DurableFormat, ComponentVerdict>,
+    carrier: DurableFormat,
+) -> ComponentVerdict {
+    verdicts
+        .get(&carrier)
+        .copied()
+        .unwrap_or(ComponentVerdict::CarrierJoinFailed)
 }
 
 /// Which format's envelope enforces a carried format's boundary.
@@ -417,14 +426,14 @@ fn evidence_for(format: DurableFormat, probe: FormatProbe) -> FormatEvidence {
 /// highest-cardinality tables in the store. Naming them is the honest answer;
 /// walking them on every boot would make the preflight the outage it exists to
 /// prevent.
-fn unwalkable_formats() -> [(&'static str, &'static str); 2] {
+fn unwalkable_formats() -> [(DurableFormat, &'static str); 2] {
     [
         (
-            DurableFormat::SessionHeadMeta.name(),
+            DurableFormat::SessionHeadMeta,
             "no bounded surface: one row per session, refused at open rather than at rest",
         ),
         (
-            DurableFormat::SessionNodeBody.name(),
+            DurableFormat::SessionNodeBody,
             "no bounded surface: one row per graph node, and the boundary is forward-only",
         ),
     ]

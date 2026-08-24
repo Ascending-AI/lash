@@ -242,7 +242,7 @@ fn component(report: &PreflightReport, format: DurableFormat) -> &ComponentReada
     report
         .components
         .iter()
-        .find(|row| row.format == format.name())
+        .find(|row| row.format_key == format)
         .unwrap_or_else(|| panic!("the report has a row for {}", format.name()))
 }
 
@@ -459,11 +459,7 @@ async fn summary_mode_names_the_per_session_walk_it_skipped() {
     let report = probe_store(&healthy_store(), PreflightOptions::summary())
         .await
         .expect("the probe reads the store");
-    let skipped: Vec<&str> = report
-        .not_scanned
-        .iter()
-        .map(|entry| entry.what.as_str())
-        .collect();
+    let skipped: Vec<&str> = report.not_scanned.iter().map(NotScanned::what).collect();
     assert!(
         skipped.contains(&DurableSurface::SessionCheckpoint.name()),
         "{skipped:?}"
@@ -489,11 +485,7 @@ async fn a_deep_probe_reads_the_surfaces_summary_skipped() {
     let report = probe_store(&healthy_store(), PreflightOptions::deep())
         .await
         .expect("the probe reads the store");
-    let skipped: Vec<&str> = report
-        .not_scanned
-        .iter()
-        .map(|entry| entry.what.as_str())
-        .collect();
+    let skipped: Vec<&str> = report.not_scanned.iter().map(NotScanned::what).collect();
     assert!(
         !skipped.contains(&DurableSurface::SessionCheckpoint.name()),
         "{skipped:?}"
@@ -516,11 +508,7 @@ async fn a_report_always_names_the_formats_no_walk_enumerates() {
     let report = probe_store(&healthy_store(), PreflightOptions::deep())
         .await
         .expect("the probe reads the store");
-    let named: Vec<&str> = report
-        .not_scanned
-        .iter()
-        .map(|entry| entry.what.as_str())
-        .collect();
+    let named: Vec<&str> = report.not_scanned.iter().map(NotScanned::what).collect();
     assert!(
         named.contains(&DurableFormat::SessionHeadMeta.name()),
         "{named:?}"
@@ -546,8 +534,8 @@ async fn a_backend_that_cannot_walk_a_surface_says_so_verbatim() {
         .expect("the probe reads the store");
     assert!(
         report.not_scanned.iter().any(|entry| {
-            entry.what == DurableSurface::ParkedSegment.name()
-                && entry.reason == "the deployment declared no process registry"
+            entry.what() == DurableSurface::ParkedSegment.name()
+                && entry.reason() == "the deployment declared no process registry"
         }),
         "{:?}",
         report.not_scanned
@@ -608,6 +596,7 @@ fn an_identity_only_refusal_says_how_many_items_another_build_wrote() {
             databases: Vec::new(),
         },
         components: vec![ComponentReadability {
+            format_key: DurableFormat::Bytecode,
             format: DurableFormat::Bytecode.name().to_string(),
             expected: crate::formats::BYTECODE_FORMAT_VERSION.to_string(),
             probe: "identity only",
@@ -669,7 +658,7 @@ async fn a_page_that_contributes_nothing_does_not_abandon_the_surface() {
         !report
             .not_scanned
             .iter()
-            .any(|entry| entry.what == DurableSurface::SessionExecutionState.name()),
+            .any(|entry| entry.what() == DurableSurface::SessionExecutionState.name()),
         "no surface is abandoned: {:?}",
         report.not_scanned
     );
@@ -687,12 +676,12 @@ async fn a_cursor_that_never_advances_stops_the_walk() {
     let stopped = report
         .not_scanned
         .iter()
-        .find(|entry| entry.what == DurableSurface::SessionExecutionState.name())
+        .find(|entry| entry.what() == DurableSurface::SessionExecutionState.name())
         .expect("the stalled surface is named");
     assert!(
-        stopped.reason.contains("session-1") && stopped.reason.contains("again"),
+        stopped.reason().contains("session-1") && stopped.reason().contains("again"),
         "the reason names the repeated cursor: {}",
-        stopped.reason
+        stopped.reason()
     );
 }
 
@@ -737,6 +726,17 @@ async fn a_carried_format_inherits_its_carriers_verdict_in_both_directions() {
     assert_eq!(
         component(&refused, DurableFormat::HeapSizeSchedule).evidence,
         FormatEvidence::CarriedBy(DurableFormat::VmContinuation.name())
+    );
+}
+
+#[test]
+fn a_carrier_absent_from_the_report_is_a_failed_join_not_an_unscanned_surface() {
+    let verdict = carrier_verdict(&BTreeMap::new(), DurableFormat::VmContinuation);
+
+    assert_eq!(
+        verdict,
+        ComponentVerdict::CarrierJoinFailed,
+        "a broken report join must not claim that nobody scanned the carrier's surface"
     );
 }
 
