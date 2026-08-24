@@ -23,6 +23,7 @@ jobs:
   prepare-release:
     name: Prepare manual release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       release_sha: ${{ steps.release.outputs.sha }}
       release_tag: ${{ steps.release.outputs.tag }}
@@ -121,6 +122,10 @@ jobs:
   validate-release-ref:
     name: Validate release ref
     runs-on: blacksmith-16vcpu-ubuntu-2404
+    # Cold-cache mode: a release cut after a Cargo.lock bump misses the
+    # linux-release cache and rebuilds the workspace in release profile
+    # (~11m on this runner class) before profiling.
+    timeout-minutes: 30
     needs: prepare-release
 
     services:
@@ -208,6 +213,8 @@ jobs:
   publish-crates:
     name: Publish crates to crates.io
     runs-on: ubuntu-latest
+    # Per-layer crates.io index-visibility waits are externally paced.
+    timeout-minutes: 20
     needs: [prepare-release, validate-release-ref]
     # CARGO_REGISTRY_TOKEN lives in the `main` GitHub Environment; a job must
     # declare the environment to read its secrets.
@@ -313,6 +320,7 @@ jobs:
   publish:
     name: Publish SDK release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [prepare-release, publish-crates]
     permissions:
       contents: write

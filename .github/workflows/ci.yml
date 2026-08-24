@@ -112,6 +112,7 @@ jobs:
   test-doc:
     name: Test docs + build cache
     runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -221,6 +222,7 @@ jobs:
   repo-gates:
     name: Repository gates
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -316,6 +318,7 @@ jobs:
   api-coverage:
     name: Public API example coverage
     runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -368,6 +371,7 @@ jobs:
   lashlang-git-consumer:
     name: Lashlang Git consumer
     runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -416,6 +420,7 @@ jobs:
   package-feature-checks:
     name: Package feature checks
     runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -509,6 +514,7 @@ jobs:
   runtime-feature-boundary:
     name: Runtime feature boundary
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -589,6 +595,7 @@ jobs:
   test-shard:
     name: Test shard ${{ matrix.shard }}/4
     runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
@@ -659,6 +666,7 @@ jobs:
   lint:
     name: Lint
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 15
     # The transcript gate reads the `Transcript:` justification from the PR
     # body. A manually dispatched run — the recovery path when GitHub stops
     # delivering a branch's events — has no pull request in its payload, so the
@@ -874,6 +882,7 @@ jobs:
   confidence-fast:
     name: Confidence fast (${{ matrix.shard }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
 
     strategy:
       fail-fast: false
@@ -890,9 +899,9 @@ jobs:
           - shard: fault-matrix
             runner: blacksmith-16vcpu-ubuntu-2404
           - shard: sim-unit-perf-guards
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: blacksmith-8vcpu-ubuntu-2404
           - shard: sim-generated
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: blacksmith-8vcpu-ubuntu-2404
           - shard: minimizer-fixtures
             runner: blacksmith-16vcpu-ubuntu-2404
 
@@ -953,6 +962,7 @@ jobs:
   confidence-fast-summary:
     name: Confidence fast summary
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
     if: always()
     needs:
       - confidence-fast
@@ -1003,6 +1013,7 @@ jobs:
   postgres-store:
     name: Test Postgres store (PG ${{ matrix.postgres }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -1106,6 +1117,7 @@ jobs:
   s3-store:
     name: Test S3 store against MinIO
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -1189,6 +1201,7 @@ jobs:
   stack-budget:
     name: Stack budget
     runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -1240,6 +1253,7 @@ jobs:
   linux-release-cache:
     name: Build Linux release cache
     runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 20
     # Warms the release-profile cache that release.yml and perf.yml restore on
     # main. A cache written by a pull-request run is scoped to that PR's merge
     # ref and can only be restored by re-runs of the same pull request, so on a
@@ -1376,6 +1390,7 @@ jobs:
   functional-e2e:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
@@ -1624,6 +1639,7 @@ jobs:
   restate-postgres-workers-summary:
     name: Restate workers E2E coverage summary
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
     if: always()
     needs:
       - restate-postgres-workers

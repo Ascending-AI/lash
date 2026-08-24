@@ -774,7 +774,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         self.assertIn(
             "- shard: sim-unit-perf-guards\n"
-            "            runner: blacksmith-16vcpu-ubuntu-2404",
+            "            runner: blacksmith-8vcpu-ubuntu-2404",
+            confidence_fast,
+        )
+        self.assertIn(
+            "- shard: sim-generated\n"
+            "            runner: blacksmith-8vcpu-ubuntu-2404",
             confidence_fast,
         )
         self.assertNotIn("ubuntu-latest", confidence_fast)
