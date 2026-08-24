@@ -527,6 +527,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             enqueued_queue_batches,
             turn_input_applications: self.turn_input_applications.clone(),
+            turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
             receipt_replayed: false,
         }
     }

@@ -42,6 +42,7 @@ impl RemoteTurnReport {
         let lash_core::facade_support::AssembledTurn {
             state: _,
             turn_input_acceptance: _,
+            turn_cancel_input_outcome: _,
             outcome,
             assistant_output,
             execution,

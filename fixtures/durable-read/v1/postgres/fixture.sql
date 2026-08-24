@@ -661,6 +661,22 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_subscriptions (
 
 
 --
+-- Name: lash_turn_cancel_requests; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_turn_cancel_requests (
+    session_id text NOT NULL,
+    turn_id text NOT NULL,
+    request_id text NOT NULL,
+    origin text,
+    reason text,
+    disposition text DEFAULT 'defer'::text NOT NULL,
+    affected_input_ids text[] DEFAULT '{}'::text[] NOT NULL,
+    affected_dispositions text[] DEFAULT '{}'::text[] NOT NULL
+);
+
+
+--
 -- Name: lash_usage_deltas; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -946,7 +962,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 58);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 59);
 
 
 --
@@ -1020,6 +1036,12 @@ INSERT INTO lash_durable_read_fixture.lash_trigger_occurrences VALUES ('trigger:
 --
 
 INSERT INTO lash_durable_read_fixture.lash_trigger_subscriptions VALUES ('trigger-subscription:v2:sha256:530ed2c8eec64b2e09849d1934965864f8786aac9d617c6e048188487e0392bb', 'session:durable-read-fixture', 'durable-read-trigger', 'durable-read-trigger-incarnation', 1, 'trigger-definition:v2:sha256:74421411540f63d31fd15f082f4bb5137efb34fd15aefd981ae018edd6c705f4', 'fixture.event', 'fixture-source', true, false, 1700000000000, 1700000000000, '{"subscription_id":"trigger-subscription:v2:sha256:530ed2c8eec64b2e09849d1934965864f8786aac9d617c6e048188487e0392bb","owner_scope":{"type":"session","session_id":"durable-read-fixture"},"subscription_key":"durable-read-trigger","incarnation":"durable-read-trigger-incarnation","revision":1,"definition_fingerprint":"trigger-definition:v2:sha256:74421411540f63d31fd15f082f4bb5137efb34fd15aefd981ae018edd6c705f4","registrant":{"type":"session","session_id":"durable-read-fixture"},"env_ref":"process-env:v3:sha256:3889c03ef030a2c50f57de91cb03927423b8a83a5c9f29bbf8a5be3b9722b1b7","wake_target":{"session_id":"durable-read-fixture"},"name":"Durable read trigger","source_type":"fixture.event","source_key":"fixture-source","source":{"fixture":"source"},"payload_schema":{"schema":{"additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"],"type":"object"}},"target":{"type":"engine","kind":"durable-read-trigger-target","payload":{"fixture":"trigger"}},"target_identity":{"kind":"durable-read-trigger-target","label":"Durable read trigger target","definition":{"fixture":"trigger"}},"event_types":[],"input_template":{"event":{"type":"event"}},"target_label":"Durable read trigger target","enabled":true,"tombstoned":false,"created_at_ms":1700000000000,"updated_at_ms":1700000000000}');
+
+
+--
+-- Data for Name: lash_turn_cancel_requests; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
 
 
 --
@@ -1440,6 +1462,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_trigger_subscriptions
 
 
 --
+-- Name: lash_turn_cancel_requests lash_turn_cancel_requests_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_turn_cancel_requests
+    ADD CONSTRAINT lash_turn_cancel_requests_pkey PRIMARY KEY (session_id, turn_id);
+
+
+--
 -- Name: lash_usage_deltas lash_usage_deltas_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1672,6 +1702,13 @@ CREATE INDEX idx_lash_runtime_effect_replay_lease ON lash_durable_read_fixture.l
 --
 
 CREATE INDEX idx_lash_runtime_effect_replay_session ON lash_durable_read_fixture.lash_runtime_effect_replay USING btree (session_id);
+
+
+--
+-- Name: idx_lash_session_meta_catalog; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_meta_catalog ON lash_durable_read_fixture.lash_session_meta USING btree (created_at_ms, session_id);
 
 
 --

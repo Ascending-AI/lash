@@ -1268,16 +1268,16 @@ impl LashRuntime {
             )
             .await
         {
-            Ok(0) => 0,
+            Ok(repaired) if repaired.is_empty() => 0,
             Ok(repaired) => {
                 tracing::info!(
                     session_id = %self.state.session_id,
-                    repaired,
+                    repaired = repaired.len(),
                     live_generation = fence.fencing_token,
                     event = "turn_input.deferred_before_drain",
                     "re-deferred active-turn inputs pinned to turns that can no longer commit"
                 );
-                repaired
+                repaired.len()
             }
             // The lane went out from under this drain; whoever holds it now owns
             // the repair, and the drain's own next store call reports the loss.
@@ -1348,11 +1348,11 @@ impl LashRuntime {
             )
             .await
         {
-            Ok(0) => {}
+            Ok(repaired) if repaired.is_empty() => {}
             Ok(repaired) => tracing::info!(
                 session_id = %self.state.session_id,
                 turn_id = %trace_turn_id,
-                repaired,
+                repaired = repaired.len(),
                 event = "turn_input.deferred_after_teardown",
                 "re-deferred active-turn inputs pinned to a turn that ended without committing"
             ),
@@ -1458,6 +1458,22 @@ impl LashRuntime {
                 assembled_cancellation,
             )
             .await?;
+        if let Some(evidence) = cancellation.as_ref()
+            && let Some(store) = self.session.as_ref().and_then(Session::history_store)
+        {
+            store
+                .record_turn_cancel_request(crate::TurnCancelRequest {
+                    address: crate::TurnAddress::new(&self.state.session_id, &trace_turn_id),
+                    request_id: evidence.request_id.clone(),
+                    origin: evidence.origin.clone(),
+                    reason: evidence.reason.clone(),
+                    undelivered: evidence.undelivered,
+                })
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                })?;
+        }
         if cancellation.is_some() {
             cancel_state.cancel();
         }
@@ -4406,6 +4422,7 @@ mod tests {
                         request_id: "retry-request".to_string(),
                         origin: Some("test-user".to_string()),
                         reason: None,
+                        undelivered: crate::TurnCancelDisposition::Defer,
                     }))
                 }
             }

@@ -112,7 +112,8 @@ impl ScratchSchema {
 /// carries them is refused as a mismatch rather than migrated. Dropping the
 /// columns takes the partial unique guard with them, and dropping the group
 /// table takes its two indexes.
-pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs;
+pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests;
+     DROP TABLE lash_checkpoint_blob_refs;
      DROP INDEX idx_lash_sessions_checkpoint_ref;
      DROP INDEX idx_lash_node_anchors_checkpoint_ref;
      DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;
@@ -138,7 +139,8 @@ pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs
 /// 55 generation. The shape checker ignores non-unique indexes, so a 54 source
 /// and this build differ in the version stamp alone — which is exactly what the
 /// 54 -> 55 migration declares as its source shape.
-pub const REWIND_PAST_55_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs;
+pub const REWIND_PAST_55_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests;
+     DROP TABLE lash_checkpoint_blob_refs;
      DROP INDEX idx_lash_sessions_checkpoint_ref;
      DROP INDEX idx_lash_node_anchors_checkpoint_ref;
      DROP INDEX idx_lash_runtime_effect_replay_group_unsettled;
@@ -155,7 +157,8 @@ pub const REWIND_PAST_55_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs
          DROP COLUMN parent_session_id;";
 
 /// Rewinds a freshly provisioned schema to the published component-56 shape.
-pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP TABLE lash_checkpoint_blob_refs;
+pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests;
+     DROP TABLE lash_checkpoint_blob_refs;
      DROP INDEX idx_lash_sessions_checkpoint_ref;
      DROP INDEX idx_lash_node_anchors_checkpoint_ref;
      ALTER TABLE lash_session_meta

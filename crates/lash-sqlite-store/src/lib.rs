@@ -23,12 +23,13 @@
 //! simplest backend that gives us *atomic multi-statement transactions on a
 //! single file* with durability guarantees we can reason about.
 //!
-//! ## Schema cutover, with one exact arming migration
+//! ## Schema cutover, with narrow additive migrations
 //!
 //! There is exactly one supported schema (see [`schema::SCHEMA`]). Older
-//! databases must normally be deleted before opening. The sole in-place
-//! exception is durable-core 37 -> 38, which decodes every rooted checkpoint
-//! manifest and arms the exact component-edge projection transactionally.
+//! databases must normally be deleted before opening. Durable-core 37 and 38
+//! are the exact in-place exceptions: both gain the version-40 cancellation
+//! request table, while 37 also decodes every rooted checkpoint manifest and
+//! arms the exact component-edge projection transactionally.
 //!
 //! ## Catalog contention
 //!
@@ -836,6 +837,38 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         .map_err(sqlite_error)
     }
 
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let store = Arc::new(
+            Store::open_bound_with_options_clock_and_process_registry(
+                &path,
+                session_id,
+                self.options,
+                Arc::clone(&self.clock),
+                None,
+                #[cfg(feature = "testing")]
+                self.fault_injector.clone(),
+            )
+            .await
+            .map_err(|err| err.to_string())?,
+        );
+        if store
+            .load_session_meta()
+            .await
+            .map_err(|err| err.to_string())?
+            .is_none()
+        {
+            return Ok(None);
+        }
+        Ok(Some(store as Arc<dyn RuntimePersistence>))
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
@@ -1241,6 +1274,7 @@ async fn delete_session_from_catalog(
             .map_err(sqlite_error)?;
             for table in [
                 "pending_turn_inputs",
+                "turn_cancel_requests",
                 "attachment_manifest",
                 "runtime_turn_commits",
                 "session_execution_leases",

@@ -54,7 +54,7 @@ async fn preflight_reports_a_version_below_the_migration_boundary_that_open_woul
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
-    let unsupported = expected - 2;
+    let unsupported = expected - 3;
 
     rewind_user_version(&path, unsupported);
 

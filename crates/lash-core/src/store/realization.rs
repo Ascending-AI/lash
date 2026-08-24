@@ -81,6 +81,7 @@ mod tests {
                     .collect(),
                 enqueued_queue_batches: Vec::new(),
                 turn_input_applications: Vec::new(),
+                turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
                 receipt_replayed: false,
             })
         }

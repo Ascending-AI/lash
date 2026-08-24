@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTurnCancelDisposition {
+    #[default]
+    Defer,
+    Drop,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnCancellationEvidence {
     pub request_id: String,
@@ -14,6 +22,8 @@ pub struct RemoteTurnCancellationEvidence {
     pub origin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "remote_disposition_is_defer")]
+    pub undelivered: RemoteTurnCancelDisposition,
 }
 
 impl RemoteTurnCancellationEvidence {
@@ -37,6 +47,12 @@ pub struct RemoteTurnCancelRequest {
     pub origin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "remote_disposition_is_defer")]
+    pub undelivered: RemoteTurnCancelDisposition,
+}
+
+fn remote_disposition_is_defer(value: &RemoteTurnCancelDisposition) -> bool {
+    matches!(value, RemoteTurnCancelDisposition::Defer)
 }
 
 impl RemoteTurnCancelRequest {

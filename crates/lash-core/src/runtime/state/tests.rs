@@ -88,6 +88,7 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
         committed_usage_delta_identities: Vec::new(),
         enqueued_queue_batches: Vec::new(),
         turn_input_applications: Vec::new(),
+        turn_cancel_input_outcome: Default::default(),
         receipt_replayed: false,
     }
 }

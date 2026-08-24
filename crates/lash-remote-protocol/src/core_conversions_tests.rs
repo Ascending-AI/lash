@@ -24,6 +24,7 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         request_id: "cancel-request".to_string(),
         origin: Some("workbench-user".to_string()),
         reason: Some("stop button".to_string()),
+        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
     };
     let remote_evidence = RemoteTurnCancellationEvidence::from(evidence.clone());
     assert_eq!(
@@ -34,6 +35,7 @@ fn turn_cancel_core_conversions_round_trip_every_envelope() {
         request_id: "cancel-without-origin".to_string(),
         origin: None,
         reason: None,
+        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
     };
     let remote_evidence = RemoteTurnCancellationEvidence::from(evidence_without_origin.clone());
     assert_eq!(
@@ -857,6 +859,7 @@ fn remote_turn_result_maps_core_semantics() {
     };
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
+        turn_cancel_input_outcome: Default::default(),
         state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -1035,6 +1038,7 @@ fn assert_terminal_call_record_converts_and_validates(
 
     let turn = lash_core::facade_support::AssembledTurn {
         turn_input_acceptance: None,
+        turn_cancel_input_outcome: Default::default(),
         state: lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -1045,6 +1049,7 @@ fn assert_terminal_call_record_converts_and_validates(
                         request_id: "cancel-request".to_string(),
                         origin: None,
                         reason: None,
+                        undelivered: lash_core::facade_support::TurnCancelDisposition::Defer,
                     },
                 },
             )

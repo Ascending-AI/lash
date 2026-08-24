@@ -353,6 +353,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 .collect(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
+            turn_cancel_input_outcome: Default::default(),
             receipt_replayed: false,
         };
         self.runtime_turn_commits.lock_recover().insert(
@@ -863,8 +864,8 @@ impl lash_core::TurnInputStore for SnapshotStore {
         _session_id: &str,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> std::result::Result<usize, lash_core::store::StoreError> {
-        Ok(0)
+    ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
+        Ok(Default::default())
     }
 }
 
@@ -1144,8 +1145,8 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         _session_id: &str,
         _session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         _scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> std::result::Result<usize, lash_core::store::StoreError> {
-        Ok(0)
+    ) -> std::result::Result<lash_core::TurnCancelInputOutcome, lash_core::store::StoreError> {
+        Ok(Default::default())
     }
 }
 

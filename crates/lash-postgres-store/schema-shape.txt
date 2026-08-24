@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 58
+version 59
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -381,6 +381,16 @@ table lash_trigger_subscriptions
   column updated_at_ms bigint not-null
   unique (owner_scope, subscription_key)
   primary-key (subscription_id)
+table lash_turn_cancel_requests
+  column affected_dispositions text[] not-null default
+  column affected_input_ids text[] not-null default
+  column disposition text not-null default
+  column origin text nullable
+  column reason text nullable
+  column request_id text not-null
+  column session_id text not-null
+  column turn_id text not-null
+  primary-key (session_id, turn_id)
 table lash_usage_deltas
   column entry_json text not-null
   column entry_ordinal bigint not-null

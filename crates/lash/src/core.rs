@@ -345,7 +345,12 @@ impl LashCore {
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
     pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
-        facade_support::TurnWorkDriver::new(self.effect_host())
+        let driver = facade_support::TurnWorkDriver::new(self.effect_host());
+        self.store_factory
+            .as_ref()
+            .map_or(driver.clone(), |factory| {
+                driver.with_session_store_factory(Arc::clone(factory))
+            })
     }
 
     /// Persist host input without opening a competing session writer.

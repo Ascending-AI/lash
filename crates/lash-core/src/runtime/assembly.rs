@@ -794,6 +794,7 @@ impl TurnAssembler {
             // Stamped by the ingress that accepted this turn's input, which
             // owns the acceptance identity assembly never sees.
             turn_input_acceptance: None,
+            turn_cancel_input_outcome: Default::default(),
         }
     }
 

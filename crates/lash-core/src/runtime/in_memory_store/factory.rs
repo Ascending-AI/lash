@@ -201,6 +201,18 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         Ok(summaries)
     }
 
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        Ok(self
+            .stores
+            .lock_recover()
+            .get(session_id)
+            .cloned()
+            .map(|store| store as Arc<dyn RuntimePersistence>))
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,

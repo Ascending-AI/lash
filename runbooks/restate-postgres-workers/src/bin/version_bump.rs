@@ -57,11 +57,13 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// run.
 const MIGRATION_FLOOR_VERSION: i32 = 50;
 /// Tables the component generations *above* the floor introduced, newest first
-/// (57: checkpoint edges; 56 and 55 add no table; 54: the effect-group journal;
+/// (59: turn-cancel requests; 58 adds no table; 57: checkpoint edges; 56 and
+/// 55 add no table; 54: the effect-group journal;
 /// 52: attachment GC fence; 51: parent-end plans and tool-intent submissions).
 /// Dropping them leaves the published floor
 /// catalog: the set is exactly the floor migration's `source_missing_tables`.
-const POST_FLOOR_TABLES: [&str; 5] = [
+const POST_FLOOR_TABLES: [&str; 6] = [
+    "lash_turn_cancel_requests",
     "lash_checkpoint_blob_refs",
     "lash_runtime_effect_group",
     "lash_attachment_condemnations",
@@ -109,7 +111,8 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 10] = [
 ];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 17] = [
+const POST_FLOOR_ARTIFACTS: [&str; 18] = [
+    "lash_turn_cancel_requests",
     "idx_lash_session_meta_catalog",
     "lash_checkpoint_blob_refs",
     "idx_lash_checkpoint_blob_refs_blob_ref",
@@ -129,10 +132,10 @@ const POST_FLOOR_ARTIFACTS: [&str; 17] = [
     "uq_lash_runtime_effect_replay_group_seq",
 ];
 /// What the newest generation alone introduced — the `introduced_relations` of
-/// the migration out of the immediate predecessor version. The catalog index
-/// makes a current schema stamped 57 distinguishable from the published 57
-/// source shape before any migration DDL runs.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_session_meta_catalog"];
+/// the migration out of the immediate predecessor version. The divergent fixture
+/// records that predecessor over the *current* catalog, so these are exactly the
+/// artifacts its refusal must enumerate.
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_turn_cancel_requests"];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.

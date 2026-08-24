@@ -24,6 +24,15 @@ use final_commit_input::FinalCommitInput;
 mod settlement;
 use settlement::*;
 
+type FinalCommitResult = Result<
+    (
+        Vec<crate::QueuedWorkBatch>,
+        Vec<crate::store::RuntimeUsageDeltaIdentity>,
+        crate::TurnCancelInputOutcome,
+    ),
+    StoreError,
+>;
+
 #[derive(Debug)]
 pub(super) struct ProgressBoundaryResult {
     pub(super) protocol_events: Vec<crate::ProtocolEvent>,
@@ -46,11 +55,8 @@ pub(super) struct TurnBoundary {
 }
 
 /// Explicit two-phase lifecycle for a turn commit.
-///
-/// A pipeline starts in [`TurnCommitStage::Drafting`] while progress boundaries
-/// accumulate in a mutable [`TurnCommitDraft`]. The first call that needs the
-/// assembled session state transitions it (irreversibly) to
-/// [`TurnCommitStage::Finalized`], and the completed turn is committed once.
+/// Drafting accumulates progress; finalization irreversibly assembles and
+/// commits the completed turn once.
 enum TurnCommitStage {
     Drafting(Box<TurnCommitDraft>),
     Finalized(Box<FinalizedTurnCommitStage>),
@@ -341,6 +347,7 @@ impl TurnBoundary {
         .await;
         let enqueued_queue_batches = commit_result?;
         returned_turn.state = self.final_state_mut().to_snapshot();
+        returned_turn.turn_cancel_input_outcome = enqueued_queue_batches.2;
         Ok(AcceptedTurnCommit::new(
             enqueued_queue_batches.0,
             enqueued_queue_batches.1,
@@ -390,13 +397,7 @@ impl TurnBoundary {
     async fn final_commit_with_snapshots(
         &mut self,
         input: FinalCommitInput<'_>,
-    ) -> Result<
-        (
-            Vec<crate::QueuedWorkBatch>,
-            Vec<crate::store::RuntimeUsageDeltaIdentity>,
-        ),
-        StoreError,
-    > {
+    ) -> FinalCommitResult {
         let FinalCommitInput {
             returned_state,
             tool_calls,
@@ -479,6 +480,7 @@ impl TurnBoundary {
                     .iter()
                     .map(|delta| delta.identity.clone())
                     .collect(),
+                Default::default(),
             ))
         }
     }
@@ -502,13 +504,7 @@ impl TurnBoundary {
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
-    ) -> Result<
-        (
-            Vec<crate::QueuedWorkBatch>,
-            Vec<crate::store::RuntimeUsageDeltaIdentity>,
-        ),
-        StoreError,
-    > {
+    ) -> FinalCommitResult {
         let session_id = self.state().session_id.clone();
         let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
         match &mut self.stage {
@@ -598,12 +594,17 @@ impl TurnBoundary {
         };
         let enqueued_queue_batches = result.enqueued_queue_batches.clone();
         let committed_usage_delta_identities = result.committed_usage_delta_identities.clone();
+        let turn_cancel_input_outcome = result.turn_cancel_input_outcome.clone();
         state.apply_persisted_commit_result(result);
         state.mark_node_ids_persisted(persisted_node_ids.clone());
         if let TurnCommitStage::Drafting(draft) = &mut self.stage {
             draft.mark_node_ids_persisted(persisted_node_ids);
         }
-        Ok((enqueued_queue_batches, committed_usage_delta_identities))
+        Ok((
+            enqueued_queue_batches,
+            committed_usage_delta_identities,
+            turn_cancel_input_outcome,
+        ))
     }
 }
 

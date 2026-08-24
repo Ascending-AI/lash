@@ -977,13 +977,17 @@ impl SessionCommitStore for Store {
                             }
                         }
                     }
+                    let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
                     if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_deref() {
+                        let disposition = load_turn_cancel_request_conn(tx, &commit.session_id, turn_id)?
+                            .map(|record| record.request.undelivered)
+                            .unwrap_or_default();
                         let input_ids = {
                             let mut stmt = tx
                                 .prepare(
-                                    "SELECT input_id, ingress_json
+                                    "SELECT input_id, ingress_json, input_json
                                      FROM pending_turn_inputs
-                                     WHERE session_id = ?1 AND state = ?2",
+                                     WHERE session_id = ?1 AND state = ?2 ORDER BY enqueue_seq ASC",
                                 )
                                 .map_err(sqlite_error)?;
                             let rows = stmt
@@ -993,19 +997,19 @@ impl SessionCommitStore for Store {
                                         lash_core::TurnInputState::PendingActive.as_str()
                                     ],
                                     |row| {
-                                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
                                     },
                                 )
                                 .map_err(sqlite_error)?;
                             let mut input_ids = Vec::new();
                             for row in rows {
-                                let (input_id, ingress_json) = row.map_err(sqlite_error)?;
+                                let (input_id, ingress_json, input_json) = row.map_err(sqlite_error)?;
                                 let ingress = decode_turn_input_ingress(ingress_json)?;
                                 if ingress
                                     .active_turn_id()
                                     .is_some_and(|active| active == turn_id)
                                 {
-                                    input_ids.push(input_id);
+                                    input_ids.push((input_id, decode_stored_json(&input_json, "turn input")?));
                                 }
                             }
                             input_ids
@@ -1016,7 +1020,7 @@ impl SessionCommitStore for Store {
                             .prepare(
                                 "UPDATE pending_turn_inputs
                                  SET state = ?3,
-                                     ingress_json = ?4,
+                                     ingress_json = COALESCE(?4, ingress_json),
                                      claim_id = NULL,
                                      claim_owner_id = NULL,
                                      claim_owner_incarnation_id = NULL,
@@ -1026,14 +1030,23 @@ impl SessionCommitStore for Store {
                                  WHERE session_id = ?1 AND input_id = ?2",
                             )
                             .map_err(sqlite_error)?;
-                        for input_id in input_ids {
+                        for (input_id, payload) in input_ids {
                             stmt.execute(params![
                                 commit.session_id,
                                 input_id,
-                                lash_core::TurnInputState::DeferredNextTurn.as_str(),
-                                next_turn_ingress
+                                match disposition {
+                                    lash_core::TurnCancelDisposition::Defer => lash_core::TurnInputState::DeferredNextTurn.as_str(),
+                                    lash_core::TurnCancelDisposition::Drop => lash_core::TurnInputState::Cancelled.as_str(),
+                                },
+                                match disposition {
+                                    lash_core::TurnCancelDisposition::Defer => Some(next_turn_ingress.as_str()),
+                                    lash_core::TurnCancelDisposition::Drop => None,
+                                }
                             ])
                             .map_err(sqlite_error)?;
+                            let affected = lash_core::TurnCancelAffectedInput { input_id, payload, disposition };
+                            append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
+                            turn_cancel_input_outcome.affected_inputs.push(affected);
                         }
                     }
                     if !commit.committed_attachment_ids.is_empty() {
@@ -1077,11 +1090,12 @@ impl SessionCommitStore for Store {
                             enqueue_nonce,
                         )?);
                     }
-                    let result = plan.result(
+                    let mut result = plan.result(
                         stored_checkpoint.checkpoint_ref,
                         stored_checkpoint.manifest,
                         enqueued_queue_batches,
                     );
+                    result.turn_cancel_input_outcome = turn_cancel_input_outcome;
                     {
                         let receipt = plan.receipt_write(&result);
                         let result_json = encode_json(receipt.result)?;
@@ -2628,6 +2642,51 @@ impl QueuedWorkStore for Store {
 
 #[async_trait::async_trait]
 impl TurnInputStore for Store {
+    async fn record_turn_cancel_request(
+        &self,
+        request: lash_core::facade_support::TurnCancelRequest,
+    ) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
+        let session_id = request.address.session_id.clone();
+        let turn_id = request.address.turn_id.clone();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome = (|| {
+                    ensure_session_not_deleted_conn(tx, &session_id)?;
+                    let record = lash_core::TurnCancelRequestRecord {
+                        request,
+                        outcome: None,
+                    };
+                    tx.execute(
+                        "INSERT OR IGNORE INTO turn_cancel_requests
+                         (session_id, turn_id, record_json) VALUES (?1, ?2, ?3)",
+                        params![session_id, turn_id, encode_json(&record)?],
+                    )
+                    .map_err(sqlite_error)?;
+                    load_turn_cancel_request_conn(tx, &session_id, &turn_id)?.ok_or_else(|| {
+                        StoreError::Backend("turn cancel request insert disappeared".to_string())
+                    })
+                })();
+                Ok(match outcome {
+                    Ok(value) => TxOutcome::Commit(Ok(value)),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &lash_core::facade_support::TurnAddress,
+    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+        let session_id = address.session_id.clone();
+        let turn_id = address.turn_id.clone();
+        self.conn
+            .call(move |conn| Ok(load_turn_cancel_request_conn(conn, &session_id, &turn_id)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         draft: lash_core::PendingTurnInputDraft,
@@ -3007,14 +3066,14 @@ impl TurnInputStore for Store {
         session_id: &str,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, StoreError> {
+    ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
         let session_id = session_id.to_string();
         let session_execution_lease = session_execution_lease.clone();
         let scope = OwnedOrphanedScope::from(scope);
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<usize, StoreError> = (|| {
+                let outcome: Result<lash_core::TurnCancelInputOutcome, StoreError> = (|| {
                     // The fence is re-read here, not upstream: between an
                     // upstream check and this write the lane can be displaced,
                     // and a stale-generation repair would clear the new
@@ -3031,7 +3090,8 @@ impl TurnInputStore for Store {
                         session_execution_lease.fencing_token,
                         scope.borrow(),
                     )
-                })();
+                })(
+                );
                 Ok(match outcome {
                     Ok(repaired) => TxOutcome::Commit(Ok(repaired)),
                     Err(err) => TxOutcome::Rollback(Err(err)),
@@ -3207,6 +3267,10 @@ impl StoreMaintenance for Store {
                         lash_core::TurnInputState::Cancelled.as_str(),
                         lash_core::TurnInputState::Completed.as_str()
                     ],
+                )?;
+                tx.execute(
+                    "DELETE FROM turn_cancel_requests WHERE session_id = ?1",
+                    params![session_id],
                 )?;
                 Ok((
                     removed_node_count,
@@ -4084,18 +4148,67 @@ impl OwnedOrphanedScope {
 /// rather than expressed as a `json_extract` predicate, so this backend and the
 /// in-memory one cannot drift on which rows a repair may touch. `live_generation`
 /// is the caller's fencing token, already re-validated on this connection.
+fn decode_stored_json<T: serde::de::DeserializeOwned>(
+    json: &str,
+    label: &str,
+) -> Result<T, StoreError> {
+    serde_json::from_str(json)
+        .map_err(|err| StoreError::Backend(format!("failed to decode {label}: {err}")))
+}
+
+fn load_turn_cancel_request_conn(
+    conn: &Connection,
+    session_id: &str,
+    turn_id: &str,
+) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+    let json = conn
+        .query_row(
+            "SELECT record_json FROM turn_cancel_requests
+             WHERE session_id = ?1 AND turn_id = ?2",
+            params![session_id, turn_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    json.map(|json| decode_stored_json(&json, "turn cancel request"))
+        .transpose()
+}
+
+fn append_turn_cancel_outcome_conn(
+    conn: &Connection,
+    session_id: &str,
+    turn_id: &str,
+    affected: lash_core::TurnCancelAffectedInput,
+) -> Result<(), StoreError> {
+    let Some(mut record) = load_turn_cancel_request_conn(conn, session_id, turn_id)? else {
+        return Ok(());
+    };
+    record
+        .outcome
+        .get_or_insert_default()
+        .affected_inputs
+        .push(affected);
+    conn.execute(
+        "UPDATE turn_cancel_requests SET record_json = ?3
+         WHERE session_id = ?1 AND turn_id = ?2",
+        params![session_id, turn_id, encode_json(&record)?],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
 fn defer_orphaned_active_turn_inputs_conn(
     conn: &Connection,
     session_id: &str,
     live_generation: u64,
     scope: lash_core::OrphanedTurnInputScope<'_>,
-) -> Result<usize, StoreError> {
+) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
     let candidates = {
         let mut stmt = conn
             .prepare(
-                "SELECT input_id, state, ingress_json, claim_token, claim_session_lease_generation
+                "SELECT input_id, state, ingress_json, input_json, claim_token, claim_session_lease_generation
                  FROM pending_turn_inputs
-                 WHERE session_id = ?1 AND state IN (?2, ?3)",
+                 WHERE session_id = ?1 AND state IN (?2, ?3) ORDER BY enqueue_seq ASC",
             )
             .map_err(sqlite_error)?;
         let rows = stmt
@@ -4110,8 +4223,9 @@ fn defer_orphaned_active_turn_inputs_conn(
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, i64>(5)?,
                     ))
                 },
             )
@@ -4119,7 +4233,7 @@ fn defer_orphaned_active_turn_inputs_conn(
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
     let mut repairable = Vec::new();
-    for (input_id, state, ingress_json, claim_token, claim_generation) in candidates {
+    for (input_id, state, ingress_json, input_json, claim_token, claim_generation) in candidates {
         let state = decode_turn_input_state(state)?;
         let ingress = decode_turn_input_ingress(ingress_json)?;
         let claim_generation = u64_from_sql(
@@ -4136,18 +4250,29 @@ fn defer_orphaned_active_turn_inputs_conn(
             claim_token.is_some(),
             claim_generation,
         ) {
-            repairable.push(input_id);
+            let turn_id = ingress.active_turn_id().ok_or_else(|| {
+                StoreError::Backend("active-turn input has no active turn id".to_string())
+            })?;
+            let disposition = load_turn_cancel_request_conn(conn, session_id, turn_id)?
+                .map(|record| record.request.undelivered)
+                .unwrap_or_default();
+            repairable.push((
+                input_id,
+                turn_id.to_string(),
+                decode_stored_json(&input_json, "turn input")?,
+                disposition,
+            ));
         }
     }
     if repairable.is_empty() {
-        return Ok(0);
+        return Ok(Default::default());
     }
     let next_turn_ingress = encode_json(&lash_core::TurnInputIngress::NextTurn)?;
     let mut stmt = conn
         .prepare(
             "UPDATE pending_turn_inputs
              SET state = ?3,
-                 ingress_json = ?4,
+                 ingress_json = COALESCE(?4, ingress_json),
                  claim_id = NULL,
                  claim_owner_id = NULL,
                  claim_owner_incarnation_id = NULL,
@@ -4157,18 +4282,32 @@ fn defer_orphaned_active_turn_inputs_conn(
              WHERE session_id = ?1 AND input_id = ?2",
         )
         .map_err(sqlite_error)?;
-    let mut repaired = 0usize;
-    for input_id in repairable {
-        repaired += stmt
-            .execute(params![
-                session_id,
-                input_id,
-                lash_core::TurnInputState::DeferredNextTurn.as_str(),
-                next_turn_ingress
-            ])
-            .map_err(sqlite_error)?;
+    let mut outcome = lash_core::TurnCancelInputOutcome::default();
+    for (input_id, turn_id, payload, disposition) in repairable {
+        stmt.execute(params![
+            session_id,
+            input_id,
+            match disposition {
+                lash_core::TurnCancelDisposition::Defer =>
+                    lash_core::TurnInputState::DeferredNextTurn.as_str(),
+                lash_core::TurnCancelDisposition::Drop =>
+                    lash_core::TurnInputState::Cancelled.as_str(),
+            },
+            match disposition {
+                lash_core::TurnCancelDisposition::Defer => Some(next_turn_ingress.as_str()),
+                lash_core::TurnCancelDisposition::Drop => None,
+            }
+        ])
+        .map_err(sqlite_error)?;
+        let affected = lash_core::TurnCancelAffectedInput {
+            input_id,
+            payload,
+            disposition,
+        };
+        append_turn_cancel_outcome_conn(conn, session_id, &turn_id, affected.clone())?;
+        outcome.affected_inputs.push(affected);
     }
-    Ok(repaired)
+    Ok(outcome)
 }
 
 fn release_session_execution_lease_conn(

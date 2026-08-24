@@ -93,6 +93,7 @@ impl SessionCommitStore for FacadeStore {
                 .collect(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
+            turn_cancel_input_outcome: Default::default(),
             receipt_replayed: false,
         })
     }
@@ -227,8 +228,8 @@ impl TurnInputStore for FacadeStore {
         _session_id: &str,
         _session_execution_lease: &SessionExecutionLeaseAuthority,
         _scope: OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, StoreError> {
-        Ok(0)
+    ) -> Result<lash::TurnCancelInputOutcome, StoreError> {
+        Ok(Default::default())
     }
 }
 

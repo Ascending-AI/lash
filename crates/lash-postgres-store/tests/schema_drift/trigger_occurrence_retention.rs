@@ -33,7 +33,7 @@ async fn main_component_55_store_upgrades_cleanly_to_57() {
         },
     )
     .await
-    .expect("the exact published component-55 shape migrates to 58");
+    .expect("the exact published component-55 shape migrates to 59");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -41,7 +41,7 @@ async fn main_component_55_store_upgrades_cleanly_to_57() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 58);
+    assert_eq!(version, 59);
     let column_present: bool = sqlx::query_scalar(
         "SELECT EXISTS (
              SELECT 1 FROM information_schema.columns
@@ -112,14 +112,14 @@ async fn populated_component_55_trigger_scope_arms_only_terminal_rows() {
         },
     )
     .await
-    .expect("a populated component-55 trigger scope migrates to 58");
+    .expect("a populated component-55 trigger scope migrates to 59");
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
     )
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 58);
+    assert_eq!(version, 59);
     let zero_fanout_arm: Option<i64> = sqlx::query_scalar(
         "SELECT reclaimable_at_ms
          FROM lash_trigger_occurrences

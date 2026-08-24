@@ -7632,6 +7632,19 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
     provider_started_rx
         .await
         .expect("provider should start after lease acquisition");
+    let undelivered = crate::store::TurnInputStore::enqueue_pending_turn_input(
+        store.as_ref(),
+        crate::PendingTurnInputDraft::new(
+            &persisted_state.session_id,
+            crate::TurnInputIngress::active_turn(
+                turn_id,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("unsent steer restored by host"),
+        ),
+    )
+    .await
+    .expect("enqueue an undelivered active-turn input");
     let receipt = turn_driver
         .request_cancel(
             crate::TurnCancelRequest::new(
@@ -7639,7 +7652,8 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
                 "cancel-before-loss-request",
                 Some("test-user".to_string()),
             )
-            .with_reason("user stopped the turn"),
+            .with_reason("user stopped the turn")
+            .undelivered(crate::TurnCancelDisposition::Drop),
         )
         .await
         .expect("seal user cancellation");
@@ -7679,8 +7693,18 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
                 request_id: "cancel-before-loss-request".to_string(),
                 origin: Some("test-user".to_string()),
                 reason: Some("user stopped the turn".to_string()),
+                undelivered: crate::TurnCancelDisposition::Drop,
             }
         })
+    );
+    assert_eq!(assembled.turn_cancel_input_outcome.affected_inputs.len(), 1);
+    assert_eq!(
+        assembled.turn_cancel_input_outcome.affected_inputs[0].input_id,
+        undelivered.input_id
+    );
+    assert_eq!(
+        assembled.turn_cancel_input_outcome.affected_inputs[0].disposition,
+        crate::TurnCancelDisposition::Drop
     );
 }
 

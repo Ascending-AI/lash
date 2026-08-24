@@ -12,6 +12,7 @@ use super::*;
 
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;
+mod turn_cancel;
 
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
 /// suite against the backend produced by `make`. `make` must return a fresh,
@@ -45,6 +46,7 @@ pub async fn session_store_factory<F>(
     session_store_factory_round_trips_every_relation_shape(make()).await;
     session_store_factory_create_is_idempotent(make()).await;
     session_store_factory_enumeration_is_read_only_and_keeps_tombstones(make()).await;
+    turn_cancel::turn_cancel_disposition_crash_matrix(make()).await;
     session_store_factory_claimable_queued_work_peek(make()).await;
     config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;

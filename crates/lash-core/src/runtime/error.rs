@@ -1,3 +1,5 @@
+use crate::SessionError;
+
 /// Stable runtime error code.
 ///
 /// Codes serialize as the same snake_case strings exposed in traces and host
@@ -258,6 +260,189 @@ pub enum RuntimeErrorCode {
     /// Foreign codes are conservatively neither retryable nor terminal.
     #[non_exhaustive]
     ForeignCode(String),
+}
+
+pub(super) fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
+    match err {
+        crate::store::StoreError::Contended => RuntimeError::new(
+            RuntimeErrorCode::StoreCommitContended,
+            "store commit is contended; retry the identical operation unchanged",
+        ),
+        err @ crate::store::StoreError::CommitNodeBudgetExceeded { .. } => RuntimeError::new(
+            RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
+            err.to_string(),
+        ),
+        err @ crate::store::StoreError::CommitByteBudgetExceeded { .. } => RuntimeError::new(
+            RuntimeErrorCode::StoreCommitByteBudgetExceeded,
+            err.to_string(),
+        ),
+        err @ crate::store::StoreError::CheckpointComponentEncodingVersionMismatch { .. } => {
+            RuntimeError::new(
+                RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch,
+                err.to_string(),
+            )
+        }
+        err @ crate::store::StoreError::RecordEncodingFailed { .. } => {
+            RuntimeError::new(RuntimeErrorCode::RecordEncodingFailed, err.to_string())
+        }
+        // ADR 0069 §5(d): a driver that settled the row it accepted without a
+        // claim, and found that row held or already settled, ceded at the head
+        // CAS. Nothing durable was written: a stand-down, not a commit fault.
+        err @ crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. } => {
+            RuntimeError::new(
+                RuntimeErrorCode::TurnInputSettlementSuperseded,
+                err.to_string(),
+            )
+        }
+        crate::store::StoreError::SessionExecutionLeaseExpired { session_id } => RuntimeError::new(
+            RuntimeErrorCode::SessionExecutionLeaseLost,
+            format!("session execution lease for session `{session_id}` was lost before commit"),
+        ),
+        crate::store::StoreError::ExecutionStateCaptureFailed { message } => RuntimeError::new(
+            RuntimeErrorCode::ExecutionStateCaptureFailed,
+            format!("failed to snapshot dirty execution state: {message}"),
+        ),
+        err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
+    }
+}
+
+/// Wrap a store commit failure for the session-facing API.
+///
+/// The typed arm is not a convenience list: every variant here is one a host is
+/// expected to *match on* rather than log. `HeadRevisionConflict` in particular
+/// is the concurrent-append outcome the host is told to refresh and retry from,
+/// so collapsing it into `Protocol(String)` would leave string matching as the
+/// only way to tell a lost head race from an unrelated store failure.
+pub(super) fn session_commit_error(
+    context: &str,
+    source: crate::store::StoreError,
+) -> SessionError {
+    match source {
+        source @ (crate::store::StoreError::SessionDeleted { .. }
+        | crate::store::StoreError::HeadRevisionConflict { .. }
+        | crate::store::StoreError::AppendOperationIdentityConflict { .. }
+        | crate::store::StoreError::AppendReceiptRequestedNodeCountCorrupt { .. }
+        | crate::store::StoreError::CommitNodeBudgetExceeded { .. }
+        | crate::store::StoreError::CommitByteBudgetExceeded { .. }
+        | crate::store::StoreError::CheckpointComponentEncodingVersionMismatch {
+            ..
+        }
+        | crate::store::StoreError::RecordEncodingFailed { .. }) => SessionError::Store {
+            context: context.to_string(),
+            source,
+        },
+        source => SessionError::Protocol(format!("{context}: {source}")),
+    }
+}
+
+#[cfg(test)]
+mod store_commit_error_tests {
+    use super::{RuntimeErrorCode, runtime_error_from_store_commit};
+    use crate::store::StoreError;
+
+    #[test]
+    fn commit_budget_errors_preserve_the_budget_kind_and_limits() {
+        let node_error = runtime_error_from_store_commit(StoreError::CommitNodeBudgetExceeded {
+            node_count: 513,
+            max_nodes: 512,
+        });
+        assert_eq!(
+            node_error.code,
+            RuntimeErrorCode::StoreCommitNodeBudgetExceeded
+        );
+        assert!(
+            node_error
+                .message
+                .contains("records 513 rows for this attempt")
+        );
+        assert!(
+            node_error
+                .message
+                .contains("configured 512-row node budget")
+        );
+        assert!(
+            node_error
+                .message
+                .contains("including attachment-intent adoption")
+        );
+
+        let byte_error = runtime_error_from_store_commit(StoreError::CommitByteBudgetExceeded {
+            session_config_bytes: 0,
+            graph_delta_bytes: 900_000,
+            checkpoint_bytes: 150_000,
+            attachment_manifest_bytes: 1,
+            total_bytes: 1_050_001,
+            max_bytes: 1_048_576,
+        });
+        assert_eq!(
+            byte_error.code,
+            RuntimeErrorCode::StoreCommitByteBudgetExceeded
+        );
+        assert!(
+            byte_error
+                .message
+                .contains("1050001 budgeted payload bytes")
+        );
+        assert!(
+            byte_error
+                .message
+                .contains("1048576-byte transaction budget")
+        );
+    }
+
+    #[test]
+    fn deterministic_checkpoint_commit_errors_are_typed_and_terminal() {
+        let mismatch = runtime_error_from_store_commit(
+            StoreError::CheckpointComponentEncodingVersionMismatch {
+                key: "execution_state".to_string(),
+                actual: 2,
+                expected: 1,
+            },
+        );
+        assert_eq!(
+            mismatch.code,
+            RuntimeErrorCode::CheckpointComponentEncodingVersionMismatch
+        );
+        assert!(mismatch.code.is_terminal());
+        assert!(!mismatch.code.is_retryable());
+        assert!(mismatch.message.contains("execution_state"));
+
+        let encoding = runtime_error_from_store_commit(StoreError::RecordEncodingFailed {
+            record_kind: "checkpoint root".to_string(),
+            message: "deterministic fixture failure".to_string(),
+        });
+        assert_eq!(encoding.code, RuntimeErrorCode::RecordEncodingFailed);
+        assert!(encoding.code.is_terminal());
+        assert!(!encoding.code.is_retryable());
+        assert!(encoding.message.contains("checkpoint root"));
+    }
+
+    #[test]
+    fn public_append_and_park_preserve_deterministic_store_errors() {
+        for error in [
+            StoreError::CheckpointComponentEncodingVersionMismatch {
+                key: "execution_state".to_string(),
+                actual: 2,
+                expected: 1,
+            },
+            StoreError::RecordEncodingFailed {
+                record_kind: "checkpoint root".to_string(),
+                message: "deterministic fixture failure".to_string(),
+            },
+        ] {
+            let expected_variant = error.variant_name();
+            let session_error =
+                super::session_commit_error("public append and park persistence boundary", error);
+            assert!(
+                matches!(
+                    session_error,
+                    crate::SessionError::Store { ref source, .. }
+                        if source.variant_name() == expected_variant
+                ),
+                "{expected_variant} lost its typed store identity: {session_error}"
+            );
+        }
+    }
 }
 
 impl RuntimeErrorCode {

@@ -214,7 +214,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // preserves their enumeration projection on permanent deletion tombstones.
 // Creation-only migrations retain older stores with nullable catalog columns;
 // enumeration reports zero for legacy rows whose creation time is unknowable.
-const SCHEMA_VERSION: i32 = 58;
+// Version 59 persists per-turn cancellation requests and their undelivered
+// input outcomes.
+const SCHEMA_VERSION: i32 = 59;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

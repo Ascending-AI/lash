@@ -120,6 +120,20 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         self.inner().enqueue_pending_turn_input(input).await
     }
 
+    async fn record_turn_cancel_request(
+        &self,
+        request: crate::TurnCancelRequest,
+    ) -> Result<crate::TurnCancelRequestRecord, StoreError> {
+        self.inner().record_turn_cancel_request(request).await
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError> {
+        self.inner().turn_cancel_request(address).await
+    }
+
     async fn list_pending_turn_inputs(
         &self,
         session_id: &str,
@@ -216,7 +230,7 @@ pub trait RuntimePersistenceDecorator: Send + Sync {
         session_id: &str,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, StoreError> {
+    ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
         self.inner()
             .defer_orphaned_active_turn_inputs(session_id, session_execution_lease, scope)
             .await
@@ -571,6 +585,20 @@ impl<T> TurnInputStore for T
 where
     T: RuntimePersistenceDecorator + ?Sized,
 {
+    async fn record_turn_cancel_request(
+        &self,
+        request: crate::TurnCancelRequest,
+    ) -> Result<crate::TurnCancelRequestRecord, StoreError> {
+        RuntimePersistenceDecorator::record_turn_cancel_request(self, request).await
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError> {
+        RuntimePersistenceDecorator::turn_cancel_request(self, address).await
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         input: crate::PendingTurnInputDraft,
@@ -674,7 +702,7 @@ where
         session_id: &str,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, StoreError> {
+    ) -> Result<crate::TurnCancelInputOutcome, StoreError> {
         RuntimePersistenceDecorator::defer_orphaned_active_turn_inputs(
             self,
             session_id,

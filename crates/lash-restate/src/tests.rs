@@ -5877,7 +5877,7 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         session_id: &str,
         session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, lash_core::StoreError> {
+    ) -> Result<lash_core::TurnCancelInputOutcome, lash_core::StoreError> {
         self.inner
             .defer_orphaned_active_turn_inputs(session_id, session_execution_lease, scope)
             .await

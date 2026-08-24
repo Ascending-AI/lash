@@ -102,7 +102,9 @@ pub use usage_activity::*;
 // the journaled turn-input acceptance. A version 44 peer rejects the new
 // variant outright, so the two sides must agree before it can appear on the
 // wire (FIG-1671).
-pub const REMOTE_PROTOCOL_VERSION: u32 = 45;
+// Bumped to 46: turn-cancel requests carry the typed undelivered-input
+// disposition. Older peers would silently apply the legacy defer policy.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 46;
 
 pub(crate) fn decode_versioned_json<T>(
     bytes: &[u8],
