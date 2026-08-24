@@ -15387,6 +15387,154 @@ fn accepted_response(invocation_id: &str) -> HttpResponse {
     }
 }
 
+const RESERVED_INGRESS_KEY: &str = "key/with?reserved% space";
+const ENCODED_RESERVED_INGRESS_KEY: &str = "key%2Fwith%3Freserved%25%20space";
+
+fn scripted_ingress_client(
+    responses: impl IntoIterator<Item = HttpResponse>,
+) -> (RestateIngressClient, Arc<ScriptedHttpTransport>) {
+    let scripted = Arc::new(ScriptedHttpTransport::new(responses));
+    let client = RestateIngressClient::new(RestateConnection::with_transport(
+        "https://cloud.example",
+        scripted.clone(),
+    ));
+    (client, scripted)
+}
+
+fn assert_reserved_ingress_url(requests: &[HttpRequest], expected_path: &str) {
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].url,
+        format!("https://cloud.example/{expected_path}")
+    );
+}
+
+#[tokio::test]
+async fn restate_workflow_send_url_encodes_reserved_key() {
+    let (client, scripted) = scripted_ingress_client([accepted_response("inv_workflow_send")]);
+
+    client
+        .send_workflow_json(
+            "Lash/Workflow",
+            RESERVED_INGRESS_KEY,
+            "run?now",
+            &serde_json::json!({}),
+        )
+        .await
+        .expect("send workflow");
+
+    assert_reserved_ingress_url(
+        &scripted.requests(),
+        &format!("Lash%2FWorkflow/{ENCODED_RESERVED_INGRESS_KEY}/run%3Fnow/send"),
+    );
+}
+
+#[tokio::test]
+async fn restate_workflow_json_url_encodes_reserved_key() {
+    let (client, scripted) = scripted_ingress_client([HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: HttpResponseBody::buffered("{}"),
+    }]);
+
+    client
+        .call_workflow_json::<_, serde_json::Value>(
+            "Lash/Workflow",
+            RESERVED_INGRESS_KEY,
+            "run?now",
+            &serde_json::json!({}),
+        )
+        .await
+        .expect("call workflow");
+
+    assert_reserved_ingress_url(
+        &scripted.requests(),
+        &format!("Lash%2FWorkflow/{ENCODED_RESERVED_INGRESS_KEY}/run%3Fnow"),
+    );
+}
+
+#[tokio::test]
+async fn restate_workflow_empty_url_encodes_reserved_key() {
+    let (client, scripted) = scripted_ingress_client([HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: HttpResponseBody::buffered("{}"),
+    }]);
+
+    client
+        .call_workflow_empty::<serde_json::Value>("Lash/Workflow", RESERVED_INGRESS_KEY, "run?now")
+        .await
+        .expect("call empty workflow");
+
+    assert_reserved_ingress_url(
+        &scripted.requests(),
+        &format!("Lash%2FWorkflow/{ENCODED_RESERVED_INGRESS_KEY}/run%3Fnow"),
+    );
+}
+
+#[tokio::test]
+async fn restate_object_json_url_encodes_reserved_key() {
+    let (client, scripted) = scripted_ingress_client([HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: HttpResponseBody::buffered("{}"),
+    }]);
+
+    client
+        .call_object_json::<_, serde_json::Value>(
+            "Lash/Object",
+            RESERVED_INGRESS_KEY,
+            "run?now",
+            &serde_json::json!({}),
+        )
+        .await
+        .expect("call object");
+
+    assert_reserved_ingress_url(
+        &scripted.requests(),
+        &format!("Lash%2FObject/{ENCODED_RESERVED_INGRESS_KEY}/run%3Fnow"),
+    );
+}
+
+#[tokio::test]
+async fn restate_object_empty_url_encodes_reserved_key() {
+    let (client, scripted) = scripted_ingress_client([HttpResponse {
+        status: 200,
+        headers: Vec::new(),
+        body: HttpResponseBody::buffered("{}"),
+    }]);
+
+    client
+        .call_object_empty("Lash/Object", RESERVED_INGRESS_KEY, "run?now")
+        .await
+        .expect("call empty object");
+
+    assert_reserved_ingress_url(
+        &scripted.requests(),
+        &format!("Lash%2FObject/{ENCODED_RESERVED_INGRESS_KEY}/run%3Fnow"),
+    );
+}
+
+#[tokio::test]
+async fn restate_object_send_url_encodes_reserved_key() {
+    let (client, scripted) = scripted_ingress_client([accepted_response("inv_object_send")]);
+
+    client
+        .send_object_json(
+            "Lash/Object",
+            RESERVED_INGRESS_KEY,
+            "run?now",
+            &serde_json::json!({}),
+        )
+        .await
+        .expect("send object");
+
+    assert_reserved_ingress_url(
+        &scripted.requests(),
+        &format!("Lash%2FObject/{ENCODED_RESERVED_INGRESS_KEY}/run%3Fnow/send"),
+    );
+}
+
 #[tokio::test]
 async fn host_transport_injects_authorization_on_ingress_submit() {
     let scripted = Arc::new(ScriptedHttpTransport::new([accepted_response("inv_auth")]));

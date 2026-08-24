@@ -421,7 +421,9 @@ impl RestateIngressClient {
         handler: &str,
         body: &T,
     ) -> Result<RestateInvocationId, RestateHttpError> {
+        let workflow = restate_path_component(workflow);
         let workflow_key = restate_path_component(workflow_key);
+        let handler = restate_path_component(handler);
         self.send_json_path(format!("{workflow}/{workflow_key}/{handler}/send"), body)
             .await
     }
@@ -469,7 +471,9 @@ impl RestateIngressClient {
         T: Serialize + ?Sized,
         R: DeserializeOwned,
     {
+        let workflow = restate_path_component(workflow);
         let workflow_key = restate_path_component(workflow_key);
+        let handler = restate_path_component(handler);
         let path = format!("{workflow}/{workflow_key}/{handler}");
         let url = format_restate_url(self.connection.ingress_url(), &path);
         let body = serde_json::to_vec(body).map_err(|source| RestateHttpError::Encode {
@@ -505,7 +509,9 @@ impl RestateIngressClient {
     where
         R: DeserializeOwned,
     {
+        let workflow = restate_path_component(workflow);
         let workflow_key = restate_path_component(workflow_key);
+        let handler = restate_path_component(handler);
         let path = format!("{workflow}/{workflow_key}/{handler}");
         let url = format_restate_url(self.connection.ingress_url(), &path);
         let response = send_request(
@@ -532,6 +538,9 @@ impl RestateIngressClient {
         T: Serialize + ?Sized,
         R: DeserializeOwned,
     {
+        let object = restate_path_component(object);
+        let object_key = restate_path_component(object_key);
+        let handler = restate_path_component(handler);
         let path = format!("{object}/{object_key}/{handler}");
         let url = format_restate_url(self.connection.ingress_url(), &path);
         let response = self.post_json("Restate object call", &url, body).await?;
@@ -550,6 +559,9 @@ impl RestateIngressClient {
         object_key: &str,
         handler: &str,
     ) -> Result<(), RestateHttpError> {
+        let object = restate_path_component(object);
+        let object_key = restate_path_component(object_key);
+        let handler = restate_path_component(handler);
         let path = format!("{object}/{object_key}/{handler}");
         let url = format_restate_url(self.connection.ingress_url(), &path);
         let response = send_request(
@@ -582,6 +594,9 @@ impl RestateIngressClient {
         handler: &str,
         body: &T,
     ) -> Result<RestateInvocationId, RestateHttpError> {
+        let object = restate_path_component(object);
+        let key = restate_path_component(key);
+        let handler = restate_path_component(handler);
         self.send_json_path(format!("{object}/{key}/{handler}/send"), body)
             .await
     }
