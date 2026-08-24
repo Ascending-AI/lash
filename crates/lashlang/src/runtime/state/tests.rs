@@ -257,6 +257,97 @@ fn canonical_encode_error_names_the_nested_value_path() {
 }
 
 #[test]
+fn heapless_snapshot_encode_refuses_a_heap_reference() {
+    let snapshot = Snapshot::new(
+        [("dangling".to_string(), Value::Ref(HeapId::from_counter(7)))]
+            .into_iter()
+            .collect(),
+    );
+
+    assert_eq!(
+        snapshot.to_canonical_bytes(),
+        Err(ContinuationError::HeaplessSnapshotContainsReference {
+            location: "globals.dangling".to_string(),
+        })
+    );
+}
+
+#[test]
+fn heapless_snapshot_decode_refuses_a_heap_reference() {
+    let wire = CanonicalSnapshot {
+        version: LASHLANG_SNAPSHOT_VERSION,
+        globals: Some(vec![CanonicalBinding {
+            name: "dangling".to_string(),
+            value: CanonicalValue::Ref {
+                value: HeapId::from_counter(7),
+            },
+        }]),
+        heap: None,
+    };
+
+    assert_eq!(
+        Snapshot::from_canonical_bytes(&named_bytes(&wire)),
+        Err(SnapshotDecodeError::HeaplessSnapshotContainsReference {
+            location: "globals.dangling".to_string(),
+        })
+    );
+}
+
+#[test]
+fn snapshot_try_from_refuses_a_heap_reference_without_the_raw_wire_validator() {
+    let wire = CanonicalSnapshot {
+        version: LASHLANG_SNAPSHOT_VERSION,
+        globals: Some(vec![CanonicalBinding {
+            name: "wrapper".to_string(),
+            value: CanonicalValue::Tuple {
+                items: vec![CanonicalValue::Ref {
+                    value: HeapId::from_counter(11),
+                }],
+            },
+        }]),
+        heap: None,
+    };
+
+    assert_eq!(
+        Snapshot::try_from(wire),
+        Err(SnapshotDecodeError::HeaplessSnapshotContainsReference {
+            location: "globals.wrapper[0]".to_string(),
+        })
+    );
+}
+
+#[test]
+fn heapless_snapshot_fixed_point_cannot_launder_a_heap_reference() {
+    let wire = CanonicalSnapshot {
+        version: LASHLANG_SNAPSHOT_VERSION,
+        globals: Some(vec![CanonicalBinding {
+            name: "wrapper".to_string(),
+            value: CanonicalValue::Tuple {
+                items: vec![CanonicalValue::Ref {
+                    value: HeapId::from_counter(11),
+                }],
+            },
+        }]),
+        heap: None,
+    };
+    let bytes = named_bytes(&wire);
+    let decoded_wire: CanonicalSnapshot =
+        rmp_serde::from_slice(&bytes).expect("crafted canonical wire");
+    assert_eq!(
+        rmp_serde::to_vec_named(&decoded_wire).expect("re-encode crafted wire"),
+        bytes,
+        "the hostile bytes themselves are a serde fixed point"
+    );
+
+    assert_eq!(
+        Snapshot::from_canonical_bytes(&bytes),
+        Err(SnapshotDecodeError::HeaplessSnapshotContainsReference {
+            location: "globals.wrapper.items[0]".to_string(),
+        })
+    );
+}
+
+#[test]
 fn canonical_decode_rejects_a_depth_bomb_before_deserializing() {
     let mut value = CanonicalValue::Null {};
     for _ in 0..120 {

@@ -12,6 +12,8 @@
 use crate::lexer::Span;
 use thiserror::Error;
 
+pub(crate) const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
+
 mod access;
 mod cache;
 mod compiler;

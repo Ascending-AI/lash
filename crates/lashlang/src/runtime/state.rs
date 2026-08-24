@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use super::{
-    CompiledProgram, ContinuationError, DateObject, ErrorKind, ErrorObject, Heap, HeapId,
-    HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots, ProjectedValue, Record,
-    RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject, UrlSearchParamsObject, Value,
-    record_with_capacity,
+    CANONICAL_NAN_BITS, CompiledProgram, ContinuationError, DateObject, ErrorKind, ErrorObject,
+    Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots,
+    ProjectedValue, Record, RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject,
+    UrlSearchParamsObject, Value, record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +15,6 @@ use wire::child_location;
 mod canonical_messagepack;
 pub use canonical_messagepack::{CanonicalMapOrder, validate_canonical_messagepack_structure};
 
-const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 // v7 carries the substrate-minted `EffectError`/`RuntimeError` error brands.
 // `error_kind` serializes by name, so a v6 reader meets an unknown variant
 // while deserializing — before it ever reads `version` — and would report a
@@ -381,6 +380,8 @@ pub enum SnapshotDecodeError {
     NonCanonicalEncoding { location: String, reason: String },
     #[error("invalid canonical snapshot encoding: {0}")]
     InvalidEncoding(String),
+    #[error("heapless snapshot contains a heap reference at `{location}`")]
+    HeaplessSnapshotContainsReference { location: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -535,7 +536,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
                             let location = child_location("globals", name);
                             Ok(CanonicalBinding {
                                 name: name.to_string(),
-                                value: CanonicalValue::from_runtime(value, &location, 0)?,
+                                value: CanonicalValue::from_heapless_runtime(value, &location, 0)?,
                             })
                         })
                         .collect::<Result<_, ContinuationError>>()?,
@@ -616,7 +617,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
     fn try_from(snapshot: CanonicalSnapshot) -> Result<Self, Self::Error> {
         match (snapshot.globals, snapshot.heap) {
             (Some(globals), None) => Ok(Self {
-                globals: bindings_into_record(globals, "globals")?,
+                globals: bindings_into_record(globals, "globals", false)?,
                 runtime_globals: Record::new(),
                 heap: Heap::default(),
                 reference_semantics: false,
@@ -631,7 +632,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                     roots,
                     objects,
                 } = heap_wire;
-                let runtime_globals = bindings_into_record(roots, "heap.roots")?;
+                let runtime_globals = bindings_into_record(roots, "heap.roots", true)?;
                 let objects = objects
                     .into_iter()
                     .map(|entry| entry.object.into_runtime().map(|object| (entry.id, object)))
@@ -698,6 +699,7 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
 fn bindings_into_record(
     bindings: Vec<CanonicalBinding>,
     location: &str,
+    references_allowed: bool,
 ) -> Result<Record, SnapshotDecodeError> {
     let mut previous: Option<&str> = None;
     let mut record = Record::new();
@@ -711,6 +713,11 @@ fn bindings_into_record(
         previous = Some(binding.name.as_str());
     }
     for binding in bindings {
+        if !references_allowed {
+            binding
+                .value
+                .ensure_heapless(&child_location(location, &binding.name))?;
+        }
         record.insert(binding.name, binding.value.into_runtime()?);
     }
     Ok(record)
@@ -1239,6 +1246,11 @@ fn validate_runtime_value(
         "string" => ("value", ExpectedValue::String),
         "image" => ("value", ExpectedValue::Image),
         "resource" => ("value", ExpectedValue::Resource),
+        "ref" => {
+            return Err(SnapshotDecodeError::HeaplessSnapshotContainsReference {
+                location: location.to_string(),
+            });
+        }
         "tuple" | "list" => ("items", ExpectedValue::RuntimeArray),
         "record" => ("fields", ExpectedValue::Bindings(BindingValueKind::Runtime)),
         "projected" => ("value", ExpectedValue::Projected),
