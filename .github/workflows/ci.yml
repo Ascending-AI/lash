@@ -1246,12 +1246,14 @@ jobs:
     # workflow can read. The same is true of a merge-queue entry's
     # `gh-readonly-queue/...` ref, and there it would also be the longest job
     # gating queue throughput. Cache warming belongs on main. Pushes whose
-    # dependency-graph inputs are unchanged skip the warm build after a
-    # first-parent diff; workflow dispatches and ambiguous histories fail open
-    # so the cache can always be recovered manually. Skipped pushes can leave
-    # sccache's workspace release objects stale, so a manual release may need
-    # to recompile changed workspace crates. That trade-off is accepted because
-    # releases are rare and manually dispatched.
+    # dependency-graph inputs are unchanged skip the warm build after diffing
+    # the complete pushed range; workflow dispatches and ambiguous histories
+    # fail open so the cache can always be recovered manually. A floating
+    # `stable` toolchain release is not itself a repository change, so it
+    # re-warms only on the next inspected-path push or manual dispatch. Skipped
+    # pushes can also leave sccache's workspace release objects stale, so a
+    # manual release may need to recompile changed workspace crates. Those
+    # trade-offs are accepted because releases are rare and manually dispatched.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     # The one job in this workflow that must not inherit the workflow-level
@@ -1306,28 +1308,33 @@ jobs:
             run_build "the push has no prior ref (initial/orphan history); failing open."
           fi
 
-          if ! git fetch --no-tags --prune --depth=2 origin "${GITHUB_SHA}"; then
-            run_build "the depth-2 history fetch failed; failing open."
+          if ! git fetch --no-tags --prune --depth=1 origin "${BEFORE_SHA}"; then
+            run_build "the pushed-range base fetch failed; failing open."
           fi
 
-          if ! git rev-parse --verify 'HEAD^' >/dev/null 2>&1; then
-            run_build "HEAD^ is unavailable after the depth-2 fetch (initial/orphan or shallow history); failing open."
+          if ! git rev-parse --verify "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
+            run_build "the pushed-range base is unavailable after fetch; failing open."
           fi
 
-          # For merge commits, HEAD^ is intentionally the first parent: the
-          # merge result is compared with the mainline state it replaced.
-          mapfile -t changed_paths < <(git diff --name-only 'HEAD^' HEAD)
+          if ! diff_output=$(git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}"); then
+            run_build "the input diff failed; failing open."
+          fi
+
+          changed_paths=()
+          if [[ -n "${diff_output}" ]]; then
+            mapfile -t changed_paths <<< "${diff_output}"
+          fi
           for path in "${changed_paths[@]}"; do
             case "${path}" in
-              Cargo.lock | Cargo.toml | */Cargo.toml | rust-toolchain | rust-toolchain.toml | .github/actions/* | .github/workflows/ci.yml)
-                run_build "cache input '${path}' changed in the first-parent diff HEAD^..HEAD."
+              Cargo.lock | Cargo.toml | */Cargo.toml | rust-toolchain | rust-toolchain.toml | .cargo/* | .github/actions/* | .github/workflows/ci.yml)
+                run_build "cache input '${path}' changed in the pushed range ${BEFORE_SHA}..${GITHUB_SHA}."
                 ;;
             esac
           done
 
           echo "run=false" >> "${GITHUB_OUTPUT}"
-          echo "Skipping Linux release-cache warm build: no cache-input paths changed in the first-parent diff HEAD^..HEAD."
-          echo "Inspected: Cargo.lock; Cargo.toml and */Cargo.toml; rust-toolchain and rust-toolchain.toml; .github/actions/**; .github/workflows/ci.yml."
+          echo "Skipping Linux release-cache warm build: no cache-input paths changed in the pushed range ${BEFORE_SHA}..${GITHUB_SHA}."
+          echo "Inspected: Cargo.lock; Cargo.toml and */Cargo.toml; rust-toolchain and rust-toolchain.toml; .cargo/**; .github/actions/**; .github/workflows/ci.yml."
 
       - name: Reclaim runner disk
         if: steps.detect.outputs.run == 'true'
