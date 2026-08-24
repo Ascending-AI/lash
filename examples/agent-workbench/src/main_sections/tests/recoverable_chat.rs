@@ -414,8 +414,7 @@ async fn retire_workbench_session(state: &AppState, session_id: &str) {
 fn assert_deleted_session_conflict(error: &AppError, session_id: &str) {
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, deleted_session_message(session_id));
-    assert!(error.terminal);
-    assert!(!error.retryable);
+    assert_eq!(error.verdict, crate::AppErrorVerdict::Terminal);
 }
 
 #[test]

@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
-    AppError, AppState, ButtonChoice, CRON_SCHEDULE_SOURCE_TYPE, ChannelTurnEvents, ModelSelection,
-    TurnStreamState, apply_model_selection_to_session, assistant_text_for_display,
-    commit_assistant_transcript, enqueue_button_trigger_command,
+    AppError, AppErrorVerdict, AppState, ButtonChoice, CRON_SCHEDULE_SOURCE_TYPE,
+    ChannelTurnEvents, ModelSelection, TurnStreamState, apply_model_selection_to_session,
+    assistant_text_for_display, commit_assistant_transcript, enqueue_button_trigger_command,
     enqueue_mail_received_trigger_command, model_spec_from_selection,
     restate_ingress::{submit_restate_empty, submit_restate_workflow_json},
     workbench_owns_committed_agent_reply, workbench_turn_assistant_message_id,
@@ -1068,30 +1068,41 @@ pub(crate) async fn terminalize_turn_execution(
                 .map_err(settlement_handler_error)?;
             Ok(())
         }
-        Ok(Err(err)) if err.retryable => {
-            state.trace_for_session(
-                session_id,
-                "turn.restate.retrying",
-                json!({
-                    "operation": trace_name,
-                    "session_id": session_id,
-                    "turn_id": turn_id,
-                    "error": err.message,
-                }),
-            );
-            Err(HandlerError::from(err))
-        }
-        Ok(Err(err)) => {
-            let message = err.message.clone();
-            // Settlement is the durable boundary for this attempt. If it
-            // fails, that failure necessarily masks the original turn error
-            // because publishing either outcome before settlement would lie.
-            settle_workbench_turn(state, session_id, turn_id)
-                .await
-                .map_err(settlement_handler_error)?;
-            record_turn_failure(state, session_id, turn_id, trace_name, &message);
-            Err(terminal_handler_error(err))
-        }
+        Ok(Err(err)) => match err.verdict {
+            AppErrorVerdict::Retryable => {
+                state.trace_for_session(
+                    session_id,
+                    "turn.restate.retrying",
+                    json!({
+                        "operation": trace_name,
+                        "session_id": session_id,
+                        "turn_id": turn_id,
+                        "error": err.message,
+                    }),
+                );
+                Err(HandlerError::from(err))
+            }
+            AppErrorVerdict::Terminal => {
+                let message = err.message.clone();
+                // Settlement is the durable boundary for this attempt. If it
+                // fails, that failure necessarily masks the original turn error
+                // because publishing either outcome before settlement would lie.
+                settle_workbench_turn(state, session_id, turn_id)
+                    .await
+                    .map_err(settlement_handler_error)?;
+                record_turn_failure(state, session_id, turn_id, trace_name, &message);
+                Err(terminal_handler_error(err))
+            }
+            AppErrorVerdict::Ambiguous => {
+                // Ambiguous turn failures terminate after their settlement.
+                let message = err.message.clone();
+                settle_workbench_turn(state, session_id, turn_id)
+                    .await
+                    .map_err(settlement_handler_error)?;
+                record_turn_failure(state, session_id, turn_id, trace_name, &message);
+                Err(terminal_handler_error(err))
+            }
+        },
         Err(payload) => {
             let message = panic_payload_message(payload);
             let message = format!("Restate-backed turn panicked: {message}");
@@ -1488,10 +1499,13 @@ fn terminal_handler_error(err: AppError) -> HandlerError {
 }
 
 fn settlement_handler_error(err: AppError) -> HandlerError {
-    if err.terminal {
-        terminal_handler_error(err)
-    } else {
-        HandlerError::from(err)
+    match err.verdict {
+        AppErrorVerdict::Retryable => HandlerError::from(err),
+        AppErrorVerdict::Terminal => terminal_handler_error(err),
+        AppErrorVerdict::Ambiguous => {
+            // Ambiguous settlement failures remain retryable.
+            HandlerError::from(err)
+        }
     }
 }
 

@@ -226,8 +226,7 @@ fn runtime_shape_uses_the_shared_terminal_classifier() {
         }),
     ));
 
-    assert!(error.terminal);
-    assert!(!error.retryable);
+    assert_eq!(error.verdict, crate::AppErrorVerdict::Terminal);
     assert_eq!(
         error.message,
         crate::deleted_session_message("retired-session")
@@ -304,8 +303,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         classified.message,
         crate::deleted_session_message(session_id)
     );
-    assert!(classified.terminal);
-    assert!(!classified.retryable);
+    assert_eq!(classified.verdict, crate::AppErrorVerdict::Terminal);
 
     let rendered = <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(
         &super::classified_plugin_handler_error(error),
@@ -672,6 +670,55 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
         .await,
         1,
         "a deterministic Restate decode failure must settle on its first handler attempt"
+    );
+}
+
+#[tokio::test]
+async fn turn_body_reader_treats_ambiguous_errors_as_terminal() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::new(lash::triggers::InMemoryTriggerStore::default()),
+    )
+    .await;
+    let session_id = state.current_session_id();
+    state
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("open session for ambiguous turn-body test")
+        .close()
+        .await
+        .expect("close session for ambiguous turn-body test");
+
+    let error = super::terminalize_turn_execution(
+        &state,
+        &session_id,
+        "fig1858-ambiguous-turn-body",
+        "fig1858.ambiguous_turn_body",
+        Ok(Err(AppError::internal("ambiguous turn failure"))),
+    )
+    .await
+    .expect_err("an ambiguous turn-body error must be terminalized");
+    let rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
+            .to_string();
+    assert!(
+        rendered.starts_with("Terminal error"),
+        "ambiguous turn-body errors must terminate: {rendered}"
+    );
+}
+
+#[test]
+fn settlement_reader_treats_ambiguous_errors_as_retryable() {
+    let error = super::settlement_handler_error(AppError::internal("ambiguous settlement failure"));
+    let rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
+            .to_string();
+    assert!(
+        !rendered.starts_with("Terminal error"),
+        "ambiguous settlement errors must remain retryable: {rendered}"
     );
 }
 
