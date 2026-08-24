@@ -100,3 +100,69 @@ fail-fast = false
 # retry ever be added here, it must first earn a `.github/test-quarantines.json`
 # entry (ADR 0008), and even then a flaky outcome fails the run.
 flaky-result = "fail"
+
+# CI bounds an ordinary test at five minutes: the baseline P99 was 1.209s and
+# the slowest completed non-special test was 42.729s. A slow test is still a
+# failure when this bound is reached; termination only releases the shard.
+# Keep the local default report-only so developers retain the full diagnostic
+# run for tests whose cost depends on a warm or service-backed workspace.
+slow-timeout = { period = "300s", terminate-after = 1 }
+
+# Start the nested-Cargo fault probes first. Isolated runs measured 205-219s;
+# the cold full-workspace run reached 1320s under nested-Cargo contention, so
+# retain a 1500s ceiling without changing their existing two-thread group.
+[[profile.ci.overrides]]
+filter = '''
+  package(lash-core)
+  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+'''
+priority = 100
+slow-timeout = { period = "300s", terminate-after = 5 }
+
+# Trybuild UI tests are legitimate long runners. CI's warmed fixture path is
+# much shorter, while a cold local run measured 1204s for one test and was
+# still compiling the second at 2781s. Keep the cap finite and above both
+# observed cold paths.
+[[profile.ci.overrides]]
+filter = 'package(lash-runtime) & binary(ui) & test(attachment_gc_requires_explicit_root_set)'
+priority = 99
+slow-timeout = { period = "600s", terminate-after = 5 }
+
+[[profile.ci.overrides]]
+filter = 'package(lash-runtime) & binary(ui) & test(model_selection_requires_model_and_variant_together)'
+priority = 99
+slow-timeout = { period = "600s", terminate-after = 5 }
+
+# Generated simulation/minimizer cases are the other measured tail. Their
+# completed cold-run times were 182-418s; allow the 411.799s runner case and
+# 418.254s minimizer case, but still terminate a pathological run.
+[[profile.ci.overrides]]
+filter = 'package(lash-sim) & test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)'
+priority = 98
+slow-timeout = { period = "600s", terminate-after = 1 }
+
+[[profile.ci.overrides]]
+filter = 'package(lash-sim) & test(minimize::tests::minimizer_preserves_named_contract_execution_fixture_reasons)'
+priority = 98
+slow-timeout = { period = "600s", terminate-after = 1 }
+
+[[profile.ci.overrides]]
+filter = 'package(lash-sim) & test(minimize::tests::minimizer_preserves_provider_worker_backend_fixture_reasons)'
+priority = 98
+slow-timeout = { period = "600s", terminate-after = 1 }
+
+[[profile.ci.overrides]]
+filter = 'package(lash-sim) & test(minimize::tests::minimizer_writes_replayable_regression_package)'
+priority = 98
+slow-timeout = { period = "600s", terminate-after = 1 }
+
+# The Unicode RGI tests are the longest ordinary tests (66.525s, 130.957s),
+# so start them with the long tail while leaving the five-minute default
+# termination bound intact.
+[[profile.ci.overrides]]
+filter = '''
+  package(lash-regress)
+  & binary(unicodesets)
+  & test(/unicode_sets_rgi_emoji_.*/)
+'''
+priority = 97
