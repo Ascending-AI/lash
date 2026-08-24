@@ -44,6 +44,21 @@ pub struct RemoteTurnReport {
 }
 
 impl RemoteTurnReport {
+    /// Decodes one JSON report after refusing a mismatched protocol version,
+    /// before the report's versioned payload vocabulary is deserialized.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        Self::decode_json_expecting_protocol_version(bytes, crate::REMOTE_PROTOCOL_VERSION)
+    }
+
+    pub(crate) fn decode_json_expecting_protocol_version(
+        bytes: &[u8],
+        expected_version: u32,
+    ) -> Result<Self, RemoteProtocolError> {
+        let report: Self = crate::decode_versioned_json(bytes, expected_version)?;
+        report.validate()?;
+        Ok(report)
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnReport", "session_id", &self.session_id)?;
