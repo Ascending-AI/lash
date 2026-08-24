@@ -260,4 +260,5 @@ async fn a_suspended_cleanup_chain_exposes_its_exception_state() {
         .as_ref()
         .expect("a routed runtime failure keeps its origin");
     assert_eq!(origin.error, RuntimeError::LenUnsupported);
+    assert_eq!(finally.handler_stack_depth, 1);
 }

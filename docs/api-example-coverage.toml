@@ -99,7 +99,7 @@ assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:250#asse
 symbol = "lashlang::VmFinallyContinuation"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/embedding_lashlang_functions.rs:252#let finally: &VmFinallyContinuation = continuation"
-assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:262#assert_eq!(origin.error, RuntimeError::LenUnsupported);"
+assertion = "examples/docs-snippets/src/embedding_lashlang_functions.rs:263#assert_eq!(finally.handler_stack_depth, 1);"
 
 [[low_level_api]]
 symbol = "lashlang::VmFinallyCompletionContinuation"
