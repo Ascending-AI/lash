@@ -1,0 +1,111 @@
+# Dependency policy for the locked Lash workspace graph.
+
+[advisories]
+version = 2
+# Current main carries h2 0.4.15 and the quick-xml advisories below; all are
+# recorded until their owning upstream dependency permits a patched version.
+ignore = [
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.4.15 is selected by the current hyper graph; remove when the locked graph moves to the patched h2 version" },
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.39.4 is required by object_store 0.13.2; remove when object_store permits quick-xml 0.41 or newer" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39.4 is required by object_store 0.13.2; remove when object_store permits quick-xml 0.41 or newer" },
+]
+
+[bans]
+# New duplicate versions fail. The three existing, reviewed exceptions below
+# remain visible in this file and must be removed when their owners converge.
+multiple-versions = "deny"
+wildcards = "allow"
+
+skip = [
+    # Existing transitive duplicate; revisit when jsonschema's dependency
+    # graph converges on bit-set 0.8.
+    { crate = "bit-set@0.5.3", reason = "jsonschema 0.18.3 retains bit-set 0.5; remove when its upstream graph converges" },
+    { crate = "bit-vec@0.6.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on bit-vec 0.8" },
+    { crate = "bitflags@1.3.2", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on bitflags 2" },
+    { crate = "block-buffer@0.10.4", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on block-buffer 0.12" },
+    { crate = "cfg_aliases@0.1.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on cfg_aliases 0.2" },
+    { crate = "compact_str@0.7.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on compact_str 0.9" },
+    { crate = "cpufeatures@0.2.17", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on cpufeatures 0.3" },
+    { crate = "crypto-common@0.1.7", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on crypto-common 0.2" },
+    { crate = "darling@0.20.11", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on darling 0.23" },
+    { crate = "darling_core@0.20.11", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on darling_core 0.23" },
+    { crate = "darling_macro@0.20.11", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on darling_macro 0.23" },
+    { crate = "digest@0.10.7", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on digest 0.11" },
+    { crate = "foldhash@0.1.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on foldhash 0.2" },
+    { crate = "getrandom@0.2.17", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on getrandom 0.4" },
+    { crate = "getrandom@0.3.4", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on getrandom 0.4" },
+    { crate = "hashbrown@0.14.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
+    { crate = "hashbrown@0.15.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
+    { crate = "hashbrown@0.16.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on hashbrown 0.17" },
+    { crate = "nix@0.28.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on nix 0.31" },
+    { crate = "phf@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf 0.12" },
+    { crate = "phf_shared@0.11.3", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on phf_shared 0.12" },
+    { crate = "r-efi@5.3.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on r-efi 6" },
+    { crate = "rand@0.8.7", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on rand 0.10" },
+    { crate = "rand@0.9.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on rand 0.10" },
+    { crate = "rand_chacha@0.3.1", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on rand_chacha 0.9" },
+    { crate = "rand_core@0.6.4", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on rand_core 0.10" },
+    { crate = "rand_core@0.9.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on rand_core 0.10" },
+    { crate = "redox_syscall@0.5.18", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on redox_syscall 0.9" },
+    { crate = "regress@0.10.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on regress 0.11" },
+    { crate = "schemars_derive@0.8.22", reason = "pre-existing transitive duplicate owned by the workspace schemars 0.8 and rmcp schemars 1.x stacks; remove after major convergence" },
+    { crate = "serde_derive_internals@0.29.1", reason = "pre-existing transitive duplicate owned by the workspace schemars 0.8 and rmcp schemars 1.x stacks; remove after major convergence" },
+    { crate = "sha2@0.10.9", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on sha2 0.11" },
+    { crate = "siphasher@0.3.11", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on siphasher 1" },
+    { crate = "thiserror@1.0.69", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on thiserror 2" },
+    { crate = "thiserror-impl@1.0.69", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on thiserror-impl 2" },
+    { crate = "wasm-streams@0.4.2", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on wasm-streams 0.5" },
+    { crate = "windows-sys@0.48.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-sys 0.61" },
+    { crate = "windows-sys@0.52.0", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-sys 0.61" },
+    { crate = "windows-targets@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows-targets 0.52" },
+    { crate = "windows_aarch64_gnullvm@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
+    { crate = "windows_aarch64_msvc@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
+    { crate = "windows_i686_gnu@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
+    { crate = "windows_i686_msvc@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
+    { crate = "windows_x86_64_gnu@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
+    { crate = "windows_x86_64_gnullvm@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
+    { crate = "windows_x86_64_msvc@0.48.5", reason = "pre-existing transitive duplicate; remove when upstream dependency graph converges on windows targets 0.52" },
+    # reqwest 0.12.28 is owned by object_store 0.13.2. Remove when
+    # object_store supports the workspace reqwest 0.13 line.
+    { crate = "reqwest@0.12.28", reason = "object_store 0.13.2 still requires reqwest 0.12; remove when object_store supports reqwest 0.13" },
+    # schemars 0.8.22 is the workspace API. Remove when rmcp supports the
+    # workspace schemars major or the workspace can migrate without an API dance.
+    { crate = "schemars@0.8.22", reason = "Lash workspace API remains on schemars 0.8 while rmcp 1.8.0 requires 1.2; remove after rmcp/workspace major convergence" },
+    # syn 3.0.3 is pulled by rmcp's schemars 1.x derive stack. Remove when
+    # that upstream stack no longer needs syn 3.
+    { crate = "syn@3.0.3", reason = "rmcp 1.8.0 schemars 1.x derive stack requires syn 3; remove when upstream converges on syn 2" },
+]
+skip-tree = []
+
+[licenses]
+version = 2
+# Explicitly permissive baseline for crates.io dependencies; add a narrowly
+# scoped exception or clarification when a future crate uses another license.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+# The local-only Restate worker runbook is not published and has no manifest
+# license; its dependencies remain checked while the private root is ignored.
+ignore = true
+
+[sources]
+# The workspace currently consumes registry crates from crates.io only. Git
+# sources and any other registry must be reviewed explicitly before use.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
