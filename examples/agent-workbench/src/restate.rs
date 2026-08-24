@@ -720,7 +720,7 @@ async fn run_user_turn(
     request: WorkbenchTurnWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
-    let mut input = workbench_turn_input(&state, &request).await?;
+    let input = workbench_turn_input(&state, &request).await?;
     let turn_model_id = request.model.model.clone();
     let turn_model = model_spec_from_selection(request.model);
     let session = state
@@ -733,7 +733,6 @@ async fn run_user_turn(
     let ui_events = ChannelTurnEvents {
         turn_state: Arc::clone(&turn_state),
     };
-    input.trace_turn_id = Some(request.turn_id.clone());
     let output = session
         .turn(input)
         .turn_id(request.turn_id.clone())

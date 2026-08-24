@@ -1,8 +1,8 @@
 //! Private helpers for the RLM subagent tool catalog.
 
 use lash_core::{
-    CausalRef, InputItem, SessionCreateRequest, SessionSnapshot, SessionToolAccess,
-    SubagentSessionContext, ToolDefinition, ToolOutcome, TurnInput, facade_support::AssembledTurn,
+    CausalRef, SessionCreateRequest, SessionSnapshot, SessionToolAccess, SubagentSessionContext,
+    ToolDefinition, ToolOutcome, TurnInput, facade_support::AssembledTurn,
     facade_support::SessionSpec, facade_support::TurnFinish, facade_support::TurnOutcome,
     facade_support::TurnStop,
 };
@@ -127,13 +127,7 @@ pub(crate) fn required_string(args: &Value, key: &str) -> Result<String, String>
 }
 
 pub(crate) fn turn_input_for_task(text: String) -> TurnInput {
-    TurnInput {
-        items: vec![InputItem::Text { text }],
-        protocol_turn_options: None,
-        trace_turn_id: None,
-        protocol_extension: None,
-        turn_context: lash_core::TurnContext::default(),
-    }
+    TurnInput::text(text)
 }
 
 pub(crate) fn capability_list_for_description(capability_names: &[String]) -> String {

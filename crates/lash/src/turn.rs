@@ -323,11 +323,15 @@ impl TurnBuilder {
         AdvancedTurn { builder: self }
     }
 
-    fn resolved_turn_id(&self) -> String {
-        self.turn_id
-            .clone()
-            .or_else(|| self.input.trace_turn_id.clone())
-            .unwrap_or_else(fresh_turn_id)
+    fn resolved_turn_id(
+        &self,
+        scoped_effect_controller: Option<&ScopedEffectController<'_>>,
+    ) -> Option<String> {
+        self.turn_id.clone().or_else(|| {
+            scoped_effect_controller
+                .filter(|controller| controller.execution_scope().validates_turn_trace_id())
+                .map(|controller| controller.scope_id().to_string())
+        })
     }
 
     fn turn_scope(&self, turn_id: &str) -> lash_core::ExecutionScope {
@@ -337,7 +341,7 @@ impl TurnBuilder {
 
     pub(crate) fn prepare(
         mut self,
-        trace_turn_id: Option<String>,
+        turn_id: Option<String>,
     ) -> Result<(RuntimeHandle, TurnInput, CancellationToken, TurnCancelGuard)> {
         if let Some(options) = self.protocol_turn_options {
             self.input.protocol_turn_options = Some(options);
@@ -345,8 +349,8 @@ impl TurnBuilder {
         if let Some(provider) = self.provider {
             self.input.turn_context.set_provider(provider);
         }
-        if let Some(trace_turn_id) = trace_turn_id {
-            self.input.trace_turn_id = Some(trace_turn_id);
+        if let Some(turn_id) = turn_id {
+            self.input.trace_turn_id = Some(turn_id);
         }
         validate_required_plugin_inputs(&self.active_plugins, &self.input)?;
         self.input
@@ -363,7 +367,7 @@ impl TurnBuilder {
         events: &dyn TurnActivitySink,
         effect_host: &dyn EffectHost,
     ) -> Result<TurnReport> {
-        let turn_id = self.resolved_turn_id();
+        let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
         let scoped_effect_controller = effect_host.scoped(self.turn_scope(&turn_id))?;
         self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
             .await
@@ -374,7 +378,7 @@ impl TurnBuilder {
         events: &dyn TurnActivitySink,
         controller: &dyn RuntimeEffectController,
     ) -> Result<TurnReport> {
-        let turn_id = self.resolved_turn_id();
+        let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
         let scoped_effect_controller =
             ScopedEffectController::borrowed(controller, self.turn_scope(&turn_id))?;
         self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
@@ -385,9 +389,9 @@ impl TurnBuilder {
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
-        trace_turn_id: Option<String>,
+        turn_id: Option<String>,
     ) -> Result<TurnReport> {
-        let (runtime, input, cancel, _cancel_guard) = self.prepare(trace_turn_id)?;
+        let (runtime, input, cancel, _cancel_guard) = self.prepare(turn_id)?;
         stream_prepared_turn(
             &runtime,
             input,
@@ -399,7 +403,7 @@ impl TurnBuilder {
     }
 
     fn stream_with_effect_host(self, effect_host: &dyn EffectHost) -> Result<TurnStream> {
-        let turn_id = self.resolved_turn_id();
+        let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
         let scoped_effect_controller = effect_host
             .scoped_static(self.turn_scope(&turn_id))?
             .ok_or(EmbedError::StaticTurnStreamRequiresStaticEffectHost)?;
@@ -409,9 +413,9 @@ impl TurnBuilder {
     fn stream_with_scope(
         self,
         scoped_effect_controller: ScopedEffectController<'static>,
-        trace_turn_id: Option<String>,
+        turn_id: Option<String>,
     ) -> Result<TurnStream> {
-        let (runtime, input, cancel, cancel_guard) = self.prepare(trace_turn_id)?;
+        let (runtime, input, cancel, cancel_guard) = self.prepare(turn_id)?;
         let (tx, rx) = mpsc::channel(64);
         let sink = ChannelTurnActivitySink { tx };
         let completion = tokio::spawn(async move {
@@ -563,9 +567,11 @@ impl AdvancedTurn {
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<TurnReport> {
-        let trace_turn_id = trace_turn_id_for_scope(&self.builder, &scoped_effect_controller);
+        let turn_id = self
+            .builder
+            .resolved_turn_id(Some(&scoped_effect_controller));
         self.builder
-            .stream_to_with_scope(events, scoped_effect_controller, trace_turn_id)
+            .stream_to_with_scope(events, scoped_effect_controller, turn_id)
             .await
     }
 
@@ -573,9 +579,11 @@ impl AdvancedTurn {
         self,
         scoped_effect_controller: ScopedEffectController<'static>,
     ) -> Result<TurnStream> {
-        let trace_turn_id = trace_turn_id_for_scope(&self.builder, &scoped_effect_controller);
+        let turn_id = self
+            .builder
+            .resolved_turn_id(Some(&scoped_effect_controller));
         self.builder
-            .stream_with_scope(scoped_effect_controller, trace_turn_id)
+            .stream_with_scope(scoped_effect_controller, turn_id)
     }
 
     /// Run the turn while sending raw lower-level runtime events to `events`.
@@ -584,8 +592,10 @@ impl AdvancedTurn {
         events: &dyn EventSink,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<TurnReport> {
-        let trace_turn_id = trace_turn_id_for_scope(&self.builder, &scoped_effect_controller);
-        let (runtime, input, cancel, _cancel_guard) = self.builder.prepare(trace_turn_id)?;
+        let turn_id = self
+            .builder
+            .resolved_turn_id(Some(&scoped_effect_controller));
+        let (runtime, input, cancel, _cancel_guard) = self.builder.prepare(turn_id)?;
         stream_prepared_turn(
             &runtime,
             input,
@@ -1091,28 +1101,6 @@ fn fresh_queue_drain_id() -> String {
     format!("queue-drain:{}", fresh_turn_id())
 }
 
-fn trace_turn_id_for_scope(
-    builder: &TurnBuilder,
-    scoped_effect_controller: &ScopedEffectController<'_>,
-) -> Option<String> {
-    if scoped_effect_controller
-        .execution_scope()
-        .validates_turn_trace_id()
-    {
-        Some(
-            builder
-                .turn_id
-                .clone()
-                .unwrap_or_else(|| scoped_effect_controller.scope_id().to_string()),
-        )
-    } else {
-        builder
-            .turn_id
-            .clone()
-            .or_else(|| builder.input.trace_turn_id.clone())
-    }
-}
-
 pub(crate) async fn stream_next_queued_prepared_turn(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
@@ -1399,18 +1387,33 @@ pub struct TurnReport {
 
 impl TurnReport {
     fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
+        // Keep this exhaustive so adding a core turn-result field forces the
+        // facade projection to be reviewed alongside the remote projection.
+        let lash_core::facade_support::AssembledTurn {
+            state,
+            turn_input_acceptance,
+            turn_cancel_input_outcome,
+            outcome,
+            assistant_output,
+            execution,
+            token_usage,
+            children_usage,
+            llm_calls,
+            tool_calls,
+            errors,
+        } = turn;
         Self {
-            state: turn.state,
-            outcome: turn.outcome,
-            assistant_output: turn.assistant_output,
-            usage: turn.token_usage,
-            children_usage: turn.children_usage,
-            llm_calls: turn.llm_calls,
-            tool_calls: turn.tool_calls,
-            execution: turn.execution,
-            errors: turn.errors,
-            acceptance: turn.turn_input_acceptance,
-            cancel_input_outcome: turn.turn_cancel_input_outcome,
+            state,
+            outcome,
+            assistant_output,
+            usage: token_usage,
+            children_usage,
+            llm_calls,
+            tool_calls,
+            execution,
+            errors,
+            acceptance: turn_input_acceptance,
+            cancel_input_outcome: turn_cancel_input_outcome,
         }
     }
 

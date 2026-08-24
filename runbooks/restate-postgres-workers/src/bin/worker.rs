@@ -230,8 +230,7 @@ impl AppState {
             "main",
             Some(cursor_text.clone()),
         );
-        let input = TurnInput::text(prompt_for_request(&request))
-            .with_trace_turn_id(request.workflow_id.clone());
+        let input = TurnInput::text(prompt_for_request(&request));
         let turn = session
             .turn(input)
             .turn_id(request.workflow_id.clone())

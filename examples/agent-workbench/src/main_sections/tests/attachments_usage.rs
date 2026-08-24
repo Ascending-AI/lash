@@ -223,10 +223,9 @@ async fn run_attachment_usage_gate(
         },
         attachment_id: Some(uploaded.attachment.id.to_string()),
     };
-    let mut input = restate::workbench_turn_input(&state, &request)
+    let input = restate::workbench_turn_input(&state, &request)
         .await
         .expect("build attachment turn input through workbench adapter");
-    input.trace_turn_id = Some(turn_id.clone());
     let session = state
         .core
         .session(session_id.clone())

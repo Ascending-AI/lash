@@ -403,15 +403,7 @@ async fn run_once_trace_jsonl(
         let turn_before_alloc = allocator_stats();
         let turn_before_memory = process_memory_sample();
         let turn_started = Instant::now();
-        let turn_input = TurnInput {
-            items: vec![InputItem::Text {
-                text: benchmark_prompt(scenario, turn_index),
-            }],
-            protocol_turn_options: None,
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        };
+        let turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
         let cancel = CancellationToken::new();
         let turn = runtime_perf_timed(
             scenario,
