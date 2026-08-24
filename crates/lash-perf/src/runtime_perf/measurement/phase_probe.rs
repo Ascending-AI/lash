@@ -12,6 +12,7 @@ struct RuntimePerfPhaseProbeState {
     open: HashMap<String, Vec<PhaseStart>>,
     completed: BTreeMap<String, RuntimePerfPhaseRunResult>,
     first_started_at: Option<Instant>,
+    deferred_closes: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -36,6 +37,20 @@ impl lash::runtime::RuntimeEffectController for ScopedPerfEffectController {
 }
 
 impl RuntimePerfPhaseProbe {
+    fn catalog_observation_stage(&self, warm: bool) -> u8 {
+        let state = self.state.lock_recover();
+        if state.completed.contains_key("post_commit_delivery") {
+            return 2;
+        }
+        if warm
+            && !state.open.contains_key("prepared_turn")
+            && !state.completed.contains_key("prepared_turn")
+        {
+            return 0;
+        }
+        1
+    }
+
     pub(crate) fn take_completed(&self) -> BTreeMap<String, RuntimePerfPhaseRunResult> {
         let mut state = self.state.lock_recover();
         // Async process phases can still be running at take; leave open spans dropped.
@@ -71,6 +86,34 @@ impl RuntimePerfPhaseProbe {
             .and_then(|started| started.checked_duration_since(operation_started))
             .map_or(0.0, |elapsed| round3(elapsed.as_secs_f64() * 1000.0))
     }
+
+    fn defer_named_close(&self, phase: &str) {
+        let inserted = self
+            .state
+            .lock_recover()
+            .deferred_closes
+            .insert(phase.to_string());
+        assert!(inserted, "named phase close already deferred: {phase}");
+    }
+
+    fn close_deferred_named(&self, phase: &str) {
+        let mut state = self.state.lock_recover();
+        assert!(
+            state.deferred_closes.remove(phase),
+            "named phase close was not deferred: {phase}"
+        );
+        let starts = state
+            .open
+            .get_mut(phase)
+            .unwrap_or_else(|| panic!("deferred named phase never opened: {phase}"));
+        let start = starts
+            .pop()
+            .unwrap_or_else(|| panic!("deferred named phase had no start: {phase}"));
+        if starts.is_empty() {
+            state.open.remove(phase);
+        }
+        record_completed_phase(&mut state.completed, phase.to_string(), start);
+    }
 }
 
 impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
@@ -85,19 +128,28 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
     fn begin_named(&self, phase: &str) {
         let mut state = self.state.lock_recover();
         state.first_started_at.get_or_insert_with(Instant::now);
+        if state.deferred_closes.contains(phase)
+            && state.open.get(phase).is_some_and(|starts| !starts.is_empty())
+        {
+            return;
+        }
+        let start = PhaseStart {
+            started_at: Instant::now(),
+            alloc_before: allocator_stats(),
+            memory_before: process_memory_sample(),
+        };
         state
             .open
             .entry(phase.to_string())
             .or_default()
-            .push(PhaseStart {
-                started_at: Instant::now(),
-                alloc_before: allocator_stats(),
-                memory_before: process_memory_sample(),
-            });
+            .push(start);
     }
 
     fn end_named(&self, phase: &str) {
         let mut state = self.state.lock_recover();
+        if state.deferred_closes.contains(phase) {
+            return;
+        }
         let Some(starts) = state.open.get_mut(phase) else {
             return;
         };
@@ -238,6 +290,8 @@ async fn run_once_inner(
         | RuntimePerfScenario::RlmLargePrint
         | RuntimePerfScenario::RlmStreamedPairedLashlang
         | RuntimePerfScenario::RlmLargeToolCatalog
+        | RuntimePerfScenario::RlmToolCatalogCold
+        | RuntimePerfScenario::RlmToolCatalogWarm
         | RuntimePerfScenario::RlmObliqueStackMix
         | RuntimePerfScenario::OpenAiCompatStream
         | RuntimePerfScenario::StandardShellOutput
@@ -336,6 +390,13 @@ async fn run_once_inner(
     let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
     let after_seed_memory = process_memory_sample();
 
+    if matches!(scenario, RuntimePerfScenario::RlmToolCatalogWarm) {
+        runtime
+            .refresh_tool_catalog("runtime-perf-catalog-warm")
+            .await?;
+        runtime.await_background_work().await?;
+    }
+
     let mut turns = Vec::with_capacity(chat_turns);
     let mut extra_counters = BTreeMap::new();
     for turn_index in 0..chat_turns {
@@ -415,26 +476,12 @@ async fn run_once_inner(
         }
         prepare_turn(&mut runtime, scenario, turn_index).await?;
 
-        let deep_turn_id = matches!(scenario, RuntimePerfScenario::DeepTurnComposition)
-            .then(|| format!("runtime-perf-deep-turn-{}", lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0));
-        if let Some(turn_id) = deep_turn_id.as_deref() {
-            runtime
-                .enqueue_active_turn_input(
-                    turn_id,
-                    TurnInput::text("deep composition ingress marker"),
-                    &format!("deep-composition-ingress-{}", turn_index + 1),
-                )
-                .await?;
-        }
+        let catalog_variant = match scenario {
+            RuntimePerfScenario::RlmToolCatalogCold => Some("cold"),
+            RuntimePerfScenario::RlmToolCatalogWarm => Some("warm"),
+            _ => None,
+        };
 
-        let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
-        runtime.set_turn_phase_probe(phase_probe.clone()).await;
-
-        let before_turn_usage = runtime.usage_report();
-        let commit_measurement_start = runtime.store_metrics().commit_measurements().len();
-        let turn_before_alloc = allocator_stats();
-        let turn_before_memory = process_memory_sample();
-        let turn_started = Instant::now();
         let mut turn_input = TurnInput {
             items: vec![InputItem::Text {
                 text: benchmark_prompt(scenario, turn_index),
@@ -448,7 +495,59 @@ async fn run_once_inner(
             turn_input =
                 turn_input.rlm_project(rlm_perf_projected_bindings(scenario, turn_index)?)?;
         }
+
+        let phase_probe = Arc::new(RuntimePerfPhaseProbe::default());
+        runtime.set_turn_phase_probe(phase_probe.clone()).await;
+
+        if matches!(scenario, RuntimePerfScenario::RlmToolCatalogCold) {
+            let refresh_key = format!("runtime-perf-catalog-cold-{turn_index}");
+            runtime.suppress_tool_catalog_composition_counting();
+            runtime.refresh_tool_catalog(&refresh_key).await?;
+            runtime.resume_tool_catalog_composition_counting();
+        }
+
+        let deep_turn_id = matches!(scenario, RuntimePerfScenario::DeepTurnComposition)
+            .then(|| format!("runtime-perf-deep-turn-{}", lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0));
+        if let Some(turn_id) = deep_turn_id.as_deref() {
+            runtime
+                .enqueue_active_turn_input(
+                    turn_id,
+                    TurnInput::text("deep composition ingress marker"),
+                    &format!("deep-composition-ingress-{}", turn_index + 1),
+                )
+                .await?;
+        }
+
+        let trigger_end_to_end = matches!(scenario, RuntimePerfScenario::RlmTriggerMailPipeline);
+        if trigger_end_to_end {
+            phase_probe.defer_named_close("trigger.occurrence_to_delivery");
+        }
+
+        let before_turn_usage = runtime.usage_report();
+        let commit_measurement_start = runtime.store_metrics().commit_measurements().len();
+        if let Some(variant) = catalog_variant {
+            let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics()?;
+            extra_counters.insert(
+                format!("tool_catalog.{variant}.registry_manifest_count"),
+                manifest_count as u64,
+            );
+            extra_counters.insert(
+                format!("tool_catalog.{variant}.registry_rendered_bytes"),
+                rendered_bytes as u64,
+            );
+            let composition_probe = Arc::clone(&phase_probe);
+            let warm = variant == "warm";
+            runtime.arm_tool_catalog_observation(
+                variant,
+                phase_probe.clone(),
+                Arc::new(move || composition_probe.catalog_observation_stage(warm)),
+            );
+        }
+        let turn_before_alloc = allocator_stats();
+        let turn_before_memory = process_memory_sample();
+        let turn_started = Instant::now();
         let cancel = CancellationToken::new();
+        let mut trigger_delivery_observation = None;
         let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffectController) {
             let effect_controller = ScopedPerfEffectController;
             let turn_id = format!("runtime-perf-scoped-{}", turn_index + 1);
@@ -530,6 +629,20 @@ async fn run_once_inner(
                 runtime.run_turn_with_id(turn_input, turn_id, cancel),
             )
             .await
+        } else if trigger_end_to_end {
+            let (turn, observation) = tokio::join!(
+                runtime_perf_timed(
+                    scenario,
+                    turn_index,
+                    "run_turn",
+                    Some(cancel.clone()),
+                    runtime.run_turn(turn_input, cancel),
+                ),
+                runtime.observe_trigger_delivery_terminals(),
+            );
+            phase_probe.close_deferred_named("trigger.occurrence_to_delivery");
+            trigger_delivery_observation = Some(observation?);
+            turn
         } else {
             runtime_perf_timed(
                 scenario,
@@ -554,8 +667,28 @@ async fn run_once_inner(
         } else {
             validate_runtime_perf_turn(scenario, turn_index, &turn)?;
         }
-        let run_turn_ms = elapsed_ms(turn_started);
-        let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
+        if let Some(variant) = catalog_variant {
+            let observation = runtime.finish_tool_catalog_observation();
+            extra_counters.insert(
+                format!("tool_catalog.{variant}.cache_state"),
+                observation.cache_state,
+            );
+            extra_counters.insert(
+                format!("tool_catalog.{variant}.setup_recomposition_count"),
+                observation.setup_recomposition_count,
+            );
+            extra_counters.insert(
+                format!("tool_catalog.{variant}.recomposition_count"),
+                observation.recomposition_count,
+            );
+        }
+        let measurement_start = PhaseStart {
+            started_at: turn_started,
+            alloc_before: turn_before_alloc,
+            memory_before: turn_before_memory,
+        };
+        let run_turn_ms = elapsed_ms(measurement_start.started_at);
+        let run_turn_alloc = alloc_delta(measurement_start.alloc_before, allocator_stats());
         let after_turn_memory = process_memory_sample();
 
         let await_before_alloc = allocator_stats();
@@ -575,6 +708,23 @@ async fn run_once_inner(
                 turn_index + 1
             )
         })?;
+        if trigger_end_to_end {
+            let observation = trigger_delivery_observation
+                .take()
+                .context("trigger delivery observation was not collected")?;
+            extra_counters.insert(
+                "trigger.delivery_process_count".to_string(),
+                observation.process_count,
+            );
+            extra_counters.insert(
+                "trigger.delivery_durable_claim_count".to_string(),
+                observation.durable_claim_count,
+            );
+            extra_counters.insert(
+                "trigger.delivery_terminal_count".to_string(),
+                observation.terminal_count,
+            );
+        }
         let await_background_work_ms = elapsed_ms(background_started);
         let await_background_work_alloc = alloc_delta(await_before_alloc, allocator_stats());
         let after_await_memory = process_memory_sample();

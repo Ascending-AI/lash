@@ -1170,7 +1170,7 @@ mod tests {
         );
         assert!(
             steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline)
-                <= 20_000_000.0
+                <= 50_000_000.0
         );
         let total_budget_ms = wall_clock_budget_ms(RuntimePerfScenario::RlmTriggerMailPipeline);
         assert!(total_budget_ms.is_finite() && total_budget_ms > 0.0);

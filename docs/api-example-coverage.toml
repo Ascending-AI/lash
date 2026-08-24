@@ -1186,7 +1186,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/harness.rs:252#probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,"
+usage = "crates/lash-perf/src/runtime_perf/harness.rs:255#probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::begin"
@@ -1194,7 +1194,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:77#fn begin(&self, phase: RuntimeTurnPhase) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:120#fn begin(&self, phase: RuntimeTurnPhase) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::begin_named"
@@ -1202,7 +1202,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:85#fn begin_named(&self, phase: &str) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:128#fn begin_named(&self, phase: &str) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::end"
@@ -1210,7 +1210,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:81#fn end(&self, phase: RuntimeTurnPhase) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:124#fn end(&self, phase: RuntimeTurnPhase) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeTurnPhaseProbe::end_named"
@@ -1218,7 +1218,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:99#fn end_named(&self, phase: &str) {"
+usage = "crates/lash-perf/src/runtime_perf/measurement/phase_probe.rs:148#fn end_named(&self, phase: &str) {"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::set_local_cancel_origin_hint"
@@ -48747,7 +48747,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::execute_effect"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/harness.rs:976#self.delegate.execute_effect(envelope, local_executor).await"
+usage = "crates/lash-perf/src/runtime_perf/harness.rs:998#self.delegate.execute_effect(envelope, local_executor).await"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectController::supports_concurrent_effects"

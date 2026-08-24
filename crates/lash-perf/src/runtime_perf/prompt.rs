@@ -18,7 +18,9 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             turn_index + 1,
             expected_reply()
         ),
-        RuntimePerfScenario::RlmLargeToolCatalog => format!(
+        RuntimePerfScenario::RlmLargeToolCatalog
+        | RuntimePerfScenario::RlmToolCatalogCold
+        | RuntimePerfScenario::RlmToolCatalogWarm => format!(
             "Turn {} in RLM mode with a Gmail-sized callable tool catalog. Do not call a Gmail tool; reply with exactly: {}",
             turn_index + 1,
             expected_reply()

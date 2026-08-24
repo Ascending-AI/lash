@@ -19,6 +19,7 @@ use lash_core::{
     facade_support::empty_trigger_source_key,
 };
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+use lash_sansio::sync::MutexExt;
 
 use super::scenarios::RuntimePerfScenario;
 
@@ -257,6 +258,118 @@ struct BenchmarkLargeToolCatalogCache {
     contracts: HashMap<String, Arc<ToolContract>>,
 }
 
+#[derive(Default)]
+pub(crate) struct BenchmarkToolCatalogObserver {
+    state: Mutex<Option<ActiveToolCatalogObservation>>,
+    suppress_composition_counting: AtomicBool,
+}
+
+struct ActiveToolCatalogObservation {
+    variant: &'static str,
+    session_id: String,
+    phase_probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
+    observation_stage: Arc<dyn Fn() -> u8 + Send + Sync>,
+    setup_recomposition_count: u64,
+    recomposition_count: u64,
+}
+
+pub(crate) struct BenchmarkToolCatalogObservation {
+    pub(crate) cache_state: u64,
+    pub(crate) setup_recomposition_count: u64,
+    pub(crate) recomposition_count: u64,
+}
+
+impl BenchmarkToolCatalogObserver {
+    pub(crate) fn suppress_composition_counting(&self) {
+        assert!(
+            !self
+                .suppress_composition_counting
+                .swap(true, Ordering::SeqCst),
+            "tool-catalog composition counting already suppressed"
+        );
+    }
+
+    pub(crate) fn resume_composition_counting(&self) {
+        assert!(
+            self.suppress_composition_counting
+                .swap(false, Ordering::SeqCst),
+            "tool-catalog composition counting was not suppressed"
+        );
+    }
+
+    pub(crate) fn arm(
+        &self,
+        variant: &'static str,
+        session_id: String,
+        phase_probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
+        observation_stage: Arc<dyn Fn() -> u8 + Send + Sync>,
+    ) {
+        let mut state = self.state.lock_recover();
+        assert!(state.is_none(), "tool-catalog observer already armed");
+        *state = Some(ActiveToolCatalogObservation {
+            variant,
+            session_id,
+            phase_probe,
+            observation_stage,
+            setup_recomposition_count: 0,
+            recomposition_count: 0,
+        });
+    }
+
+    pub(crate) fn observe_session_catalog_composition(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        if self.suppress_composition_counting.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let (probe, phase) = {
+            let mut state = self.state.lock_recover();
+            let Some(active) = state.as_mut() else {
+                return Ok(());
+            };
+            if active.session_id != session_id {
+                return Ok(());
+            }
+            match (active.observation_stage)() {
+                0 => {
+                    active.setup_recomposition_count += 1;
+                    return Ok(());
+                }
+                1 => {}
+                _ => return Ok(()),
+            }
+            active.recomposition_count += 1;
+            (
+                Arc::clone(&active.phase_probe),
+                format!(
+                    "tool_catalog.{}.session_catalog_composition",
+                    active.variant
+                ),
+            )
+        };
+        probe.begin_named(&phase);
+        probe.end_named(&phase);
+        Ok(())
+    }
+
+    pub(crate) fn finish(&self) -> BenchmarkToolCatalogObservation {
+        let active = self
+            .state
+            .lock_recover()
+            .take()
+            .expect("tool-catalog observer was not armed");
+        BenchmarkToolCatalogObservation {
+            cache_state: u64::from(
+                active.recomposition_count == 0
+                    && (active.variant != "warm" || active.setup_recomposition_count > 0),
+            ),
+            setup_recomposition_count: active.setup_recomposition_count,
+            recomposition_count: active.recomposition_count,
+        }
+    }
+}
+
 impl Default for BenchmarkLargeToolCatalog {
     fn default() -> Self {
         Self {
@@ -421,8 +534,9 @@ fn done_without_intents(result: ToolOutcome) -> ToolAttemptOutcome {
 ///
 /// The emission is a journaled trigger occurrence, so it cannot run inside the
 /// recorded attempt body: it is declared here and executed by the intent
-/// executor once the attempt commits. The named phase therefore spans the
-/// declaration the attempt owns, not the router-side delivery that follows it.
+/// executor once the attempt commits. This site opens the occurrence-to-delivery
+/// window; the harness closes it only after observing the delivery process's
+/// durable claim and terminal state.
 fn execute_benchmark_mail_send(
     call: lash_core::ToolCall<'_>,
     account: &'static str,
@@ -1593,6 +1707,8 @@ finish { len: result.value }"#,
         }
         RuntimePerfScenario::Rlm
         | RuntimePerfScenario::RlmLargeToolCatalog
+        | RuntimePerfScenario::RlmToolCatalogCold
+        | RuntimePerfScenario::RlmToolCatalogWarm
         | RuntimePerfScenario::EmbedRlm
         | RuntimePerfScenario::TraceJsonlExtended => {
             let text = lashlang_block(r#"finish "runtime perf benchmark ok""#);
