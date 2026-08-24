@@ -26,14 +26,10 @@
 # blocking. `max-threads = 1` makes that serialization the runner's job, so
 # the slots stay free for the rest of the workspace.
 #
-# Scope note, so the group is not mistaken for a CI win it does not currently
-# deliver: every nextest call site today runs service-less (the shards in
-# `.github/workflows/ci.yml` and `scripts/push-gate.sh`, which unsets
-# `LASH_POSTGRES_DATABASE_URL` outright), so these tests all self-skip and the
-# group does nothing there. The jobs that do have services — `Test Postgres
-# store`, `Test S3 store` — run `cargo test`, not nextest. The group pays off
-# for a developer running the workspace with a database URL set, and is the
-# shape those service jobs need the day they move to nextest.
+# The Postgres store CI job exercises this group from a nextest archive against
+# each supported Postgres major. Other workspace nextest call sites are
+# service-less and these tests self-skip there; the S3 store job still uses
+# `cargo test`.
 #
 # Deliberately NOT in this group: `lash-sim`'s Postgres-backed unit tests
 # (`crates/lash-sim/src/postgres_test_isolation.rs`) and anything else built on

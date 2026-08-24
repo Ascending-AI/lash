@@ -1010,10 +1010,68 @@ jobs:
           path: target/confidence/fast
           if-no-files-found: error
 
+  postgres-store-build:
+    name: Build Postgres store tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc and nextest
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc,nextest
+
+      - name: Install mold
+        uses: ./.github/actions/setup-mold
+
+      - name: Build Postgres store test archive
+        run: >-
+          cargo nextest archive --profile ci -p lash-postgres-store --locked
+          --archive-file target/nextest/postgres-store-tests.tar.zst
+
+      # Nextest does not support Rust doctests. Compile the crate's two
+      # compile-only examples once here instead of repeating them per major.
+      - name: Test Postgres store doctests
+        run: cargo test -p lash-postgres-store --doc --locked
+
+      - name: Upload Postgres store test archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: postgres-store-tests-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: target/nextest/postgres-store-tests.tar.zst
+          if-no-files-found: error
+
   postgres-store:
     name: Test Postgres store (PG ${{ matrix.postgres }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
+    timeout-minutes: 10
+    needs: postgres-store-build
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -1082,6 +1140,12 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
+      - name: Download Postgres store test archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: postgres-store-tests-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: target/nextest-archives
+
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
@@ -1091,12 +1155,13 @@ jobs:
       # carries the `schema_shape` and `schema_drift` suites, which assert this
       # major produces the committed expectation artifact byte-for-byte and that
       # each seeded drift class is rejected by name.
-      # The suites self-serialize on a shared in-process guard (they share one
-      # database and reset() truncates all lash_* tables), so no --test-threads=1.
-      # That guard is per-process, so this must stay `cargo test` — nextest's
-      # process-per-test model would race the suites against each other.
+      # The suites share one database and reset() truncates all lash_* tables.
+      # The `docker-services` nextest group serializes the binaries which share
+      # that database while leaving scratch-schema tests parallel.
       - name: Test Postgres store (conformance)
-        run: cargo test -p lash-postgres-store --locked
+        run: >-
+          cargo nextest run --profile ci
+          --archive-file target/nextest-archives/postgres-store-tests.tar.zst
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"

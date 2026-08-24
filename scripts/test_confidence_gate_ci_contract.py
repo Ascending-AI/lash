@@ -1216,6 +1216,34 @@ derive_mutation_jobs() {{
             ),
         )
 
+    def test_postgres_ci_builds_one_attempt_scoped_archive_for_all_majors(
+        self,
+    ) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        build_job = workflow_job_block(workflow, "postgres-store-build")
+        run_job = workflow_job_block(workflow, "postgres-store")
+        artifact_name = (
+            "postgres-store-tests-${{ github.run_id }}-attempt-"
+            "${{ github.run_attempt }}"
+        )
+
+        self.assertEqual(workflow.count("cargo nextest archive"), 1)
+        self.assertEqual(
+            workflow.count("cargo test -p lash-postgres-store --doc --locked"), 1
+        )
+        self.assertIn("name: Build Postgres store tests", build_job)
+        self.assertIn("-p lash-postgres-store --locked", build_job)
+        self.assertIn("if-no-files-found: error", build_job)
+        self.assertIn(f"name: {artifact_name}", build_job)
+
+        self.assertIn("    needs: postgres-store-build\n", run_job)
+        self.assertIn('postgres: ["14", "16", "18"]', run_job)
+        self.assertIn("name: Test Postgres store (PG ${{ matrix.postgres }})", run_job)
+        self.assertIn(f"name: {artifact_name}", run_job)
+        self.assertIn("cargo nextest run --profile ci", run_job)
+        self.assertIn("--archive-file target/nextest-archives/", run_job)
+        self.assertNotIn("cargo test -p lash-postgres-store", run_job)
+
     def test_minio_ci_lane_requires_storage_configuration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         s3_store_job = workflow_job_block(workflow, "s3-store")
