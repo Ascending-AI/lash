@@ -2,7 +2,7 @@
 use super::super::*;
 #[cfg(feature = "rlm")]
 use super::contracts::{
-    GraphContract, assert_all_processes_terminal, assert_failed_code_block_present,
+    GraphContract, NodeStatusFact, assert_all_processes_terminal, assert_failed_code_block_present,
     assert_graph_lineage_connected, assert_labeled_resource_operation,
     assert_no_duplicate_label_step, assert_no_false_finishted_success,
     assert_no_forbidden_error_text, assert_subagent_bridge_exec_graphs,
@@ -594,7 +594,7 @@ finish result"#,
         assert_labeled_resource_operation(
             &contract,
             "Spawn failing subagent",
-            crate::tracing::TraceLashlangNodeStatus::Failed,
+            NodeStatusFact::Failed,
         );
         assert_no_duplicate_label_step(&contract, "Spawn failing subagent");
         assert_graph_lineage_connected(&contract, &run.final_process_list);

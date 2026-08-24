@@ -6745,7 +6745,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::Error", "lash_core::TurnEvent::Error"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/runner/agent_contracts.rs:1388#lash::TurnEvent::Error { message } => turn_error_messages.push(message.clone()),"
+usage = "crates/lash-sim/src/runner/agent_contracts.rs:1396#lash::TurnEvent::Error { message } => turn_error_messages.push(message.clone()),"
 
 [[api]]
 symbol = "lash::TurnEvent::Error::message"
@@ -6754,7 +6754,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::Error::message", "lash_core::TurnEvent::Error::message"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/runner/agent_contracts.rs:1388#lash::TurnEvent::Error { message } => turn_error_messages.push(message.clone()),"
+usage = "crates/lash-sim/src/runner/agent_contracts.rs:1396#lash::TurnEvent::Error { message } => turn_error_messages.push(message.clone()),"
 
 [[api]]
 symbol = "lash::TurnEvent::FinalValue"
@@ -62002,20 +62002,12 @@ disposition = "unused-add"
 reason = "Add lash::tracing::TraceLashlangGraphNode to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::tracing::TraceLashlangGraphNode::duration_ms"
+symbol = "lash::tracing::TraceLashlangGraphNode::observation"
 kind = "field"
 availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangGraphNode::duration_ms to the agent-service recovery/operations flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::tracing::TraceLashlangGraphNode::first_timestamp"
-kind = "field"
-availability = "all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangGraphNode::first_timestamp to the agent-service recovery/operations flow example and assert its externally observable result."
+reason = "Add lash::tracing::TraceLashlangGraphNode::observation to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::tracing::TraceLashlangGraphNode::id"
@@ -62048,38 +62040,6 @@ availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "Add lash::tracing::TraceLashlangGraphNode::label_metadata to the agent-service recovery/operations flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::tracing::TraceLashlangGraphNode::last_timestamp"
-kind = "field"
-availability = "all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangGraphNode::last_timestamp to the agent-service recovery/operations flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::tracing::TraceLashlangGraphNode::latest_error"
-kind = "field"
-availability = "all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangGraphNode::latest_error to the agent-service recovery/operations flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::tracing::TraceLashlangGraphNode::occurrence"
-kind = "field"
-availability = "all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangGraphNode::occurrence to the agent-service trigger flow example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::tracing::TraceLashlangGraphNode::status"
-kind = "field"
-availability = "all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangGraphNode::status to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::tracing::TraceLashlangGraphStore"
@@ -62117,44 +62077,132 @@ usage = "examples/agent-workbench/src/main_sections/routes.rs:1177#state.lashlan
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::list_lashlang_graphs#`let session_id = query.resolve(&state)?;`, inside `list_lashlang_graphs`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `list_lashlang_graphs` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
-symbol = "lash::tracing::TraceLashlangNodeStatus"
+symbol = "lash::tracing::TraceLashlangNodeObservation"
 kind = "enum"
 availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangNodeStatus to the agent-service recovery/operations flow example and assert its externally observable result."
+reason = "Add lash::tracing::TraceLashlangNodeObservation to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::tracing::TraceLashlangNodeStatus::Completed"
+symbol = "lash::tracing::TraceLashlangNodeObservation::Completed"
 kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangNodeStatus::Completed to the agent-service recovery/operations flow example and assert its externally observable result."
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Completed to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::tracing::TraceLashlangNodeStatus::Failed"
+symbol = "lash::tracing::TraceLashlangNodeObservation::Completed::duration_ms"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Completed::duration_ms to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Completed::end"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Completed::end to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Completed::occurrence"
+kind = "field"
+availability = "all-features"
+area = "triggers"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Completed::occurrence to the agent-service trigger flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Completed::start"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Completed::start to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Failed"
 kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangNodeStatus::Failed to the agent-service recovery/operations flow example and assert its externally observable result."
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Failed to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::tracing::TraceLashlangNodeStatus::Running"
+symbol = "lash::tracing::TraceLashlangNodeObservation::Failed::duration_ms"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Failed::duration_ms to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Failed::end"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Failed::end to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Failed::error"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Failed::error to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Failed::occurrence"
+kind = "field"
+availability = "all-features"
+area = "triggers"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Failed::occurrence to the agent-service trigger flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Failed::start"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Failed::start to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Running"
 kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangNodeStatus::Running to the agent-service recovery/operations flow example and assert its externally observable result."
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Running to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::tracing::TraceLashlangNodeStatus::Unobserved"
+symbol = "lash::tracing::TraceLashlangNodeObservation::Running::occurrence"
+kind = "field"
+availability = "all-features"
+area = "triggers"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Running::occurrence to the agent-service trigger flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Running::start"
+kind = "field"
+availability = "all-features"
+area = "observation-admin"
+disposition = "unused-add"
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Running::start to the agent-service recovery/operations flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::tracing::TraceLashlangNodeObservation::Unobserved"
 kind = "variant"
 availability = "all-features"
 area = "observation-admin"
 disposition = "unused-add"
-reason = "Add lash::tracing::TraceLashlangNodeStatus::Unobserved to the agent-service recovery/operations flow example and assert its externally observable result."
+reason = "Add lash::tracing::TraceLashlangNodeObservation::Unobserved to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::tracing::TraceLevel"

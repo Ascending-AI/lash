@@ -671,7 +671,7 @@ pub mod tracing {
         TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
         TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
         TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
-        TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeStatus,
+        TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
     };
     pub use lash_trace::{StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink};
 }

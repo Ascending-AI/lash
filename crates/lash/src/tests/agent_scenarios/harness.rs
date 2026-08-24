@@ -1,6 +1,6 @@
 use super::super::*;
 use super::contracts::{
-    GraphContract, assert_all_processes_terminal, assert_completed_process_graph,
+    GraphContract, NodeStatusFact, assert_all_processes_terminal, assert_completed_process_graph,
     assert_labeled_node, assert_labeled_resource_operation,
     assert_min_completed_child_session_exec_graphs, assert_min_completed_process_graphs,
     assert_no_duplicate_label_step, assert_session_turn_child_graph,
@@ -357,19 +357,11 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
 
     let contract = GraphContract::from_graphs(&run.graph_snapshots);
     for title in case.expected_contracts.labeled_resource_titles {
-        assert_labeled_resource_operation(
-            &contract,
-            title,
-            crate::tracing::TraceLashlangNodeStatus::Completed,
-        );
+        assert_labeled_resource_operation(&contract, title, NodeStatusFact::Completed);
         assert_no_duplicate_label_step(&contract, title);
     }
     for title in case.expected_contracts.labeled_node_titles {
-        assert_labeled_node(
-            &contract,
-            title,
-            crate::tracing::TraceLashlangNodeStatus::Completed,
-        );
+        assert_labeled_node(&contract, title, NodeStatusFact::Completed);
         assert_no_duplicate_label_step(&contract, title);
     }
     for entry_name in case.expected_contracts.completed_process_entries {

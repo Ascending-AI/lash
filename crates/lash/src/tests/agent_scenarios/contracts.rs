@@ -29,8 +29,16 @@ struct NodeFact {
     kind: String,
     label: String,
     label_title: Option<String>,
-    status: crate::tracing::TraceLashlangNodeStatus,
+    status: NodeStatusFact,
     has_error: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NodeStatusFact {
+    Unobserved,
+    Running,
+    Completed,
+    Failed,
 }
 
 #[allow(dead_code)]
@@ -69,16 +77,32 @@ impl GraphContract {
                 nodes: graph
                     .nodes
                     .iter()
-                    .map(|node| NodeFact {
-                        graph_key: graph.graph_key.clone(),
-                        kind: node.kind.clone(),
-                        label: node.label.clone(),
-                        label_title: node
-                            .label_metadata
-                            .as_ref()
-                            .map(|label| label.title.clone()),
-                        status: node.status,
-                        has_error: node.latest_error.is_some(),
+                    .map(|node| {
+                        let (status, has_error) = match &node.observation {
+                            crate::tracing::TraceLashlangNodeObservation::Unobserved => {
+                                (NodeStatusFact::Unobserved, false)
+                            }
+                            crate::tracing::TraceLashlangNodeObservation::Running { .. } => {
+                                (NodeStatusFact::Running, false)
+                            }
+                            crate::tracing::TraceLashlangNodeObservation::Completed { .. } => {
+                                (NodeStatusFact::Completed, false)
+                            }
+                            crate::tracing::TraceLashlangNodeObservation::Failed { .. } => {
+                                (NodeStatusFact::Failed, true)
+                            }
+                        };
+                        NodeFact {
+                            graph_key: graph.graph_key.clone(),
+                            kind: node.kind.clone(),
+                            label: node.label.clone(),
+                            label_title: node
+                                .label_metadata
+                                .as_ref()
+                                .map(|label| label.title.clone()),
+                            status,
+                            has_error,
+                        }
                     })
                     .collect(),
             });
@@ -296,7 +320,7 @@ pub(super) fn assert_graph_lineage_connected(
 pub(super) fn assert_labeled_resource_operation(
     contract: &GraphContract,
     title: &str,
-    expected_status: crate::tracing::TraceLashlangNodeStatus,
+    expected_status: NodeStatusFact,
 ) {
     let node = contract
         .nodes()
@@ -314,7 +338,7 @@ pub(super) fn assert_labeled_resource_operation(
         node.status, expected_status,
         "labeled resource operation `{title}` had wrong status: {node:#?}"
     );
-    if expected_status == crate::tracing::TraceLashlangNodeStatus::Failed {
+    if expected_status == NodeStatusFact::Failed {
         assert!(
             node.has_error,
             "failed labeled resource operation should retain node error: {node:#?}"
@@ -325,7 +349,7 @@ pub(super) fn assert_labeled_resource_operation(
 pub(super) fn assert_labeled_node(
     contract: &GraphContract,
     title: &str,
-    expected_status: crate::tracing::TraceLashlangNodeStatus,
+    expected_status: NodeStatusFact,
 ) {
     let node = contract
         .nodes()

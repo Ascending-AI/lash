@@ -29,15 +29,29 @@ pub struct TraceLashlangGraph {
     pub children: Vec<TraceLashlangGraphChildLink>,
 }
 
-/// Observed Lashlang graph node state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceLashlangNodeStatus {
+/// One occurrence's observed Lashlang graph node state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum TraceLashlangNodeObservation {
     #[default]
     Unobserved,
-    Running,
-    Completed,
-    Failed,
+    Running {
+        occurrence: u64,
+        start: String,
+    },
+    Completed {
+        occurrence: u64,
+        start: String,
+        end: String,
+        duration_ms: i64,
+    },
+    Failed {
+        occurrence: u64,
+        start: String,
+        end: String,
+        duration_ms: i64,
+        error: String,
+    },
 }
 
 /// Observed branch-edge selection state.
@@ -58,12 +72,8 @@ pub struct TraceLashlangGraphNode {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_metadata: Option<TraceLabelMetadata>,
-    pub status: TraceLashlangNodeStatus,
-    pub first_timestamp: Option<String>,
-    pub last_timestamp: Option<String>,
-    pub duration_ms: Option<i64>,
-    pub latest_error: Option<String>,
-    pub occurrence: Option<u64>,
+    #[serde(flatten)]
+    pub observation: TraceLashlangNodeObservation,
 }
 
 impl TraceLashlangGraphNode {
@@ -78,12 +88,7 @@ impl TraceLashlangGraphNode {
             kind: kind.into(),
             label: label.into(),
             label_metadata,
-            status: TraceLashlangNodeStatus::Unobserved,
-            first_timestamp: None,
-            last_timestamp: None,
-            duration_ms: None,
-            latest_error: None,
-            occurrence: None,
+            observation: TraceLashlangNodeObservation::Unobserved,
         }
     }
 }
@@ -234,6 +239,8 @@ fn reduce_lashlang_execution_event(
         }
         TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => {
             graph_mut(state, identity).status = *status;
+            // A finished or cancelled execution can still leave nodes running.
+            // Their terminal observation policy is deliberately unresolved.
         }
         TraceLanguageExecutionPayload::NodeStarted {
             node_id,
@@ -250,12 +257,10 @@ fn reduce_lashlang_execution_event(
                     label,
                 },
             );
-            if node.first_timestamp.is_none() {
-                node.first_timestamp = Some(timestamp.to_string());
-            }
-            node.last_timestamp = Some(timestamp.to_string());
-            node.status = TraceLashlangNodeStatus::Running;
-            node.occurrence = Some(*occurrence);
+            node.observation = TraceLashlangNodeObservation::Running {
+                occurrence: *occurrence,
+                start: timestamp.to_string(),
+            };
         }
         TraceLanguageExecutionPayload::NodeCompleted {
             node_id,
@@ -272,10 +277,13 @@ fn reduce_lashlang_execution_event(
                     label,
                 },
             );
-            node.last_timestamp = Some(timestamp.to_string());
-            node.duration_ms = duration_ms(node.first_timestamp.as_deref(), Some(timestamp));
-            node.status = TraceLashlangNodeStatus::Completed;
-            node.occurrence = Some(*occurrence);
+            let start = current_occurrence_start(node, *occurrence, timestamp);
+            node.observation = TraceLashlangNodeObservation::Completed {
+                occurrence: *occurrence,
+                duration_ms: duration_ms(&start, timestamp),
+                start,
+                end: timestamp.to_string(),
+            };
         }
         TraceLanguageExecutionPayload::NodeFailed {
             node_id,
@@ -293,11 +301,14 @@ fn reduce_lashlang_execution_event(
                     label,
                 },
             );
-            node.last_timestamp = Some(timestamp.to_string());
-            node.duration_ms = duration_ms(node.first_timestamp.as_deref(), Some(timestamp));
-            node.status = TraceLashlangNodeStatus::Failed;
-            node.latest_error = Some(error.clone());
-            node.occurrence = Some(*occurrence);
+            let start = current_occurrence_start(node, *occurrence, timestamp);
+            node.observation = TraceLashlangNodeObservation::Failed {
+                occurrence: *occurrence,
+                duration_ms: duration_ms(&start, timestamp),
+                start,
+                end: timestamp.to_string(),
+                error: error.clone(),
+            };
         }
         TraceLanguageExecutionPayload::BranchSelected {
             node_id,
@@ -307,9 +318,7 @@ fn reduce_lashlang_execution_event(
         } => {
             let graph = graph_mut(state, identity);
             if let Some(node) = graph.nodes.get_mut(node_id) {
-                node.status = TraceLashlangNodeStatus::Completed;
-                node.last_timestamp = Some(timestamp.to_string());
-                node.occurrence = Some(*occurrence);
+                node.observation = zero_duration_completion(*occurrence, timestamp);
             }
             let selected_edge = graph
                 .edges
@@ -322,14 +331,7 @@ fn reduce_lashlang_execution_event(
                 if let Some(selected_node) = graph.nodes.get_mut(&selected_to)
                     && selected_node.kind == "branch_arm"
                 {
-                    if selected_node.first_timestamp.is_none() {
-                        selected_node.first_timestamp = Some(timestamp.to_string());
-                    }
-                    selected_node.last_timestamp = Some(timestamp.to_string());
-                    selected_node.duration_ms =
-                        duration_ms(selected_node.first_timestamp.as_deref(), Some(timestamp));
-                    selected_node.status = TraceLashlangNodeStatus::Completed;
-                    selected_node.occurrence = Some(*occurrence);
+                    selected_node.observation = zero_duration_completion(*occurrence, timestamp);
                 }
                 for edge in graph.edges.values_mut() {
                     if edge.from == selected_from
@@ -429,10 +431,40 @@ fn node_mut<'a>(
         })
 }
 
-fn duration_ms(first: Option<&str>, last: Option<&str>) -> Option<i64> {
-    let first = chrono::DateTime::parse_from_rfc3339(first?).ok()?;
-    let last = chrono::DateTime::parse_from_rfc3339(last?).ok()?;
-    Some((last - first).num_milliseconds().max(0))
+fn current_occurrence_start(
+    node: &TraceLashlangGraphNode,
+    occurrence: u64,
+    fallback: &str,
+) -> String {
+    match &node.observation {
+        TraceLashlangNodeObservation::Running {
+            occurrence: running_occurrence,
+            start,
+        } if *running_occurrence == occurrence => start.clone(),
+        TraceLashlangNodeObservation::Unobserved
+        | TraceLashlangNodeObservation::Running { .. }
+        | TraceLashlangNodeObservation::Completed { .. }
+        | TraceLashlangNodeObservation::Failed { .. } => fallback.to_string(),
+    }
+}
+
+fn zero_duration_completion(occurrence: u64, timestamp: &str) -> TraceLashlangNodeObservation {
+    TraceLashlangNodeObservation::Completed {
+        occurrence,
+        start: timestamp.to_string(),
+        end: timestamp.to_string(),
+        duration_ms: 0,
+    }
+}
+
+fn duration_ms(first: &str, last: &str) -> i64 {
+    let Ok(first) = chrono::DateTime::parse_from_rfc3339(first) else {
+        return 0;
+    };
+    let Ok(last) = chrono::DateTime::parse_from_rfc3339(last) else {
+        return 0;
+    };
+    (last - first).num_milliseconds().max(0)
 }
 
 #[cfg(test)]
@@ -548,6 +580,20 @@ mod tests {
         }
     }
 
+    fn node_failed(event_key: &str, occurrence: u64, error: &str) -> TraceLanguageExecution {
+        TraceLanguageExecution {
+            event_key: event_key.to_string(),
+            identity: identity(),
+            payload: TraceLanguageExecutionPayload::NodeFailed {
+                node_id: "branch".to_string(),
+                node_kind: "branch".to_string(),
+                label: "if ready".to_string(),
+                occurrence,
+                error: error.to_string(),
+            },
+        }
+    }
+
     #[test]
     fn graph_store_seeds_static_map_on_execution_start() {
         let store = TraceLashlangGraphStore::default();
@@ -558,7 +604,10 @@ mod tests {
             .graph("effect:session-1:turn-1:exec-1")
             .expect("graph");
         assert_eq!(graph.status, LanguageExecutionStatus::Running);
-        assert_eq!(graph.nodes[0].status, TraceLashlangNodeStatus::Unobserved);
+        assert_eq!(
+            graph.nodes[0].observation,
+            TraceLashlangNodeObservation::Unobserved
+        );
         assert_eq!(
             graph.edges[0].selection,
             TraceLashlangEdgeSelection::Unknown
@@ -625,7 +674,10 @@ mod tests {
         let graph = store
             .graph("effect:session-1:turn-1:exec-1")
             .expect("graph");
-        assert_eq!(graph.nodes[0].status, TraceLashlangNodeStatus::Running);
+        assert!(matches!(
+            graph.nodes[0].observation,
+            TraceLashlangNodeObservation::Running { occurrence: 1, .. }
+        ));
     }
 
     #[test]
@@ -633,15 +685,131 @@ mod tests {
         let store = TraceLashlangGraphStore::default();
 
         append_at(&store, node_started("start-node", 1), 1_000);
-        append_at(&store, node_completed("complete-node", 2), 1_750);
+        append_at(&store, node_completed("complete-node", 1), 1_750);
 
         let graph = store
             .graph("effect:session-1:turn-1:exec-1")
             .expect("graph");
         let node = &graph.nodes[0];
-        assert_eq!(node.status, TraceLashlangNodeStatus::Completed);
-        assert_eq!(node.duration_ms, Some(750));
-        assert_eq!(node.occurrence, Some(2));
+        assert!(matches!(
+            node.observation,
+            TraceLashlangNodeObservation::Completed {
+                occurrence: 1,
+                duration_ms: 750,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn graph_store_reentered_node_resets_error_and_measures_current_occurrence() {
+        let store = TraceLashlangGraphStore::default();
+
+        append_at(&store, node_started("first-start", 1), 1_000);
+        append_at(
+            &store,
+            node_failed("first-failure", 1, "first failed"),
+            1_250,
+        );
+        append_at(&store, node_started("second-start", 2), 2_000);
+        append_at(&store, node_completed("second-complete", 2), 2_400);
+
+        let graph = store
+            .graph("effect:session-1:turn-1:exec-1")
+            .expect("graph");
+        let node = &graph.nodes[0];
+        assert!(matches!(
+            node.observation,
+            TraceLashlangNodeObservation::Completed {
+                occurrence: 2,
+                duration_ms: 400,
+                ..
+            }
+        ));
+        let serialized = serde_json::to_value(node).expect("serialize completed node");
+        assert_eq!(serialized.get("error"), None);
+    }
+
+    #[test]
+    fn graph_store_terminal_event_for_different_occurrence_uses_terminal_timestamp() {
+        for terminal in [
+            node_completed("complete-node", 2),
+            node_failed("fail-node", 2, "failed"),
+        ] {
+            let store = TraceLashlangGraphStore::default();
+            append_at(&store, node_started("start-node", 1), 1_000);
+            append_at(&store, terminal, 1_750);
+
+            let graph = store
+                .graph("effect:session-1:turn-1:exec-1")
+                .expect("graph");
+            let (occurrence, start, end, duration_ms) = match &graph.nodes[0].observation {
+                TraceLashlangNodeObservation::Completed {
+                    occurrence,
+                    start,
+                    end,
+                    duration_ms,
+                }
+                | TraceLashlangNodeObservation::Failed {
+                    occurrence,
+                    start,
+                    end,
+                    duration_ms,
+                    ..
+                } => (occurrence, start, end, duration_ms),
+                observation => panic!("node was not terminal: {observation:#?}"),
+            };
+            assert_eq!(*occurrence, 2);
+            assert_eq!(start, end);
+            assert_eq!(*duration_ms, 0);
+        }
+    }
+
+    #[test]
+    fn graph_store_branch_selection_completes_unstarted_node_with_zero_duration() {
+        let store = TraceLashlangGraphStore::default();
+
+        append_at(&store, started_event("start"), 1_000);
+        append_at(
+            &store,
+            TraceLanguageExecution {
+                event_key: "branch".to_string(),
+                identity: identity(),
+                payload: TraceLanguageExecutionPayload::BranchSelected {
+                    node_id: "branch".to_string(),
+                    occurrence: 1,
+                    edge_id: "then-edge".to_string(),
+                    selected: TraceBranchSelection::Then,
+                },
+            },
+            1_100,
+        );
+
+        let graph = store
+            .graph("effect:session-1:turn-1:exec-1")
+            .expect("graph");
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "branch")
+            .expect("branch node");
+        let TraceLashlangNodeObservation::Completed {
+            occurrence,
+            start,
+            end,
+            duration_ms,
+        } = &node.observation
+        else {
+            panic!("branch node was not completed: {node:#?}");
+        };
+        assert_eq!(*occurrence, 1);
+        assert_eq!(start, end);
+        assert_eq!(*duration_ms, 0);
+
+        let serialized = serde_json::to_value(node).expect("serialize branch node");
+        assert_eq!(serialized["status"], "completed");
+        assert_eq!(serialized["duration_ms"], 0);
+        assert!(serialized.get("observation").is_none());
     }
 
     #[test]

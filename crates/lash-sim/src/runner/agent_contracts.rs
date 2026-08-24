@@ -1333,19 +1333,27 @@ fn agent_contract_graph_facts(
                 .as_ref()
                 .map(|label| label.title.as_str());
             if node.kind == "resource_operation"
-                && node.status == lash::tracing::TraceLashlangNodeStatus::Completed
+                && matches!(
+                    &node.observation,
+                    lash::tracing::TraceLashlangNodeObservation::Completed { .. }
+                )
                 && let Some(title) = title
             {
                 completed_labeled_resources.insert(title.to_string());
             }
             if node.kind == "resource_operation"
-                && node.status == lash::tracing::TraceLashlangNodeStatus::Failed
+                && matches!(
+                    &node.observation,
+                    lash::tracing::TraceLashlangNodeObservation::Failed { .. }
+                )
                 && let Some(title) = title
             {
                 failed_labeled_resources.insert(title.to_string());
             }
-            if node.status == lash::tracing::TraceLashlangNodeStatus::Completed
-                && let Some(title) = title
+            if matches!(
+                &node.observation,
+                lash::tracing::TraceLashlangNodeObservation::Completed { .. }
+            ) && let Some(title) = title
             {
                 completed_labeled_nodes.insert(title.to_string());
             }

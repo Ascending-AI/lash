@@ -38,7 +38,7 @@ pub mod otel;
 pub use lashlang_graph::{
     TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
     TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
-    TraceLashlangNodeStatus,
+    TraceLashlangNodeObservation,
 };
 
 /// Version of the durable trace JSONL schema, written to
