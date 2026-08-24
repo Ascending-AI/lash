@@ -39,8 +39,7 @@ impl PersistedSegmentHandover {
 /// Result of one process invocation. A segment boundary is never terminal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessRunOutcome {
-    Terminal(Box<ProcessAwaitOutput>),
-    TerminalWithParentEnd {
+    Terminal {
         output: Box<ProcessAwaitOutput>,
         actions: Vec<crate::ToolIntentParentEndAction>,
     },
@@ -52,7 +51,7 @@ impl ProcessRunOutcome {
     ///
     /// This is an **integrator class 3: process-engine implementor** seam.
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Terminal(_) | Self::TerminalWithParentEnd { .. })
+        matches!(self, Self::Terminal { .. })
     }
 
     /// Borrow the terminal output without consuming engine-owned parent-end actions.
@@ -60,23 +59,7 @@ impl ProcessRunOutcome {
     /// This is an **integrator class 3: process-engine implementor** seam.
     pub fn terminal_output(&self) -> Option<&ProcessAwaitOutput> {
         match self {
-            Self::Terminal(output) | Self::TerminalWithParentEnd { output, .. } => Some(output),
-            Self::SegmentBoundary(_) => None,
-        }
-    }
-
-    /// Consume a terminal engine result into output plus durable teardown actions.
-    ///
-    /// This is an **integrator class 3: process-engine implementor** seam.
-    pub fn into_terminal_parts(
-        self,
-    ) -> Option<(
-        Box<ProcessAwaitOutput>,
-        Vec<crate::ToolIntentParentEndAction>,
-    )> {
-        match self {
-            Self::Terminal(output) => Some((output, Vec::new())),
-            Self::TerminalWithParentEnd { output, actions } => Some((output, actions)),
+            Self::Terminal { output, .. } => Some(output),
             Self::SegmentBoundary(_) => None,
         }
     }
@@ -120,7 +103,10 @@ impl From<crate::PluginError> for ProcessInfraError {
 
 impl From<ProcessAwaitOutput> for ProcessRunOutcome {
     fn from(output: ProcessAwaitOutput) -> Self {
-        Self::Terminal(Box::new(output))
+        Self::Terminal {
+            output: Box::new(output),
+            actions: Vec::new(),
+        }
     }
 }
 

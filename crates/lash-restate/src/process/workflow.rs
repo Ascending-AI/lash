@@ -233,7 +233,10 @@ where
                 .await
                 .map_err(retryable_registry_error)?;
         }
-        Ok(lash_core::ProcessRunOutcome::Terminal(Box::new(stored)))
+        Ok(lash_core::ProcessRunOutcome::Terminal {
+            output: Box::new(stored),
+            actions: Vec::new(),
+        })
     }
 
     pub(crate) async fn complete_with_stored_outcome(
@@ -308,27 +311,19 @@ where
                 cancellation.cancel();
                 self.confirm_process_cancel_requested(&process_id).await?;
                 let _ = runner.await;
-                Ok(lash_core::ProcessRunOutcome::Terminal(Box::new(
-                    ProcessAwaitOutput::Cancelled {
+                Ok(lash_core::ProcessRunOutcome::Terminal {
+                    output: Box::new(ProcessAwaitOutput::Cancelled {
                         message: format!("process `{process_id}` was cancelled"),
                         raw: None,
                         control: None,
-                    },
-                )))
+                    }),
+                    actions: Vec::new(),
+                })
             }
             outcome = &mut runner => outcome
         };
         match outcome {
-            Ok(lash_core::ProcessRunOutcome::Terminal(output)) => {
-                self.finish_terminal_with_parent_end(
-                    &process_id,
-                    output,
-                    Vec::new(),
-                    parent_end_controller,
-                )
-                .await
-            }
-            Ok(lash_core::ProcessRunOutcome::TerminalWithParentEnd { output, actions }) => {
+            Ok(lash_core::ProcessRunOutcome::Terminal { output, actions }) => {
                 self.finish_terminal_with_parent_end(
                     &process_id,
                     output,
@@ -624,8 +619,7 @@ where
             RestateProcessCancelSignal::SegmentFinished,
         )?;
         match outcome {
-            lash_core::ProcessRunOutcome::Terminal(output)
-            | lash_core::ProcessRunOutcome::TerminalWithParentEnd { output, .. } => {
+            lash_core::ProcessRunOutcome::Terminal { output, .. } => {
                 let output = *output;
                 if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
                     resolve_process_terminal_promise(controller.context(), &process_id, &output)?;

@@ -7566,8 +7566,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                     .await
                     .map_err(TerminalError::from_error)?
                 {
-                    lash_core::ProcessRunOutcome::Terminal(output)
-                    | lash_core::ProcessRunOutcome::TerminalWithParentEnd { output, .. } => {
+                    lash_core::ProcessRunOutcome::Terminal { output, .. } => {
                         break *output;
                     }
                     lash_core::ProcessRunOutcome::SegmentBoundary(next) => handover = Some(next),
@@ -11732,7 +11731,7 @@ async fn running_process_cancel_uses_native_signal_without_poll_delay() {
         .expect("run process");
     assert!(matches!(
         outcome,
-        lash_core::ProcessRunOutcome::Terminal(output)
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
             if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
     ));
     let requests = signal_transport.requests.lock_recover();
@@ -11785,7 +11784,7 @@ async fn cancel_watch_reissues_after_attach_ceiling_until_segment_completes() {
 
     assert!(matches!(
         outcome,
-        lash_core::ProcessRunOutcome::Terminal(output)
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
             if matches!(*output, ProcessAwaitOutput::Success { .. })
     ));
     assert!(
@@ -12006,7 +12005,7 @@ async fn transient_cancel_registry_read_error_cannot_fall_through_to_success() {
         .expect("run process");
     assert!(matches!(
         outcome,
-        lash_core::ProcessRunOutcome::Terminal(output)
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
             if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
     ));
 }
@@ -12150,7 +12149,10 @@ async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
         )
         .await
         .expect("run successor segment");
-    assert!(matches!(second, lash_core::ProcessRunOutcome::Terminal(_)));
+    assert!(matches!(
+        second,
+        lash_core::ProcessRunOutcome::Terminal { .. }
+    ));
     assert_eq!(runner.runs.load(Ordering::SeqCst), 2);
     assert_eq!(
         runner.handovers.lock_recover().as_slice(),
@@ -12523,7 +12525,7 @@ async fn cancel_redrives_successor_engine() {
         .expect("cancelled successor");
     assert!(matches!(
         outcome,
-        lash_core::ProcessRunOutcome::Terminal(output)
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
             if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
     ));
     assert_eq!(
@@ -14416,7 +14418,7 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
 
     assert!(matches!(
         output,
-        lash_core::ProcessRunOutcome::Terminal(output)
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
             if matches!(*output, ProcessAwaitOutput::Success { .. })
     ));
     assert_eq!(
@@ -14853,7 +14855,7 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
     // The real runner rejects this before user-code execution when its atomic
     // start write observes the prior OwnerBound attempt.
     assert_eq!(*runner.calls.lock_recover(), 1);
-    let lash_core::ProcessRunOutcome::Terminal(output) = &output else {
+    let lash_core::ProcessRunOutcome::Terminal { output, .. } = &output else {
         panic!("expected terminal output, got {output:?}");
     };
     let ProcessAwaitOutput::Abandoned { evidence, .. } = output.as_ref() else {
@@ -14909,7 +14911,7 @@ async fn run_registration_runs_fresh_owner_bound() {
 
     assert!(matches!(
         output,
-        lash_core::ProcessRunOutcome::Terminal(output)
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
             if matches!(*output, ProcessAwaitOutput::Success { .. })
     ));
     assert_eq!(
