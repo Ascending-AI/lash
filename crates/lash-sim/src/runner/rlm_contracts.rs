@@ -808,8 +808,13 @@ fn rlm_exec_response(
     terminal_finish: Option<Value>,
 ) -> lash_core::ExecResponse {
     lash_core::ExecResponse {
-        observations: output.iter().map(|value| (*value).to_string()).collect(),
-        observation_truncation: Vec::new(),
+        observations: output
+            .iter()
+            .map(|value| lash_core::Observation {
+                text: (*value).to_string(),
+                projection: Default::default(),
+            })
+            .collect(),
         tool_calls: Vec::new(),
         executed_calls: Vec::new(),
         printed_images: Vec::new(),
@@ -839,8 +844,13 @@ fn rlm_exec_response_with_tool_calls(
         })
         .collect();
     lash_core::ExecResponse {
-        observations: output.iter().map(|value| (*value).to_string()).collect(),
-        observation_truncation: Vec::new(),
+        observations: output
+            .iter()
+            .map(|value| lash_core::Observation {
+                text: (*value).to_string(),
+                projection: Default::default(),
+            })
+            .collect(),
         tool_calls,
         executed_calls,
         printed_images: Vec::new(),

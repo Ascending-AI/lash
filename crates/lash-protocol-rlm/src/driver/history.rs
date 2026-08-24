@@ -761,7 +761,7 @@ fn project_history_output(item: &str) -> (String, bool) {
     let value = history_output_value(item);
     let projected = crate::rlm_support::print_history_projector()
         .project_blocking(ValueProjectionContext::new(&value));
-    let lossy = projection_is_lossy(item, &projected);
+    let lossy = crate::rlm_support::projection_is_lossy(item, &projected);
     (projected, lossy)
 }
 
@@ -773,11 +773,4 @@ fn history_output_value(item: &str) -> FlowValue {
         return json_to_flow_value(value);
     }
     FlowValue::String(item.into())
-}
-
-fn projection_is_lossy(original: &str, projected: &str) -> bool {
-    projected.contains("truncated")
-        || projected.contains("omitted")
-        || projected.contains("max depth")
-        || projected.chars().count() < original.chars().count()
 }

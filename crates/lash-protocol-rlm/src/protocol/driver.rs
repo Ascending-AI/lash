@@ -545,8 +545,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 (state.calls, state.calls_omitted) = executed_call_ledger(&response.executed_calls);
                 state.images.extend(response.printed_images);
                 for observation in response.observations {
-                    if !observation.is_empty() {
-                        state.output.push(observation);
+                    if !observation.text.is_empty() {
+                        state.output.push(observation.text);
                     }
                 }
                 if let Some(raw_error) = response.error {

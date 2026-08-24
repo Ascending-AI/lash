@@ -238,7 +238,7 @@ the indexed recovery worklist, the session-metadata payload cutover, the
 durable effect-group journal, and the loser drain's unsettled-children index
 over it, plus the same turn-cancel records, admission marker, structural append receipt identities, and attributed observer intent. SQLite 43-to-44 and PostgreSQL 62-to-63 migrate the split legacy observer rows forward, preferring host-requested attribution for duplicate process ids. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> adds atomic pending
 process-parent teardown to the v3 process-environment reference cutover; trigger
-schema <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span> carries durable trigger-occurrence reclaim eligibility. Effect schema <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">12</span> carries the
+schema <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span> carries durable trigger-occurrence reclaim eligibility. Effect schema <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">13</span> carries merged exec observations alongside the
 agent-frame-key and recorded tool-intent cutovers plus the effect-group journal,
 which SQLite reaches by reject-and-recreate.
 Stores older than the explicit observer-intent migration window must be recreated.

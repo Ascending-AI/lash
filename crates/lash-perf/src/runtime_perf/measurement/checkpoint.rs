@@ -768,10 +768,10 @@ fn checkpoint_pending_exec(
     restored.handle_response(Response::ExecResult {
         id,
         result: Ok(ExecResponse {
-            observations: vec![
-                "checkpoint observation: resumed after ExecCode effect boundary".to_string(),
-            ],
-            observation_truncation: Vec::new(),
+            observations: vec![lash_core::Observation {
+                text: "checkpoint observation: resumed after ExecCode effect boundary".to_string(),
+                projection: Default::default(),
+            }],
             tool_calls: Vec::new(),
             executed_calls: Vec::new(),
             printed_images: Vec::new(),

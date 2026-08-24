@@ -75,8 +75,9 @@ pub use lashlang_graph::{
 /// Version 9 promotes the four runtime exec diagnostic phases from opaque
 /// [`TraceEvent::ProtocolStep`] payloads to typed events, types each completed
 /// exec's tool-call roll-up, and removes the redundant `tool_call_count` and
-/// `terminal_finish_present` fields.
-pub const TRACE_SCHEMA_VERSION: u32 = 9;
+/// `terminal_finish_present` fields. Version 10 renames the exec completion's
+/// projection metadata list to match the merged observation representation.
+pub const TRACE_SCHEMA_VERSION: u32 = 10;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -370,7 +371,7 @@ pub enum TraceEvent {
         output: String,
         output_chars: usize,
         observation_count: usize,
-        observation_truncation: Vec<TextProjectionMetadata>,
+        observation_projections: Vec<TextProjectionMetadata>,
         error: Option<String>,
         terminal_finish: Option<Value>,
         tool_calls: Vec<TraceExecToolCall>,

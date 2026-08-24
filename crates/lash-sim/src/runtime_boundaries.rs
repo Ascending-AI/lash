@@ -446,8 +446,10 @@ impl RuntimeBoundaryHarness {
             },
         );
         let response = ExecResponse {
-            observations: vec![output.clone()],
-            observation_truncation: Vec::new(),
+            observations: vec![lash_core::Observation {
+                text: output.clone(),
+                projection: Default::default(),
+            }],
             tool_calls: Vec::new(),
             executed_calls: Vec::new(),
             printed_images: Vec::new(),

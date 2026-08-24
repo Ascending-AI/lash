@@ -14,7 +14,8 @@ use lash_core::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimeScope,
     SessionScope, TestLocalProcessRegistry, TriggerCommand, TriggerInputBinding,
     TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
-    facade_support::InMemoryAttachmentStore, facade_support::InMemoryTriggerStore,
+    WakeDeliveryDisposition, facade_support::InMemoryAttachmentStore,
+    facade_support::InMemoryTriggerStore,
 };
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
 use lash_sqlite_store::{
@@ -1036,7 +1037,7 @@ async fn process_rows_from_memory(registry: &TestLocalProcessRegistry) -> Proces
         wake_deliveries: raw
             .wake_deliveries
             .into_iter()
-            .map(|delivery| normalized_json(serde_json::to_value(delivery).expect("encode wake")))
+            .map(normalized_memory_wake_delivery)
             .collect(),
         wake_allocation_floors: raw.wake_allocation_floors,
         tombstones: raw
@@ -1045,6 +1046,32 @@ async fn process_rows_from_memory(registry: &TestLocalProcessRegistry) -> Proces
             .map(|row| normalized_json(serde_json::to_value(row).expect("encode tombstone")))
             .collect(),
     }
+}
+
+fn normalized_memory_wake_delivery(delivery: lash_core::WakeDelivery) -> serde_json::Value {
+    let state = delivery.state();
+    let claim_token = match &delivery.disposition {
+        WakeDeliveryDisposition::Enqueuing { claim_token } => Some(claim_token.clone()),
+        _ => None,
+    };
+    let discard_reason = delivery.disposition.discard_reason();
+    let mut value = serde_json::json!({
+        "delivery_id": delivery.delivery_id,
+        "wake": delivery.wake,
+        "state": state,
+        "attempts": delivery.attempts,
+        "first_attempt_ms": delivery.first_attempt_ms,
+        "next_attempt_at_ms": delivery.next_attempt_at_ms,
+        "expires_at_ms": delivery.expires_at_ms,
+        "discard_reason": discard_reason,
+    });
+    if let Some(claim_token) = claim_token {
+        value
+            .as_object_mut()
+            .expect("wake delivery projection is an object")
+            .insert("claim_token".to_string(), serde_json::json!(claim_token));
+    }
+    normalized_json(value)
 }
 
 fn trigger_rows_from_memory(store: &InMemoryTriggerStore) -> TriggerRows {

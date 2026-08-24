@@ -89,14 +89,14 @@ let core = builder.build(owner)?;</code></pre>
         <ul>
           <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">44</span> (<code>lash_sqlite_store::SESSION_SCHEMA_VERSION</code>)</li>
           <li>SQLite process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span></li>
-          <li>SQLite effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">12</span></li>
+          <li>SQLite effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">13</span></li>
           <li>SQLite trigger version <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span></li>
           <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">63</span></li>
         </ul>
-        <p>SQLite durable-core <span data-format-version="SQLITE_SCHEMA_VERSION">44</span> and Postgres component <span data-format-version="POSTGRES_SCHEMA_VERSION">63</span> encode receipt identity structurally: a plain commit stores no append fields, while an append stores its request hash, requested node count, and identity encoding version together. The schema rejects every half-populated combination, and no longer persists the requested ancestor already carried by the commit.</p>
+        <p>The current SQLite effect generation stores each exec observation together with its projection metadata. Effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">13</span> is a hard cutover with no migration arm; pre-cutover effect databases are rejected at open. SQLite durable-core <span data-format-version="SQLITE_SCHEMA_VERSION">44</span> and Postgres component <span data-format-version="POSTGRES_SCHEMA_VERSION">63</span> encode receipt identity structurally: a plain commit stores no append fields, while an append stores its request hash, requested node count, and identity encoding version together. The schema rejects every half-populated combination, and no longer persists the requested ancestor already carried by the commit.</p>
         <ul>
           <li>Process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> carries atomic process-parent teardown.</li>
-          <li>Effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">12</span> carries versioned tool-intent carriers, typed execution outcomes, the durable effect-group journal, and parts-authoritative LLM responses.</li>
+          <li>Effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">13</span> carries merged exec observations, versioned tool-intent carriers, typed execution outcomes, the durable effect-group journal, and parts-authoritative LLM responses.</li>
           <li>The effect-group journal arrived in the component-54 migration.</li>
           <li>Version 55 adds the loser drain's unsettled-children index.</li>
           <li>Version 56 adds nullable trigger-occurrence reclaim eligibility and its partial maintenance index.</li>

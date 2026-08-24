@@ -753,8 +753,10 @@ impl ModelStore {
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
                 let response = lash_core::ExecResponse {
-                    observations: vec![output.clone()],
-                    observation_truncation: Vec::new(),
+                    observations: vec![lash_core::Observation {
+                        text: output.clone(),
+                        projection: Default::default(),
+                    }],
                     tool_calls: Vec::new(),
                     executed_calls: Vec::new(),
                     printed_images: Vec::new(),

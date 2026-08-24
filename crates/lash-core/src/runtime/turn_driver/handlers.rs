@@ -437,7 +437,7 @@ impl RuntimeTurnDriver<'_> {
                     code_correlation_id.clone(),
                     TurnEvent::CodeBlockCompleted {
                         language: language.clone(),
-                        output: output.observations.join("\n"),
+                        output: join_observations(&output.observations),
                         error: output.error.clone(),
                         success: output.error.is_none(),
                         duration_ms: output.duration_ms,
@@ -476,7 +476,12 @@ impl RuntimeTurnDriver<'_> {
         }
         if let Ok(output) = &result {
             if self.host.core.tracing.trace_sink.is_some() {
-                let observations_text = output.observations.join("\n");
+                let observations_text = join_observations(&output.observations);
+                let observation_projections = output
+                    .observations
+                    .iter()
+                    .map(|observation| observation.projection.clone())
+                    .collect::<Vec<_>>();
                 let tool_calls = output
                     .tool_calls
                     .iter()
@@ -504,17 +509,17 @@ impl RuntimeTurnDriver<'_> {
                         output: observations_text.clone(),
                         output_chars: observations_text.chars().count(),
                         observation_count: output.observations.len(),
-                        observation_truncation: output.observation_truncation.clone(),
+                        observation_projections: observation_projections.clone(),
                         error: output.error.clone(),
                         terminal_finish: output.terminal_finish.clone(),
                         tool_calls,
                     },
                 );
-                if !output.observation_truncation.is_empty() {
+                if !observation_projections.is_empty() {
                     self.emit_trace(
                         iteration,
                         lash_trace::TraceEvent::ObservationProjection {
-                            projections: output.observation_truncation.clone(),
+                            projections: observation_projections,
                         },
                     );
                 }
@@ -544,6 +549,14 @@ impl RuntimeTurnDriver<'_> {
         )?;
         Ok(())
     }
+}
+
+fn join_observations(observations: &[crate::Observation]) -> String {
+    observations
+        .iter()
+        .map(|observation| observation.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Option<String> {

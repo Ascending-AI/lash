@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 32;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 33;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -402,8 +402,10 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 ));
                 Ok(RuntimeEffectOutcome::ExecCode {
                     result: Box::new(Ok(ExecResponse {
-                        observations: vec!["durable read effect".to_string()],
-                        observation_truncation: Vec::new(),
+                        observations: vec![lash_core::Observation {
+                            text: "durable read effect".to_string(),
+                            projection: Default::default(),
+                        }],
                         tool_calls: Vec::new(),
                         executed_calls: Vec::new(),
                         printed_images: Vec::new(),
@@ -1032,7 +1034,8 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         panic!("durable fixture semantic drift: runtime-effect replay outcome kind changed");
     };
     let response = result.expect("durable fixture semantic drift: exec effect became an error");
-    assert_eq!(response.observations, vec!["durable read effect"]);
+    assert_eq!(response.observations.len(), 1);
+    assert_eq!(response.observations[0].text, "durable read effect");
     assert_eq!(response.duration_ms, 887);
     assert_eq!(
         response.terminal_finish,
