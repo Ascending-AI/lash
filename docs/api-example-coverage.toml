@@ -71536,7 +71536,7 @@ kind = "proc_derive"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:500#LlmOutputSpec::JsonSchema(schema) => {"
+usage = "crates/lash-provider-anthropic/src/request.rs:488#LlmOutputSpec::JsonSchema(schema) => {"
 
 [[api]]
 symbol = "lash_core::facade_support::JsonSchema"
@@ -71544,7 +71544,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:500#LlmOutputSpec::JsonSchema(schema) => {"
+usage = "crates/lash-provider-anthropic/src/request.rs:488#LlmOutputSpec::JsonSchema(schema) => {"
 
 [[api]]
 symbol = "lash_core::facade_support::JsonSchema::is_referenceable"
@@ -72560,7 +72560,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:194#let capabilities = ProviderSchemaCapabilities::anthropic();"
+usage = "crates/lash-provider-anthropic/src/request.rs:219#let capabilities = ProviderSchemaCapabilities::anthropic();"
 
 [[api]]
 symbol = "lash_core::facade_support::ProviderSchemaCapabilities::anthropic"
@@ -72568,7 +72568,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:194#let capabilities = ProviderSchemaCapabilities::anthropic();"
+usage = "crates/lash-provider-anthropic/src/request.rs:219#let capabilities = ProviderSchemaCapabilities::anthropic();"
 
 [[api]]
 symbol = "lash_core::facade_support::ProviderSchemaCapabilities::bedrock_claude"
@@ -72585,7 +72585,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:203#dialects: capabilities.dialects_for(SchemaPurpose::ToolInput),"
+usage = "crates/lash-provider-anthropic/src/request.rs:228#dialects: capabilities.dialects_for(SchemaPurpose::ToolInput),"
 
 [[api]]
 symbol = "lash_core::facade_support::ProviderSchemaCapabilities::google"
@@ -73056,7 +73056,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:202#purpose: SchemaPurpose::ToolInput,"
+usage = "crates/lash-provider-anthropic/src/request.rs:227#purpose: SchemaPurpose::ToolInput,"
 
 [[api]]
 symbol = "lash_core::facade_support::SchemaPurpose::PromptSchema"
@@ -73072,7 +73072,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:506#purpose: SchemaPurpose::StructuredOutput,"
+usage = "crates/lash-provider-anthropic/src/request.rs:494#purpose: SchemaPurpose::StructuredOutput,"
 
 [[api]]
 symbol = "lash_core::facade_support::SchemaPurpose::ToolInput"
@@ -73080,7 +73080,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:202#purpose: SchemaPurpose::ToolInput,"
+usage = "crates/lash-provider-anthropic/src/request.rs:227#purpose: SchemaPurpose::ToolInput,"
 
 [[api]]
 symbol = "lash_core::facade_support::SchemaPurpose::ToolOutput"
@@ -73120,7 +73120,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:180#err.first_diagnostic()"
+usage = "crates/lash-provider-anthropic/src/request.rs:205#err.first_diagnostic()"
 
 [[api]]
 symbol = "lash_core::facade_support::SchemaResolutionError::provider"
@@ -73144,7 +73144,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:200#SchemaResolutionRequest {"
+usage = "crates/lash-provider-anthropic/src/request.rs:225#SchemaResolutionRequest {"
 
 [[api]]
 symbol = "lash_core::facade_support::SchemaResolutionRequest::dialects"
@@ -73152,7 +73152,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:203#dialects: capabilities.dialects_for(SchemaPurpose::ToolInput),"
+usage = "crates/lash-provider-anthropic/src/request.rs:228#dialects: capabilities.dialects_for(SchemaPurpose::ToolInput),"
 
 [[api]]
 symbol = "lash_core::facade_support::SchemaResolutionRequest::provider"
@@ -73160,7 +73160,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:201#provider: \"Anthropic\","
+usage = "crates/lash-provider-anthropic/src/request.rs:226#provider: \"Anthropic\","
 
 [[api]]
 symbol = "lash_core::facade_support::SchemaResolutionRequest::purpose"
@@ -73168,7 +73168,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/request.rs:202#purpose: SchemaPurpose::ToolInput,"
+usage = "crates/lash-provider-anthropic/src/request.rs:227#purpose: SchemaPurpose::ToolInput,"
 
 [[api]]
 symbol = "lash_core::facade_support::ScopedEffectControllerFacadeOps"

@@ -31,7 +31,7 @@ mod tests {
         CacheRetention, ModelCapability, Provider, ProviderOptions, ReasoningCapability,
         ReasoningEncoding, StreamTermination,
     };
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::collections::BTreeMap;
     use std::num::NonZeroUsize;
     use std::sync::Arc;
@@ -145,6 +145,20 @@ mod tests {
             stream_events: None,
             generation: lash_core::GenerationOptions::default(),
             provider_trace: None,
+        }
+    }
+
+    fn count_object_key(value: &Value, key: &str) -> usize {
+        match value {
+            Value::Object(object) => {
+                usize::from(object.contains_key(key))
+                    + object
+                        .values()
+                        .map(|value| count_object_key(value, key))
+                        .sum::<usize>()
+            }
+            Value::Array(array) => array.iter().map(|value| count_object_key(value, key)).sum(),
+            _ => 0,
         }
     }
 
@@ -1219,15 +1233,17 @@ mod tests {
                 .get("cache_control")
                 .is_none()
         );
-        assert!(
-            body["messages"][0]["content"][0]
-                .get("__lash_cache_breakpoint")
-                .is_none()
-        );
+        assert_eq!(count_object_key(&body, "__lash_cache_breakpoint"), 0);
         assert_eq!(
             AnthropicProvider::generation_disposition(&req, &body).cache,
             lash_core::GenerationOptionOutcome::Applied,
         );
+    }
+
+    mod cache_breakpoint_tests {
+        use super::*;
+
+        include!("cache_breakpoint_tests.rs");
     }
 
     #[test]
