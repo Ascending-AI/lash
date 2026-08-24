@@ -2,10 +2,10 @@
 #
 # Three jobs, and deliberately nothing else:
 #
-#   1. Keep the slow marks visible to the end of the run, without ever killing
-#      a test. A slow test is annotated, not terminated; there is no
-#      `terminate-after` in this file, so no gate can be weakened by a bound
-#      that was guessed rather than measured.
+#   1. Keep the slow marks visible to the end of the run. Locally a slow test
+#      is annotated, not terminated; the CI profile terminates at measured
+#      bounds (each derived from recorded runs below) so a hung test releases
+#      its runner instead of holding it to the job timeout.
 #   2. Bound the two known co-scheduling hazards — the fault-matrix chunk tests,
 #      which each fork real `cargo` invocations of their own, and the suites
 #      that share a single Postgres database or MinIO bucket.
@@ -121,15 +121,12 @@ slow-timeout = { period = "300s", terminate-after = 5 }
 
 # Trybuild UI tests are legitimate long runners. CI's warmed fixture path is
 # much shorter, while a cold local run measured 1204s for one test and was
-# still compiling the second at 2781s. Keep the cap finite and above both
-# observed cold paths.
+# still compiling the second at 2781s. The cold cost is the SHARED trybuild
+# scratch-project build, paid by whichever ui test wins the race — so the
+# whole binary gets the wider bound, not the two tests one run happened to
+# charge it to. Keep the cap finite and above both observed cold paths.
 [[profile.ci.overrides]]
-filter = 'package(lash-runtime) & binary(ui) & test(attachment_gc_requires_explicit_root_set)'
-priority = 99
-slow-timeout = { period = "600s", terminate-after = 5 }
-
-[[profile.ci.overrides]]
-filter = 'package(lash-runtime) & binary(ui) & test(model_selection_requires_model_and_variant_together)'
+filter = 'package(lash-runtime) & binary(ui)'
 priority = 99
 slow-timeout = { period = "600s", terminate-after = 5 }
 
