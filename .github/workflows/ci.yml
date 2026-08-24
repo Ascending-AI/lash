@@ -580,19 +580,19 @@ jobs:
   # read-only restore cannot save, sharing it across the shards and runs.
   # --no-fail-fast so one failure never hides the rest (the alpha.82 lesson).
   #
-  # Four partitions, not three: with the old three, shard 3 ran 30% longer than
-  # shard 1 (12m09s vs 9m20s) and set the wall time for the whole lane. nextest
-  # partitions by count, which balances test *numbers* and not test *durations*,
-  # so the residual skew is reduced by making each partition smaller rather than
-  # by hand-assigning tests to shards.
+  # Five partitions, not four: with four, shard 2/4 consistently ran 9–11 min
+  # while the others took ~8 min, setting the wall time for the whole lane.
+  # nextest partitions by count, which balances test *numbers* and not test
+  # *durations*, so the residual skew is reduced by making each partition
+  # smaller rather than by hand-assigning tests to shards.
   test-shard:
-    name: Test shard ${{ matrix.shard }}/4
+    name: Test shard ${{ matrix.shard }}/5
     runs-on: blacksmith-16vcpu-ubuntu-2404
 
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
 
     steps:
       - name: Check out repository
@@ -643,13 +643,13 @@ jobs:
 
       # Workspace-wide: every crate's tests run, not a hand-maintained crate
       # list. Live tests (Restate e2e, Postgres conformance without a database
-      # URL) are #[ignore]d or self-skip. Partition count:i/4 splits execution
-      # across the four shards.
+      # URL) are #[ignore]d or self-skip. Partition count:i/5 splits execution
+      # across the five shards.
       - name: Test workspace shard
         run: |
           # shellcheck disable=SC2086
           cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
-            --no-fail-fast --partition count:${{ matrix.shard }}/4
+            --no-fail-fast --partition count:${{ matrix.shard }}/5
 
       - name: Report sccache stats
         if: always()
