@@ -5,6 +5,12 @@
 use crate::policy::AnthropicThinkingConfig;
 use crate::support::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct BreakpointAddress {
+    pub(crate) message_index: usize,
+    pub(crate) block_index: usize,
+}
+
 impl AnthropicProvider {
     fn role_name(role: &LlmRole) -> &'static str {
         match role {
@@ -40,15 +46,11 @@ impl AnthropicProvider {
         Some(json!({"type": block_type, "source": wire_source}))
     }
 
-    fn text_block_value(text: &str, cache_breakpoint: bool) -> Value {
-        let mut block = json!({
+    fn text_block_value(text: &str) -> Value {
+        json!({
             "type": "text",
             "text": text,
-        });
-        if cache_breakpoint {
-            block["__lash_cache_breakpoint"] = json!(true);
-        }
-        block
+        })
     }
 
     /// Translate one `LlmContentBlock` into the Anthropic wire shape.
@@ -56,19 +58,15 @@ impl AnthropicProvider {
     /// empty text block — Anthropic 400s on those).
     fn content_block_value(req: &LlmRequest, block: &LlmContentBlock) -> Option<Value> {
         match block {
-            LlmContentBlock::Text {
-                text,
-                cache_breakpoint,
-                ..
-            } => {
+            LlmContentBlock::Text { text, .. } => {
                 if text.trim().is_empty() {
                     return None;
                 }
-                Some(Self::text_block_value(text, *cache_breakpoint))
+                Some(Self::text_block_value(text))
             }
             LlmContentBlock::Attachment { attachment_idx } => Some(
                 Self::attachment_block_value(req, *attachment_idx)
-                    .unwrap_or_else(|| Self::text_block_value("[Attachment]", false)),
+                    .unwrap_or_else(|| Self::text_block_value("[Attachment]")),
             ),
             LlmContentBlock::ToolCall {
                 call_id,
@@ -101,7 +99,7 @@ impl AnthropicProvider {
                     if text.trim().is_empty() {
                         return None;
                     }
-                    return Some(Self::text_block_value(text, false));
+                    return Some(Self::text_block_value(text));
                 };
                 if replay.as_ref().is_some_and(|meta| meta.redacted) {
                     return Some(json!({
@@ -124,9 +122,13 @@ impl AnthropicProvider {
     /// Build the `messages` array for Anthropic Messages API. Each lash
     /// `LlmMessage` becomes one wire message; adjacent same-role messages
     /// get merged to match Anthropic's alternation rules.
-    fn build_messages(&self, req: &LlmRequest) -> (Option<String>, Vec<Value>) {
+    pub(crate) fn build_messages(
+        &self,
+        req: &LlmRequest,
+    ) -> (Option<String>, Vec<Value>, Option<BreakpointAddress>) {
         let mut system_prompt: Option<String> = None;
         let mut out: Vec<Value> = Vec::new();
+        let mut breakpoint = None;
         let mut first_system_seen = false;
 
         for msg in &req.messages {
@@ -145,8 +147,18 @@ impl AnthropicProvider {
 
             let wire_role = Self::role_name(&msg.role);
             let mut blocks: Vec<Value> = Vec::new();
+            let mut marked_block_index = None;
             for block in msg.blocks.iter() {
                 if let Some(value) = Self::content_block_value(req, block) {
+                    if matches!(
+                        block,
+                        LlmContentBlock::Text {
+                            cache_breakpoint: true,
+                            ..
+                        }
+                    ) {
+                        marked_block_index = Some(blocks.len());
+                    }
                     blocks.push(value);
                 }
             }
@@ -157,21 +169,34 @@ impl AnthropicProvider {
             // Merge with previous turn if same role — keeps replay valid
             // when a reasoning-only message immediately precedes a text
             // message from the same role.
+            let message_count = out.len();
             if let Some(prev) = out.last_mut()
                 && prev.get("role").and_then(|v| v.as_str()) == Some(wire_role)
                 && let Some(prev_content) = prev.get_mut("content").and_then(|c| c.as_array_mut())
             {
+                if let Some(block_index) = marked_block_index {
+                    breakpoint = Some(BreakpointAddress {
+                        message_index: message_count - 1,
+                        block_index: prev_content.len() + block_index,
+                    });
+                }
                 prev_content.extend(blocks);
                 continue;
             }
 
+            if let Some(block_index) = marked_block_index {
+                breakpoint = Some(BreakpointAddress {
+                    message_index: message_count,
+                    block_index,
+                });
+            }
             out.push(json!({
                 "role": wire_role,
                 "content": blocks,
             }));
         }
 
-        (system_prompt, out)
+        (system_prompt, out, breakpoint)
     }
 
     fn projection_error(err: SchemaResolutionError) -> LlmTransportError {
@@ -228,17 +253,9 @@ impl AnthropicProvider {
         system: &mut Option<Value>,
         messages: &mut [Value],
         tools: &mut [Value],
+        breakpoint: Option<BreakpointAddress>,
     ) {
         let Some(ctrl) = Self::cache_control_value(cache_retention) else {
-            for msg in messages {
-                if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
-                    for block in content {
-                        block
-                            .as_object_mut()
-                            .map(|obj| obj.remove("__lash_cache_breakpoint"));
-                    }
-                }
-            }
             return;
         };
 
@@ -250,37 +267,17 @@ impl AnthropicProvider {
             last["cache_control"] = ctrl.clone();
         }
 
-        let mut applied_explicit_breakpoint = false;
-        for msg in messages.iter_mut().rev() {
-            if !matches!(
-                msg.get("role").and_then(Value::as_str),
-                Some("user" | "assistant")
-            ) {
-                continue;
-            }
-            let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) else {
-                continue;
-            };
-            for block in content.iter_mut().rev() {
-                let is_marked = block
-                    .get("__lash_cache_breakpoint")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                if is_marked && block.is_object() {
-                    block["cache_control"] = ctrl.clone();
-                    block
-                        .as_object_mut()
-                        .map(|obj| obj.remove("__lash_cache_breakpoint"));
-                    applied_explicit_breakpoint = true;
-                    break;
-                }
-            }
-            if applied_explicit_breakpoint {
-                break;
-            }
+        if let Some(address) = breakpoint {
+            let block = messages
+                .get_mut(address.message_index)
+                .and_then(|message| message.get_mut("content"))
+                .and_then(Value::as_array_mut)
+                .and_then(|content| content.get_mut(address.block_index))
+                .expect("breakpoint address points to a surviving content block");
+            block["cache_control"] = ctrl.clone();
         }
 
-        if !applied_explicit_breakpoint
+        if breakpoint.is_none()
             && let Some(last_msg) = messages.last_mut()
             && last_msg.get("role").and_then(|v| v.as_str()) == Some("user")
             && let Some(content) = last_msg.get_mut("content").and_then(|c| c.as_array_mut())
@@ -294,16 +291,6 @@ impl AnthropicProvider {
             && last_tool.is_object()
         {
             last_tool["cache_control"] = ctrl;
-        }
-
-        for msg in messages {
-            if let Some(content) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
-                for block in content {
-                    block
-                        .as_object_mut()
-                        .map(|obj| obj.remove("__lash_cache_breakpoint"));
-                }
-            }
         }
     }
 
@@ -391,7 +378,7 @@ impl AnthropicProvider {
                 .with_code("stored_attachment_not_resolved"));
             }
         }
-        let (system_text, mut messages) = self.build_messages(req);
+        let (system_text, mut messages, breakpoint) = self.build_messages(req);
         let mut tools = self.build_tools(req)?;
 
         let thinking_config = Self::thinking_config(req);
@@ -417,6 +404,7 @@ impl AnthropicProvider {
             &mut system_value,
             &mut messages,
             &mut tools,
+            breakpoint,
         );
 
         let mut body = json!({
