@@ -15,8 +15,7 @@ use super::registry::ProcessRegistry;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SegmentHandover {
     pub reason: crate::BoundaryReason,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub program_hash: Option<String>,
+    pub program_hash: String,
     pub engine_state: Vec<u8>,
 }
 
@@ -27,8 +26,14 @@ pub struct SegmentHandover {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersistedSegmentHandover {
     pub segment_ordinal: u64,
-    pub program_hash: String,
     pub handover: SegmentHandover,
+}
+
+impl PersistedSegmentHandover {
+    /// Returns the program identity carried by the engine-owned handover.
+    pub fn program_hash(&self) -> &str {
+        &self.handover.program_hash
+    }
 }
 
 /// Result of one process invocation. A segment boundary is never terminal.

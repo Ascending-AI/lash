@@ -563,10 +563,9 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
         }
         let handover = lash_core::PersistedSegmentHandover {
             segment_ordinal: 1,
-            program_hash: "sim-seeded-program-v1".to_string(),
             handover: lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
-                program_hash: Some("sim-seeded-program-v1".to_string()),
+                program_hash: "sim-seeded-program-v1".to_string(),
                 engine_state: budget.to_le_bytes().to_vec(),
             },
         };

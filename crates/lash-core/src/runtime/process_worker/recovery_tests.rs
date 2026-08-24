@@ -522,7 +522,7 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
             Ok(crate::ProcessRunOutcome::SegmentBoundary(
                 crate::SegmentHandover {
                     reason: crate::BoundaryReason::JournalBudget,
-                    program_hash: Some("program-v1".to_string()),
+                    program_hash: "program-v1".to_string(),
                     engine_state: vec![1, 2, 3],
                 },
             ))

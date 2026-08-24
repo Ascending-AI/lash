@@ -265,7 +265,7 @@ fn parked_segment(payload: Payload<'_>, owner_record: Option<&str>) -> Vec<Extra
 #[cfg(feature = "rlm")]
 fn program_identity(root: &serde_json::Value, owner_record: Option<&str>) -> Option<Extraction> {
     let format = DurableFormat::Bytecode;
-    let persisted = root.get("program_hash")?.as_str()?;
+    let persisted = root.get("handover")?.get("program_hash")?.as_str()?;
     let record: serde_json::Value = serde_json::from_str(owner_record?).ok()?;
     let input = record.get("input")?;
     // Only Lashlang engine processes carry a bytecode identity; a tool-call or
@@ -435,8 +435,11 @@ mod tests {
         let bytes = serde_json::to_vec(&engine_state).expect("the fixture encodes");
         serde_json::json!({
             "segment_ordinal": 3,
-            "program_hash": "sha256:abc",
-            "handover": {"reason": "await", "engine_state": bytes},
+            "handover": {
+                "reason": "await",
+                "program_hash": "sha256:abc",
+                "engine_state": bytes,
+            },
         })
         .to_string()
     }
@@ -467,8 +470,10 @@ mod tests {
         let engine_state = serde_json::to_vec(&serde_json::json!({"vm": {"format_version": 8}}))
             .expect("the fixture encodes");
         let payload = serde_json::json!({
-            "program_hash": "sha256:abc",
-            "handover": {"engine_state": engine_state},
+            "handover": {
+                "program_hash": "sha256:abc",
+                "engine_state": engine_state,
+            },
         })
         .to_string();
         let extractions = extract(&item(
@@ -685,6 +690,48 @@ mod tests {
 
     #[cfg(feature = "rlm")]
     #[test]
+    fn a_new_writer_handover_exposes_its_nested_program_identity() {
+        let hash = lashlang::ContentHash::new("00ff");
+        let input = lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: lashlang::ModuleRef::new(&hash),
+            process_ref: lashlang::ProcessRef::new(hash.clone(), 0),
+            host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
+            process_name: "worker".to_string(),
+            args: serde_json::Map::new(),
+        };
+        let current = lash_lashlang_runtime::lashlang_program_hash(&input);
+        let record = serde_json::json!({
+            "input": {
+                "type": "engine",
+                "kind": lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+                "payload": serde_json::to_value(&input).expect("the input serializes"),
+            }
+        })
+        .to_string();
+        let payload = serde_json::to_string(&lash_core::PersistedSegmentHandover {
+            segment_ordinal: 1,
+            handover: lash_core::SegmentHandover {
+                reason: lash_core::BoundaryReason::JournalBudget,
+                program_hash: current,
+                engine_state: serde_json::to_vec(&serde_json::json!({
+                    "version": crate::formats::LASHLANG_SEGMENT_STATE_VERSION,
+                    "vm": {"format_version": crate::formats::VM_CONTINUATION_FORMAT_VERSION},
+                }))
+                .expect("the engine state serializes"),
+            },
+        })
+        .expect("the new writer handover serializes");
+        let mut parked = item(DurableSurface::ParkedSegment, DurablePayload::Json(payload));
+        parked.owner_record = Some(record);
+
+        assert_eq!(
+            versions(&extract(&parked), DurableFormat::Bytecode),
+            vec![crate::formats::BYTECODE_FORMAT_VERSION]
+        );
+    }
+
+    #[cfg(feature = "rlm")]
+    #[test]
     fn a_program_identity_from_another_build_is_a_refusal_with_no_version_to_name() {
         let hash = lashlang::ContentHash::new("00ff");
         let input = lash_lashlang_runtime::LashlangProcessInput {
@@ -708,8 +755,10 @@ mod tests {
             DurableSurface::ParkedSegment,
             DurablePayload::Json(
                 serde_json::json!({
-                    "program_hash": current,
-                    "handover": {"engine_state": Vec::<u8>::new()},
+                    "handover": {
+                        "program_hash": current,
+                        "engine_state": Vec::<u8>::new(),
+                    },
                 })
                 .to_string(),
             ),
@@ -724,8 +773,10 @@ mod tests {
         let mut stale = matching.clone();
         stale.payload = DurablePayload::Json(
             serde_json::json!({
-                "program_hash": "sha256:from-another-build",
-                "handover": {"engine_state": Vec::<u8>::new()},
+                "handover": {
+                    "program_hash": "sha256:from-another-build",
+                    "engine_state": Vec::<u8>::new(),
+                },
             })
             .to_string(),
         );

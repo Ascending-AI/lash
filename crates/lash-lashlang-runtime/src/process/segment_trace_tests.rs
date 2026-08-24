@@ -35,7 +35,7 @@ fn multi_segment_trace_emits_one_started_and_one_finished() {
     let boundary = || {
         lash_core::ProcessRunOutcome::SegmentBoundary(lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
-            program_hash: Some("program-v1".to_string()),
+            program_hash: "program-v1".to_string(),
             engine_state: Vec::new(),
         })
     };
@@ -57,7 +57,7 @@ fn multi_segment_trace_emits_one_started_and_one_finished() {
 
 #[test]
 fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
-    let output = validate_lashlang_program_hash(Some("sha256:old"), "sha256:current")
+    let output = validate_lashlang_program_hash("sha256:old", "sha256:current")
         .expect_err("changed bytecode identity must fail closed");
     assert!(matches!(
         *output,

@@ -20,7 +20,7 @@ use crate::process::{
     boundary_must_be_declined, missing_segment_is_superseded, process_segment_workflow_key,
     restate_process_terminal_await_key, restate_process_terminal_output,
     restate_process_terminal_resolution, retryable_registry_error, segment_execution_authority,
-    terminal_completion_workflow_key, validate_segment_program_hash, workflow_key_authority,
+    terminal_completion_workflow_key, workflow_key_authority,
 };
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -737,7 +737,7 @@ impl RestateProcessRunner for Fig788SegmentBoundaryRunner {
         Ok(lash_core::ProcessRunOutcome::SegmentBoundary(
             lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
-                program_hash: Some("fig788-segment-program".to_string()),
+                program_hash: "fig788-segment-program".to_string(),
                 engine_state: vec![7, 8, 8],
             },
         ))
@@ -768,7 +768,7 @@ impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
             handover.expect("ordinal-one runner must receive its handover"),
             lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
-                program_hash: Some("fig788-terminal-program".to_string()),
+                program_hash: "fig788-terminal-program".to_string(),
                 engine_state: vec![1],
             }
         );
@@ -804,7 +804,7 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
             handover.expect("effectful ordinal-one runner must receive its handover"),
             lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
-                program_hash: Some("fig811-effectful-terminal-program".to_string()),
+                program_hash: "fig811-effectful-terminal-program".to_string(),
                 engine_state: vec![8, 1, 1],
             }
         );
@@ -1588,10 +1588,9 @@ async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_handover() {
         .expect("record retained Restate execution start");
     let persisted = lash_core::PersistedSegmentHandover {
         segment_ordinal: 1,
-        program_hash: "fig788-terminal-program".to_string(),
         handover: lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
-            program_hash: Some("fig788-terminal-program".to_string()),
+            program_hash: "fig788-terminal-program".to_string(),
             engine_state: vec![1],
         },
     };
@@ -1689,10 +1688,9 @@ async fn fig811_post_terminal_redrive_replays_delivery_after_handover_cleanup() 
             process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
-                program_hash: "fig788-terminal-program".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
-                    program_hash: Some("fig788-terminal-program".to_string()),
+                    program_hash: "fig788-terminal-program".to_string(),
                     engine_state: vec![1],
                 },
             },
@@ -1772,10 +1770,9 @@ async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
             process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
-                program_hash: "fig811-effectful-terminal-program".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
-                    program_hash: Some("fig811-effectful-terminal-program".to_string()),
+                    program_hash: "fig811-effectful-terminal-program".to_string(),
                     engine_state: vec![8, 1, 1],
                 },
             },
@@ -12069,7 +12066,7 @@ async fn absent_event_after_cancel_promise_is_a_terminal_handler_error() {
 async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
     let continuation = lash_core::SegmentHandover {
         reason: lash_core::BoundaryReason::JournalBudget,
-        program_hash: Some("program-v1".to_string()),
+        program_hash: "program-v1".to_string(),
         engine_state: vec![1, 2, 3],
     };
     let terminal = ProcessAwaitOutput::Success {
@@ -12116,7 +12113,6 @@ async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
     };
     let persisted = lash_core::PersistedSegmentHandover {
         segment_ordinal: 1,
-        program_hash: "program-v1".to_string(),
         handover: first_handover,
     };
     continuations
@@ -12137,8 +12133,7 @@ async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
         .await
         .expect("load successor handover")
         .expect("persisted successor handover");
-    let resumed = validate_segment_program_hash("segmented-durable", loaded)
-        .expect("matching program identity");
+    let resumed = loaded.handover;
     first_context.start_replay();
     let successor_context = Arc::new(ReplayableRecordingContext::default());
     let successor_controller = RestateRuntimeEffectController::new(successor_context);
@@ -12222,12 +12217,12 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
             outcomes: Mutex::new(VecDeque::from([
                 lash_core::ProcessRunOutcome::SegmentBoundary(lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
-                    program_hash: Some("matrix-program-v1".to_string()),
+                    program_hash: "matrix-program-v1".to_string(),
                     engine_state: vec![1],
                 }),
                 lash_core::ProcessRunOutcome::SegmentBoundary(lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
-                    program_hash: Some("matrix-program-v1".to_string()),
+                    program_hash: "matrix-program-v1".to_string(),
                     engine_state: vec![2],
                 }),
                 terminal.clone().into(),
@@ -12326,10 +12321,7 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
                         Some(loaded.clone())
                     );
                 }
-                input_handover = Some(
-                    validate_segment_program_hash(&process_id, loaded)
-                        .expect("valid matrix handover"),
-                );
+                input_handover = Some(loaded.handover);
             }
 
             let run_once = workflow
@@ -12353,7 +12345,6 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
             let next = ordinal + 1;
             let persisted = lash_core::PersistedSegmentHandover {
                 segment_ordinal: next,
-                program_hash: "matrix-program-v1".to_string(),
                 handover: boundary,
             };
             continuations
@@ -12431,10 +12422,9 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
 fn missing_segment_handover_distinguishes_superseded_orphan_from_current_input() {
     let latest = lash_core::PersistedSegmentHandover {
         segment_ordinal: 4,
-        program_hash: "program-v1".to_string(),
         handover: lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
-            program_hash: Some("program-v1".to_string()),
+            program_hash: "program-v1".to_string(),
             engine_state: vec![4],
         },
     };
@@ -12460,10 +12450,9 @@ async fn persisted_handover_is_change_feed_and_event_invariant() {
             "segment-invariant",
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
-                program_hash: "program-v1".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::DurationCap,
-                    program_hash: Some("program-v1".to_string()),
+                    program_hash: "program-v1".to_string(),
                     engine_state: vec![9],
                 },
             },
@@ -12486,25 +12475,7 @@ async fn persisted_handover_is_change_feed_and_event_invariant() {
 }
 
 #[tokio::test]
-async fn segment_program_hash_mismatch_is_typed_and_cancel_redrives_successor_engine() {
-    let mismatch = validate_segment_program_hash(
-        "hash-bound",
-        lash_core::PersistedSegmentHandover {
-            segment_ordinal: 1,
-            program_hash: "old-program".to_string(),
-            handover: lash_core::SegmentHandover {
-                reason: lash_core::BoundaryReason::JournalBudget,
-                program_hash: Some("new-program".to_string()),
-                engine_state: vec![],
-            },
-        },
-    )
-    .expect_err("changed program must fail closed");
-    assert_eq!(
-        mismatch.code,
-        lash_core::RuntimeErrorCode::RestateSegmentProgramHashMismatch
-    );
-
+async fn cancel_redrives_successor_engine() {
     let runner = Arc::new(SegmentedRecordingRunner {
         outcomes: Mutex::new(VecDeque::from([ProcessAwaitOutput::Success {
             value: serde_json::Value::Null,
@@ -12543,7 +12514,7 @@ async fn segment_program_hash_mismatch_is_typed_and_cancel_redrives_successor_en
             1,
             Some(lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
-                program_hash: Some("program-v1".to_string()),
+                program_hash: "program-v1".to_string(),
                 engine_state: vec![1],
             }),
             async { Ok(()) },
@@ -13208,7 +13179,10 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
                     })
                     .await
                     .expect("inspect early intent children");
-                assert_eq!(durable_state["version"], serde_json::json!(3));
+                assert_eq!(
+                    durable_state["version"],
+                    serde_json::json!(lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION)
+                );
                 assert_eq!(
                     durable_state["parent_end_actions"]
                         .as_array()
@@ -13233,10 +13207,6 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
                         "segmented-process-parent",
                         lash_core::PersistedSegmentHandover {
                             segment_ordinal: next,
-                            program_hash: boundary
-                                .program_hash
-                                .clone()
-                                .expect("versioned Lashlang program hash"),
                             handover: boundary,
                         },
                     )
@@ -13247,10 +13217,7 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
                     .await
                     .expect("reload process-parent handover")
                     .expect("stored process-parent handover");
-                input_handover = Some(
-                    validate_segment_program_hash("segmented-process-parent", loaded)
-                        .expect("valid process-parent program identity"),
-                );
+                input_handover = Some(loaded.handover);
                 ordinal = next;
             }
             Err(join_error) if join_error.is_panic() => break,
@@ -15063,10 +15030,9 @@ async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
             "mid-chain",
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 3,
-                program_hash: "program-v1".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
-                    program_hash: Some("program-v1".to_string()),
+                    program_hash: "program-v1".to_string(),
                     engine_state: vec![3],
                 },
             },
