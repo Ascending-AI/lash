@@ -285,13 +285,9 @@ async fn run_generated_evidence_profile(
     for seed in seed_values.iter().copied() {
         let workload = generate_workload(seed, profile, boundary_limit)?;
         let trace_path = replay_dir.join(format!("seed-{seed:016x}.trace.json"));
-        let trace = run_generated_workload(
-            workload,
-            &fixed_manifest.script_bundle_hash,
-            &labels.shard,
-            &trace_path,
-        )
-        .await?;
+        let trace =
+            run_generated_workload(workload, &fixed_manifest.script_bundle_hash, &labels.shard)
+                .await?;
         if !trace.oracle.is_passed() {
             return Err(FixedScriptRunnerError::Assertion(
                 trace.oracle.message.clone(),
@@ -416,7 +412,10 @@ async fn run_generated_evidence_profile(
             sqlite_database_path: relative_path(artifact_root, &sqlite_database_path),
             sqlite_replay_report_path: relative_path(artifact_root, &sqlite_replay_report_path),
             sqlite_replay_report_sha256,
-            replay_command: trace.replay_command,
+            replay_command: format!(
+                "cargo run -p lash-sim --locked -- replay {}",
+                trace_path.display()
+            ),
             sqlite_replay_command: format!(
                 "cargo run -p lash-sim --locked -- replay-sqlite {} --out {}",
                 trace_path.display(),
@@ -646,13 +645,9 @@ async fn run_generated_search_profile(
         let workload = generate_workload(seed, profile, boundary_limit)?;
         let seed_dir = failures_dir.join(format!("seed-{seed:016x}"));
         let trace_path = seed_dir.join("trace.json");
-        let trace = run_generated_workload(
-            workload,
-            &fixed_manifest.script_bundle_hash,
-            &labels.shard,
-            &trace_path,
-        )
-        .await?;
+        let trace =
+            run_generated_workload(workload, &fixed_manifest.script_bundle_hash, &labels.shard)
+                .await?;
 
         boundary_events += trace.events.len();
         runtime_turn_proofs += trace
@@ -706,7 +701,6 @@ async fn run_generated_search_profile(
                 generate_workload(seed, profile, boundary_limit)?,
                 &fixed_manifest.script_bundle_hash,
                 &labels.shard,
-                &trace_path,
             )
             .await?;
             match require_identical_simulation_rerun(seed_index, &trace, &rerun) {
@@ -830,6 +824,10 @@ async fn run_generated_search_profile(
         } else {
             trace.oracle.message.clone()
         };
+        let replay_command = format!(
+            "cargo run -p lash-sim --locked -- replay {}",
+            trace_path.display()
+        );
         let package = json!({
             "schema": "lash.sim.search-failure-package.v1",
             "seed": seed,
@@ -842,7 +840,7 @@ async fn run_generated_search_profile(
             "seed_corpus": labels.seed_source.corpus(),
             "reason": failure_reason,
             "determinism_rerun_trace": determinism_rerun_trace_path,
-            "replay_command": trace.replay_command,
+            "replay_command": replay_command,
             "regenerate_command": format!(
                 "cargo run -p lash-sim --locked -- run --out <artifact-root> --profile {profile} --seed {seed} --max-boundaries {boundary_limit}"
             ),
@@ -876,7 +874,7 @@ async fn run_generated_search_profile(
              reproducibility package at {}; reproduce with: {}",
             labels.shard,
             seed_dir.display(),
-            trace.replay_command
+            replay_command
         )));
     }
 

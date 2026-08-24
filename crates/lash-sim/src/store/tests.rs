@@ -39,11 +39,11 @@ fn model_store_keeps_cross_session_outputs_isolated() {
 
     let summary = store.summary();
     assert_eq!(summary.session_count, 2);
-    assert_eq!(summary.sessions[0].provider_outputs, vec!["one"]);
-    assert_eq!(summary.sessions[1].provider_outputs, vec!["two"]);
+    assert_eq!(summary.sessions[0].provider_turns[0].output, "one");
+    assert_eq!(summary.sessions[1].provider_turns[0].output, "two");
     assert_ne!(
-        summary.sessions[0].provider_outputs,
-        summary.sessions[1].provider_outputs
+        summary.sessions[0].provider_turns,
+        summary.sessions[1].provider_turns
     );
 }
 

@@ -519,9 +519,9 @@ pub fn cross_session_isolation(summary: &AbstractWorldSummary) -> OracleVerdict 
             .filter(|alias| *alias != session.alias)
         {
             let leaked_provider = session
-                .provider_outputs
+                .provider_turns
                 .iter()
-                .any(|output| output.contains(other_alias));
+                .any(|turn| turn.output.contains(other_alias));
             let leaked_tool = session
                 .tool_outputs
                 .iter()
@@ -599,7 +599,7 @@ fn observer_convergence_law(
     expectations: Option<&WorkloadExpectations>,
 ) -> OracleVerdict {
     for session in &summary.sessions {
-        let expected_turns = session.provider_outputs.len();
+        let expected_turns = session.provider_turns.len();
         let Some(last_observed_turn) = session.observer_turn_indices.last().copied() else {
             return OracleVerdict::failed(
                 OBSERVER_CONVERGENCE_ORACLE,
@@ -1118,21 +1118,20 @@ fn runtime_session_graph_law(
     expectations: Option<&WorkloadExpectations>,
 ) -> OracleVerdict {
     for session in &summary.sessions {
-        if session.provider_outputs.len() < 2 {
+        if session.provider_turns.len() < 2 {
             return OracleVerdict::failed(
                 RUNTIME_SESSION_GRAPH_ORACLE,
                 format!(
                     "session `{}` ran only {} provider turns",
                     session.alias,
-                    session.provider_outputs.len()
+                    session.provider_turns.len()
                 ),
             );
         }
-        for (index, output) in session.provider_outputs.iter().enumerate() {
-            let turn_index = index + 1;
+        for (index, turn) in session.provider_turns.iter().enumerate() {
+            let turn_index = index as u64 + 1;
             let expected_exchange_count = turn_index;
-            if session.provider_exchange_counts.get(index).copied() != Some(expected_exchange_count)
-            {
+            if turn.exchange_count != Some(expected_exchange_count) {
                 return OracleVerdict::failed(
                     RUNTIME_SESSION_GRAPH_ORACLE,
                     format!(
@@ -1142,8 +1141,7 @@ fn runtime_session_graph_law(
                 );
             }
             let expected_graph_min_count = turn_index * 2 + 1;
-            if session.graph_node_counts.get(index).copied().unwrap_or(0) < expected_graph_min_count
-            {
+            if turn.graph_node_count.unwrap_or(0) < expected_graph_min_count {
                 return OracleVerdict::failed(
                     RUNTIME_SESSION_GRAPH_ORACLE,
                     format!(
@@ -1153,13 +1151,7 @@ fn runtime_session_graph_law(
                 );
             }
             let expected_transcript_min_count = turn_index * 2;
-            if session
-                .transcript_message_counts
-                .get(index)
-                .copied()
-                .unwrap_or(0)
-                < expected_transcript_min_count
-            {
+            if turn.transcript_message_count.unwrap_or(0) < expected_transcript_min_count {
                 return OracleVerdict::failed(
                     RUNTIME_SESSION_GRAPH_ORACLE,
                     format!(
@@ -1168,7 +1160,7 @@ fn runtime_session_graph_law(
                     ),
                 );
             }
-            if !output.contains(&session.alias) {
+            if !turn.output.contains(&session.alias) {
                 return OracleVerdict::failed(
                     RUNTIME_SESSION_GRAPH_ORACLE,
                     format!(
@@ -2396,7 +2388,7 @@ fn mini_rlm_finish_required_prose_repair(
 ) -> OracleVerdict {
     verdict_from_bool(
         SCENARIO_MINI_RLM_FINISH_REPAIR_ORACLE,
-        provider_exchange_counts_are_turn_indexed(summary)
+        provider_turn_exchange_counts_are_indexed(summary)
             && observer_reconnect_has_matching_turn(events, summary)
             && events
                 .iter()
@@ -2638,7 +2630,7 @@ fn scenario_evidence_satisfied(
             let provider_turns = summary
                 .sessions
                 .iter()
-                .map(|session| session.provider_outputs.len())
+                .map(|session| session.provider_turns.len())
                 .sum::<usize>();
             summary.session_count > 0 && provider_turns >= summary.session_count * 2
         }
@@ -2723,7 +2715,7 @@ fn scenario_evidence_satisfied(
             summary.session_count > 0
                 && summary.sessions.iter().all(|session| {
                     session.observer_turn_indices.last().copied()
-                        == Some(session.provider_outputs.len())
+                        == Some(session.provider_turns.len())
                 })
         }
         "runtime_session_graph" => runtime_session_graph_law(summary, None).is_passed(),
@@ -3113,7 +3105,7 @@ fn runtime_contract_semantics(
         "runtime.queued_turn_input_completion" => assert_semantic(
             queued_ingress_has_source_keys(events)
                 && summary.sessions.iter().any(|session| {
-                    session.queued_ingress_count > 0 && session.provider_outputs.len() >= 2
+                    session.queued_ingress_count > 0 && session.provider_turns.len() >= 2
                 }),
             "a queued turn input source key was followed by a completed subsequent turn",
         ),
@@ -6422,7 +6414,7 @@ fn provider_turns_after_queue(summary: &AbstractWorldSummary) -> bool {
     summary
         .sessions
         .iter()
-        .any(|session| session.queued_ingress_count > 0 && session.provider_outputs.len() >= 2)
+        .any(|session| session.queued_ingress_count > 0 && session.provider_turns.len() >= 2)
 }
 
 fn process_wake_runtime_dto_observed(events: &[DeliveredBoundary]) -> bool {
@@ -6513,10 +6505,10 @@ fn duplicate_free_stream_finalization(
     let observed_turns = summary
         .sessions
         .iter()
-        .map(|session| session.provider_outputs.len())
+        .map(|session| session.provider_turns.len())
         .sum::<usize>();
     provider_count == observed_turns
-        && provider_exchange_counts_are_turn_indexed(summary)
+        && provider_turn_exchange_counts_are_indexed(summary)
         && observer_convergence_law(summary, None).is_passed()
 }
 
@@ -6671,14 +6663,14 @@ fn trigger_delivery_runtime_observed(events: &[DeliveredBoundary]) -> bool {
     })
 }
 
-fn provider_exchange_counts_are_turn_indexed(summary: &AbstractWorldSummary) -> bool {
+fn provider_turn_exchange_counts_are_indexed(summary: &AbstractWorldSummary) -> bool {
     summary.sessions.iter().all(|session| {
-        !session.provider_exchange_counts.is_empty()
+        !session.provider_turns.is_empty()
             && session
-                .provider_exchange_counts
+                .provider_turns
                 .iter()
                 .enumerate()
-                .all(|(index, count)| *count == index + 1)
+                .all(|(index, turn)| turn.exchange_count == Some(index as u64 + 1))
     })
 }
 
@@ -6696,7 +6688,7 @@ fn observer_reconnect_has_matching_turn(
     });
     reconnect_seen
         && summary.sessions.iter().all(|session| {
-            session.observer_turn_indices.last().copied() == Some(session.provider_outputs.len())
+            session.observer_turn_indices.last().copied() == Some(session.provider_turns.len())
         })
 }
 
@@ -6928,10 +6920,102 @@ pub fn combine_oracles(oracles: &[OracleVerdict]) -> OracleVerdict {
 mod tests {
     use super::*;
     use crate::scheduler::SchedulerDeliveryEvidence;
+    use crate::store::ModelStore;
     use crate::trace::{
-        DurableEffectAbstractSummary, SessionAbstractSummary, WorkerAbstractSummary,
+        DurableEffectAbstractSummary, ProviderTurnSummary, SessionAbstractSummary, SimulationTrace,
+        WorkerAbstractSummary, read_trace, write_trace,
     };
     use serde_json::json;
+
+    #[test]
+    fn provider_counter_gap_round_trips_and_stays_on_original_turn() {
+        let mut store = ModelStore::default();
+        let mut events = Vec::new();
+        for (turn, graph_node_count) in [(1, Some(3)), (2, None), (3, Some(7))] {
+            let mut observed = json!({
+                "provider_output": format!("answer for session-001 turn {turn}"),
+                "provider_exchange_count": turn,
+                "graph_node_count": graph_node_count,
+                "transcript_message_count": turn * 2,
+            });
+            if graph_node_count.is_none() {
+                observed
+                    .as_object_mut()
+                    .expect("object observation")
+                    .remove("graph_node_count");
+            }
+            let event = delivered_with_payload(
+                turn as usize,
+                &format!("provider-{turn}"),
+                "session-001",
+                BoundaryKind::Provider,
+                json!({"text": format!("answer for session-001 turn {turn}")}),
+                observed,
+            );
+            store.apply_observed_boundary(&event.as_event(), &event.observed);
+            events.push(event);
+        }
+        let summary = store.summary();
+
+        let verdict = runtime_session_graph_law(&summary, None);
+        assert!(
+            verdict.message.contains("turn 2 graph"),
+            "the missing turn-2 graph count must fail turn 2, got: {}",
+            verdict.message
+        );
+
+        let trace = SimulationTrace::new(
+            1,
+            "test-generator",
+            "test",
+            "1/1",
+            "provider-counter-gap",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "test-script-bundle",
+            WorkloadExpectations::default(),
+            BTreeMap::new(),
+            events,
+            Vec::new(),
+            verdict.clone(),
+            vec![verdict],
+            summary,
+        );
+        let directory = tempfile::tempdir().expect("temporary trace directory");
+        let path = directory.path().join("trace.json");
+        write_trace(&path, &trace).expect("write trace");
+        let serialized: Value = serde_json::from_slice(
+            &std::fs::read(&path).expect("read serialized trace for shape assertions"),
+        )
+        .expect("parse serialized trace");
+        assert!(serialized.get("replay_command").is_none());
+        let serialized_session = &serialized["final_summary"]["sessions"][0];
+        assert!(serialized_session.get("provider_turns").is_some());
+        assert!(serialized_session.get("provider_outputs").is_none());
+        assert!(serialized_session.get("graph_node_counts").is_none());
+
+        let mut legacy_shape = serialized;
+        legacy_shape["final_summary"]["sessions"][0]
+            .as_object_mut()
+            .expect("serialized session object")
+            .remove("provider_turns");
+        assert!(serde_json::from_value::<SimulationTrace>(legacy_shape).is_err());
+
+        let round_tripped = read_trace(&path).expect("read trace");
+        let turns = &round_tripped.final_summary.sessions[0].provider_turns;
+        assert_eq!(turns[0].graph_node_count, Some(3));
+        assert_eq!(turns[1].graph_node_count, None);
+        assert_eq!(turns[2].graph_node_count, Some(7));
+        assert!(
+            round_tripped.events[1]
+                .observed
+                .get("graph_node_count")
+                .is_none()
+        );
+
+        let mut repaired = round_tripped.final_summary;
+        repaired.sessions[0].provider_turns[1].graph_node_count = Some(5);
+        assert!(runtime_session_graph_law(&repaired, None).is_passed());
+    }
 
     #[test]
     fn unmapped_scenario_semantics_fail_loudly_for_every_suite() {
@@ -9091,14 +9175,11 @@ mod tests {
                     alias: "session-001".to_string(),
                     opened: true,
                     ingress_count: 1,
-                    provider_outputs: vec![
-                        "answer for session-001 turn 1".to_string(),
-                        "answer for session-001 turn 2".to_string(),
-                        "answer for session-001 turn 3".to_string(),
+                    provider_turns: vec![
+                        provider_turn_summary("answer for session-001 turn 1", 1, 3, 2),
+                        provider_turn_summary("answer for session-001 turn 2", 2, 5, 4),
+                        provider_turn_summary("answer for session-001 turn 3", 3, 7, 6),
                     ],
-                    provider_exchange_counts: vec![1, 2, 3],
-                    graph_node_counts: vec![3, 5, 7],
-                    transcript_message_counts: vec![2, 4, 6],
                     tool_outputs: vec!["tool result for session-001".to_string()],
                     exec_code_outputs: vec!["exec result for session-001".to_string()],
                     observer_turn_indices: vec![3],
@@ -9121,13 +9202,10 @@ mod tests {
                     alias: "session-002".to_string(),
                     opened: true,
                     ingress_count: 1,
-                    provider_outputs: vec![
-                        "answer for session-002 turn 1".to_string(),
-                        "answer for session-002 turn 2".to_string(),
+                    provider_turns: vec![
+                        provider_turn_summary("answer for session-002 turn 1", 1, 3, 2),
+                        provider_turn_summary("answer for session-002 turn 2", 2, 5, 4),
                     ],
-                    provider_exchange_counts: vec![1, 2],
-                    graph_node_counts: vec![3, 5],
-                    transcript_message_counts: vec![2, 4],
                     tool_outputs: Vec::new(),
                     exec_code_outputs: Vec::new(),
                     observer_turn_indices: vec![2],
@@ -9166,6 +9244,20 @@ mod tests {
                 process_terminal_event_count: 1,
             }],
         )
+    }
+
+    fn provider_turn_summary(
+        output: &str,
+        exchange_count: u64,
+        graph_node_count: u64,
+        transcript_message_count: u64,
+    ) -> ProviderTurnSummary {
+        ProviderTurnSummary {
+            output: output.to_string(),
+            exchange_count: Some(exchange_count),
+            graph_node_count: Some(graph_node_count),
+            transcript_message_count: Some(transcript_message_count),
+        }
     }
 
     fn semantic_events() -> Vec<DeliveredBoundary> {

@@ -483,7 +483,7 @@ mod tests {
             report.final_summary.sessions.iter().any(|session| {
                 session.queued_ingress_count > 0
                     && session.cancellation_count > 0
-                    && session.provider_outputs.len() >= 2
+                    && session.provider_turns.len() >= 2
             }),
             "fixture must retain an active-turn cancel followed by later turns"
         );

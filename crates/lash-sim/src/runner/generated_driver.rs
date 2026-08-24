@@ -4,13 +4,8 @@ pub(crate) async fn run_generated_workload_for_fixture(
     workload: GeneratedWorkload,
     script_bundle_hash: &str,
 ) -> Result<SimulationTrace, FixedScriptRunnerError> {
-    let trace = run_generated_workload(
-        workload,
-        script_bundle_hash,
-        &SimShard::FULL.label(),
-        Path::new("trace.json"),
-    )
-    .await?;
+    let trace =
+        run_generated_workload(workload, script_bundle_hash, &SimShard::FULL.label()).await?;
     if !trace.oracle.is_passed() {
         return Err(FixedScriptRunnerError::Assertion(
             trace.oracle.message.clone(),
@@ -399,7 +394,6 @@ pub(super) async fn run_generated_workload(
     workload: GeneratedWorkload,
     script_bundle_hash: &str,
     shard_label: &str,
-    trace_path: &Path,
 ) -> Result<SimulationTrace, FixedScriptRunnerError> {
     let mut world = GeneratedRuntimeWorld::new();
     // Declared before the run so oracles can prove an observation class is
@@ -470,6 +464,5 @@ pub(super) async fn run_generated_workload(
         oracle,
         oracles,
         final_summary,
-        trace_path,
     ))
 }

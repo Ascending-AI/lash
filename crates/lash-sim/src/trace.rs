@@ -37,14 +37,19 @@ impl StableAliases {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProviderTurnSummary {
+    pub output: String,
+    pub exchange_count: Option<u64>,
+    pub graph_node_count: Option<u64>,
+    pub transcript_message_count: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SessionAbstractSummary {
     pub alias: String,
     pub opened: bool,
     pub ingress_count: usize,
-    pub provider_outputs: Vec<String>,
-    pub provider_exchange_counts: Vec<usize>,
-    pub graph_node_counts: Vec<usize>,
-    pub transcript_message_counts: Vec<usize>,
+    pub provider_turns: Vec<ProviderTurnSummary>,
     pub tool_outputs: Vec<String>,
     pub exec_code_outputs: Vec<String>,
     pub observer_turn_indices: Vec<usize>,
@@ -434,7 +439,6 @@ pub struct SimulationTrace {
     pub oracle: OracleVerdict,
     pub oracles: Vec<OracleVerdict>,
     pub final_summary: AbstractWorldSummary,
-    pub replay_command: String,
 }
 
 impl SimulationTrace {
@@ -454,12 +458,7 @@ impl SimulationTrace {
         oracle: OracleVerdict,
         oracles: Vec<OracleVerdict>,
         final_summary: AbstractWorldSummary,
-        trace_path: &Path,
     ) -> Self {
-        let replay_command = format!(
-            "cargo run -p lash-sim --locked -- replay {}",
-            trace_path.display()
-        );
         Self {
             schema: TRACE_SCHEMA.to_string(),
             seed,
@@ -476,7 +475,6 @@ impl SimulationTrace {
             oracle,
             oracles,
             final_summary,
-            replay_command,
         }
     }
 }
