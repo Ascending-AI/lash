@@ -173,7 +173,7 @@ where
 {
     context
         .resolve_event(RestateDurableWaitResolveRequest {
-            address: RestateDurableWaitAddress::for_key(key),
+            key: key.clone(),
             resolution,
         })
         .await
@@ -1242,7 +1242,7 @@ where
             .map_err(|err| PluginError::Session(err.to_string()))?;
             context
                 .resolve_event(RestateDurableWaitResolveRequest {
-                    address: RestateDurableWaitAddress::for_key(&key),
+                    key,
                     resolution: Resolution::Ok(result.event.payload.clone()),
                 })
                 .await

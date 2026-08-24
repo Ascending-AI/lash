@@ -513,7 +513,9 @@ macro_rules! impl_restate_controller_context {
                             .await;
                         };
 
-                        let Some(session_id) = turn_cancel.address.session_id.clone() else {
+                        let Some(session_id) =
+                            turn_cancel.key.scope.session_id().map(str::to_string)
+                        else {
                             return Err(TerminalError::new(
                                 "turn cancellation gate is missing its session id",
                             ));
@@ -527,7 +529,7 @@ macro_rules! impl_restate_controller_context {
                         let gate = match register_turn_cancel_gate(
                             self,
                             &session_id,
-                            turn_cancel.address,
+                            turn_cancel.key,
                             awakeable_id,
                         )
                         .await?
@@ -650,9 +652,10 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     Box::pin(async move {
+                        let address = RestateDurableWaitAddress::for_key(&request.key);
                         let start = self
                             .workflow_client::<LashDurableWaitWorkflowClient>(
-                                request.address.workflow_key.clone(),
+                                address.workflow_key.clone(),
                             )
                             .await_resolution(Json(request.clone()));
                         let call = start.call();
@@ -662,13 +665,12 @@ macro_rules! impl_restate_controller_context {
                                 Ok(resolution)
                             },
                             on_cancel => {
-                                let address = request.address;
                                 let resolve_request = self
                                     .object_client::<LashDurableWaitIndexClient>(
                                         durable_wait_index_object_key(&address),
                                     )
                                     .resolve(Json(RestateDurableWaitResolveRequest {
-                                        address,
+                                        key: request.key,
                                         resolution: Resolution::Cancelled,
                                     }));
                                 let Json(outcome) = resolve_request.call().await?;
@@ -700,12 +702,15 @@ macro_rules! impl_restate_controller_context {
                                 .map(RestateTurnCancelRaceOutcome::Completed);
                         };
 
-                        let Some(session_id) = turn_cancel.address.session_id.clone() else {
+                        let Some(session_id) =
+                            turn_cancel.key.scope.session_id().map(str::to_string)
+                        else {
                             return Err(TerminalError::new(
                                 "turn cancellation gate is missing its session id",
                             ));
                         };
-                        let event_address = request.address.clone();
+                        let event_address = RestateDurableWaitAddress::for_key(&request.key);
+                        let event_key = request.key.clone();
                         // Same journal geometry as process await: the guarded
                         // wait's CallCommand is emitted first, then the gate's
                         // awakeable, then the registration.
@@ -720,7 +725,7 @@ macro_rules! impl_restate_controller_context {
                         let gate = match register_turn_cancel_gate(
                             self,
                             &session_id,
-                            turn_cancel.address,
+                            turn_cancel.key,
                             awakeable_id,
                         )
                         .await?
@@ -754,7 +759,7 @@ macro_rules! impl_restate_controller_context {
                                                 durable_wait_index_object_key(&event_address),
                                             )
                                             .resolve(Json(RestateDurableWaitResolveRequest {
-                                                address: event_address,
+                                                key: event_key,
                                                 resolution: Resolution::Cancelled,
                                             }));
                                         let Json(_) = resolve.call().await?;
@@ -820,7 +825,9 @@ macro_rules! impl_restate_controller_context {
                                 .map(Box::new)
                                 .map(RestateTurnCancelRaceOutcome::Completed);
                         };
-                        let Some(session_id) = turn_cancel.address.session_id.clone() else {
+                        let Some(session_id) =
+                            turn_cancel.key.scope.session_id().map(str::to_string)
+                        else {
                             return Err(TerminalError::new(
                                 "turn cancellation gate is missing its session id",
                             ));
@@ -840,7 +847,7 @@ macro_rules! impl_restate_controller_context {
                         let gate = match register_turn_cancel_gate(
                             self,
                             &session_id,
-                            turn_cancel.address,
+                            turn_cancel.key,
                             awakeable_id,
                         )
                         .await?
@@ -916,9 +923,10 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     Box::pin(async move {
+                        let address = RestateDurableWaitAddress::for_key(&request.key);
                         let resolve = self
                             .object_client::<LashDurableWaitIndexClient>(
-                                durable_wait_index_object_key(&request.address),
+                                durable_wait_index_object_key(&address),
                             )
                             .resolve(Json(request));
                         let Json(outcome) = resolve.call().await?;

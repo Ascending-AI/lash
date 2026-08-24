@@ -88,6 +88,13 @@ index identity epoch invalidates shared index state that draining invocations
 still await, so an epoch bump is a stop-the-world cutover — drain, recreate,
 then open — never an overlap.
 
+Identity epoch 4 is such a cutover. Durable-wait requests and indexed state now
+carry the `AwaitEventKey` preimage so handlers derive addresses locally; epoch-3
+state has neither that request shape nor that indexed value. Operators must
+drain and recreate both `LashDurableWaitIndex` and `LashDurableWaitWorkflow`
+state before opening the epoch-4 deployment. There is no tolerant decoder,
+address migration, or dual-deployment window.
+
 Segment handover crosses invocations, so a successor segment is routed to the
 latest deployment. Immutability of any single deployment does not make
 handover artifacts self-describing, which is why they carry their own format

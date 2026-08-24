@@ -151,10 +151,10 @@ async fn resolve_restate_await_event_via_ingress(
 ) -> Result<ResolveOutcome, RuntimeError> {
     let address = RestateDurableWaitAddress::for_key(key);
     let request = RestateDurableWaitResolveRequest {
-        address,
+        key: key.clone(),
         resolution,
     };
-    let index_key = durable_wait_index_object_key(&request.address);
+    let index_key = durable_wait_index_object_key(&address);
     let outcome = ingress
         .ingress
         .call_object_json::<_, ResolveOutcome>(
@@ -230,7 +230,7 @@ async fn await_restate_await_event_via_ingress(
 ) -> Result<Resolution, RuntimeError> {
     let request =
         restate_durable_wait_request(key, deadline, &lash_core::facade_support::SystemClock);
-    let workflow_key = request.address.workflow_key.clone();
+    let workflow_key = RestateDurableWaitAddress::for_key(&request.key).workflow_key;
     tokio::select! {
         result = async {
             match effect_replay_key {

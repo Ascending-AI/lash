@@ -277,7 +277,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AwaitEventKey::signature"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:53#key.signature.as_bytes(),"
+usage = "crates/lash-restate/src/durable_wait.rs:59#key.signature.as_bytes(),"
 
 [[api]]
 symbol = "lash::AwaitEventKey::wait"
@@ -286,7 +286,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AwaitEventKey::wait"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:45#let Ok(expected) = restate_await_event_key(&key.scope, key.wait.clone()) else {"
+usage = "crates/lash-restate/src/durable_wait.rs:51#let Ok(expected) = restate_await_event_key(&key.scope, key.wait.clone()) else {"
 
 [[api]]
 symbol = "lash::AwaitEventWaitIdentity"
@@ -394,7 +394,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AwaitEventWaitIdentity::is_turn_control"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:84#classification: if key.wait.is_turn_control() {"
+usage = "crates/lash-restate/src/durable_wait.rs:91#classification: if key.wait.is_turn_control() {"
 
 [[api]]
 symbol = "lash::AwaitEventWaitIdentity::process_signal"
@@ -4724,7 +4724,7 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution::Timeout"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:351#let payload = serde_json::to_string(&Resolution::Timeout)"
+usage = "crates/lash-restate/src/durable_wait.rs:372#let payload = serde_json::to_string(&Resolution::Timeout)"
 
 [[api]]
 symbol = "lash::ResolveOutcome"
@@ -46704,7 +46704,7 @@ availability = "default+all-features"
 aliases = ["lash_core::Clock::now"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:204#u64::try_from(deadline.saturating_duration_since(clock.now()).as_millis())"
+usage = "crates/lash-restate/src/durable_wait.rs:227#u64::try_from(deadline.saturating_duration_since(clock.now()).as_millis())"
 
 [[api]]
 symbol = "lash::runtime::Clock::sleep"
@@ -47042,7 +47042,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::queue_drain"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:8334#ExecutionScope::queue_drain(\"session\", \"drain\"),"
+usage = "crates/lash-restate/src/tests.rs:8426#ExecutionScope::queue_drain(\"session\", \"drain\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -47062,7 +47062,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::session_delete"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:8335#ExecutionScope::session_delete(\"session\"),"
+usage = "crates/lash-restate/src/tests.rs:8427#ExecutionScope::session_delete(\"session\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48961,7 +48961,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::Direct::usage_source"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:5972#usage_source: \"test\".to_string(),"
+usage = "crates/lash-restate/src/tests.rs:6045#usage_source: \"test\".to_string(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49116,7 +49116,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::SyncExecutionEnvironment::update_machine_config"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:6009#update_machine_config: true,"
+usage = "crates/lash-restate/src/tests.rs:6082#update_machine_config: true,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49407,7 +49407,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::AwaitEvent"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:975#runtime_invocation(RuntimeEffectKind::AwaitEvent, \"fig1126-revoked-await\"),"
+usage = "crates/lash-restate/src/tests.rs:976#runtime_invocation(RuntimeEffectKind::AwaitEvent, \"fig1126-revoked-await\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49480,7 +49480,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::PeekAwaitEvent"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:934#RuntimeEffectKind::PeekAwaitEvent,"
+usage = "crates/lash-restate/src/tests.rs:935#RuntimeEffectKind::PeekAwaitEvent,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49535,7 +49535,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::Trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:4580#RuntimeEffectKind::Trigger,"
+usage = "crates/lash-restate/src/tests.rs:4653#RuntimeEffectKind::Trigger,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49672,7 +49672,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::sleep"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:649#RuntimeEffectLocalExecutor::sleep(cancellation.clone())"
+usage = "crates/lash-restate/src/tests.rs:650#RuntimeEffectLocalExecutor::sleep(cancellation.clone())"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49700,7 +49700,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::triggers"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:4594#.execute_effect(envelope, RuntimeEffectLocalExecutor::triggers(store))"
+usage = "crates/lash-restate/src/tests.rs:4667#.execute_effect(envelope, RuntimeEffectLocalExecutor::triggers(store))"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -49710,7 +49710,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::unavailable"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:939#RuntimeEffectLocalExecutor::unavailable(),"
+usage = "crates/lash-restate/src/tests.rs:940#RuntimeEffectLocalExecutor::unavailable(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -52454,7 +52454,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeScope::for_turn"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:932#RuntimeScope::for_turn(\"fig793-session\", \"fig793-turn\", 1, 0),"
+usage = "crates/lash-restate/src/tests.rs:933#RuntimeScope::for_turn(\"fig793-session\", \"fig793-turn\", 1, 0),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -52491,7 +52491,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeScope::turn_id"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:5213#turn_id: Some(\"journaled-peek-turn\".to_string()),"
+usage = "crates/lash-restate/src/tests.rs:5286#turn_id: Some(\"journaled-peek-turn\".to_string()),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -52501,7 +52501,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeScope::turn_index"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:5214#turn_index: None,"
+usage = "crates/lash-restate/src/tests.rs:5287#turn_index: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -65494,7 +65494,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOwnerScope::host"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:1974#owner_scope: lash_core::TriggerOwnerScope::host(\"fig806\").expect(\"owner scope\"),"
+usage = "crates/lash-restate/src/tests.rs:1975#owner_scope: lash_core::TriggerOwnerScope::host(\"fig806\").expect(\"owner scope\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -70543,7 +70543,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:4525#journaled_bytes_estimate: Some(128),"
+usage = "crates/lash-restate/src/tests.rs:4598#journaled_bytes_estimate: Some(128),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -71765,7 +71765,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:2722#lash_core::drive_with_event_pump("
+usage = "crates/lash-restate/src/tests.rs:2723#lash_core::drive_with_event_pump("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -76842,7 +76842,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:48#lash_core::facade_support::promise_semantics::constant_time_eq("
+usage = "crates/lash-restate/src/durable_wait.rs:54#lash_core::facade_support::promise_semantics::constant_time_eq("
 
 [[api]]
 symbol = "lash_core::facade_support::promise_semantics::derive_key_id"
@@ -76850,7 +76850,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:35#let key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;"
+usage = "crates/lash-restate/src/durable_wait.rs:41#let key_id = lash_core::facade_support::promise_semantics::derive_key_id(scope, &wait)?;"
 
 [[api]]
 symbol = "lash_core::facade_support::promise_semantics::resolve"
@@ -78562,7 +78562,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:13113#probe_slot.set_for_session("
+usage = "crates/lash-restate/src/tests.rs:13201#probe_slot.set_for_session("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
