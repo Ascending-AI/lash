@@ -1240,7 +1240,7 @@ derive_mutation_jobs() {{
         self.assertIn(f"name: {artifact_name}", build_job)
 
         self.assertIn("    needs: postgres-store-build\n", run_job)
-        self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", run_job)
+        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", run_job)
         self.assertIn('postgres: ["14", "16", "18"]', run_job)
         self.assertIn("name: Test Postgres store (PG ${{ matrix.postgres }})", run_job)
         self.assertIn(f"name: {artifact_name}", run_job)
