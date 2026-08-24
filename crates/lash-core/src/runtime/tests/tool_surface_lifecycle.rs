@@ -93,7 +93,7 @@ impl crate::ToolProvider for DynamicToolSurface {
         }));
         if tool.finish_on_execute {
             result.with_control(crate::ToolControl::Finish {
-                value: json!(tool.id).into(),
+                value: crate::ToolValue::untrusted_json(json!(tool.id)),
             })
         } else {
             result

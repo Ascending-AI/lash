@@ -194,10 +194,7 @@ impl ToolInvocationReply {
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| value.to_string());
         let mut failure = ToolFailure::tool(ToolFailureClass::Execution, "tool_error", message);
-        failure.raw =
-            Some(serde_json::from_value(value).unwrap_or_else(|_| {
-                crate::ToolValue::String("unserializable tool error".to_string())
-            }));
+        failure.raw = Some(crate::ToolValue::untrusted_json(value));
         Self {
             output: ToolCallOutput::failure(failure),
             record: None,

@@ -239,7 +239,7 @@ impl lash::tools::StaticToolExecute for DevToolValue {
         lash::tools::ToolOutcome::from_output(
             lash::tools::ToolCallOutput::success(serde_json::json!({ "accepted": true }))
                 .with_control(lash::tools::ToolControl::Finish {
-                    value: lash::tools::ToolValue::from(serde_json::json!({
+                    value: lash::tools::ToolValue::untrusted_json(serde_json::json!({
                         "event_class": "tool_value",
                         "marker": "FIG-1350 deterministic tool value"
                     })),

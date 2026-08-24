@@ -52,7 +52,7 @@ impl ToolProvider for GrantProbeTools {
                 Some(0),
             ),
             GrantProbeMode::InlineAttachment => {
-                ToolOutcome::from_output(crate::ToolCallOutput::success(
+                ToolOutcome::from_output(crate::ToolCallOutput::success_tool_value(
                     crate::ToolValue::Attachment(crate::AttachmentSource::inline(
                         crate::MediaType::parse("text/plain").expect("media type"),
                         b"granted attachment bytes".to_vec(),

@@ -13431,10 +13431,9 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
         .expect("await ToolCall parent terminal");
     assert_eq!(
         tool_terminal,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({"child": "tool-call"}),
-            control: None,
-        }
+        ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            serde_json::json!({"child": "tool-call"}),
+        ))
     );
     let children = registry
         .list_processes(&lash_core::ProcessListFilter {
@@ -13686,7 +13685,10 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
             .await
             .expect("await recovered terminal process"),
         ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "echo": "wake-after-rebuild" }),
+            value: serde_json::json!({
+                "$lash_tool_value": "untrusted_json",
+                "value": { "echo": "wake-after-rebuild" }
+            }),
             control: None,
         }
     );

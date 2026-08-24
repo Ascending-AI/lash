@@ -1004,6 +1004,7 @@ fn bounded_tool_value(value: &ToolValue) -> ToolValue {
                 .map(|(key, value)| (key.clone(), bounded_tool_value(value)))
                 .collect(),
         ),
+        ToolValue::UntrustedJson(value) => ToolValue::untrusted_json(bounded_untrusted_json(value)),
         ToolValue::Null
         | ToolValue::Bool(_)
         | ToolValue::Number(_)
@@ -1012,10 +1013,28 @@ fn bounded_tool_value(value: &ToolValue) -> ToolValue {
     }
 }
 
+fn bounded_untrusted_json(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(value) if value.len() > MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES => {
+            serde_json::json!({ "omitted_bytes": value.len() })
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(bounded_untrusted_json).collect())
+        }
+        serde_json::Value::Object(entries) => serde_json::Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (key.clone(), bounded_untrusted_json(value)))
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
 fn omitted_bytes_marker(omitted_bytes: usize) -> ToolValue {
     ToolValue::Object(BTreeMap::from([(
         "omitted_bytes".to_string(),
-        ToolValue::from(serde_json::json!(omitted_bytes)),
+        ToolValue::untrusted_json(serde_json::json!(omitted_bytes)),
     )]))
 }
 
@@ -1033,15 +1052,15 @@ fn exec_tool_call_overflow_record(omitted: &[ToolCallRecord]) -> ToolCallRecord 
         ("attachments".to_string(), ToolValue::Array(attachments)),
         (
             "omitted_failures".to_string(),
-            ToolValue::from(serde_json::json!(omitted_failures)),
+            ToolValue::untrusted_json(serde_json::json!(omitted_failures)),
         ),
         (
             "omitted_records".to_string(),
-            ToolValue::from(serde_json::json!(omitted.len())),
+            ToolValue::untrusted_json(serde_json::json!(omitted.len())),
         ),
     ]));
     let output = if omitted_failures == 0 {
-        ToolCallOutput::success(marker)
+        ToolCallOutput::success_tool_value(marker)
     } else {
         let mut failure = ToolFailure::runtime(
             ToolFailureClass::ResourceLimit,
@@ -1334,7 +1353,7 @@ mod tests {
     fn bounded_output_replaces_oversized_scalars_without_losing_structure_or_attachments() {
         let attachment = image_ref("nested-attachment");
         let oversized = "x".repeat(MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES + 17);
-        let output = ToolCallOutput::success(ToolValue::Object(BTreeMap::from([
+        let output = ToolCallOutput::success_tool_value(ToolValue::Object(BTreeMap::from([
             (
                 "nested".to_string(),
                 ToolValue::Array(vec![
@@ -1420,7 +1439,7 @@ mod tests {
                 "failure recovered by Lashlang",
             ));
         records[MAX_EXEC_TOOL_CALL_RECORDS + 2].output =
-            ToolCallOutput::success(ToolValue::Attachment(attachment.clone()));
+            ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone()));
 
         let bounded = bounded_exec_tool_call_records(&records);
 

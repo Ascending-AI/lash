@@ -2181,13 +2181,13 @@ mod test_protocol_fakes {
                         Some(crate::ToolControl::Finish { value }) => {
                             Some(TurnOutcome::Finished(TurnFinish::ToolValue {
                                 tool_name: outcome.tool_name.clone(),
-                                value: value.to_json_value(),
+                                value: crate::tool_value_for_projection(value),
                             }))
                         }
                         Some(crate::ToolControl::Fail { failure }) => {
                             Some(TurnOutcome::Stopped(TurnStop::ToolError {
                                 tool_name: outcome.tool_name.clone(),
-                                value: failure.to_json_value(),
+                                value: crate::tool_failure_for_projection(failure),
                             }))
                         }
                         _ => None,

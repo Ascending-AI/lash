@@ -650,14 +650,26 @@ pub fn turn_outcome_from_tool_control(
         }),
         ToolControl::Finish { value } => Some(TurnOutcome::Finished(TurnFinish::ToolValue {
             tool_name: tool_name.to_string(),
-            value: value.to_json_value(),
+            value: tool_value_for_projection(value),
         })),
         ToolControl::Fail { failure } => Some(TurnOutcome::Stopped(TurnStop::ToolError {
             tool_name: tool_name.to_string(),
-            value: failure.to_json_value(),
+            value: tool_failure_for_projection(failure),
         })),
         ToolControl::SwitchAgentFrame { .. } => None,
     }
+}
+
+fn tool_value_for_projection(value: &ToolValue) -> serde_json::Value {
+    ToolCallOutput::success_tool_value(value.clone()).value_for_projection()
+}
+
+fn tool_failure_for_projection(failure: &ToolFailure) -> serde_json::Value {
+    let mut projected = failure.to_json_value();
+    if let Some(raw) = failure.raw.as_ref() {
+        projected["raw"] = tool_value_for_projection(raw);
+    }
+    projected
 }
 pub use protocol_build::ProtocolBuildInput;
 pub use tool_registry::{ToolRegistry, ToolState};

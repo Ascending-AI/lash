@@ -667,10 +667,10 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
     let tools: Arc<dyn crate::ToolProvider> = Arc::new(TerminalControlTool {
         controls: vec![
             crate::ToolControl::Finish {
-                value: json!("first").into(),
+                value: crate::ToolValue::untrusted_json(json!("first")),
             },
             crate::ToolControl::Finish {
-                value: json!("second").into(),
+                value: crate::ToolValue::untrusted_json(json!("second")),
             },
         ],
     });

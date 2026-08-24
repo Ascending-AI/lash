@@ -356,7 +356,9 @@ mod tests {
         let outcome = typed_ok(TypedOutput { ok: true });
         assert_eq!(
             outcome.as_output().outcome,
-            lash_core::ToolCallOutcome::Success(lash_core::ToolValue::from(json!({"ok": true})))
+            lash_core::ToolCallOutcome::Success(lash_core::ToolValue::untrusted_json(json!({
+                "ok": true
+            })))
         );
     }
 

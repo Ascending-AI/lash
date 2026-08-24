@@ -1261,7 +1261,7 @@ impl E2eTools {
             result_json,
         )
         .await;
-        ToolOutcome::from_output(lash_core::ToolCallOutput::success(result))
+        ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(result))
     }
 
     async fn crash_once(&self, call: ToolCall<'_>) -> ToolOutcome {

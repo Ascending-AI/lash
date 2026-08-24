@@ -13,7 +13,7 @@ impl lash::tools::StaticToolExecute for WorkbenchControlTools {
             "workbench_finish" => lash::tools::ToolOutcome::from_output(
                 lash::tools::ToolCallOutput::success(json!({ "accepted": true })).with_control(
                     lash::tools::ToolControl::Finish {
-                        value: lash::tools::ToolValue::from(json!({
+                        value: lash::tools::ToolValue::untrusted_json(json!({
                             "finished_by": "workbench_finish"
                         })),
                     },

@@ -1425,7 +1425,7 @@ mod tests {
     #[test]
     fn tool_attachment_round_trips_to_generic_part() {
         let attachment = attachment_source("att-1");
-        let output = ToolCallOutput::success(ToolValue::Attachment(attachment.clone()));
+        let output = ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone()));
         let model_return =
             ModelToolReturn::from_output("call-9".to_string(), "screenshot".to_string(), &output);
 
@@ -1445,7 +1445,7 @@ mod tests {
     #[test]
     fn tool_text_and_attachment_round_trip_preserves_order() {
         let attachment = attachment_source("att-2");
-        let output = ToolCallOutput::success(ToolValue::Array(vec![
+        let output = ToolCallOutput::success_tool_value(ToolValue::Array(vec![
             ToolValue::String("before".into()),
             ToolValue::Attachment(attachment.clone()),
             ToolValue::String("after".into()),

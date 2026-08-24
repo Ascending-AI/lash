@@ -594,9 +594,12 @@ impl AgentSessionTurnProcessScenario {
         let await_output = lash_core::facade_support::ProcessAwaiter::polling(registry)
             .await_terminal(self.process_id)
             .await?;
-        let lash_core::ProcessAwaitOutput::Success { value, .. } = await_output else {
-            panic!("session-turn process did not succeed: {await_output:#?}");
-        };
+        let output = await_output.into_tool_output();
+        assert!(
+            output.is_success(),
+            "session-turn process did not succeed: {output:#?}"
+        );
+        let value = output.into_value_for_projection();
         assert_eq!(
             value.get("child_session_id"),
             Some(&serde_json::json!(self.child_session_id))

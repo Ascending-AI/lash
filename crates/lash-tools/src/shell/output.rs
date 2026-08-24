@@ -639,7 +639,7 @@ pub(crate) fn timed_out_shell_io_result(
 
 fn shell_failure(code: &str, message: impl Into<String>, raw: serde_json::Value) -> ToolOutcome {
     let mut failure = ToolFailure::tool(ToolFailureClass::Execution, code, message);
-    failure.raw = Some(ToolValue::from(raw));
+    failure.raw = Some(ToolValue::untrusted_json(raw));
     ToolOutcome::failure(failure)
 }
 
@@ -654,7 +654,7 @@ pub(crate) fn shell_reader_died_failure() -> Box<ToolFailure> {
         "shell_reader_died",
         SHELL_READER_DIED,
     );
-    failure.raw = Some(ToolValue::from(json!({ "reader_died": true })));
+    failure.raw = Some(ToolValue::untrusted_json(json!({ "reader_died": true })));
     Box::new(failure)
 }
 
