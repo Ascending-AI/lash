@@ -17,7 +17,7 @@ pub use lash_trace::{
     TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
     TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphEdge,
-    TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeStatus,
+    TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
 };
 pub use lashlang::{
     CompiledProcessCache, InMemoryLashlangArtifactStore, LASH_TYPE_KEY, LashlangAbilities,

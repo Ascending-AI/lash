@@ -107,11 +107,19 @@ IDENTIFIER_RENAME_BASELINES = {
     "PROCESS_REGISTRATION_FAMILY_VERSION": (
         "sha256:fd2a5cd3cc916b265166f95f896524883c047382634e959d152df48e860f9ed7"
     ),
-    # FIG-1623: structural envelope hoist; identical key set/values, object key
-    # order changed (kind first→third); key order ruled outside the trace wire
-    # contract, so no schema bump is owed.
+    # FIG-1623 history: a structural envelope hoist kept identical key
+    # sets/values while object key order changed (kind first→third); key order
+    # was ruled outside the trace wire contract, so no schema bump was owed.
+    #
+    # FIG-1975: occurrence-scoped node observations. TraceLashlangGraphNode and
+    # its observation enum are a host-facing projection REDUCED from trace
+    # records by TraceLashlangGraphStore; they are never written into a
+    # TraceRecord, so the durable JSONL record schema is byte-identical and no
+    # TRACE_SCHEMA_VERSION bump is owed. Ruled on FIG-1975; the baseline pins
+    # this state -- any further guarded-shape drift in lash-trace re-fails the
+    # gate.
     "crates/lash-trace/src/lib.rs:TRACE_SCHEMA_VERSION": (
-        "sha256:587b0088e2344437aeeff0446339baca01ef0a2f3fa5b054f41581717eda7e0a"
+        "sha256:e0e9517e6cb097694d871511e21af24ecb2d0835c904128188e38ba7020697ee"
     ),
     # FIG-1792, one time only: the protocol turn options schema version became
     # wire-only. The in-memory field was deleted and a hand-written serializer
