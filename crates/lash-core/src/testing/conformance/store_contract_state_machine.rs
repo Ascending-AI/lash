@@ -10,8 +10,8 @@ use crate::{
     LeaseOwnerIdentity, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome, ProcessObserverBy, ProcessRecord,
     ProcessStartOutcome, ProjectionWatermark, WakeDelivery, WakeDeliveryClaimOutcome,
-    WakeDeliveryState, WakeDiscardReason, apply_process_event_projection, fold_process_record,
-    process_wake_batch_draft,
+    WakeDeliveryDisposition, WakeDeliveryState, WakeDiscardReason, apply_process_event_projection,
+    fold_process_record, process_wake_batch_draft,
 };
 use generated_prefix::generated_prefix;
 use proptest::prelude::*;
@@ -783,12 +783,13 @@ async fn apply_operation(
                 .is_ok()
             {
                 for delivery in model.wake_deliveries.values_mut() {
-                    if delivery.state == WakeDeliveryState::Pending
+                    if delivery.state() == WakeDeliveryState::Pending
                         && delivery.wake.process_id == id
                         && Some(delivery.wake.target_session_id.as_str()) != target.as_deref()
                     {
-                        delivery.state = WakeDeliveryState::Discarded;
-                        delivery.discard_reason = Some(WakeDiscardReason::Retargeted);
+                        delivery.disposition = WakeDeliveryDisposition::Discarded {
+                            reason: WakeDiscardReason::Retargeted,
+                        };
                     }
                 }
             }
@@ -1146,7 +1147,7 @@ async fn settle_wake(
         .wake_deliveries
         .values()
         .rev()
-        .find(|delivery| delivery.state == WakeDeliveryState::Enqueuing)
+        .find(|delivery| delivery.state() == WakeDeliveryState::Enqueuing)
         .cloned()
     else {
         return Ok(());
@@ -1198,18 +1199,17 @@ async fn settle_wake(
             .wake_deliveries
             .get_mut(&delivery.delivery_id)
             .expect("claimed delivery is modeled");
-        expected.claim_token = None;
         match settle {
             WakeSettle::Mark => {
-                expected.state = WakeDeliveryState::Enqueued;
-                expected.discard_reason = None;
+                expected.disposition = WakeDeliveryDisposition::Enqueued;
             }
             WakeSettle::Discard => {
-                expected.state = WakeDeliveryState::Discarded;
-                expected.discard_reason = Some(WakeDiscardReason::TargetGone);
+                expected.disposition = WakeDeliveryDisposition::Discarded {
+                    reason: WakeDiscardReason::TargetGone,
+                };
             }
             WakeSettle::Defer => {
-                expected.state = WakeDeliveryState::Pending;
+                expected.disposition = WakeDeliveryDisposition::Pending;
                 expected.next_attempt_at_ms = delivery.next_attempt_at_ms.saturating_add(1);
             }
         }

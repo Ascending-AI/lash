@@ -499,7 +499,7 @@ pub async fn wake_delivery_crash_matrix(
                         && delivery.wake.sequence == sequence
                 })
                 .expect("coalesced sender row remains inspectable")
-                .state,
+                .state(),
             crate::WakeDeliveryState::Enqueued,
             "every sender row must be settled independently"
         );
@@ -548,7 +548,7 @@ pub async fn wake_delivery_crash_matrix(
         .await
         .expect("claim retarget-race wake");
     assert_eq!(claimed.len(), 1);
-    assert_eq!(claimed[0].state, crate::WakeDeliveryState::Enqueuing);
+    assert_eq!(claimed[0].state(), crate::WakeDeliveryState::Enqueuing);
     registry
         .retarget_subscription(retarget_process_id, Some("wake-new-target"))
         .await
@@ -574,9 +574,12 @@ pub async fn wake_delivery_crash_matrix(
         .into_iter()
         .find(|delivery| delivery.delivery_id == claimed[0].delivery_id)
         .expect("settled retarget-race delivery");
-    assert_eq!(retarget_delivery.state, crate::WakeDeliveryState::Enqueued);
+    assert_eq!(
+        retarget_delivery.state(),
+        crate::WakeDeliveryState::Enqueued
+    );
     assert_eq!(retarget_delivery.wake.target_session_id, target_session_id);
-    assert_eq!(retarget_delivery.discard_reason, None);
+    assert_eq!(retarget_delivery.disposition.discard_reason(), None);
     let retarget_source =
         crate::process_wake_source_key(&retarget_wake.process_id, retarget_wake.sequence);
     assert_eq!(
@@ -617,7 +620,10 @@ pub async fn wake_delivery_crash_matrix(
         .await
         .expect("claim wake before simulated crash");
     assert_eq!(crashed_claim.len(), 1);
-    assert_eq!(crashed_claim[0].state, crate::WakeDeliveryState::Enqueuing);
+    assert_eq!(
+        crashed_claim[0].state(),
+        crate::WakeDeliveryState::Enqueuing
+    );
     let stale_token = crashed_claim[0]
         .claim_token()
         .expect("first claim token")
@@ -734,7 +740,7 @@ pub async fn wake_delivery_crash_matrix(
         .find(|delivery| delivery.wake.process_id == settled_crash_process_id)
         .expect("settled crash-window sender row remains");
     assert_eq!(settled_sender.wake.sequence, settled_crash_wake.sequence);
-    assert_eq!(settled_sender.state, crate::WakeDeliveryState::Enqueued);
+    assert_eq!(settled_sender.state(), crate::WakeDeliveryState::Enqueued);
 
     let deferred_process_id = "wake-deferred-before-first-receiver-attempt";
     registry
@@ -957,8 +963,7 @@ async fn missing_target_is_deferred_and_rearmed(
             delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
         })
         .expect("deferred missing-target wake remains inspectable");
-    assert_eq!(deferred.state, crate::WakeDeliveryState::Pending);
-    assert_eq!(deferred.claim_token, None);
+    assert_eq!(deferred.state(), crate::WakeDeliveryState::Pending);
     assert_eq!(deferred.attempts, 1);
     assert!(deferred.next_attempt_at_ms > crate::Clock::timestamp_ms(clock.as_ref()));
 
@@ -996,8 +1001,8 @@ async fn missing_target_is_deferred_and_rearmed(
             delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
         })
         .expect("re-armed missing-target wake remains inspectable");
-    assert_eq!(rearmed.state, crate::WakeDeliveryState::Enqueued);
-    assert_eq!(rearmed.discard_reason, None);
+    assert_eq!(rearmed.state(), crate::WakeDeliveryState::Enqueued);
+    assert_eq!(rearmed.disposition.discard_reason(), None);
 }
 
 async fn sender_floor_lifetime(
@@ -1285,7 +1290,7 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
         new_sender.delivery_id, old_sender_id,
         "new wake must not collide with the old-incarnation delivery id"
     );
-    assert_eq!(new_sender.state, crate::WakeDeliveryState::Pending);
+    assert_eq!(new_sender.state(), crate::WakeDeliveryState::Pending);
 
     let turn_handle = Arc::new(RecordingWakeTurnHandle::default());
     let prior_runs = turn_handle.len().await;
@@ -1714,9 +1719,9 @@ async fn target_gone_is_a_typed_discard(
             delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
         })
         .expect("target-gone wake remains inspectable");
-    assert_eq!(delivery.state, crate::WakeDeliveryState::Discarded);
+    assert_eq!(delivery.state(), crate::WakeDeliveryState::Discarded);
     assert_eq!(
-        delivery.discard_reason,
+        delivery.disposition.discard_reason(),
         Some(crate::WakeDiscardReason::TargetGone)
     );
 }
@@ -1782,9 +1787,9 @@ async fn expired_is_a_typed_discard(
             delivery.wake.process_id == wake.process_id && delivery.wake.sequence == wake.sequence
         })
         .expect("expired wake remains inspectable");
-    assert_eq!(delivery.state, crate::WakeDeliveryState::Discarded);
+    assert_eq!(delivery.state(), crate::WakeDeliveryState::Discarded);
     assert_eq!(
-        delivery.discard_reason,
+        delivery.disposition.discard_reason(),
         Some(crate::WakeDiscardReason::Expired)
     );
 }

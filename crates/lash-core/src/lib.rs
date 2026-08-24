@@ -1035,8 +1035,8 @@ pub use runtime::{
     TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
     TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WorkerSlotKind,
-    WorkerSlotPermit, WorkerSlotSupplier,
+    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
+    WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

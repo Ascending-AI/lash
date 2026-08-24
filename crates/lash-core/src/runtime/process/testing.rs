@@ -425,12 +425,13 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         drop(wake_targets);
         if let Some(old_target) = old_target {
             for delivery in self.wake_deliveries.lock().await.values_mut() {
-                if delivery.state == super::WakeDeliveryState::Pending
+                if delivery.state() == super::WakeDeliveryState::Pending
                     && delivery.wake.process_id == process_id
                     && delivery.wake.target_session_id == old_target
                 {
-                    delivery.state = super::WakeDeliveryState::Discarded;
-                    delivery.discard_reason = Some(super::WakeDiscardReason::Retargeted);
+                    delivery.disposition = super::WakeDeliveryDisposition::Discarded {
+                        reason: super::WakeDiscardReason::Retargeted,
+                    };
                 }
             }
         }
@@ -466,11 +467,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .retain(|(target_session_id, _), _| target_session_id != session_id);
         let mut discarded_wake_delivery_count = 0;
         for delivery in self.wake_deliveries.lock().await.values_mut() {
-            if delivery.state == super::WakeDeliveryState::Pending
+            if delivery.state() == super::WakeDeliveryState::Pending
                 && delivery.wake.target_session_id == session_id
             {
-                delivery.state = super::WakeDeliveryState::Discarded;
-                delivery.discard_reason = Some(super::WakeDiscardReason::TargetGone);
+                delivery.disposition = super::WakeDeliveryDisposition::Discarded {
+                    reason: super::WakeDiscardReason::TargetGone,
+                };
                 discarded_wake_delivery_count += 1;
             }
         }
@@ -1157,24 +1159,27 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let now = self.clock.timestamp_ms();
         let mut deliveries = self.wake_deliveries.lock().await;
         for delivery in deliveries.values_mut() {
-            if delivery.state == super::WakeDeliveryState::Enqueuing
+            if delivery.state() == super::WakeDeliveryState::Enqueuing
                 && delivery.next_attempt_at_ms <= now
             {
-                delivery.state = super::WakeDeliveryState::Pending;
-                delivery.claim_token = None;
+                delivery.disposition = super::WakeDeliveryDisposition::Pending;
             }
         }
         let mut ids = deliveries
             .values()
-            .filter(|delivery| delivery.state == super::WakeDeliveryState::Pending)
+            .filter(|delivery| delivery.state() == super::WakeDeliveryState::Pending)
             .filter(|delivery| delivery.next_attempt_at_ms <= now)
             .filter(|candidate| {
                 !deliveries.values().any(|earlier| {
-                    earlier.state != super::WakeDeliveryState::Enqueued
-                        && !(earlier.state == super::WakeDeliveryState::Discarded
-                            && earlier
-                                .discard_reason
-                                .is_none_or(|reason| !reason.blocks_ordering_group()))
+                    let discarded_non_blocking = match &earlier.disposition {
+                        super::WakeDeliveryDisposition::Discarded { reason } => {
+                            !reason.blocks_ordering_group()
+                        }
+                        super::WakeDeliveryDisposition::DiscardedUnattributed => true,
+                        _ => false,
+                    };
+                    earlier.state() != super::WakeDeliveryState::Enqueued
+                        && !discarded_non_blocking
                         && earlier.wake.target_session_id == candidate.wake.target_session_id
                         && earlier.wake.process_id == candidate.wake.process_id
                         && earlier.wake.sequence < candidate.wake.sequence
@@ -1196,8 +1201,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .into_iter()
             .filter_map(|(_, _, _, _, id)| {
                 let delivery = deliveries.get_mut(&id)?;
-                delivery.state = super::WakeDeliveryState::Enqueuing;
-                delivery.claim_token = Some(uuid::Uuid::new_v4().to_string());
+                delivery.disposition = super::WakeDeliveryDisposition::Enqueuing {
+                    claim_token: uuid::Uuid::new_v4().to_string(),
+                };
                 delivery.attempts = delivery.attempts.saturating_add(1);
                 delivery.first_attempt_ms.get_or_insert(now);
                 delivery.next_attempt_at_ms =
@@ -1217,7 +1223,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .lock()
             .await
             .values()
-            .filter(|delivery| state.is_none_or(|state| delivery.state == state))
+            .filter(|delivery| state.is_none_or(|state| delivery.state() == state))
             .cloned()
             .collect::<Vec<_>>();
         deliveries.sort_by(|left, right| left.delivery_id.cmp(&right.delivery_id));
@@ -1247,16 +1253,17 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Enqueuing
-            || delivery.claim_token.as_deref() != Some(claim_token)
-        {
+        if !matches!(
+            &delivery.disposition,
+            super::WakeDeliveryDisposition::Enqueuing {
+                claim_token: current
+            } if current == claim_token
+        ) {
             return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
-                state: delivery.state,
+                state: delivery.state(),
             });
         }
-        delivery.state = super::WakeDeliveryState::Enqueued;
-        delivery.claim_token = None;
-        delivery.discard_reason = None;
+        delivery.disposition = super::WakeDeliveryDisposition::Enqueued;
         Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
 
@@ -1271,16 +1278,17 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Enqueuing
-            || delivery.claim_token.as_deref() != Some(claim_token)
-        {
+        if !matches!(
+            &delivery.disposition,
+            super::WakeDeliveryDisposition::Enqueuing {
+                claim_token: current
+            } if current == claim_token
+        ) {
             return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
-                state: delivery.state,
+                state: delivery.state(),
             });
         }
-        delivery.state = super::WakeDeliveryState::Discarded;
-        delivery.claim_token = None;
-        delivery.discard_reason = Some(reason);
+        delivery.disposition = super::WakeDeliveryDisposition::Discarded { reason };
         Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
 
@@ -1290,13 +1298,12 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Discarded {
+        if delivery.state() != super::WakeDeliveryState::Discarded {
             return Err(PluginError::Session(format!(
                 "wake delivery `{delivery_id}` is not discarded"
             )));
         }
-        delivery.state = super::WakeDeliveryState::Pending;
-        delivery.claim_token = None;
+        delivery.disposition = super::WakeDeliveryDisposition::Pending;
         delivery.attempts = 0;
         delivery.first_attempt_ms = None;
         delivery.next_attempt_at_ms = self.clock.timestamp_ms();
@@ -1304,7 +1311,6 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .clock
             .timestamp_ms()
             .saturating_add(self.wake_delivery_config.delivery_expiry_ms);
-        delivery.discard_reason = None;
         Ok(())
     }
 
@@ -1319,15 +1325,17 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         let delivery = deliveries.get_mut(delivery_id).ok_or_else(|| {
             PluginError::Session(format!("unknown wake delivery `{delivery_id}`"))
         })?;
-        if delivery.state != super::WakeDeliveryState::Enqueuing
-            || delivery.claim_token.as_deref() != Some(claim_token)
-        {
+        if !matches!(
+            &delivery.disposition,
+            super::WakeDeliveryDisposition::Enqueuing {
+                claim_token: current
+            } if current == claim_token
+        ) {
             return Ok(super::WakeDeliveryClaimOutcome::ClaimLost {
-                state: delivery.state,
+                state: delivery.state(),
             });
         }
-        delivery.state = super::WakeDeliveryState::Pending;
-        delivery.claim_token = None;
+        delivery.disposition = super::WakeDeliveryDisposition::Pending;
         delivery.next_attempt_at_ms = next_attempt_at_ms;
         Ok(super::WakeDeliveryClaimOutcome::Applied)
     }
@@ -1414,7 +1422,7 @@ impl ProcessRegistry for TestLocalProcessRegistry {
             .values()
             .filter(|delivery| {
                 matches!(
-                    delivery.state,
+                    delivery.state(),
                     super::WakeDeliveryState::Pending | super::WakeDeliveryState::Enqueuing
                 )
             })

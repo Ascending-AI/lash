@@ -703,17 +703,13 @@ finish "registered"
             .find(|delivery| delivery.wake.process_id == process_id)
             .expect("committed process wake delivery");
         assert_eq!(
-            wake_delivery.state,
+            wake_delivery.state(),
             lash_core::WakeDeliveryState::Enqueued,
             "recovery wake must reach its terminal delivered state"
         );
         assert_eq!(
             wake_delivery.attempts, 1,
             "recovery wake must claim and commit on the first background delivery attempt"
-        );
-        assert_eq!(
-            wake_delivery.claim_token, None,
-            "a committed recovery wake must release its delivery claim"
         );
         drop(session);
 

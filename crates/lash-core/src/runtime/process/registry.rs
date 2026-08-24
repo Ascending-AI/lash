@@ -190,6 +190,51 @@ pub enum WakeDiscardReason {
     SequenceRewound,
 }
 
+/// Complete in-memory disposition of a wake delivery.
+///
+/// State-specific evidence travels with the state that requires it, so an enqueuing delivery
+/// cannot exist without its ownership fence and a typed discard cannot exist without its reason.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WakeDeliveryDisposition {
+    /// Awaiting its next claim attempt.
+    Pending,
+    /// Claimed while the receiver enqueue is in flight.
+    Enqueuing {
+        /// Ownership fence that every transition out of `enqueuing` must present.
+        claim_token: String,
+    },
+    /// Successfully enqueued at the target session.
+    Enqueued,
+    /// Terminally discarded with a typed classification.
+    Discarded {
+        /// The classification that made this delivery terminal.
+        reason: WakeDiscardReason,
+    },
+    /// A deliberately representable legacy row whose durable discard reason is `NULL`.
+    DiscardedUnattributed,
+}
+
+impl WakeDeliveryDisposition {
+    /// Returns the stable label-only state represented by this disposition.
+    pub fn state(&self) -> WakeDeliveryState {
+        match self {
+            Self::Pending => WakeDeliveryState::Pending,
+            Self::Enqueuing { .. } => WakeDeliveryState::Enqueuing,
+            Self::Enqueued => WakeDeliveryState::Enqueued,
+            Self::Discarded { .. } | Self::DiscardedUnattributed => WakeDeliveryState::Discarded,
+        }
+    }
+
+    /// Returns the typed reason carried by a classified discard.
+    pub fn discard_reason(&self) -> Option<WakeDiscardReason> {
+        match self {
+            Self::Discarded { reason } => Some(*reason),
+            _ => None,
+        }
+    }
+}
+
 macro_rules! define_wake_discard_ordering_group_rule {
     (
         blocking: [$($blocking:ident),+ $(,)?],
@@ -232,19 +277,11 @@ impl WakeDiscardReason {
 pub struct WakeDelivery {
     pub delivery_id: String,
     pub wake: ProcessWakeDelivery,
-    pub state: WakeDeliveryState,
-    /// Ownership fence minted for the current `enqueuing` claim.
-    ///
-    /// Every transition out of `enqueuing` must present this exact token.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claim_token: Option<String>,
+    pub disposition: WakeDeliveryDisposition,
     pub attempts: u64,
     pub first_attempt_ms: Option<u64>,
     pub next_attempt_at_ms: u64,
     pub expires_at_ms: u64,
-    /// A discarded delivery without a recorded reason is non-blocking: only a typed, exhaustively
-    /// classified reason can retain its ordering-group block.
-    pub discard_reason: Option<WakeDiscardReason>,
 }
 
 impl WakeDelivery {
@@ -265,24 +302,28 @@ impl WakeDelivery {
             delivery_id,
             expires_at_ms: wake.created_at_ms.saturating_add(config.delivery_expiry_ms),
             wake,
-            state: WakeDeliveryState::Pending,
-            claim_token: None,
+            disposition: WakeDeliveryDisposition::Pending,
             attempts: 0,
             first_attempt_ms: None,
             next_attempt_at_ms,
-            discard_reason: None,
         })
     }
 
+    /// Returns the label-only state represented by this delivery's disposition.
+    pub fn state(&self) -> WakeDeliveryState {
+        self.disposition.state()
+    }
+
     /// Returns the exact enqueuing ownership fence process-store implementors must present for
-    /// settlement, or an error when the claimed row carries no token.
+    /// settlement, or an error when the delivery is not enqueuing.
     pub fn claim_token(&self) -> Result<&str, PluginError> {
-        self.claim_token.as_deref().ok_or_else(|| {
-            PluginError::Session(format!(
-                "enqueuing wake delivery `{}` is missing its claim token",
+        match &self.disposition {
+            WakeDeliveryDisposition::Enqueuing { claim_token } => Ok(claim_token),
+            _ => Err(PluginError::Session(format!(
+                "wake delivery `{}` is not enqueuing",
                 self.delivery_id
-            ))
-        })
+            ))),
+        }
     }
 }
 
@@ -385,20 +426,20 @@ impl WakeDeliveryReport {
         let deliveries = deliveries.into_iter().collect::<Vec<_>>();
         let mut report = Self::default();
         for delivery in &deliveries {
-            match delivery.state {
-                WakeDeliveryState::Pending => report.pending += 1,
-                WakeDeliveryState::Enqueuing => report.enqueuing += 1,
-                WakeDeliveryState::Enqueued => report.enqueued += 1,
-                WakeDeliveryState::Discarded => {
+            match &delivery.disposition {
+                WakeDeliveryDisposition::Pending => report.pending += 1,
+                WakeDeliveryDisposition::Enqueuing { .. } => report.enqueuing += 1,
+                WakeDeliveryDisposition::Enqueued => report.enqueued += 1,
+                WakeDeliveryDisposition::Discarded { reason } => {
                     report.discarded += 1;
-                    match delivery.discard_reason {
-                        Some(WakeDiscardReason::Expired) => report.expired += 1,
-                        Some(WakeDiscardReason::TargetGone) => report.target_gone += 1,
-                        Some(WakeDiscardReason::Retargeted) => report.retargeted += 1,
-                        Some(WakeDiscardReason::SequenceRewound) => report.sequence_rewound += 1,
-                        None => {}
+                    match reason {
+                        WakeDiscardReason::Expired => report.expired += 1,
+                        WakeDiscardReason::TargetGone => report.target_gone += 1,
+                        WakeDiscardReason::Retargeted => report.retargeted += 1,
+                        WakeDiscardReason::SequenceRewound => report.sequence_rewound += 1,
                     }
                 }
+                WakeDeliveryDisposition::DiscardedUnattributed => report.discarded += 1,
             }
         }
 
@@ -416,20 +457,22 @@ impl WakeDeliveryReport {
             group.sort_by_key(|delivery| delivery.wake.sequence);
             let Some(last_active_index) = group.iter().rposition(|delivery| {
                 matches!(
-                    delivery.state,
+                    delivery.state(),
                     WakeDeliveryState::Pending | WakeDeliveryState::Enqueuing
                 )
             }) else {
                 continue;
             };
             if let Some(delivery) = group[..last_active_index].iter().find(|delivery| {
-                delivery.state == WakeDeliveryState::Discarded
+                delivery.state() == WakeDeliveryState::Discarded
                     && delivery
-                        .discard_reason
+                        .disposition
+                        .discard_reason()
                         .is_some_and(WakeDiscardReason::blocks_ordering_group)
             }) {
                 let reason = delivery
-                    .discard_reason
+                    .disposition
+                    .discard_reason()
                     .expect("discarded delivery filtered to a typed reason");
                 report.blocked_groups.push(WakeDeliveryBlockedGroup {
                     target_session_id: delivery.wake.target_session_id.clone(),

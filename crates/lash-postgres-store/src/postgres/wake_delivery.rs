@@ -120,9 +120,10 @@ pub(super) async fn update_wake_delivery_state(
     pool: &PgPool,
     delivery_id: &str,
     claim_token: &str,
-    state: lash_core::WakeDeliveryState,
-    reason: Option<lash_core::WakeDiscardReason>,
+    disposition: lash_core::WakeDeliveryDisposition,
 ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
+    let state = disposition.state();
+    let reason = disposition.discard_reason();
     let changed = sqlx::query(
         "UPDATE lash_process_wake_deliveries
          SET state = $3, claim_token = NULL, discard_reason = $4
