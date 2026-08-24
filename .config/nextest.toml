@@ -6,9 +6,9 @@
 #      a test. A slow test is annotated, not terminated; there is no
 #      `terminate-after` in this file, so no gate can be weakened by a bound
 #      that was guessed rather than measured.
-#   2. Stop the two known co-scheduling hazards — the fault-matrix gate test,
-#      which forks real `cargo` invocations of its own, and the suites that
-#      share a single Postgres database or MinIO bucket.
+#   2. Bound the two known co-scheduling hazards — the fault-matrix chunk tests,
+#      which each fork real `cargo` invocations of their own, and the suites
+#      that share a single Postgres database or MinIO bucket.
 #   3. Give CI a profile that finishes the whole run rather than stopping at
 #      the first failure, and that refuses to launder a flaky pass into a
 #      green run.
@@ -45,6 +45,11 @@
 [test-groups.docker-services]
 max-threads = 1
 
+# Two chunk tests still overlap their real-cargo probes, preserving the measured
+# shard win, while bounding contention on their shared CARGO_TARGET_DIR.
+[test-groups.fault-matrix-real-cargo]
+max-threads = 2
+
 [profile.default]
 # Report-only, and at nextest's own 60s slow mark: raising the period would buy
 # quieter output by making the 60-120s band invisible, which is the band worth
@@ -53,19 +58,16 @@ max-threads = 1
 # end-of-run summary rather than scrolling past mid-run.
 final-status-level = "slow"
 
-# `durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence` walks the
-# durable fault matrix and, for every non-blocked row, spawns a real
-# `cargo test -p ... -- --list` to prove the row's filter still selects tests.
-# Each probe is its own cargo invocation with its own build graph, so this one
-# "test" is really N cargo processes. Co-scheduling it with the rest of the
-# suite is what turns a loaded box into a timeout report; `num-test-threads`
-# reserves the whole runner for its duration instead.
+# Each fault-matrix chunk test spawns real `cargo test -p ... -- --list`
+# probes. The chunks usefully overlap, but all share one CARGO_TARGET_DIR, so
+# cap the group at two rather than reserving the whole runner for a cheap fake
+# gate test or letting all five contend on Cargo's build lock at once.
 [[profile.default.overrides]]
 filter = '''
   package(lash-core)
-  & test(=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence)
+  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
 '''
-threads-required = "num-test-threads"
+test-group = "fault-matrix-real-cargo"
 
 # Membership of the shared-service group, narrowed to the binaries that
 # actually contend: unit tests which never open a connection stay parallel, and

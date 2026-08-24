@@ -290,6 +290,8 @@ fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
 }
 
 const REAL_CARGO_FILTER_CHUNKS: usize = 5;
+// Raising the chunk count must add a matching test and bump this pin.
+const _: () = assert!(REAL_CARGO_FILTER_CHUNKS == 5);
 
 #[test]
 fn durable_fault_matrix_real_cargo_filters_chunk_0() {
