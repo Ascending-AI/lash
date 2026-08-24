@@ -181,7 +181,13 @@ async fn await_terminal_unknown_process_errors() {
         .await_terminal("missing")
         .await
         .expect_err("unknown process should error");
-    assert!(err.to_string().contains("unknown process `missing`"));
+    assert!(
+        matches!(
+            err,
+            PluginError::ProcessUnknown { ref process_id } if process_id == "missing"
+        ),
+        "unknown process should return ProcessUnknown, got: {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -196,11 +202,13 @@ async fn await_terminal_propagates_process_store_read_errors() {
         .await_terminal("unreadable")
         .await
         .expect_err("store read failure should surface");
-    assert_eq!(
-        err.to_string(),
-        "plugin session error: process store read failed"
+    assert!(
+        matches!(
+            err,
+            PluginError::Session(ref message) if message == "process store read failed"
+        ),
+        "store read failure should remain a session error, got: {err:?}"
     );
-    assert!(!err.to_string().contains("unknown process"));
 }
 
 #[tokio::test]
@@ -647,11 +655,13 @@ async fn driver_propagates_process_store_read_errors() {
         .await_terminal("unreadable")
         .await
         .expect_err("store read failure should surface");
-    assert_eq!(
-        err.to_string(),
-        "plugin session error: process store read failed"
+    assert!(
+        matches!(
+            err,
+            PluginError::Session(ref message) if message == "process store read failed"
+        ),
+        "store read failure should remain a session error, got: {err:?}"
     );
-    assert!(!err.to_string().contains("unknown process"));
 }
 
 #[tokio::test]

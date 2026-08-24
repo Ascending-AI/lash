@@ -92868,6 +92868,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: a host awaiting a detached launch it did not start, which reads the departed row's id off the refusal to reconcile it. In-repo the field is read inside lash-core and its tests only."
 
 [[api]]
+symbol = "lash::plugins::PluginError::ProcessUnknown"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessUnknown"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: a host operating on a process handle must distinguish a process id the registry never knew from retained lifecycle refusals and backend failures without matching display text. In-repo the variant is raised and matched inside lash-core and its tests only."
+
+[[api]]
+symbol = "lash::plugins::PluginError::ProcessUnknown::process_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::PluginError::ProcessUnknown::process_id"]
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: a host reads the refused process id from the typed unknown-process error to correlate the failed operation with its process handle. In-repo the field is read inside lash-core and its tests only."
+
+[[api]]
 symbol = "lash::process::ProcessEventAppendRequest::caller_departed"
 kind = "function"
 availability = "default+all-features"

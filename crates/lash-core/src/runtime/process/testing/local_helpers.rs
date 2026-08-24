@@ -16,7 +16,9 @@ impl TestLocalProcessRegistry {
 
     pub(super) async fn process_miss(&self, process_id: &str) -> PluginError {
         self.tombstones.lock().await.get(process_id).map_or_else(
-            || PluginError::Session(format!("unknown process `{process_id}`")),
+            || PluginError::ProcessUnknown {
+                process_id: process_id.to_string(),
+            },
             |tombstone| PluginError::ProcessNoLongerRetained {
                 terminal_label: tombstone.terminal_label.clone(),
                 pruned_at_ms: tombstone.pruned_at_ms,
