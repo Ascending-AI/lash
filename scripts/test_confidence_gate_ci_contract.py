@@ -1232,6 +1232,7 @@ derive_mutation_jobs() {{
             workflow.count("cargo test -p lash-postgres-store --doc --locked"), 1
         )
         self.assertIn("name: Build Postgres store tests", build_job)
+        self.assertIn("mkdir -p target/nextest", build_job)
         self.assertIn("-p lash-postgres-store --locked", build_job)
         self.assertIn("if-no-files-found: error", build_job)
         self.assertIn(f"name: {artifact_name}", build_job)

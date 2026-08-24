@@ -1051,9 +1051,10 @@ jobs:
         uses: ./.github/actions/setup-mold
 
       - name: Build Postgres store test archive
-        run: >-
-          cargo nextest archive --profile ci -p lash-postgres-store --locked
-          --archive-file target/nextest/postgres-store-tests.tar.zst
+        run: |
+          mkdir -p target/nextest
+          cargo nextest archive --profile ci -p lash-postgres-store --locked \
+            --archive-file target/nextest/postgres-store-tests.tar.zst
 
       # Nextest does not support Rust doctests. Compile the crate's two
       # compile-only examples once here instead of repeating them per major.
