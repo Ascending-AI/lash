@@ -3,6 +3,7 @@ use lash_core::llm::types::{LlmOutputPart, LlmUsage};
 use serde_json::Value;
 
 use crate::responses_shared::ResponsesStreamState;
+use crate::responses_stream_event::ResponsesStreamEvent;
 use crate::schema::{classify_openai_error, responses_error_is_retryable};
 
 pub(super) fn response_failed_error(provider: &str, event: &Value) -> LlmTransportError {
@@ -53,97 +54,106 @@ pub(super) fn output_item_has_output_evidence(item: &Value) -> bool {
 }
 
 /// Classify official Responses events whose content Lash does not project into
-/// a first-class stream part. Returns `true` when the event type was handled.
-pub(super) fn handle_evidence_only_event(
-    event_type: &str,
+/// a first-class stream part.
+pub(super) fn handle_output_evidence_event(
+    event_type: ResponsesStreamEvent,
     event: &Value,
     state: &mut ResponsesStreamState,
-) -> bool {
+) {
     match event_type {
         // A named SSE ping loses its `event:` name in the shared framers and
         // arrives as `{}`. Every other untyped payload is possible generated
         // output: extensions must fail safe without a field-name allowlist.
-        "" => {
+        ResponsesStreamEvent::EmptyPing => {
             state.streamed_item_content_received |=
                 !event.as_object().is_some_and(serde_json::Map::is_empty);
         }
         // OpenRouter request-debug metadata describes the upstream request;
         // it is never model-generated response output.
-        "response.debug" => {}
-        "response.content_part.added" | "response.content_part.done" => {
+        ResponsesStreamEvent::ResponseDebug => {}
+        ResponsesStreamEvent::ResponseContentPartAdded
+        | ResponsesStreamEvent::ResponseContentPartDone => {
             state.streamed_item_content_received |=
                 event.get("part").is_some_and(output_content_has_evidence);
         }
-        // These events still need structural handling in `responses_shared`,
-        // so classify their required payload here and then return `false`.
-        "response.reasoning_summary_part.added" | "response.reasoning_summary_part.done" => {
+        ResponsesStreamEvent::ResponseReasoningSummaryPartAdded
+        | ResponsesStreamEvent::ResponseReasoningSummaryPartDone => {
             state.streamed_item_content_received |= event
                 .get("part")
                 .is_some_and(|part| has_nonempty_string(part, &["text"]));
-            return false;
         }
-        "response.reasoning_summary_text.delta" => {
-            state.streamed_item_content_received |= has_nonempty_string(event, &["delta"]);
-            return false;
-        }
-        "response.reasoning_summary_text.done" => {
-            state.streamed_item_content_received |= has_nonempty_string(event, &["text"]);
-            return false;
-        }
-        "response.reasoning_text.delta" | "response.refusal.delta" => {
+        ResponsesStreamEvent::ResponseReasoningSummaryTextDelta => {
             state.streamed_item_content_received |= has_nonempty_string(event, &["delta"]);
         }
-        "response.reasoning_text.done" => {
+        ResponsesStreamEvent::ResponseReasoningSummaryTextDone => {
             state.streamed_item_content_received |= has_nonempty_string(event, &["text"]);
         }
-        "response.refusal.done" => {
+        ResponsesStreamEvent::ResponseReasoningTextDelta
+        | ResponsesStreamEvent::ResponseRefusalDelta => {
+            state.streamed_item_content_received |= has_nonempty_string(event, &["delta"]);
+        }
+        ResponsesStreamEvent::ResponseReasoningTextDone => {
+            state.streamed_item_content_received |= has_nonempty_string(event, &["text"]);
+        }
+        ResponsesStreamEvent::ResponseRefusalDone => {
             state.streamed_item_content_received |= has_nonempty_string(event, &["refusal"]);
         }
         // Lifecycle events carry no generated content of their own. Their
         // response snapshots are retained and inspected independently.
-        "response.created" | "response.in_progress" | "response.queued" => {}
+        ResponsesStreamEvent::ResponseCreated
+        | ResponsesStreamEvent::ResponseInProgress
+        | ResponsesStreamEvent::ResponseQueued => {}
         // These events prove output or hosted-tool work even when Lash does not
         // project their modality into an LlmOutputPart.
-        "response.audio.done"
-        | "response.audio.transcript.done"
-        | "response.code_interpreter_call.completed"
-        | "response.code_interpreter_call.in_progress"
-        | "response.code_interpreter_call.interpreting"
-        | "response.file_search_call.completed"
-        | "response.file_search_call.in_progress"
-        | "response.file_search_call.searching"
-        | "response.web_search_call.completed"
-        | "response.web_search_call.in_progress"
-        | "response.web_search_call.searching"
-        | "response.image_generation_call.completed"
-        | "response.image_generation_call.generating"
-        | "response.image_generation_call.in_progress"
-        | "response.image_generation_call.partial_image"
-        | "response.mcp_call.completed"
-        | "response.mcp_call.failed"
-        | "response.mcp_call.in_progress"
-        | "response.mcp_list_tools.completed"
-        | "response.mcp_list_tools.failed"
-        | "response.mcp_list_tools.in_progress"
-        | "response.output_text.annotation.added" => {
+        ResponsesStreamEvent::ResponseAudioDone
+        | ResponsesStreamEvent::ResponseAudioTranscriptDone
+        | ResponsesStreamEvent::ResponseCodeInterpreterCallCompleted
+        | ResponsesStreamEvent::ResponseCodeInterpreterCallInProgress
+        | ResponsesStreamEvent::ResponseCodeInterpreterCallInterpreting
+        | ResponsesStreamEvent::ResponseFileSearchCallCompleted
+        | ResponsesStreamEvent::ResponseFileSearchCallInProgress
+        | ResponsesStreamEvent::ResponseFileSearchCallSearching
+        | ResponsesStreamEvent::ResponseWebSearchCallCompleted
+        | ResponsesStreamEvent::ResponseWebSearchCallInProgress
+        | ResponsesStreamEvent::ResponseWebSearchCallSearching
+        | ResponsesStreamEvent::ResponseImageGenerationCallCompleted
+        | ResponsesStreamEvent::ResponseImageGenerationCallGenerating
+        | ResponsesStreamEvent::ResponseImageGenerationCallInProgress
+        | ResponsesStreamEvent::ResponseImageGenerationCallPartialImage
+        | ResponsesStreamEvent::ResponseMcpCallCompleted
+        | ResponsesStreamEvent::ResponseMcpCallFailed
+        | ResponsesStreamEvent::ResponseMcpCallInProgress
+        | ResponsesStreamEvent::ResponseMcpListToolsCompleted
+        | ResponsesStreamEvent::ResponseMcpListToolsFailed
+        | ResponsesStreamEvent::ResponseMcpListToolsInProgress
+        | ResponsesStreamEvent::ResponseOutputTextAnnotationAdded => {
             state.streamed_item_content_received = true;
         }
         // Empty unsupported delta/done payloads are allocation markers; a
         // non-empty payload is possible generated output.
-        "response.audio.delta"
-        | "response.audio.transcript.delta"
-        | "response.code_interpreter_call_code.delta"
-        | "response.code_interpreter_call_code.done"
-        | "response.mcp_call_arguments.delta"
-        | "response.mcp_call_arguments.done"
-        | "response.custom_tool_call_input.delta"
-        | "response.custom_tool_call_input.done" => {
+        ResponsesStreamEvent::ResponseAudioDelta
+        | ResponsesStreamEvent::ResponseAudioTranscriptDelta
+        | ResponsesStreamEvent::ResponseCodeInterpreterCallCodeDelta
+        | ResponsesStreamEvent::ResponseCodeInterpreterCallCodeDone
+        | ResponsesStreamEvent::ResponseMcpCallArgumentsDelta
+        | ResponsesStreamEvent::ResponseMcpCallArgumentsDone
+        | ResponsesStreamEvent::ResponseCustomToolCallInputDelta
+        | ResponsesStreamEvent::ResponseCustomToolCallInputDone => {
             state.streamed_item_content_received |=
                 has_nonempty_string(event, &["delta", "code", "arguments", "input"]);
         }
-        _ => return false,
+        ResponsesStreamEvent::ResponseCompleted
+        | ResponsesStreamEvent::ResponseDone
+        | ResponsesStreamEvent::ResponseFailed
+        | ResponsesStreamEvent::ResponseFunctionCallArgumentsDelta
+        | ResponsesStreamEvent::ResponseFunctionCallArgumentsDone
+        | ResponsesStreamEvent::ResponseIncomplete
+        | ResponsesStreamEvent::ResponseOutputItemAdded
+        | ResponsesStreamEvent::ResponseOutputItemDone
+        | ResponsesStreamEvent::ResponseOutputTextDelta
+        | ResponsesStreamEvent::ResponseOutputTextDone
+        | ResponsesStreamEvent::Unknown => {}
     }
-    true
 }
 
 pub(super) fn reasoning_item_has_output_evidence(item: &Value) -> bool {

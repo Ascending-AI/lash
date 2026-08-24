@@ -1,4 +1,249 @@
 use super::*;
+use crate::responses_stream_event::{ResponsesStreamEvent, ResponsesStreamEventClass};
+
+#[test]
+fn responses_stream_event_classes_reproduce_the_old_tables() {
+    use ResponsesStreamEventClass::{EvidenceOnly, Lifecycle, Structural, Terminal};
+
+    // Frozen from the pre-FIG-1973 evidence and structural string tables. The
+    // final two columns are the old evidence-handler return and structural
+    // match outcomes, respectively.
+    let cases = [
+        ("", EvidenceOnly, true, false),
+        ("response.audio.delta", EvidenceOnly, true, false),
+        ("response.audio.done", EvidenceOnly, true, false),
+        ("response.audio.transcript.delta", EvidenceOnly, true, false),
+        ("response.audio.transcript.done", EvidenceOnly, true, false),
+        (
+            "response.code_interpreter_call_code.delta",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.code_interpreter_call_code.done",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.code_interpreter_call.completed",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.code_interpreter_call.in_progress",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.code_interpreter_call.interpreting",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        ("response.completed", Terminal, false, true),
+        ("response.content_part.added", EvidenceOnly, true, false),
+        ("response.content_part.done", EvidenceOnly, true, false),
+        ("response.created", Lifecycle, true, false),
+        (
+            "response.custom_tool_call_input.delta",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.custom_tool_call_input.done",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        ("response.debug", EvidenceOnly, true, false),
+        ("response.done", Terminal, false, true),
+        ("response.failed", Terminal, false, true),
+        (
+            "response.file_search_call.completed",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.file_search_call.in_progress",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.file_search_call.searching",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.function_call_arguments.delta",
+            Structural,
+            false,
+            true,
+        ),
+        (
+            "response.function_call_arguments.done",
+            Structural,
+            false,
+            true,
+        ),
+        (
+            "response.image_generation_call.completed",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.image_generation_call.generating",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.image_generation_call.in_progress",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.image_generation_call.partial_image",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        ("response.in_progress", Lifecycle, true, false),
+        ("response.incomplete", Terminal, false, true),
+        (
+            "response.mcp_call_arguments.delta",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.mcp_call_arguments.done",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        ("response.mcp_call.completed", EvidenceOnly, true, false),
+        ("response.mcp_call.failed", EvidenceOnly, true, false),
+        ("response.mcp_call.in_progress", EvidenceOnly, true, false),
+        (
+            "response.mcp_list_tools.completed",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        ("response.mcp_list_tools.failed", EvidenceOnly, true, false),
+        (
+            "response.mcp_list_tools.in_progress",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        ("response.output_item.added", Structural, false, true),
+        ("response.output_item.done", Structural, false, true),
+        (
+            "response.output_text.annotation.added",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        ("response.output_text.delta", Structural, false, true),
+        ("response.output_text.done", Structural, false, true),
+        ("response.queued", Lifecycle, true, false),
+        (
+            "response.reasoning_summary_part.added",
+            Structural,
+            false,
+            true,
+        ),
+        (
+            "response.reasoning_summary_part.done",
+            Structural,
+            false,
+            true,
+        ),
+        (
+            "response.reasoning_summary_text.delta",
+            Structural,
+            false,
+            true,
+        ),
+        (
+            "response.reasoning_summary_text.done",
+            Structural,
+            false,
+            true,
+        ),
+        ("response.reasoning_text.delta", EvidenceOnly, true, false),
+        ("response.reasoning_text.done", EvidenceOnly, true, false),
+        ("response.refusal.delta", EvidenceOnly, true, false),
+        ("response.refusal.done", EvidenceOnly, true, false),
+        (
+            "response.web_search_call.completed",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.web_search_call.in_progress",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+        (
+            "response.web_search_call.searching",
+            EvidenceOnly,
+            true,
+            false,
+        ),
+    ];
+
+    assert_eq!(cases.len(), 55);
+    for (name, expected_class, old_evidence_handled, old_structural_handled) in cases {
+        let event = ResponsesStreamEvent::parse(name);
+        let class = event.handling_class();
+        assert_ne!(event, ResponsesStreamEvent::Unknown, "known name: {name}");
+        assert_eq!(class, expected_class, "wrong class for {name}");
+        assert_eq!(event.is_terminal(), expected_class == Terminal, "{name}");
+        assert_eq!(
+            matches!(class, EvidenceOnly | Lifecycle),
+            old_evidence_handled,
+            "old evidence-handler outcome changed for {name}"
+        );
+        assert_eq!(
+            matches!(class, Structural | Terminal),
+            old_structural_handled,
+            "old structural-handler outcome changed for {name}"
+        );
+    }
+}
+
+#[test]
+fn unknown_responses_stream_event_stays_unknown_and_fails_safe() {
+    let name = "response.completed.future";
+    let event = ResponsesStreamEvent::parse(name);
+    assert_eq!(event, ResponsesStreamEvent::Unknown);
+    assert_eq!(event.handling_class(), ResponsesStreamEventClass::Unknown);
+    assert!(!event.is_terminal());
+
+    let mut state = ResponsesStreamState::default();
+    OpenAiCompatibleProvider::process_sse_event(
+        &serde_json::json!({"type": name}).to_string(),
+        &mut state,
+        None,
+    )
+    .unwrap();
+    assert!(state.unrecognized_event_observed);
+    assert!(state.output_started());
+}
 
 #[test]
 fn responses_output_started_requires_generated_evidence_not_allocated_slots() {
