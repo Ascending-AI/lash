@@ -430,24 +430,8 @@ impl RuntimeTurnDriver<'_> {
                             && let Ok((provider_result, provider_after)) = (&mut llm_task).await
                         {
                             llm_task_abort.disarm();
-                            self.policy.binding = match crate::ProviderBinding::new(
-                                self.policy.binding.provider_id.clone(),
-                                provider_after,
-                            ) {
-                                Ok(binding) => binding,
-                                Err(err) => {
-                                    break Err(LlmCallError {
-                                        message: err.to_string(),
-                                        retryable: false,
-                                        kind: crate::ProviderFailureKind::Unknown,
-                                        raw: None,
-                                        code: Some("provider_binding_mismatch".to_string()),
-                                        terminal_reason: crate::LlmTerminalReason::ProviderError,
-                                        request_body: None,
-                                        partial_response: None,
-                                    });
-                                }
-                            };
+                            self.policy.binding =
+                                crate::ProviderBinding::from_provider(provider_after);
                             match provider_result {
                                 Ok(completion) => {
                                     let crate::ProviderCompletion {
@@ -601,22 +585,7 @@ impl RuntimeTurnDriver<'_> {
                             ));
                         }
                     };
-                    self.policy.binding = match crate::ProviderBinding::new(
-                        self.policy.binding.provider_id.clone(),
-                        provider_after,
-                    ) {
-                        Ok(binding) => binding,
-                        Err(err) => break Err(LlmCallError {
-                            message: err.to_string(),
-                            retryable: false,
-                            kind: crate::ProviderFailureKind::Unknown,
-                            raw: None,
-                            code: Some("provider_binding_mismatch".to_string()),
-                            terminal_reason: crate::LlmTerminalReason::ProviderError,
-                            request_body: None,
-                            partial_response: None,
-                        }),
-                    };
+                    self.policy.binding = crate::ProviderBinding::from_provider(provider_after);
                     if let Err(err) = self
                         .drain_provider_stream_queue(
                             &mut host_forwarder,
