@@ -12,6 +12,33 @@ minio_port="${LASH_E2E_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
 export LASH_E2E_MINIO_PORT="$minio_port"
 export LASH_E2E_BIN_DIR="${CARGO_TARGET_DIR:-$repo/target}/release"
 trace_volume="${compose_project}_trace-output"
+workflow_segment="${LASH_E2E_WORKFLOW_SEGMENT:-}"
+case "$workflow_segment" in
+  "" | 1 | 2) ;;
+  *)
+    echo "LASH_E2E_WORKFLOW_SEGMENT must be 1 or 2, got '$workflow_segment'" >&2
+    exit 1
+    ;;
+esac
+
+completed_manifest="${LASH_E2E_COMPLETED_WORKFLOW_MANIFEST:-}"
+manifest_dir="${CARGO_TARGET_DIR:-$repo/target}/restate-postgres-workers-e2e-manifests"
+manifest_name=""
+if [ -n "$completed_manifest" ]; then
+  case "$completed_manifest" in
+    /*) ;;
+    *) completed_manifest="$repo/$completed_manifest" ;;
+  esac
+  manifest_dir="$(dirname "$completed_manifest")"
+  manifest_name="$(basename "$completed_manifest")"
+fi
+mkdir -p "$manifest_dir"
+export LASH_E2E_WORKFLOW_MANIFEST_DIR="$manifest_dir"
+export LASH_E2E_COMPLETED_WORKFLOW_MANIFEST_CONTAINER=""
+if [ -n "$manifest_name" ]; then
+  rm -f "$completed_manifest" "$manifest_dir/workflow-inventory.tsv"
+  export LASH_E2E_COMPLETED_WORKFLOW_MANIFEST_CONTAINER="/e2e-manifests/$manifest_name"
+fi
 
 # Acquire ownership before touching this fixed project, then scrub the entire
 # previous project including its append-only trace volume. The generic
@@ -44,6 +71,10 @@ test_output="$(mktemp "${TMPDIR:-/tmp}/lash-restate-postgres-workers-e2e-${LASH_
 # bind-mounted into the compose services; see docker-compose.yml for the
 # glibc compatibility note.
 cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+if [ -n "$manifest_name" ]; then
+  "$LASH_E2E_BIN_DIR/lash-e2e-runner" --workflow-inventory \
+    > "$manifest_dir/workflow-inventory.tsv"
+fi
 
 cleanup() {
   status=$?
@@ -93,20 +124,26 @@ while true; do
   sleep 1
 done
 
-LASH_MINIO_ENDPOINT="http://127.0.0.1:$minio_port" \
-LASH_MINIO_BUCKET="lash-attachments" \
-LASH_MINIO_REGION="us-east-1" \
-LASH_MINIO_ACCESS_KEY="minioadmin" \
-LASH_MINIO_SECRET_KEY="minioadmin" \
-LASH_MINIO_PREFIX="conformance/restate-postgres-workers-${LASH_GATE_WORKTREE_SLUG}-$$" \
-  cargo test --locked -p lash-s3-store -- --nocapture \
-  2>&1 | tee "$test_output"
+if [ "$workflow_segment" != "2" ]; then
+  LASH_MINIO_ENDPOINT="http://127.0.0.1:$minio_port" \
+  LASH_MINIO_BUCKET="lash-attachments" \
+  LASH_MINIO_REGION="us-east-1" \
+  LASH_MINIO_ACCESS_KEY="minioadmin" \
+  LASH_MINIO_SECRET_KEY="minioadmin" \
+  LASH_MINIO_PREFIX="conformance/restate-postgres-workers-${LASH_GATE_WORKTREE_SLUG}-$$" \
+    cargo test --locked -p lash-s3-store -- --nocapture \
+    2>&1 | tee "$test_output"
+fi
 
 "${compose[@]}" --profile runner run --rm runner 2>&1 | tee -a "$test_output" &
 runner_job=$!
 
-if [ "${LASH_E2E_WAKE_RCA_ONLY:-0}" = "1" ]; then
+if [ "${LASH_E2E_WAKE_RCA_ONLY:-0}" = "1" ] || [ "$workflow_segment" = "1" ]; then
   wait "$runner_job"
+  if [ -n "$completed_manifest" ] && [ ! -s "$completed_manifest" ]; then
+    echo "runner did not write completed-workflow manifest '$completed_manifest'" >&2
+    exit 1
+  fi
   "${compose[@]}" logs --no-color 2>&1 | tee -a "$test_output"
   if grep -Fn 'panicked at' "$test_output" >&2; then
     echo "panic gate: FAILED ('panicked at' found in Restate/Postgres workers E2E output)" >&2
@@ -160,6 +197,10 @@ done
 echo "engine-restart harness: Restate started; workers remained running"
 
 wait "$runner_job"
+if [ -n "$completed_manifest" ] && [ ! -s "$completed_manifest" ]; then
+  echo "runner did not write completed-workflow manifest '$completed_manifest'" >&2
+  exit 1
+fi
 "${compose[@]}" logs --no-color 2>&1 | tee -a "$test_output"
 if grep -Fn 'panicked at' "$test_output" >&2; then
   echo "panic gate: FAILED ('panicked at' found in Restate/Postgres workers E2E output)" >&2

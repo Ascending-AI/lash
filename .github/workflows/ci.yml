@@ -298,6 +298,7 @@ jobs:
           python3 scripts/test_judged_runbook_matrix.py
           python3 scripts/test_check_judged_build_geometry.py
           python3 scripts/test_release_notes.py
+          python3 scripts/test_restate_workers_e2e_coverage.py
           python3 scripts/test_rustdoc_json_cache.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
@@ -1518,11 +1519,15 @@ jobs:
           if-no-files-found: warn
 
   restate-postgres-workers:
-    name: Restate + Postgres + MinIO Workers
+    name: Restate + Postgres + MinIO Workers (segment ${{ matrix.segment }})
     runs-on: blacksmith-16vcpu-ubuntu-2404
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        segment: [1, 2]
 
     steps:
       - name: Check out repository
@@ -1572,22 +1577,76 @@ jobs:
         uses: ./.github/actions/setup-mold
 
       - name: Run distributed backend E2E
+        env:
+          LASH_E2E_WORKFLOW_SEGMENT: ${{ matrix.segment }}
+          LASH_E2E_COMPLETED_WORKFLOW_MANIFEST: target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}/completed-workflows.txt
         run: bash scripts/restate-postgres-workers-e2e.sh
 
       - name: Run graceful drain operator-flow E2E
+        if: matrix.segment == 1
         env:
           LASH_GRACEFUL_DRAIN_ARTIFACT_DIR: target/operator-flow-artifacts/graceful-drain
         run: bash scripts/graceful-drain-e2e.sh
 
       - name: Run request abandon operator-flow E2E
+        if: matrix.segment == 1
         env:
           LASH_REQUEST_ABANDON_ARTIFACT_DIR: target/operator-flow-artifacts/request-abandon
         run: bash scripts/request-abandon-e2e.sh
 
       - name: Upload operator-flow E2E failure artifacts
-        if: failure()
+        if: failure() && matrix.segment == 1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: operator-flow-e2e-attempt-${{ github.run_attempt }}
           path: target/operator-flow-artifacts
           if-no-files-found: warn
+
+      - name: Upload completed workflow manifest
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: restate-workers-e2e-segment-${{ matrix.segment }}-attempt-${{ github.run_attempt }}
+          path: target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}
+          if-no-files-found: error
+
+  restate-postgres-workers-summary:
+    name: Restate workers E2E coverage summary
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    if: always()
+    needs:
+      - restate-postgres-workers
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Download completed workflow manifests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: restate-workers-e2e-segment-*-attempt-${{ github.run_attempt }}
+          path: target/restate-postgres-workers-e2e-download
+          merge-multiple: false
+
+      - name: Verify complete workflow coverage
+        run: >-
+          python3 scripts/check_restate_workers_e2e_coverage.py
+          --leg 1
+          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-1-attempt-${{ github.run_attempt }}/workflow-inventory.tsv
+          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-1-attempt-${{ github.run_attempt }}/completed-workflows.txt
+          --leg 2
+          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}/workflow-inventory.tsv
+          target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}/completed-workflows.txt

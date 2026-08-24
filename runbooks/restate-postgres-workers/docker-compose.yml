@@ -169,12 +169,15 @@ services:
       LASH_E2E_TRACE_DIR: /e2e-traces
       LASH_E2E_STALL_TIMEOUT_SECS: "${LASH_E2E_STALL_TIMEOUT_SECS:-240}"
       LASH_E2E_WAKE_RCA_ONLY: "${LASH_E2E_WAKE_RCA_ONLY:-0}"
+      LASH_E2E_WORKFLOW_SEGMENT: "${LASH_E2E_WORKFLOW_SEGMENT:-}"
+      LASH_E2E_COMPLETED_WORKFLOW_MANIFEST: "${LASH_E2E_COMPLETED_WORKFLOW_MANIFEST_CONTAINER:-}"
     volumes:
       - ${LASH_E2E_BIN_DIR:?run via `just restate-postgres-workers-e2e`}/lash-e2e-runner:/usr/local/bin/lash-e2e-runner:ro
       - ${LASH_E2E_BIN_DIR:?run via `just restate-postgres-workers-e2e`}/lash-e2e-frame-crash:/usr/local/bin/lash-e2e-frame-crash:ro
       - ${LASH_E2E_BIN_DIR:?run via `just restate-postgres-workers-e2e`}/lash-e2e-await-event-helper:/usr/local/bin/lash-e2e-await-event-helper:ro
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
       - trace-output:/e2e-traces
+      - ${LASH_E2E_WORKFLOW_MANIFEST_DIR:?run via the e2e script}:/e2e-manifests
     profiles:
       - runner
 
