@@ -4693,7 +4693,7 @@ availability = "default+all-features"
 aliases = ["lash_core::Resolution::Timeout"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/durable_wait.rs:377#let payload = serde_json::to_string(&Resolution::Timeout)"
+usage = "crates/lash-restate/src/durable_wait.rs:351#let payload = serde_json::to_string(&Resolution::Timeout)"
 
 [[api]]
 symbol = "lash::ResolveOutcome"
@@ -24896,7 +24896,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonWriter::EngineGaveUp"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/workflow.rs:371#writer: AbandonWriter::EngineGaveUp,"
+usage = "crates/lash-restate/src/process/workflow.rs:370#writer: AbandonWriter::EngineGaveUp,"
 
 [[api]]
 symbol = "lash::process::AbandonWriter::OwnerDrain"
@@ -24923,7 +24923,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonWriter::Sweep"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/workflow.rs:348#writer: AbandonWriter::Sweep,"
+usage = "crates/lash-restate/src/process/workflow.rs:347#writer: AbandonWriter::Sweep,"
 
 [[api]]
 symbol = "lash::process::CausalRef"

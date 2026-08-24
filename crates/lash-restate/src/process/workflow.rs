@@ -15,8 +15,7 @@ use lash_core::{
     ProcessExecutionContext, ProcessRegistration, ProcessRegistry, ScopedEffectController,
 };
 use restate_sdk::context::{
-    ContextClient, ContextPromises, InvocationHandle, RequestTarget, SharedWorkflowContext,
-    WorkflowContext,
+    ContextClient, ContextPromises, InvocationHandle, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -526,22 +525,12 @@ where
                         &ctx,
                         RestateProcessCancelSignal::SegmentFinished,
                     )?;
-                    let request: restate_sdk::context::Request<
-                        '_,
-                        Json<RestateProcessCompleteRequest>,
-                        Json<()>,
-                    > = ContextClient::request(
-                        &ctx,
-                        RequestTarget::workflow(
-                            "LashProcessWorkflow",
-                            process_id.clone(),
-                            "complete_terminal",
-                        ),
-                        Json(RestateProcessCompleteRequest {
+                    let request = ctx
+                        .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
+                        .complete_terminal(Json(RestateProcessCompleteRequest {
                             process_id: process_id.clone(),
                             output: output.clone(),
-                        }),
-                    );
+                        }));
                     request.call().await?;
                     return Ok(Json(RestateProcessWorkflowOutput::Terminal {
                         output: Box::new(output),
@@ -583,22 +572,12 @@ where
                         .complete_with_stored_outcome(&process_id, output)
                         .await
                         .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
-                    let request: restate_sdk::context::Request<
-                        '_,
-                        Json<RestateProcessCompleteRequest>,
-                        Json<()>,
-                    > = ContextClient::request(
-                        &ctx,
-                        RequestTarget::workflow(
-                            "LashProcessWorkflow",
-                            process_id.clone(),
-                            "complete_terminal",
-                        ),
-                        Json(RestateProcessCompleteRequest {
+                    let request = ctx
+                        .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
+                        .complete_terminal(Json(RestateProcessCompleteRequest {
                             process_id: process_id.clone(),
                             output: output.clone(),
-                        }),
-                    );
+                        }));
                     request.call().await?;
                     return Ok(Json(RestateProcessWorkflowOutput::Terminal {
                         output: Box::new(output),
@@ -676,22 +655,13 @@ where
                 if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
                     resolve_process_terminal_promise(controller.context(), &process_id, &output)?;
                 } else {
-                    let request: restate_sdk::context::Request<
-                        '_,
-                        Json<RestateProcessCompleteRequest>,
-                        Json<()>,
-                    > = ContextClient::request(
-                        controller.context(),
-                        RequestTarget::workflow(
-                            "LashProcessWorkflow",
-                            process_id.clone(),
-                            "complete_terminal",
-                        ),
-                        Json(RestateProcessCompleteRequest {
+                    let request = controller
+                        .context()
+                        .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
+                        .complete_terminal(Json(RestateProcessCompleteRequest {
                             process_id: process_id.clone(),
                             output: output.clone(),
-                        }),
-                    );
+                        }));
                     request.call().await?;
                 }
 
@@ -724,20 +694,15 @@ where
                 // FIG-788: successor emission is unconditional. A cancellation
                 // event can land between attempts, so the append-only registry
                 // read below may shape only commands after this deployed prefix.
-                let request: restate_sdk::context::Request<
-                    '_,
-                    Json<RestateProcessWorkflowInput>,
-                    Json<RestateProcessWorkflowOutput>,
-                > = ContextClient::request(
-                    controller.context(),
-                    RequestTarget::workflow("LashProcessWorkflow", successor_key.clone(), "run"),
-                    Json(RestateProcessWorkflowInput {
+                let request = controller
+                    .context()
+                    .workflow_client::<LashProcessWorkflowClient>(successor_key.clone())
+                    .run(Json(RestateProcessWorkflowInput {
                         registration: input.registration,
                         execution_context: input.execution_context,
                         segment_ordinal: next_segment_ordinal,
                         execution_id: Some(execution_id),
-                    }),
-                );
+                    }));
                 let _ = request.send().invocation_id().await?;
                 if self
                     .process_cancel_requested(&process_id)
@@ -748,22 +713,13 @@ where
                     // retires its promise but before the successor handover is
                     // visible to the cancel endpoint. Forward that durable fact
                     // after scheduling so the successor owns terminalization.
-                    let deliver: restate_sdk::context::Request<
-                        '_,
-                        Json<RestateProcessCancelRequest>,
-                        Json<()>,
-                    > = ContextClient::request(
-                        controller.context(),
-                        RequestTarget::workflow(
-                            "LashProcessWorkflow",
-                            successor_key,
-                            "deliver_cancel",
-                        ),
-                        Json(RestateProcessCancelRequest {
+                    let deliver = controller
+                        .context()
+                        .workflow_client::<LashProcessWorkflowClient>(successor_key)
+                        .deliver_cancel(Json(RestateProcessCancelRequest {
                             process_id: process_id.clone(),
                             reason: Some("process cancelled between segments".to_string()),
-                        }),
-                    );
+                        }));
                     let Json(()) = deliver.call().await?;
                 }
                 Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
@@ -799,19 +755,12 @@ where
             .map_err(retryable_registry_error)?
             && handover.segment_ordinal > 0
         {
-            let deliver: restate_sdk::context::Request<
-                '_,
-                Json<RestateProcessCancelRequest>,
-                Json<()>,
-            > = ContextClient::request(
-                &ctx,
-                RequestTarget::workflow(
-                    "LashProcessWorkflow",
-                    process_segment_workflow_key(&request.process_id, handover.segment_ordinal),
-                    "deliver_cancel",
-                ),
-                Json(request.clone()),
-            );
+            let deliver = ctx
+                .workflow_client::<LashProcessWorkflowClient>(process_segment_workflow_key(
+                    &request.process_id,
+                    handover.segment_ordinal,
+                ))
+                .deliver_cancel(Json(request.clone()));
             let Json(()) = deliver.call().await?;
         }
         self.runner
