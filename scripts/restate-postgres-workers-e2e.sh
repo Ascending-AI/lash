@@ -124,7 +124,7 @@ while true; do
   sleep 1
 done
 
-if [ "$workflow_segment" != "1" ]; then
+if [ "$workflow_segment" != "2" ]; then
   LASH_MINIO_ENDPOINT="http://127.0.0.1:$minio_port" \
   LASH_MINIO_BUCKET="lash-attachments" \
   LASH_MINIO_REGION="us-east-1" \

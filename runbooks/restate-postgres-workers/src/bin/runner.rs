@@ -94,16 +94,17 @@ struct WorkflowSpec {
 
 // FIG-2040 dependency map and measured split (2026-08-24 baseline progress log):
 //
-// Segment 1 (~4m22s) owns the cold-process AwaitEvent vectors and these chains:
+// Segment 1 (~3m22s) owns the cold-process AwaitEvent vectors and these chains:
 // - e2e-main -> queued work -> e2e-main-wake
 // - e2e-trigger-setup -> button delivery -> trigger process terminal
 // - e2e-signal-suspend-setup -> e2e-failover -> e2e-failover-wake ->
 //   e2e-signal-first -> e2e-signal-second -> signal process terminal
 // - e2e-process-llm-query -> e2e-process-llm-query-replay
-// - e2e-durable-input -> e2e-parent-durable-input-after-child -> engine promise conformance
+// - e2e-durable-input -> e2e-parent-durable-input-after-child
 // The async-completion workflow is independent and stays in its original position.
 //
-// Segment 2 (~3m31s) owns these independent chains:
+// Segment 2 (~4m31s) starts with the independent engine promise conformance and
+// owns these chains:
 // - e2e-tool-batch -> e2e-tool-batch-failover
 // - the four frame-switch workflows, in their current order
 // - e2e-suspended-sleep-cancel
@@ -377,6 +378,7 @@ async fn async_main() -> Result<()> {
             selection.includes(WorkflowSegment::One),
             "LASH_E2E_WAKE_RCA_ONLY requires workflow segment 1"
         );
+        run_engine_promise_gates(&admin_url, &ingress_url).await?;
         assert_durable_input_attempts(storage.pool()).await?;
         println!(
             "wake RCA soak passed: failover; queued-drain; waiter-before-resolution; resolution-before-waiter"
@@ -384,7 +386,7 @@ async fn async_main() -> Result<()> {
         watchdog.abort();
         return Ok(());
     }
-    if segment_one.is_some() {
+    if selection == SegmentSelection::One {
         assert_no_active_lash_restate_invocations(&admin_url).await?;
         assert_no_problem_lash_restate_invocations(&admin_url).await?;
     }
@@ -688,10 +690,6 @@ async fn run_workflow_segment_one(
     let parent_durable_response =
         wait_for_terminal_result(storage.pool(), &parent_durable_input_request.workflow_id).await?;
     assert_parent_durable_input_response(&parent_durable_response)?;
-    run_engine_promise_conformance(admin_url, ingress_url).await?;
-    println!(
-        "durable-wait wake gates passed: waiter-before-resolution; resolution-before-waiter; peer-worker resolution across failover"
-    );
     Ok(SegmentOneOutput {
         trigger_process_id,
         signal_process_id,
@@ -703,6 +701,10 @@ async fn run_workflow_segment_two(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
+    run_engine_promise_gates(admin_url, ingress_url).await?;
+    assert_no_active_lash_restate_invocations(admin_url).await?;
+    assert_no_problem_lash_restate_invocations(admin_url).await?;
+
     let tool_batch_request = TurnRequest {
         workflow_id: "e2e-tool-batch".to_string(),
         fail_once: false,
@@ -778,6 +780,14 @@ async fn run_workflow_segment_two(
     drive_engine_restart_scenario(storage, ingress_url, admin_url).await?;
     drive_turn_control_scenarios(storage, ingress_url).await?;
     drive_durable_wait_index_scenarios(ingress_url, admin_url).await?;
+    Ok(())
+}
+
+async fn run_engine_promise_gates(admin_url: &str, ingress_url: &str) -> Result<()> {
+    run_engine_promise_conformance(admin_url, ingress_url).await?;
+    println!(
+        "durable-wait wake gates passed: waiter-before-resolution; resolution-before-waiter; peer-worker resolution across failover"
+    );
     Ok(())
 }
 

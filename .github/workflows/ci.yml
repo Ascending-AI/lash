@@ -1583,19 +1583,19 @@ jobs:
         run: bash scripts/restate-postgres-workers-e2e.sh
 
       - name: Run graceful drain operator-flow E2E
-        if: matrix.segment == 2
+        if: matrix.segment == 1
         env:
           LASH_GRACEFUL_DRAIN_ARTIFACT_DIR: target/operator-flow-artifacts/graceful-drain
         run: bash scripts/graceful-drain-e2e.sh
 
       - name: Run request abandon operator-flow E2E
-        if: matrix.segment == 2
+        if: matrix.segment == 1
         env:
           LASH_REQUEST_ABANDON_ARTIFACT_DIR: target/operator-flow-artifacts/request-abandon
         run: bash scripts/request-abandon-e2e.sh
 
       - name: Upload operator-flow E2E failure artifacts
-        if: failure() && matrix.segment == 2
+        if: failure() && matrix.segment == 1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: operator-flow-e2e-attempt-${{ github.run_attempt }}
