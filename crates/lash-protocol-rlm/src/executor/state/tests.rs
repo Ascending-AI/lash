@@ -9,6 +9,301 @@ use lashlang::{
 };
 use serde_json::json;
 
+#[test]
+fn generated_snapshot_field_schemas_match_all_fields_set_serialization() {
+    use lash_lashlang_runtime::{
+        DeferredResolutionLinkKey, DeferredResolutionRecord, Resolution, ToolGrant,
+    };
+    use lash_sansio::{
+        CompactToolContract, ProjectionMode, SchemaContract, SchemaProjectionOverride,
+        SchemaProjectionPolicy, ToolActivation, ToolArgumentProjectionPolicy, ToolDefinition,
+        ToolOutputContract, ToolRetryPolicy,
+    };
+
+    let compact_contract = CompactToolContract {
+        name: "lookup".to_string(),
+        signature: "lookup(query: string)".to_string(),
+        returns: "object".to_string(),
+        parameters: vec![json!({"name": "query"})],
+        return_fields: vec![json!({"name": "answer"})],
+        description: "Look up an answer".to_string(),
+        examples: vec!["lookup(\"weather\")".to_string()],
+    };
+    let schema_override = SchemaProjectionOverride {
+        dialect: "test".to_string(),
+        schema: json!({"type": "string"}),
+    };
+    let schema_projection = SchemaProjectionPolicy {
+        mode: ProjectionMode::Exact,
+        overrides: vec![schema_override.clone()],
+    };
+    let schema_contract = SchemaContract {
+        canonical: json!({"type": "object"}),
+        projection: schema_projection.clone(),
+    };
+    let retry_policy = ToolRetryPolicy::Safe {
+        max_attempts: 3,
+        base_delay_ms: 10,
+        max_delay_ms: 100,
+    };
+    let output_contract = ToolOutputContract::FromInputSchema {
+        input_field: "schema".to_string(),
+        default_schema: Some(json!({"type": "object"})),
+    };
+    let argument_projection = ToolArgumentProjectionPolicy::PreserveProjectedRefsInField {
+        field: "payload".to_string(),
+    };
+    let mut definition = ToolDefinition::raw(
+        "tool.lookup",
+        "lookup",
+        "Look up an answer",
+        json!({"type": "object"}),
+        json!({"type": "object"}),
+    );
+    definition.manifest.compact_contract = Some(compact_contract.clone());
+    definition.manifest.activation = ToolActivation::Internal;
+    definition
+        .manifest
+        .bindings
+        .insert("service".to_string(), json!({"account": "primary"}));
+    definition.manifest.argument_projection = argument_projection.clone();
+    definition.manifest.retry_policy = retry_policy;
+    definition.contract.input_schema = schema_contract.clone();
+    definition.contract.output_schema = schema_contract.clone();
+    definition.contract.output_contract = output_contract.clone();
+    definition.contract.examples = vec!["lookup weather".to_string()];
+
+    let grant = ToolGrant::new(definition.clone())
+        .with_source_id("registry")
+        .with_execution_binding(json!({"route": "primary"}));
+    let resolution = Resolution::Resolved(Box::new(grant));
+    let link_key = DeferredResolutionLinkKey {
+        session_id: "session".to_string(),
+        turn_id: Some("turn".to_string()),
+        turn_index: Some(7),
+        protocol_iteration: Some(2),
+        effect_id: "effect".to_string(),
+        replay_key: Some("replay".to_string()),
+    };
+    let deferred_resolutions = DeferredResolutionRecord {
+        link_key: Some(link_key.clone()),
+        resolutions: BTreeMap::from([("lookup".to_string(), resolution.clone())]),
+    };
+    let root = RlmSnapshotRoot {
+        version: RLM_SNAPSHOT_VERSION,
+        engine: "lashlang".to_string(),
+        globals: BTreeMap::from([
+            (
+                "inline".to_string(),
+                PersistedValue::Inline { body: vec![1] },
+            ),
+            (
+                "leaf".to_string(),
+                PersistedValue::Leaf {
+                    component: "sha256:test".to_string(),
+                },
+            ),
+        ]),
+        deferred_resolutions: deferred_resolutions.clone(),
+    };
+
+    assert_field_schema(
+        ROOT_FIELDS,
+        &["version", "engine", "globals", "deferred_resolutions"],
+        &[serialized_fields(&root)],
+    );
+    assert_field_schema(
+        PERSISTED_VALUE_FIELDS,
+        &["kind", "body", "component"],
+        &[
+            serialized_fields(&PersistedValue::Inline { body: vec![1] }),
+            serialized_fields(&PersistedValue::Leaf {
+                component: "sha256:test".to_string(),
+            }),
+        ],
+    );
+    assert_field_schema(
+        DEFERRED_RESOLUTION_FIELDS,
+        &["link_key", "resolutions"],
+        &[serialized_fields(&deferred_resolutions)],
+    );
+    assert_field_schema(
+        DEFERRED_LINK_KEY_FIELDS,
+        &[
+            "session_id",
+            "turn_id",
+            "turn_index",
+            "protocol_iteration",
+            "effect_id",
+            "replay_key",
+        ],
+        &[serialized_fields(&link_key)],
+    );
+    assert_field_schema(
+        RESOLUTION_FIELDS,
+        &["kind", "definition", "source_id", "execution_binding"],
+        &[
+            serialized_fields(&resolution),
+            serialized_fields(&Resolution::NotAvailable),
+        ],
+    );
+    assert_field_schema(
+        TOOL_DEFINITION_FIELDS,
+        &[
+            "id",
+            "name",
+            "description",
+            "compact_contract",
+            "activation",
+            "bindings",
+            "argument_projection",
+            "retry_policy",
+            "input_schema",
+            "output_schema",
+            "output_contract",
+            "examples",
+        ],
+        &[serialized_fields(&definition)],
+    );
+    assert_field_schema(
+        SCHEMA_CONTRACT_FIELDS,
+        &["canonical", "projection"],
+        &[serialized_fields(&schema_contract)],
+    );
+    assert_field_schema(
+        SCHEMA_PROJECTION_FIELDS,
+        &["mode", "overrides"],
+        &[serialized_fields(&schema_projection)],
+    );
+    assert_field_schema(
+        SCHEMA_OVERRIDE_FIELDS,
+        &["dialect", "schema"],
+        &[serialized_fields(&schema_override)],
+    );
+    assert_field_schema(
+        COMPACT_CONTRACT_FIELDS,
+        &[
+            "name",
+            "signature",
+            "returns",
+            "parameters",
+            "return_fields",
+            "description",
+            "examples",
+        ],
+        &[serialized_fields(&compact_contract)],
+    );
+    assert_field_schema(
+        RETRY_POLICY_FIELDS,
+        &["type", "max_attempts", "base_delay_ms", "max_delay_ms"],
+        &[serialized_fields(&retry_policy)],
+    );
+    assert_field_schema(
+        OUTPUT_CONTRACT_FIELDS,
+        &["kind", "input_field", "default_schema"],
+        &[serialized_fields(&output_contract)],
+    );
+    assert_field_schema(
+        ARGUMENT_PROJECTION_FIELDS,
+        &["kind", "field"],
+        &[serialized_fields(&argument_projection)],
+    );
+}
+
+fn assert_field_schema(generated: &[&str], expected: &[&str], serialized: &[Vec<String>]) {
+    let mut serialized_union = Vec::new();
+    for fields in serialized {
+        for field in fields {
+            if !serialized_union.contains(field) {
+                serialized_union.push(field.clone());
+            }
+        }
+    }
+    assert_eq!(generated, expected, "generated field schema changed");
+    assert_eq!(serialized_union, expected, "serialized field order changed");
+}
+
+fn serialized_fields(value: &impl Serialize) -> Vec<String> {
+    let encoded = serde_json::to_string(value).expect("serialize all-fields-set witness");
+    top_level_json_object_keys(&encoded)
+}
+
+fn top_level_json_object_keys(encoded: &str) -> Vec<String> {
+    let bytes = encoded.as_bytes();
+    assert_eq!(
+        bytes.first(),
+        Some(&b'{'),
+        "witness must serialize as a map"
+    );
+    let mut keys = Vec::new();
+    let mut cursor = 1;
+    while cursor < bytes.len() {
+        while matches!(bytes.get(cursor), Some(b' ' | b'\n' | b'\r' | b'\t' | b',')) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) == Some(&b'}') {
+            break;
+        }
+        let key_end = json_string_end(bytes, cursor);
+        keys.push(
+            serde_json::from_str::<String>(&encoded[cursor..key_end])
+                .expect("decode serialized field name"),
+        );
+        cursor = key_end;
+        while matches!(bytes.get(cursor), Some(b' ' | b'\n' | b'\r' | b'\t')) {
+            cursor += 1;
+        }
+        assert_eq!(bytes.get(cursor), Some(&b':'));
+        cursor += 1;
+        cursor = json_value_end(bytes, cursor);
+    }
+    keys
+}
+
+fn json_string_end(bytes: &[u8], start: usize) -> usize {
+    assert_eq!(bytes.get(start), Some(&b'"'));
+    let mut cursor = start + 1;
+    let mut escaped = false;
+    while cursor < bytes.len() {
+        match (bytes[cursor], escaped) {
+            (_, true) => escaped = false,
+            (b'\\', false) => escaped = true,
+            (b'"', false) => return cursor + 1,
+            _ => {}
+        }
+        cursor += 1;
+    }
+    panic!("unterminated JSON string")
+}
+
+fn json_value_end(bytes: &[u8], start: usize) -> usize {
+    let mut cursor = start;
+    let mut depth = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if in_string {
+            match (byte, escaped) {
+                (_, true) => escaped = false,
+                (b'\\', false) => escaped = true,
+                (b'"', false) => in_string = false,
+                _ => {}
+            }
+        } else {
+            match byte {
+                b'"' => in_string = true,
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' if depth > 0 => depth -= 1,
+                b',' | b'}' if depth == 0 => return cursor,
+                _ => {}
+            }
+        }
+        cursor += 1;
+    }
+    cursor
+}
+
 fn hydrate(
     snapshot: lash_core::plugin::ExecutionStateSnapshot,
 ) -> lash_core::plugin::HydratedExecutionState {

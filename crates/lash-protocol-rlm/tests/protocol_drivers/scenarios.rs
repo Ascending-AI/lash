@@ -622,6 +622,7 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
             printed_images: Vec::new(),
             error: None,
             duration_ms: 7,
+            degraded_bindings: Vec::new(),
             terminal_finish: None,
         })
         .expect(RlmProtocolExpectations {
@@ -673,6 +674,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
             printed_images: Vec::new(),
             error: None,
             duration_ms: 3,
+            degraded_bindings: Vec::new(),
             terminal_finish: None,
         })
         .checkpoint()
@@ -730,6 +732,7 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
             printed_images: Vec::new(),
             error: None,
             duration_ms: 3,
+            degraded_bindings: Vec::new(),
             terminal_finish: None,
         })
         .checkpoint()

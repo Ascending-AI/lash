@@ -42,3 +42,10 @@ uuid = { workspace = true, features = ["v4"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
 insta = "1"
+
+[build-dependencies]
+lash-lashlang-runtime = { workspace = true }
+lash-sansio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+syn = { version = "2", features = ["full"] }

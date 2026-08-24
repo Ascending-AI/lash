@@ -180,6 +180,7 @@ fn empty_exec_response() -> crate::ExecResponse {
         printed_images: Vec::new(),
         error: None,
         duration_ms: 0,
+        degraded_bindings: Vec::new(),
         terminal_finish: None,
     }
 }

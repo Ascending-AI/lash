@@ -40,6 +40,12 @@ pub struct TextProjectionMetadata {
     pub max_lines: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DegradedBinding {
+    pub name: String,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecResponse {
     pub observations: Vec<String>,
@@ -50,6 +56,11 @@ pub struct ExecResponse {
     pub printed_images: Vec<AttachmentRef>,
     pub error: Option<String>,
     pub duration_ms: u64,
+    /// Bindings that could not be restored to a live host reference during
+    /// executor setup. The executor leaves each binding loudly unavailable;
+    /// the host decides whether to warn, repair, or abort.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub degraded_bindings: Vec<DegradedBinding>,
     /// When the surrounding session uses protocol-specific finish behavior,
     /// this carries the protocol's terminal value. The dispatch loop uses it
     /// as the terminal result of the session. `None` for chat-style sessions

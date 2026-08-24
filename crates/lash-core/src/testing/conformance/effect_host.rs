@@ -1658,6 +1658,7 @@ fn replay_conformance_exec_outcome(effect_id: &str) -> RuntimeEffectOutcome {
             printed_images: Vec::new(),
             error: None,
             duration_ms: 0,
+            degraded_bindings: Vec::new(),
             terminal_finish: Some(serde_json::json!(effect_id)),
         })),
     }

@@ -228,26 +228,36 @@ pub(crate) fn json_to_flow_value(value: Value) -> FlowValue {
 
 /// Resolves every projected reference held in the session's globals.
 ///
-/// The rehydrated bindings are committed as one batch: the turn's whole
-/// rehydration costs one heap copy and one collection rather than one of each
-/// per key, and a rehydration that cannot be committed leaves the globals as
-/// they were.
+/// Result of restoring process-local projected host references.
+pub(crate) struct ProjectedGlobalRehydration {
+    pub(crate) degraded_bindings: Vec<lash_core::DegradedBinding>,
+}
+
+/// The successfully rehydrated bindings are committed as one batch: the turn's
+/// whole rehydration costs one heap copy and one collection rather than one of
+/// each per key. A reference failure leaves only its top-level binding in the
+/// loudly unavailable state installed by snapshot restore.
 pub(crate) async fn rehydrate_projected_globals(
     rlm: &mut FlowState,
     projection_resolver: Arc<dyn ProjectionResolver>,
-) -> Result<(), String> {
+) -> Result<ProjectedGlobalRehydration, String> {
     let keys = rlm.globals().keys().map(str::to_string).collect::<Vec<_>>();
     let mut patch = Vec::new();
+    let mut degraded_bindings = Vec::new();
     for key in keys {
-        if let Some(mut value) = rlm.globals().get(&key).cloned()
-            && rehydrate_projected_value(&mut value, Arc::clone(&projection_resolver)).await?
-        {
-            patch.push(lashlang::GlobalPatch::Insert { name: key, value });
+        if let Some(mut value) = rlm.globals().get(&key).cloned() {
+            match rehydrate_projected_value(&mut value, Arc::clone(&projection_resolver)).await {
+                Ok(true) => patch.push(lashlang::GlobalPatch::Insert { name: key, value }),
+                Ok(false) => {}
+                Err(reason) => {
+                    degraded_bindings.push(lash_core::DegradedBinding { name: key, reason })
+                }
+            }
         }
     }
     rlm.patch_globals(patch)
         .map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(ProjectedGlobalRehydration { degraded_bindings })
 }
 
 fn rehydrate_projected_value<'a>(

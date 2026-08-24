@@ -774,6 +774,7 @@ fn checkpoint_pending_exec(
             printed_images: Vec::new(),
             error: None,
             duration_ms: 1,
+            degraded_bindings: Vec::new(),
             terminal_finish: Some(serde_json::json!("runtime perf benchmark ok")),
         }),
     });
