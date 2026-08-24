@@ -103,7 +103,7 @@ An unknown ID returns HTTP `404`:
         "kind": "call",
         "title": "show_message",
         "description": "optional @label description",
-        "nameSource": "derived",
+        "nameSource": "label",
         "operation": "show_message",
         "effect": "sleep",
         "fields": { "text": "Welcome", "pct": 35 },
@@ -160,7 +160,11 @@ Node `type` and `data.kind` use `process`, `data`, `call`, `effect`,
 `data.effect` uses `start_process`,
 `await_join`, `signal_run`, `wait_signal`, `sleep`, `cancel`, `print`, `yield`,
 `wake`, `break`, or `continue`. `data.nameSource` is `label` for an authored
-`@label` and `derived` for an automatic name.
+`@label` and `derived` for an automatic name. It is required on every node and
+tags the name: a `label` name carries `data.title` and an optional
+`data.description`, a `derived` name carries only the recomputed `data.title`.
+A missing or unrecognized `nameSource` is a decode error, never a `derived`
+name — a title sent without its tag would otherwise be dropped on save.
 
 `data.fields` contains JSON-editable literal arguments. In the default graph
 that includes strings such as `text`, `key`, `value`, `name`, `state`, `list`,
@@ -210,7 +214,8 @@ Content-Type: application/json
 The editable surface is:
 
 - `data.title`, `data.description`, and `data.nameSource`; set `nameSource` to
-  `label` to author a label. A `derived` title is recomputed after save.
+  `label` to author a label, and send it with every node. A `derived` title is
+  recomputed after save and must not carry a description.
 - `data.fields` literal values.
 - `data.binding`, `data.target`, `data.expression`, `data.condition`,
   `data.iterable`, and `data.clauses` canonical Lashlang text where present.

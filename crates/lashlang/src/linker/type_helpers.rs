@@ -683,3 +683,23 @@ fn expr_has_label_annotation(expr: &Expr) -> bool {
         other => other.children().any(expr_has_label_annotation),
     }
 }
+
+/// The path of the first label annotation under `expr`, addressed the way
+/// `Program::expression_source_spans` addresses expressions: one child index
+/// per level, outermost first.
+///
+/// Called on `Program::main` — a block of root statements — the leading index
+/// is the root statement index, so the returned path resolves to the
+/// annotation's own span rather than to whichever statement happens to come
+/// first.
+fn label_annotation_path(expr: &Expr) -> Option<Vec<u32>> {
+    if matches!(expr, Expr::LabelAnnotated { .. }) {
+        return Some(Vec::new());
+    }
+    expr.children().enumerate().find_map(|(index, child)| {
+        label_annotation_path(child).map(|mut path| {
+            path.insert(0, index as u32);
+            path
+        })
+    })
+}

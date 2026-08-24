@@ -4,8 +4,8 @@ use std::time::Duration;
 use serde_json::Value;
 use workflow_graph_roundtrip::{
     AppState, ChildGroup, EditableComprehensionClause, EditableProcessField, EditableValue,
-    FlowNode, NodeData, RunEvent, RunStatus, RunTiming, SaveWorkflowResponse, WorkflowCatalogEntry,
-    WorkflowDocument,
+    FlowNode, NodeData, NodeName, RunEvent, RunStatus, RunTiming, SaveWorkflowResponse,
+    WorkflowCatalogEntry, WorkflowDocument,
 };
 
 #[tokio::test]
@@ -200,7 +200,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
 
     let mut document = select_workflow(&client, &base, "blank").await;
     let process = new_flow_node_from_catalog(process_entry, "new:process");
-    assert_eq!(process.data.name.as_deref(), Some("my_process"));
+    assert_eq!(process.data.process_name.as_deref(), Some("my_process"));
     document.roots.processes.insert(0, process.id.clone());
     document.nodes.push(process);
 
@@ -224,7 +224,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
         .document
         .nodes
         .iter()
-        .find(|node| node.data.name.as_deref() == Some("my_process"))
+        .find(|node| node.data.process_name.as_deref() == Some("my_process"))
         .expect("reprojected added process");
     assert_eq!(added.data.kind, "process");
     assert!(added.data.params.is_empty());
@@ -280,7 +280,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .iter_mut()
         .find(|node| node.data.kind == "process")
         .expect("blank process");
-    process.data.name = Some("renamed".to_string());
+    process.data.process_name = Some("renamed".to_string());
     process.data.params = vec![
         EditableProcessField {
             name: "input".to_string(),
@@ -328,7 +328,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .iter_mut()
         .find(|node| node.data.kind == "process")
         .expect("reprojected renamed process");
-    process.data.name = Some("revised".to_string());
+    process.data.process_name = Some("revised".to_string());
     process.data.params.pop();
     process.data.signals.pop();
 
@@ -350,7 +350,7 @@ async fn process_name_params_and_signals_add_remove_and_round_trip() {
         .iter()
         .find(|node| node.data.kind == "process")
         .expect("reprojected revised process");
-    assert_eq!(process.data.name.as_deref(), Some("revised"));
+    assert_eq!(process.data.process_name.as_deref(), Some("revised"));
     assert_eq!(
         process.data.params,
         [EditableProcessField {
@@ -1064,11 +1064,11 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             );
             assert!(document.nodes.iter().any(|node| {
                 node.node_type == "container"
-                    && node.data.title == "while"
+                    && node.data.name.title() == "while"
                     && node.data.children.iter().any(|child| child.slot == "body")
             }));
             assert!(document.nodes.iter().any(|node| {
-                node.node_type == "container" && node.data.title.starts_with("for ")
+                node.node_type == "container" && node.data.name.title().starts_with("for ")
             }));
             assert!(projected.nodes().any(|node| {
                 matches!(
@@ -1120,7 +1120,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             .nodes
             .iter()
             .find(|node| node.id == final_event.node_id)
-            .map(|node| node.data.title.as_str());
+            .map(|node| node.data.name.title());
         assert_eq!(
             final_event.node_id, terminal_id,
             "{} final event was {final_title:?}",
@@ -1188,7 +1188,11 @@ async fn project_mutate_save_and_run_streams_correlated_events() {
         .iter_mut()
         .find(|node| node.data.operation.as_deref() == Some("show_message"))
         .expect("show_message node");
-    assert_eq!(message.data.name_source, "derived");
+    assert!(
+        matches!(message.data.name, NodeName::Derived { .. }),
+        "unlabelled node projected as {:?}",
+        message.data.name
+    );
     message.data.fields.insert(
         "text".to_string(),
         EditableValue::String("Edited through the graph API".to_string()),
@@ -1279,7 +1283,7 @@ async fn edited_counter_loop_condition_saves_reprojects_and_runs() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.title == "while")
+        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
         .expect("counter-loop while node");
     assert_eq!(
         while_node.data.condition.as_deref(),
@@ -1332,7 +1336,7 @@ async fn bare_counter_loop_condition_rewraps_canonically_and_runs() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.title == "while")
+        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
         .expect("counter-loop while node");
     while_node.data.condition = Some("state.count < 1".to_string());
 
@@ -2275,7 +2279,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.title == "while")
+        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
         .expect("default workflow while container");
     let original_condition = while_node.data.condition.clone();
     while_node.data.condition = Some("count <".to_string());
@@ -2293,7 +2297,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     let while_node = document
         .nodes
         .iter_mut()
-        .find(|node| node.node_type == "container" && node.data.title == "while")
+        .find(|node| node.node_type == "container" && node.data.name.title() == "while")
         .expect("default workflow while container");
     while_node.data.condition = original_condition;
     while_node
@@ -2389,12 +2393,12 @@ fn new_flow_node(id: &str, kind: &str, subkind: Option<&str>, title: &str) -> Fl
         data: NodeData {
             kind: kind.to_string(),
             subkind: subkind.map(str::to_string),
-            title: title.to_string(),
-            name: None,
+            name: NodeName::Derived {
+                title: title.to_string(),
+            },
+            process_name: None,
             params: Vec::new(),
             signals: Vec::new(),
-            description: None,
-            name_source: "derived".to_string(),
             operation: None,
             effect: None,
             terminal_kind: None,
@@ -2433,7 +2437,7 @@ fn new_flow_node_from_catalog(entry: &Value, id: &str) -> FlowNode {
             .unwrap_or_else(|| panic!("catalog field {name} string default"))
             .to_string();
         match name {
-            "name" => node.data.name = Some(default),
+            "name" => node.data.process_name = Some(default),
             "binding" => node.data.binding = Some(default),
             "target" => node.data.target = Some(default),
             "expression" => node.data.expression = Some(default),

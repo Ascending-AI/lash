@@ -240,13 +240,28 @@ impl<'module> Linker<'module> {
                 });
             }
         }
-        if expr_has_label_annotation(&self.program.main) {
+        if let Some(path) = label_annotation_path(&self.program.main) {
             return Err(LinkError::FeatureDisabled {
                 feature: "label annotations",
-                span: self.program.expression_spans.first().copied(),
+                span: self.annotation_span(&path),
             });
         }
         Ok(())
+    }
+
+    /// The source span recorded for the expression at `path`, falling back to
+    /// the root statement that contains it when the program was built from an
+    /// AST and carries no nested spans.
+    fn annotation_span(&self, path: &[u32]) -> Option<Span> {
+        self.program
+            .expression_source_spans
+            .iter()
+            .find(|source_span| source_span.path == path)
+            .map(|source_span| source_span.span)
+            .or_else(|| {
+                let root = *path.first()? as usize;
+                self.program.expression_spans.get(root).copied()
+            })
     }
 
     fn binding_for_type(&self, ty: &TypeExpr) -> Binding {

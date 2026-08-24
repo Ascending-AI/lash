@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lashlang::{GraphRenderError, Span};
+use lashlang::{GraphRenderError, Span, WorkflowNodeNameSource};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
@@ -172,17 +172,14 @@ pub struct NodeData {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subkind: Option<String>,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    #[serde(flatten)]
+    pub name: NodeName,
+    #[serde(rename = "name", default, skip_serializing_if = "Option::is_none")]
+    pub process_name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<EditableProcessField>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<EditableProcessField>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default = "derived_name_source")]
-    pub name_source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -252,8 +249,68 @@ pub struct EditableProcessField {
     pub field_type: String,
 }
 
-fn derived_name_source() -> String {
-    "derived".to_string()
+/// A node's display name together with the one fact that decides whether the
+/// host may throw it away: who chose it.
+///
+/// Rendering emits an `@label` annotation only for an authored name, so a
+/// payload that carries a title without saying where the name came from is a
+/// rename waiting to evaporate. The tag is therefore mandatory and carries the
+/// title inside the variant: "title present, tag absent" is unrepresentable,
+/// and an unknown tag is a decode error rather than a silent `derived`. The
+/// wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the
+/// browser client already writes on every node.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "nameSource", rename_all = "camelCase")]
+pub enum NodeName {
+    /// The author named this node: the title and its optional description are
+    /// theirs, and the save path renders them back as an `@label` annotation.
+    #[serde(rename = "label")]
+    Authored {
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+    },
+    /// The name is a rendering of the node's own expression. The title is
+    /// output, not input: the save path recomputes it and it carries no
+    /// description.
+    Derived { title: String },
+}
+
+impl NodeName {
+    /// The title to display for this node, authored or rendered.
+    pub fn title(&self) -> &str {
+        match self {
+            Self::Authored { title, .. } | Self::Derived { title } => title,
+        }
+    }
+
+    /// The authored description, which only an authored name can carry.
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            Self::Authored { description, .. } => description.as_deref(),
+            Self::Derived { .. } => None,
+        }
+    }
+
+    /// The core tag this name projects to.
+    pub fn name_source(&self) -> WorkflowNodeNameSource {
+        match self {
+            Self::Authored { .. } => WorkflowNodeNameSource::Label,
+            Self::Derived { .. } => WorkflowNodeNameSource::Derived,
+        }
+    }
+
+    /// Build the wire name from a projected node's name facts.
+    pub fn projected(
+        name_source: WorkflowNodeNameSource,
+        title: String,
+        description: Option<String>,
+    ) -> Self {
+        match name_source {
+            WorkflowNodeNameSource::Label => Self::Authored { title, description },
+            WorkflowNodeNameSource::Derived => Self::Derived { title },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -375,6 +432,77 @@ mod editable_value_tests {
                     && entries.get("$expr")
                         == Some(&EditableValue::String("literal member".to_string()))
         ));
+    }
+}
+
+#[cfg(test)]
+mod node_name_tests {
+    use super::*;
+
+    fn node_data(name: Value) -> Result<NodeData, serde_json::Error> {
+        let mut payload = json!({ "kind": "call" });
+        let object = payload.as_object_mut().expect("node data object");
+        for (key, value) in name.as_object().expect("name fields") {
+            object.insert(key.clone(), value.clone());
+        }
+        serde_json::from_value::<NodeData>(payload)
+    }
+
+    #[test]
+    fn an_authored_name_round_trips_with_its_description() {
+        let data = node_data(json!({
+            "title": "Greet the customer",
+            "description": "The opening message",
+            "nameSource": "label",
+        }))
+        .expect("authored node data");
+
+        assert_eq!(
+            data.name,
+            NodeName::Authored {
+                title: "Greet the customer".to_string(),
+                description: Some("The opening message".to_string()),
+            }
+        );
+        assert_eq!(data.name.name_source(), WorkflowNodeNameSource::Label);
+        assert_eq!(
+            serde_json::to_value(&data.name).expect("serialize authored name"),
+            json!({
+                "nameSource": "label",
+                "title": "Greet the customer",
+                "description": "The opening message",
+            })
+        );
+    }
+
+    #[test]
+    fn a_title_without_a_tag_is_not_representable() {
+        let error = node_data(json!({ "title": "Greet the customer" }))
+            .expect_err("untagged title must not decode");
+        assert!(
+            error.to_string().contains("nameSource"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_tag_is_a_decode_error_and_never_derived() {
+        let error = node_data(json!({ "title": "Greet the customer", "nameSource": "lable" }))
+            .expect_err("unknown tag must not decode");
+        let message = error.to_string();
+        assert!(
+            message.contains("lable") && message.contains("label") && message.contains("derived"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn a_derived_name_carries_no_description() {
+        let data = node_data(json!({ "title": "call greet", "nameSource": "derived" }))
+            .expect("derived node data");
+
+        assert_eq!(data.name.description(), None);
+        assert_eq!(data.name.name_source(), WorkflowNodeNameSource::Derived);
     }
 }
 
