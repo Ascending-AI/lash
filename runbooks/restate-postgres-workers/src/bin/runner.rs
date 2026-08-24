@@ -111,12 +111,22 @@ struct WorkflowSpec {
 // - e2e-engine-restart-{cancel,suspended-sleep,complete}, including the complete
 //   engine-restart-ready/engine-restart-complete shell handshake
 // - the four ordered turn-control workflows, then the durable-wait index gates
-// - e2e-turn-break-glass, which remains last because it strands a shared lease
+//   and e2e-turn-break-glass (last because it strands a shared lease); the
+//   index gates and break-glass ride segment 2 but are NOT inventory members —
+//   they produce no terminal-result row and are covered by their own driver
+//   assertions, not the completion manifest
 //
 // Each CI leg has a fresh stack, so schema/reset/readiness/deployment bootstrap is
 // intentionally repeated. No workflow setup is duplicated between segments.
 // This is the single authoritative workflow inventory used by execution manifests
 // and the CI coverage summary; workflow ids must not be copied into those layers.
+// Pin the inventory size: the runner emits both the inventory and the
+// manifests, so shrinking the workflow set would otherwise pass the CI
+// coverage summary silently. Removing or adding a workflow must touch this
+// pin, forcing the change into reviewer view.
+const EXPECTED_WORKFLOW_INVENTORY_LEN: usize = 28;
+const _: () = assert!(WORKFLOW_INVENTORY.len() == EXPECTED_WORKFLOW_INVENTORY_LEN);
+
 const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
     WorkflowSpec {
         id: "e2e-main",
