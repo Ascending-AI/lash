@@ -4954,6 +4954,18 @@ async fn fig1767_journal_entry_byte_sequence_equality() {
             .get(process_record_key)
             .expect("process effect record journal entry");
 
+        let process_record: serde_json::Value =
+            serde_json::from_slice(process_record_bytes).expect("decode process effect record");
+        let refusal = &process_record["outcome"]["Ok"]["result"]["outcome"];
+        assert_eq!(refusal["process_id"], "fig1767-proc");
+        assert_eq!(
+            refusal["message"],
+            lash_core::PluginError::ProcessUnknown {
+                process_id: "fig1767-proc".to_string(),
+            }
+            .to_string()
+        );
+
         // Pin verdict entry byte sequence: JournaledBudgetVerdict::Proceed serializes as "Proceed"
         assert_eq!(
             process_verdict_bytes.as_slice(),
@@ -4962,7 +4974,7 @@ async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             process_record_bytes,
-            br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-process-cmd\",\"kind\":\"process\"},\"replay\":{\"key\":\"fig1767-process-cmd\"}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"c282f7946c2d914f62cc9d3494999c640754549700179d2df1dd31a78450da5e"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"plugin session error: unknown process `fig1767-proc`"}}}}}"##,
+            br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-process-cmd\",\"kind\":\"process\"},\"replay\":{\"key\":\"fig1767-process-cmd\"}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"c282f7946c2d914f62cc9d3494999c640754549700179d2df1dd31a78450da5e"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }

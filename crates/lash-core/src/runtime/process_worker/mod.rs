@@ -501,7 +501,7 @@ impl DurableProcessWorker {
             .get_process(&registration.id)
             .await?
             .ok_or_else(|| {
-                PluginError::Session(format!("unknown process `{}`", registration.id))
+                crate::runtime::registry_transitions::unknown_process(&registration.id)
             })?;
         self.run_process_segment_from_current(
             registration,
@@ -1282,9 +1282,9 @@ impl DurableProcessWorker {
         let current = match self.read_for_recovery(&process_id).await {
             RecoveryReadDisposition::Found(current) => *current,
             RecoveryReadDisposition::Absent => {
-                return Err(RecoverFailure::Run(PluginError::Session(format!(
-                    "unknown process `{process_id}`"
-                ))));
+                return Err(RecoverFailure::Run(
+                    crate::runtime::registry_transitions::unknown_process(&process_id),
+                ));
             }
             RecoveryReadDisposition::BackendError(error) => {
                 return Err(RecoverFailure::BackendError(error));

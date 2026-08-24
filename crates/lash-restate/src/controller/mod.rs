@@ -1051,7 +1051,9 @@ where
             // `Err(ProcessNoLongerRetained)` at `?`, not `Ok(None)` at this
             // branch. Hosts must retain terminal rows beyond every such waiter.
             if registry.get_process(&process_id).await?.is_none() {
-                return Err(PluginError::Session(format!("unknown process `{process_id}`")).into());
+                return Err(
+                    lash_core::runtime::registry_transitions::unknown_process(&process_id).into(),
+                );
             }
             let turn_cancel = restate_process_turn_cancel_wait_request(
                 invocation,
@@ -1139,10 +1141,9 @@ where
             reason,
             replay,
         } => {
-            let record = registry
-                .get_process(&process_id)
-                .await?
-                .ok_or_else(|| PluginError::Session(format!("unknown process `{process_id}`")))?;
+            let record = registry.get_process(&process_id).await?.ok_or_else(|| {
+                lash_core::runtime::registry_transitions::unknown_process(&process_id)
+            })?;
             let mut request =
                 lash_core::ProcessEventAppendRequest::cancel_requested(&process_id, reason.clone());
             if let Some(replay) = replay {
@@ -1175,9 +1176,7 @@ where
                 lash_core::ProcessParentEndPolicy::Cancel => {
                     let result: Result<(), lash_core::PluginError> = async {
                         registry.get_process(&process_id).await?.ok_or_else(|| {
-                            lash_core::PluginError::Session(format!(
-                                "unknown process `{process_id}`"
-                            ))
+                            lash_core::runtime::registry_transitions::unknown_process(&process_id)
                         })?;
                         registry
                             .append_event(

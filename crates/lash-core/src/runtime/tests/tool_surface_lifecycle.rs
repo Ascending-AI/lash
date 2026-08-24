@@ -327,6 +327,16 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             &uuid::Uuid::new_v4().to_string(),
         ))
     };
+    let unknown_process_id = "host-unknown-process";
+    let unknown_process = host_service
+        .cancel(session_id, unknown_process_id, scope())
+        .await
+        .expect_err("cancelling an unknown process must be refused");
+    assert!(matches!(
+        unknown_process,
+        crate::PluginError::ProcessUnknown { ref process_id }
+            if process_id == unknown_process_id
+    ));
     let listed = service
         .list_visible(session_id, crate::ProcessListMode::Live, scope())
         .await
