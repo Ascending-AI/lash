@@ -35,7 +35,7 @@ removal_verdicts_recorded = 775
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2764
+prose_citations_recorded = 2709
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -67891,36 +67891,42 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::PluginExtensions"
+symbol = "lash::plugins::PluginExtensions"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::PluginExtensions"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:89#let extensions: &PluginExtensions = &ctx.extensions;"
 
 [[api]]
-symbol = "lash_core::PluginExtensions::from_contributions"
+symbol = "lash::plugins::PluginExtensions::from_contributions"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::PluginExtensions::from_contributions"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:186#PluginExtensions::from_contributions([PluginExtensionContribution::from_value("
 
 [[api]]
-symbol = "lash_core::PluginExtensions::insert"
+symbol = "lash::plugins::PluginExtensions::insert"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::PluginExtensions::insert"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:190#extensions.insert(PluginExtensionContribution::from_value("
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:196#PluginExtensions::payloads(&extensions, extension_id).len(),"
 
 [[api]]
-symbol = "lash_core::PluginExtensions::payloads"
+symbol = "lash::plugins::PluginExtensions::payloads"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::PluginExtensions::payloads"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:196#PluginExtensions::payloads(&extensions, extension_id).len(),"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:196#PluginExtensions::payloads(&extensions, extension_id).len(),"
 
 [[api]]
 symbol = "lash_core::PluginSessionSnapshot"
@@ -70035,76 +70041,93 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::SessionToolAccess"
+symbol = "lash::plugins::SessionToolAccess"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::SessionToolAccess"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:170#assert!(SessionToolAccess::hides(&access, \"interactive\"));"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:170#assert!(SessionToolAccess::hides(&access, \"interactive\"));"
 
 [[api]]
-symbol = "lash_core::SessionToolAccess::hidden_tools"
+symbol = "lash::plugins::SessionToolAccess::hidden_tools"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionToolAccess::hidden_tools"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:172#assert_eq!(access.hidden_tools.len(), 1);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:172#assert_eq!(access.hidden_tools.len(), 1);"
 
 [[api]]
-symbol = "lash_core::SessionToolAccess::hides"
+symbol = "lash::plugins::SessionToolAccess::hides"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::SessionToolAccess::hides"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:170#assert!(SessionToolAccess::hides(&access, \"interactive\"));"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:170#assert!(SessionToolAccess::hides(&access, \"interactive\"));"
 
 [[api]]
-symbol = "lash_core::SessionToolAccess::tools"
+symbol = "lash::plugins::SessionToolAccess::tools"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionToolAccess::tools"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:171#assert_eq!(access.tools.len(), 0);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:171#assert_eq!(access.tools.len(), 0);"
 
 [[api]]
-symbol = "lash_core::SubagentSessionContext"
+symbol = "lash::plugins::SubagentSessionContext"
 kind = "struct"
 availability = "default+all-features"
-area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash-subagents/src/capability.rs:143#.with_subagent_context(SubagentSessionContext {"
+aliases = ["lash_core::SubagentSessionContext"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:174#let subagent = SubagentSessionContext {"
 
 [[api]]
-symbol = "lash_core::SubagentSessionContext::capability"
+symbol = "lash::plugins::SubagentSessionContext::capability"
 kind = "field"
 availability = "default+all-features"
-area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash-subagents/src/rlm_support.rs:264#authority.capability, authority.depth, authority.max_depth"
+aliases = ["lash_core::SubagentSessionContext::capability"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:181#assert_eq!(subagent.capability, \"review\");"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:181#assert_eq!(subagent.capability, \"review\");"
 
 [[api]]
-symbol = "lash_core::SubagentSessionContext::depth"
+symbol = "lash::plugins::SubagentSessionContext::depth"
 kind = "field"
 availability = "default+all-features"
-area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash-subagents/src/rlm_support.rs:264#authority.capability, authority.depth, authority.max_depth"
+aliases = ["lash_core::SubagentSessionContext::depth"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:182#assert_eq!(subagent.depth, 2);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:182#assert_eq!(subagent.depth, 2);"
 
 [[api]]
-symbol = "lash_core::SubagentSessionContext::max_depth"
+symbol = "lash::plugins::SubagentSessionContext::max_depth"
 kind = "field"
 availability = "default+all-features"
-area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash-subagents/src/rlm_support.rs:264#authority.capability, authority.depth, authority.max_depth"
+aliases = ["lash_core::SubagentSessionContext::max_depth"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:183#assert_eq!(subagent.max_depth, 5);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:183#assert_eq!(subagent.max_depth, 5);"
 
 [[api]]
-symbol = "lash_core::SubagentSessionContext::parent_session_id"
+symbol = "lash::plugins::SubagentSessionContext::parent_session_id"
 kind = "field"
 availability = "default+all-features"
-area = "sessions-turns"
-disposition = "internal-consumed"
-usage = "crates/lash-subagents/src/capability.rs:144#parent_session_id: self.parent_session_id.to_string(),"
+aliases = ["lash_core::SubagentSessionContext::parent_session_id"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:180#assert_eq!(subagent.parent_session_id, \"parent\");"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:180#assert_eq!(subagent.parent_session_id, \"parent\");"
 
 [[api]]
 symbol = "lash_core::TestProcessRegistryWriteExt"
@@ -76608,92 +76631,114 @@ disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/plugins_operations.rs:130#.with_events(vec![PluginRuntimeEvent::Status {"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationDef"
+symbol = "lash::plugins::PluginOperationDef"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationDef"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::query#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Query),`, crates/lash-core/src/plugin/session_obj.rs::PluginSession::plugin_operations#`.map(|op| op.def().clone())`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:214#assert_eq!(PluginOperationDef::kind(definition), expected_kind);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:214#assert_eq!(PluginOperationDef::kind(definition), expected_kind);"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationDef::description"
+symbol = "lash::plugins::PluginOperationDef::description"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationDef::description"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`description: \"echo\".to_string(),`, crates/lash-core/src/plugin/actions.rs::PluginOperationDef::from_spec#`description: spec.description,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:215#assert!(!definition.description.is_empty());"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:215#assert!(!definition.description.is_empty());"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationDef::input_schema"
+symbol = "lash::plugins::PluginOperationDef::input_schema"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationDef::input_schema"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`input_schema: json!({}),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`.input_schema`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:217#assert!(definition.input_schema.is_object());"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:217#assert!(definition.input_schema.is_object());"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationDef::kind"
+symbol = "lash::plugins::PluginOperationDef::kind"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationDef::kind"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this method is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::invoke_plugin_operation#`if operation.def().kind() != invocation.kind() {`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.kind(), PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:214#assert_eq!(PluginOperationDef::kind(definition), expected_kind);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:214#assert_eq!(PluginOperationDef::kind(definition), expected_kind);"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationDef::name"
+symbol = "lash::plugins::PluginOperationDef::name"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationDef::name"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockToolProvider::resolve_contract#`.find(|tool| tool.name() == name)`, crates/lash-core/src/plugin/mod.rs::tests::MockToolProvider::resolve_contract#`self.tool_definitions()`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:213#assert_eq!(definition.name, name);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:213#assert_eq!(definition.name, name);"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationDef::output_schema"
+symbol = "lash::plugins::PluginOperationDef::output_schema"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationDef::output_schema"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`output_schema: json!({}),`, crates/lash-core/src/plugin/actions.rs::PluginOperationDef::from_spec#`output_schema: spec.output_schema,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:218#assert!(definition.output_schema.is_object());"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:218#assert!(definition.output_schema.is_object());"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationDef::session_param"
+symbol = "lash::plugins::PluginOperationDef::session_param"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationDef::session_param"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::plugin_operations` hands `PluginOperationDef` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this field is exercised in-repo at crates/lash-core/src/plugin/mod.rs::tests::MockPlugin::register#`session_param: SessionParam::Optional,`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.session_param, SessionParam::Optional);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:216#assert_eq!(definition.session_param, SessionParam::Optional);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:216#assert_eq!(definition.session_param, SessionParam::Optional);"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationKind"
+symbol = "lash::plugins::PluginOperationKind"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationKind"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this type is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationContext::kind#`Self::Command(_) => PluginOperationKind::Command,`, crates/lash-core/src/plugin/mod.rs::tests::plugin_query_generates_schema_and_invokes_typed_output#`assert_eq!(def.kind(), PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:222#assert!(kinds.contains(&PluginOperationKind::Query));"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:222#assert!(kinds.contains(&PluginOperationKind::Query));"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationKind::Command"
+symbol = "lash::plugins::PluginOperationKind::Command"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationKind::Command"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals and core runtime contract tests -- this variant is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::command#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Command),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_operation_registration_stamps_kind_from_its_constructor#`assert_eq!(command.def().kind(), PluginOperationKind::Command);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:223#assert!(kinds.contains(&PluginOperationKind::Command));"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:223#assert!(kinds.contains(&PluginOperationKind::Command));"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationKind::Query"
+symbol = "lash::plugins::PluginOperationKind::Query"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationKind::Query"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::query#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Query),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_operation_registration_stamps_kind_from_its_constructor#`assert_eq!(query.def().kind(), PluginOperationKind::Query);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:222#assert!(kinds.contains(&PluginOperationKind::Query));"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:222#assert!(kinds.contains(&PluginOperationKind::Query));"
 
 [[api]]
-symbol = "lash_core::plugin::actions::PluginOperationKind::Task"
+symbol = "lash::plugins::PluginOperationKind::Task"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::actions::PluginOperationKind::Task"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::actions::PluginOperationDef::kind` hands `PluginOperationKind` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/plugin/actions.rs::PluginOperationRegistration::task#`def: PluginOperationDef::from_spec(spec, PluginOperationKind::Task),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_operation_registration_stamps_kind_from_its_constructor#`assert_eq!(task.def().kind(), PluginOperationKind::Task);`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:224#assert!(kinds.contains(&PluginOperationKind::Task));"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:224#assert!(kinds.contains(&PluginOperationKind::Task));"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeDirective"
@@ -76768,115 +76813,151 @@ disposition = "unused-add"
 reason = "Add lash::plugins::SessionParam::Required to the docs-snippets plugin-operations example and assert its externally observable result."
 
 [[api]]
-symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason"
+symbol = "lash::plugins::AssistantStreamFinishReason"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::hooks::AssistantStreamFinishReason"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::finish_assistant_stream` hands `AssistantStreamFinishReason` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/plugin/session_obj.rs::PluginSession::finish_assistant_stream#`reason: AssistantStreamFinishReason,`, crates/lash-core/src/runtime/turn_driver/streaming.rs::RuntimeTurnDriver::finish_assistant_stream_hooks#`reason: crate::plugin::AssistantStreamFinishReason,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:126#match ctx.reason {"
 
 [[api]]
-symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason::Aborted"
+symbol = "lash::plugins::AssistantStreamFinishReason::Aborted"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::hooks::AssistantStreamFinishReason::Aborted"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::finish_assistant_stream` hands `AssistantStreamFinishReason` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/runtime/turn_driver/streaming.rs::assistant_stream_finish_reason#`return AssistantStreamFinishReason::Aborted;`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:129#AssistantStreamFinishReason::Aborted => \"aborted\","
 
 [[api]]
-symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason::AttemptReset"
+symbol = "lash::plugins::AssistantStreamFinishReason::AttemptReset"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::hooks::AssistantStreamFinishReason::AttemptReset"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::finish_assistant_stream` hands `AssistantStreamFinishReason` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/runtime/turn_driver/streaming.rs::RuntimeTurnDriver::forward_provider_stream_event#`LlmStreamEvent::AttemptReset => {`, crates/lash-core/src/runtime/turn_driver/streaming.rs::RuntimeTurnDriver::forward_provider_stream_event#`crate::plugin::AssistantStreamFinishReason::AttemptReset,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:127#AssistantStreamFinishReason::AttemptReset => \"attempt-reset\","
 
 [[api]]
-symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason::Cancelled"
+symbol = "lash::plugins::AssistantStreamFinishReason::Cancelled"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::hooks::AssistantStreamFinishReason::Cancelled"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::finish_assistant_stream` hands `AssistantStreamFinishReason` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised at crates/lash-core/src/runtime/turn_driver/streaming.rs::assistant_stream_finish_reason#`Err(err) if err.terminal_reason == crate::LlmTerminalReason::Cancelled => {`, not by any example, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:130#AssistantStreamFinishReason::Cancelled => \"cancelled\","
 
 [[api]]
-symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason::Complete"
+symbol = "lash::plugins::AssistantStreamFinishReason::Complete"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::hooks::AssistantStreamFinishReason::Complete"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::finish_assistant_stream` hands `AssistantStreamFinishReason` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/runtime/turn_driver/streaming.rs::assistant_stream_finish_reason#`Ok(_) => AssistantStreamFinishReason::Complete,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:128#AssistantStreamFinishReason::Complete => \"complete\","
 
 [[api]]
-symbol = "lash_core::plugin::hooks::AssistantStreamFinishReason::ProviderError"
+symbol = "lash::plugins::AssistantStreamFinishReason::ProviderError"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::hooks::AssistantStreamFinishReason::ProviderError"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::finish_assistant_stream` hands `AssistantStreamFinishReason` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/runtime/turn_driver/streaming.rs::assistant_stream_finish_reason#`Err(_) => AssistantStreamFinishReason::ProviderError,`, crates/lash-protocol-rlm/src/stream_mask.rs::CellDetector::note_stream_finished#`| lash_core::plugin::AssistantStreamFinishReason::ProviderError => self.reset(),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:131#AssistantStreamFinishReason::ProviderError => \"provider-error\","
 
 [[api]]
-symbol = "lash_core::facade_support::ToolResultProjectionContext"
+symbol = "lash::plugins::AssistantStreamFinishedContext"
 kind = "struct"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this type is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_tool_result#`ctx: ToolResultProjectionContext`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:122#.stream_finished(Arc::new(|ctx: AssistantStreamFinishedContext| {"
 
 [[api]]
-symbol = "lash_core::facade_support::ToolResultProjectionContext::args"
+symbol = "lash::plugins::AssistantStreamFinishedContext::reason"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext::args"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::truncation_hint#`.or_else(|| ctx.and_then(|ctx| spill_tool_output(&ctx.tool_name, &ctx.args, text)));`, crates/lash-plugin-tool-output-budget/src/lib.rs::spill_tool_output#`args: &serde_json::Value,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:126#match ctx.reason {"
 
 [[api]]
-symbol = "lash_core::facade_support::ToolResultProjectionContext::call_id"
+symbol = "lash::plugins::AssistantStreamFinishedContext::session_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext::call_id"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_tool_result#`call_id: ctx.call_id.clone(),`, crates/lash-plugin-tool-output-budget/src/lib.rs::project_batch_child_value#`call_id: format!(\"{}.{}\", ctx.call_id, index),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:125#ctx.session_id,"
 
 [[api]]
-symbol = "lash_core::facade_support::ToolResultProjectionContext::duration_ms"
-kind = "field"
+symbol = "lash::plugins::ToolResultProjectionContext"
+kind = "struct"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext::duration_ms"]
+aliases = ["lash_core::facade_support::ToolResultProjectionContext", "lash_core::plugin::hooks::ToolResultProjectionContext"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_batch_child_value#`duration_ms,`, crates/lash-plugin-tool-output-budget/src/lib.rs::project_batch_child_value#`duration_ms,`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:230#.project_tool_result(ToolResultProjectionContext {"
 
 [[api]]
-symbol = "lash_core::facade_support::ToolResultProjectionContext::output"
+symbol = "lash::plugins::ToolResultProjectionContext::args"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext::output"]
+aliases = ["lash_core::facade_support::ToolResultProjectionContext::args", "lash_core::plugin::hooks::ToolResultProjectionContext::args"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates -- this field is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_model_parts#`match &ctx.output.outcome {`, crates/lash-plugin-tool-output-budget/src/lib.rs::project_model_parts#`lash_core::session_model::format_tool_output_content(&ctx.output),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:114#ctx.args,"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:244#assert!(rendered.contains(r#\"args={\"goal\":\"ship the facade\"}\"#));"
 
 [[api]]
-symbol = "lash_core::facade_support::ToolResultProjectionContext::session_id"
+symbol = "lash::plugins::ToolResultProjectionContext::call_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext::session_id"]
+aliases = ["lash_core::facade_support::ToolResultProjectionContext::call_id", "lash_core::plugin::hooks::ToolResultProjectionContext::call_id"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates -- this field is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_batch_child_value#`session_id: ctx.session_id.clone(),`, crates/lash-plugin-tool-output-budget/src/lib.rs::tests::truncates_strings_with_terminal_style_marker#`session_id: \"root\".to_string(),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:112#ctx.call_id,"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:242#assert!(rendered.contains(\"call=call-docs\"));"
 
 [[api]]
-symbol = "lash_core::facade_support::ToolResultProjectionContext::tool_name"
+symbol = "lash::plugins::ToolResultProjectionContext::duration_ms"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::plugin::hooks::ToolResultProjectionContext::tool_name"]
+aliases = ["lash_core::facade_support::ToolResultProjectionContext::duration_ms", "lash_core::plugin::hooks::ToolResultProjectionContext::duration_ms"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::project_tool_result` hands `ToolResultProjectionContext` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this field is exercised in-repo at crates/lash-plugin-tool-output-budget/src/lib.rs::project_tool_result#`tool_name: ctx.tool_name.clone(),`, crates/lash-plugin-tool-output-budget/src/lib.rs::project_model_parts#`if ctx.tool_name == \"batch\" {`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:116#ctx.duration_ms,"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:246#assert!(rendered.contains(\"duration_ms=7\"));"
+
+[[api]]
+symbol = "lash::plugins::ToolResultProjectionContext::output"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::ToolResultProjectionContext::output", "lash_core::plugin::hooks::ToolResultProjectionContext::output"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:108#let projected = ctx.output.value_for_projection();"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:245#assert!(rendered.contains(\"output=\\\"project me\\\"\"));"
+
+[[api]]
+symbol = "lash::plugins::ToolResultProjectionContext::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::ToolResultProjectionContext::session_id", "lash_core::plugin::hooks::ToolResultProjectionContext::session_id"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:111#ctx.session_id,"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:241#assert!(rendered.contains(\"session=docs-plugin-contexts\"));"
+
+[[api]]
+symbol = "lash::plugins::ToolResultProjectionContext::tool_name"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::ToolResultProjectionContext::tool_name", "lash_core::plugin::hooks::ToolResultProjectionContext::tool_name"]
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:113#ctx.tool_name,"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:243#assert!(rendered.contains(\"tool=docs.inspect_query\"));"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnHookReport"
@@ -77230,60 +77311,73 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::prepare_turn_with_phase_probe` hands `PrepareTurnRequest` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::PluginSession::prepare_turn_with_phase_probe#`session_graph,`, crates/lash-core/src/plugin/session_obj/directives.rs::PluginSession::prepare_turn_with_phase_probe#`sessions,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext"
+symbol = "lash::plugins::ToolCatalogContext"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::tool_catalog::ToolCatalogContext"]
 area = "plugins"
-disposition = "unused-add"
-reason = "Add lash_core::plugin::tool_catalog::ToolCatalogContext to the agent-workbench plugin/tool setup example and assert its externally observable result."
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:86#.contribute(Arc::new(|ctx: ToolCatalogContext| {"
 
 [[api]]
-symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::extensions"
+symbol = "lash::plugins::ToolCatalogContext::extensions"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::tool_catalog::ToolCatalogContext::extensions"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer class: the RLM protocol crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-protocol-rlm/src/dialect/typescript.rs::TypescriptDialect::tests::every_advertised_catalog_identifier_is_callable_verbatim#`extensions: Default::default(),`, crates/lash-core/src/plugin/mod.rs::tests::plugin_host_collects_factory_extension_contributions#`host.extensions().payloads(TEST_EXTENSION_ID),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:89#let extensions: &PluginExtensions = &ctx.extensions;"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:102#assert!(extensions.payloads(\"docs.missing\").is_empty());"
 
 [[api]]
-symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::resolve_contract"
+symbol = "lash::plugins::ToolCatalogContext::resolve_contract"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::tool_catalog::ToolCatalogContext::resolve_contract"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer evidence: this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/tools.rs::PluginSession::resolved_tool_catalog#`Arc::new(move |name: &str| contract_provider.resolve_contract(name));`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:93#.resolve_contract"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:96#assert!(unresolved_contract.is_none());"
 
 [[api]]
-symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::session_id"
+symbol = "lash::plugins::ToolCatalogContext::session_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::tool_catalog::ToolCatalogContext::session_id"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer class: the RLM protocol crate -- this field is exercised in-repo at crates/lash-protocol-rlm/src/control_tools.rs::continue_as_switch_frame#`context.session_id(),`, crates/lash-protocol-rlm/src/control_tools.rs::tests::BatonManager::create_session#`session_id: request.session_id.unwrap_or_else(|| \"child\".to_string()),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:91#assert_eq!(ctx.session_id, SESSION);"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:91#assert_eq!(ctx.session_id, SESSION);"
 
 [[api]]
-symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::subagent"
+symbol = "lash::plugins::ToolCatalogContext::subagent"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::tool_catalog::ToolCatalogContext::subagent"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer class: the RLM protocol crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-protocol-rlm/src/dialect/typescript.rs::TypescriptDialect::tests::every_advertised_catalog_identifier_is_callable_verbatim#`subagent: None,`, crates/lash-core/src/plugin/runtime_impl.rs::PluginHost::build_session_inner#`subagent: authority.subagent.clone(),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:88#let subagent: Option<&SubagentSessionContext> = ctx.subagent.as_ref();"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:101#assert!(subagent.is_none());"
 
 [[api]]
-symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::tool_access"
+symbol = "lash::plugins::ToolCatalogContext::tool_access"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::tool_catalog::ToolCatalogContext::tool_access"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer class: the RLM protocol crate and first-party plugin crates -- this field is exercised in-repo at crates/lash-protocol-rlm/src/dialect/typescript.rs::TypescriptDialect::tests::every_advertised_catalog_identifier_is_callable_verbatim#`tool_access: lash_core::SessionToolAccess::default(),`, crates/lash-core/src/plugin/runtime_impl.rs::PluginHost::build_session_inner#`tool_access: authority.tool_access.clone(),`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:87#let access: &SessionToolAccess = &ctx.tool_access;"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:100#assert!(!access.hides(\"docs.inspect_query\"));"
 
 [[api]]
-symbol = "lash_core::plugin::tool_catalog::ToolCatalogContext::tools"
+symbol = "lash::plugins::ToolCatalogContext::tools"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::plugin::tool_catalog::ToolCatalogContext::tools"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog` hands `ToolCatalogContext` to hosts (plugin and tool implementers). Consumer class: core runtime internals and first-party plugin crates -- this field is exercised in-repo at crates/lash-core/src/session.rs::ToolCatalogHandle::catalog#`self.0.tool_catalog.tools.iter().cloned(),`, crates/lash-core/src/session.rs::Session::build_tool_catalog_entry#`let provider = self.tools();`, and no example reaches it, which is what keeps the row unused."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/plugins_contexts.rs:97#assert!(!ctx.tools.is_empty());"
+assertion = "examples/docs-snippets/src/plugins_contexts.rs:97#assert!(!ctx.tools.is_empty());"
 
 [[api]]
 symbol = "lash_core::plugin::tool_catalog::TurnFinalization"
