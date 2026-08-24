@@ -751,6 +751,11 @@ kind = "rust_items"
 paths = ["crates/lash-lashlang-runtime/src/process.rs"]
 symbols = ["LashlangSegmentState"]
 
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-core/src/runtime/process/engine.rs"]
+must_cover = ["SegmentHandover", "PersistedSegmentHandover"]
+
 [[surface]]
 constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph.rs"
