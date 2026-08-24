@@ -1012,7 +1012,7 @@ jobs:
 
   postgres-store-build:
     name: Build Postgres store tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 10
 
     steps:
@@ -1067,10 +1067,13 @@ jobs:
           name: postgres-store-tests-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: target/nextest/postgres-store-tests.tar.zst
           if-no-files-found: error
+          # The nextest archive is already zstd-compressed; wrapping it in a
+          # second compression pass only adds upload/download latency.
+          compression-level: 0
 
   postgres-store:
     name: Test Postgres store (PG ${{ matrix.postgres }})
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     needs: postgres-store-build
 
@@ -1163,6 +1166,7 @@ jobs:
         run: >-
           cargo nextest run --profile ci
           --archive-file target/nextest-archives/postgres-store-tests.tar.zst
+          --extract-to . --extract-overwrite
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"

@@ -1232,17 +1232,21 @@ derive_mutation_jobs() {{
             workflow.count("cargo test -p lash-postgres-store --doc --locked"), 1
         )
         self.assertIn("name: Build Postgres store tests", build_job)
+        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", build_job)
         self.assertIn("mkdir -p target/nextest", build_job)
         self.assertIn("-p lash-postgres-store --locked", build_job)
         self.assertIn("if-no-files-found: error", build_job)
+        self.assertIn("compression-level: 0", build_job)
         self.assertIn(f"name: {artifact_name}", build_job)
 
         self.assertIn("    needs: postgres-store-build\n", run_job)
+        self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", run_job)
         self.assertIn('postgres: ["14", "16", "18"]', run_job)
         self.assertIn("name: Test Postgres store (PG ${{ matrix.postgres }})", run_job)
         self.assertIn(f"name: {artifact_name}", run_job)
         self.assertIn("cargo nextest run --profile ci", run_job)
         self.assertIn("--archive-file target/nextest-archives/", run_job)
+        self.assertIn("--extract-to . --extract-overwrite", run_job)
         self.assertNotIn("cargo test -p lash-postgres-store", run_job)
 
     def test_minio_ci_lane_requires_storage_configuration(self) -> None:
