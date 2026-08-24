@@ -49,5 +49,5 @@ lash-tools = { workspace = true }
 lash-sqlite-store = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing-subscriber = { workspace = true }

@@ -44,4 +44,4 @@ lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { path = ".", features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }

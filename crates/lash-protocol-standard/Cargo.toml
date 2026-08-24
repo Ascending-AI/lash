@@ -33,5 +33,5 @@ lash-core = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
 lash-tools = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true }
