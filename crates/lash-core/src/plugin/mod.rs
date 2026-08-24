@@ -305,9 +305,12 @@ mod tests {
             reg.prompt().contribute(Arc::new(|_ctx| {
                 Box::pin(async move {
                     Ok(vec![
-                        PromptContribution::guidance("Plugin Prompt", "Structured plugin prompt"),
                         PromptContribution::guidance("Dynamic Note", "dynamic note")
                             .with_priority(1),
+                        PromptContribution::guidance("Gated", "Shared guidance")
+                            .requires_tool("mock_tool"),
+                        PromptContribution::guidance("Always", "Shared guidance"),
+                        PromptContribution::guidance("Plugin Prompt", "Structured plugin prompt"),
                     ])
                 })
             }));
@@ -446,8 +449,10 @@ mod tests {
         assert_eq!(
             contributions,
             vec![
-                PromptContribution::guidance("Plugin Prompt", "Structured plugin prompt"),
                 PromptContribution::guidance("Dynamic Note", "dynamic note").with_priority(1),
+                PromptContribution::guidance("Gated", "Shared guidance").requires_tool("mock_tool"),
+                PromptContribution::guidance("Always", "Shared guidance"),
+                PromptContribution::guidance("Plugin Prompt", "Structured plugin prompt"),
             ]
         );
     }
