@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::plugin::{
     CheckpointHookContext, PluginDirective, PluginError, ProtocolRuntimeContext,
     ProtocolSessionContext, ProtocolSessionMaterialization, ProtocolSessionPlugin,
+    TurnPluginDirective,
 };
 use lash_core::{CheckpointKind, PluginOptions, ProtocolTurnOptions, SessionError};
 use lash_rlm_types::{
@@ -47,7 +48,7 @@ impl RlmProtocolSession {
     pub(super) fn soft_warn_directives(
         &self,
         ctx: CheckpointHookContext,
-    ) -> Result<Vec<PluginDirective>, PluginError> {
+    ) -> Result<Vec<TurnPluginDirective>, PluginError> {
         if ctx.checkpoint != CheckpointKind::AfterWork {
             return Ok(Vec::new());
         }
@@ -63,15 +64,16 @@ impl RlmProtocolSession {
             return Ok(Vec::new());
         }
         *warned = true;
-        Ok(vec![PluginDirective::emit_runtime_events(vec![
-            lash_core::PluginRuntimeEvent::Status {
+        Ok(vec![
+            PluginDirective::emit_runtime_events(vec![lash_core::PluginRuntimeEvent::Status {
                 key: BUDGET_WARNING_STATUS.to_string(),
                 label: "context budget".to_string(),
                 detail: Some(format!(
                     "{used} tokens used; warn at {threshold}; choose frame switch path"
                 )),
-            },
-        ])])
+            }])
+            .into(),
+        ])
     }
 }
 
@@ -641,7 +643,9 @@ mod tests {
             .expect("warning directives");
 
         assert_eq!(directives.len(), 1);
-        let lash_core::plugin::PluginDirective::EmitRuntimeEvents { events } = &directives[0]
+        let lash_core::plugin::TurnPluginDirective::Ambient(
+            lash_core::plugin::PluginDirective::EmitRuntimeEvents { events },
+        ) = &directives[0]
         else {
             panic!("budget warning must be a runtime event, not an injected message");
         };

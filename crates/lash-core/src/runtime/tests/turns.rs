@@ -575,12 +575,14 @@ async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
                 external_registrar: Some(Arc::new(|reg| {
                     reg.turn().after(Arc::new(|_| {
                         Box::pin(async {
-                            Ok(vec![crate::PluginDirective::emit_runtime_events(vec![
-                                crate::PluginRuntimeEvent::Custom {
-                                    name: "post_commit_suspend".to_string(),
-                                    payload: serde_json::json!({"test": true}),
-                                },
-                            ])])
+                            Ok(vec![crate::AfterTurnPluginDirective::from(
+                                crate::PluginDirective::emit_runtime_events(vec![
+                                    crate::PluginRuntimeEvent::Custom {
+                                        name: "post_commit_suspend".to_string(),
+                                        payload: serde_json::json!({"test": true}),
+                                    },
+                                ]),
+                            )])
                         })
                     }));
                     Ok(())
@@ -2522,16 +2524,18 @@ async fn plugin_before_turn_can_abort_and_inject_messages() {
                 before_turn: Some(Arc::new(|_| {
                     Box::pin(async {
                         Ok(vec![
-                            crate::PluginDirective::EnqueueMessages {
-                                messages: vec![crate::PluginMessage::text(
-                                    crate::MessageRole::System,
-                                    "plugin preface",
-                                )],
-                            },
-                            crate::PluginDirective::AbortTurn {
+                            crate::TurnPluginDirective::EnqueueMessages(
+                                crate::EnqueueMessagesDirective {
+                                    messages: vec![crate::PluginMessage::text(
+                                        crate::MessageRole::System,
+                                        "plugin preface",
+                                    )],
+                                },
+                            ),
+                            crate::TurnPluginDirective::AbortTurn(crate::AbortTurnDirective {
                                 code: "blocked".to_string(),
                                 message: "plugin stopped the turn".to_string(),
-                            },
+                            }),
                         ])
                     })
                 })),
@@ -2970,12 +2974,14 @@ async fn checkpoint_hook_can_inject_messages() {
                 checkpoint: Some(Arc::new(|ctx| {
                     Box::pin(async move {
                         if ctx.checkpoint == crate::CheckpointKind::BeforeCompletion {
-                            Ok(vec![crate::PluginDirective::EnqueueMessages {
-                                messages: vec![crate::PluginMessage::text(
-                                    crate::MessageRole::System,
-                                    "checkpoint injected",
-                                )],
-                            }])
+                            Ok(vec![crate::TurnPluginDirective::EnqueueMessages(
+                                crate::EnqueueMessagesDirective {
+                                    messages: vec![crate::PluginMessage::text(
+                                        crate::MessageRole::System,
+                                        "checkpoint injected",
+                                    )],
+                                },
+                            )])
                         } else {
                             Ok(Vec::new())
                         }
@@ -3053,10 +3059,12 @@ async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application
                 before_turn: None,
                 checkpoint: Some(Arc::new(|_| {
                     Box::pin(async {
-                        Ok(vec![crate::PluginDirective::AbortTurn {
-                            code: "checkpoint_rejected".to_string(),
-                            message: "reject checkpoint delivery".to_string(),
-                        }])
+                        Ok(vec![crate::TurnPluginDirective::AbortTurn(
+                            crate::AbortTurnDirective {
+                                code: "checkpoint_rejected".to_string(),
+                                message: "reject checkpoint delivery".to_string(),
+                            },
+                        )])
                     })
                 })),
                 tool_result_projector: None,
@@ -3192,9 +3200,11 @@ async fn checkpoint_attachment_failure_leaves_active_input_pending_without_appli
                                     .expect("valid test media type"),
                                 "https://example.test/checkpoint.pdf",
                             ));
-                        Ok(vec![crate::PluginDirective::EnqueueMessages {
-                            messages: vec![message],
-                        }])
+                        Ok(vec![crate::TurnPluginDirective::EnqueueMessages(
+                            crate::EnqueueMessagesDirective {
+                                messages: vec![message],
+                            },
+                        )])
                     })
                 })),
                 tool_result_projector: None,
@@ -4468,10 +4478,12 @@ async fn claimed_plugin_abort_commits_and_settles_input() {
             Ok(Arc::new(RuntimeTestPlugin {
                 before_turn: Some(Arc::new(|_| {
                     Box::pin(async {
-                        Ok(vec![crate::PluginDirective::AbortTurn {
-                            code: "blocked".to_string(),
-                            message: "plugin stopped claimed turn".to_string(),
-                        }])
+                        Ok(vec![crate::TurnPluginDirective::AbortTurn(
+                            crate::AbortTurnDirective {
+                                code: "blocked".to_string(),
+                                message: "plugin stopped claimed turn".to_string(),
+                            },
+                        )])
                     })
                 })),
                 checkpoint: None,

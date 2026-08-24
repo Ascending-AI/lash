@@ -358,12 +358,14 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
             let ordinal = next_injection.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
                 Ok(vec![
-                    lash_core::facade_support::PluginDirective::EnqueueMessages {
-                        messages: vec![lash_core::PluginMessage::text(
-                            lash_core::MessageRole::User,
-                            format!("plugin injection {ordinal}"),
-                        )],
-                    },
+                    lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
+                        lash_core::facade_support::EnqueueMessagesDirective {
+                            messages: vec![lash_core::PluginMessage::text(
+                                lash_core::MessageRole::User,
+                                format!("plugin injection {ordinal}"),
+                            )],
+                        },
+                    ),
                 ])
             }) as lash_core::plugin::PluginFuture<_>
         })

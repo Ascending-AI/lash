@@ -1,0 +1,5 @@
+error[E0599]: no variant, associated function, or constant named `AbortTurn` found for enum `AfterTurnPluginDirective` in the current scope
+ --> tests/ui/after_turn_cannot_abort.rs:4:39
+  |
+4 |     let _ = AfterTurnPluginDirective::AbortTurn(AbortTurnDirective {
+  |                                       ^^^^^^^^^ variant, associated function, or constant not found in `AfterTurnPluginDirective`

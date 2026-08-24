@@ -1,8 +1,10 @@
-use lash_core::plugin::{PluginDirective, PluginError, ToolCallHookContext};
+use lash_core::plugin::{
+    BeforeToolCallPluginDirective, PluginError, ReplaceToolArgsDirective, ToolCallHookContext,
+};
 
 pub(super) fn normalize_projected_tool_args(
     ctx: ToolCallHookContext,
-) -> Result<Vec<PluginDirective>, PluginError> {
+) -> Result<Vec<BeforeToolCallPluginDirective>, PluginError> {
     let original = ctx.args;
     let normalized = crate::projection::normalize_tool_args_for_projection(
         original.clone(),
@@ -11,7 +13,7 @@ pub(super) fn normalize_projected_tool_args(
     if normalized == original {
         Ok(Vec::new())
     } else {
-        Ok(vec![PluginDirective::ReplaceToolArgs { args: normalized }])
+        Ok(vec![ReplaceToolArgsDirective { args: normalized }.into()])
     }
 }
 
@@ -249,11 +251,12 @@ mod tests {
             );
             let directives = super::normalize_projected_tool_args(context)
                 .expect("projection normalization succeeds");
-            let [lash_core::plugin::PluginDirective::ReplaceToolArgs { args: normalized }] =
+            let [lash_core::plugin::BeforeToolCallPluginDirective::ReplaceToolArgs(directive)] =
                 directives.as_slice()
             else {
                 panic!("projection-aware args must be rewritten for {tool_name}")
             };
+            let normalized = &directive.args;
             assert_eq!(
                 normalized,
                 &serde_json::json!({

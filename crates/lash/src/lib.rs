@@ -299,11 +299,15 @@ pub mod persistence {
 
 pub mod plugins {
     pub use lash_core::PluginOptions;
-    pub use lash_core::facade_support::PluginDirective;
     /// Durable session-lifecycle operations a hook context carries, alongside
     /// [`SessionStateService`] and [`SessionGraphService`]. Named by
     /// [`TurnTransformContext`] and [`CompactionContext`]; runtime-implemented.
     pub use lash_core::facade_support::SessionLifecycleService;
+    pub use lash_core::facade_support::{
+        AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,
+        BeforeToolCallPluginDirective, EnqueueMessagesDirective, PluginDirective,
+        ReplaceToolArgsDirective, ShortCircuitToolDirective, TurnPluginDirective,
+    };
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
         AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,

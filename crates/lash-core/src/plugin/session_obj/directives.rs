@@ -4,29 +4,6 @@ use std::sync::Arc;
 use super::*;
 use crate::session_model::plugin_message_to_message;
 
-#[derive(Clone, Copy)]
-struct PluginDirectivePolicy {
-    abort_error: Option<&'static str>,
-    tool_directive_error: &'static str,
-}
-
-impl PluginDirectivePolicy {
-    const BEFORE_TURN: Self = Self {
-        abort_error: None,
-        tool_directive_error: "tool directives are not valid in before_turn",
-    };
-
-    const CHECKPOINT: Self = Self {
-        abort_error: None,
-        tool_directive_error: "checkpoint hooks only support abort, message enqueue, session creation, events, and trace events",
-    };
-
-    const AFTER_TURN: Self = Self {
-        abort_error: Some("only message enqueue and session creation are valid in after_turn"),
-        tool_directive_error: "only message enqueue, session creation, events, and trace events are valid in after_turn",
-    };
-}
-
 enum DirectiveAction {
     Abort(PluginAbort),
     EnqueueMessages(Vec<PluginMessage>),
@@ -54,64 +31,59 @@ fn append_plugin_messages(
     }
 }
 
-async fn interpret_directive(
+async fn interpret_ambient(
     emitted: PluginOwned<PluginDirective>,
     session_lifecycle: &Arc<dyn SessionLifecycleService>,
     session_graph: &Arc<dyn SessionGraphService>,
-    policy: PluginDirectivePolicy,
+) -> Result<crate::plugin::AmbientDirectiveAction, PluginError> {
+    crate::plugin::interpret_ambient_directive(emitted, session_lifecycle, session_graph)
+        .await
+        .map_err(|error| error.into_plugin_error())
+}
+
+async fn interpret_directive(
+    emitted: PluginOwned<TurnPluginDirective>,
+    session_lifecycle: &Arc<dyn SessionLifecycleService>,
+    session_graph: &Arc<dyn SessionGraphService>,
 ) -> Result<DirectiveAction, PluginError> {
-    match emitted.value {
-        PluginDirective::AbortTurn { code, message } => {
-            if let Some(error) = policy.abort_error {
-                return Err(PluginError::Session(error.to_string()));
+    let PluginOwned { plugin_id, value } = emitted;
+    match value {
+        TurnPluginDirective::Ambient(directive) => {
+            match interpret_ambient(
+                PluginOwned {
+                    plugin_id,
+                    value: directive,
+                },
+                session_lifecycle,
+                session_graph,
+            )
+            .await?
+            {
+                crate::plugin::AmbientDirectiveAction::EmitRuntimeEvents { plugin_id, events } => {
+                    Ok(DirectiveAction::EmitRuntimeEvents(
+                        crate::plugin::plugin_runtime_session_events(&plugin_id, events),
+                    ))
+                }
+                crate::plugin::AmbientDirectiveAction::None => Ok(DirectiveAction::None),
             }
-            Ok(DirectiveAction::Abort(PluginAbort { code, message }))
         }
-        PluginDirective::EnqueueMessages { messages } => {
-            Ok(DirectiveAction::EnqueueMessages(messages))
+        TurnPluginDirective::AbortTurn(directive) => Ok(DirectiveAction::Abort(PluginAbort {
+            code: directive.code,
+            message: directive.message,
+        })),
+        TurnPluginDirective::EnqueueMessages(directive) => {
+            Ok(DirectiveAction::EnqueueMessages(directive.messages))
         }
-        PluginDirective::CreateSession { request } => {
-            session_lifecycle
-                .create_session(*request)
-                .await
-                .map_err(|err| PluginError::Session(err.to_string()))?;
-            Ok(DirectiveAction::None)
-        }
-        PluginDirective::EmitRuntimeEvents { events: surface } => {
-            Ok(DirectiveAction::EmitRuntimeEvents(
-                crate::plugin::plugin_runtime_session_events(&emitted.plugin_id, surface),
-            ))
-        }
-        PluginDirective::EmitTrace {
-            name,
-            payload,
-            context,
-        } => {
-            session_graph
-                .emit_trace_event(
-                    *context,
-                    lash_trace::TraceEvent::Custom {
-                        name: format!("plugin.{}.{}", emitted.plugin_id, name),
-                        payload,
-                    },
-                )
-                .await?;
-            Ok(DirectiveAction::None)
-        }
-        PluginDirective::ReplaceToolArgs { .. } | PluginDirective::ShortCircuitTool { .. } => Err(
-            PluginError::Session(policy.tool_directive_error.to_string()),
-        ),
     }
 }
 
 impl PluginSession {
     async fn apply_turn_directives(
         &self,
-        directives: Vec<PluginOwned<PluginDirective>>,
+        directives: Vec<PluginOwned<TurnPluginDirective>>,
         mut messages: crate::MessageSequence,
         session_lifecycle: Arc<dyn SessionLifecycleService>,
         session_graph: Arc<dyn SessionGraphService>,
-        policy: PluginDirectivePolicy,
         message_scope_id: &str,
     ) -> Result<TurnPreparation, PluginError> {
         let mut events = Vec::new();
@@ -119,7 +91,7 @@ impl PluginSession {
         let mut next_message_ordinal = 0usize;
 
         for emitted in directives {
-            match interpret_directive(emitted, &session_lifecycle, &session_graph, policy).await? {
+            match interpret_directive(emitted, &session_lifecycle, &session_graph).await? {
                 DirectiveAction::Abort(next) => abort = Some(next),
                 DirectiveAction::EnqueueMessages(plugin_messages) => {
                     append_plugin_messages(
@@ -172,7 +144,6 @@ impl PluginSession {
             messages,
             session_lifecycle,
             session_graph,
-            PluginDirectivePolicy::BEFORE_TURN,
             &format!("{turn_scope_id}:before_turn"),
         )
         .await
@@ -188,14 +159,7 @@ impl PluginSession {
         let mut abort = None;
 
         for emitted in directives {
-            match interpret_directive(
-                emitted,
-                &ctx.session_lifecycle,
-                &ctx.session_graph,
-                PluginDirectivePolicy::CHECKPOINT,
-            )
-            .await?
-            {
+            match interpret_directive(emitted, &ctx.session_lifecycle, &ctx.session_graph).await? {
                 DirectiveAction::Abort(next) => abort = Some(next),
                 DirectiveAction::EnqueueMessages(queued) => messages.extend(queued),
                 DirectiveAction::EmitRuntimeEvents(next_events) => events.extend(next_events),
@@ -237,16 +201,32 @@ impl PluginSession {
         let mut updated_messages: Option<crate::MessageSequence> = None;
         let mut next_message_ordinal = 0usize;
         for emitted in directives {
-            match interpret_directive(
-                emitted,
-                &session_lifecycle,
-                &session_graph,
-                PluginDirectivePolicy::AFTER_TURN,
-            )
-            .await?
-            {
-                DirectiveAction::Abort(_) => unreachable!("after_turn policy rejects abort"),
-                DirectiveAction::EnqueueMessages(plugin_messages) => {
+            let PluginOwned { plugin_id, value } = emitted;
+            match value {
+                AfterTurnPluginDirective::Ambient(directive) => {
+                    match interpret_ambient(
+                        PluginOwned {
+                            plugin_id,
+                            value: directive,
+                        },
+                        &session_lifecycle,
+                        &session_graph,
+                    )
+                    .await?
+                    {
+                        crate::plugin::AmbientDirectiveAction::EmitRuntimeEvents {
+                            plugin_id,
+                            events: next_events,
+                        } => {
+                            events.extend(crate::plugin::plugin_runtime_session_events(
+                                &plugin_id,
+                                next_events,
+                            ));
+                        }
+                        crate::plugin::AmbientDirectiveAction::None => {}
+                    }
+                }
+                AfterTurnPluginDirective::EnqueueMessages(directive) => {
                     let messages = updated_messages.get_or_insert_with(|| {
                         crate::MessageSequence::from_base(
                             turn.state.read_view().messages().to_vec().into(),
@@ -254,13 +234,11 @@ impl PluginSession {
                     });
                     append_plugin_messages(
                         messages,
-                        &plugin_messages,
+                        &directive.messages,
                         &format!("{turn_scope_id}:after_turn"),
                         &mut next_message_ordinal,
                     );
                 }
-                DirectiveAction::EmitRuntimeEvents(next_events) => events.extend(next_events),
-                DirectiveAction::None => {}
             }
         }
         if let Some(messages) = updated_messages.as_ref() {

@@ -30,7 +30,7 @@ fn before_tool_factory(
 
 fn fixed_before_tool_factory(
     id: &'static str,
-    directive: crate::PluginDirective,
+    directive: crate::BeforeToolCallPluginDirective,
 ) -> Arc<dyn PluginFactory> {
     before_tool_factory(
         id,
@@ -66,7 +66,7 @@ fn after_tool_factory(
 
 fn fixed_after_tool_factory(
     id: &'static str,
-    directives: Vec<crate::PluginDirective>,
+    directives: Vec<crate::AfterToolCallPluginDirective>,
 ) -> Arc<dyn PluginFactory> {
     after_tool_factory(
         id,
@@ -90,35 +90,50 @@ fn after_tool_plugin_stack(mut factories: Vec<Arc<dyn PluginFactory>>) -> Arc<Pl
         .expect("plugin session")
 }
 
-fn denial(code: &str, message: &str) -> crate::PluginDirective {
-    crate::PluginDirective::ShortCircuitTool {
+fn denial<T>(code: &str, message: &str) -> T
+where
+    T: From<crate::ShortCircuitToolDirective>,
+{
+    crate::ShortCircuitToolDirective {
         output: crate::ToolCallOutput::failure(crate::ToolFailure::tool(
             crate::ToolFailureClass::InvalidRequest,
             code,
             message,
         )),
     }
+    .into()
 }
 
-fn policy_denial() -> crate::PluginDirective {
+fn policy_denial<T>() -> T
+where
+    T: From<crate::ShortCircuitToolDirective>,
+{
     denial("policy_denied", "policy denied the call")
 }
 
-fn successful_short_circuit() -> crate::PluginDirective {
-    crate::PluginDirective::ShortCircuitTool {
+fn successful_short_circuit<T>() -> T
+where
+    T: From<crate::ShortCircuitToolDirective>,
+{
+    crate::ShortCircuitToolDirective {
         output: crate::ToolCallOutput::success(json!("allowed")),
     }
+    .into()
 }
 
-fn abort_turn() -> crate::PluginDirective {
-    crate::PluginDirective::AbortTurn {
+fn abort_turn<T>() -> T
+where
+    T: From<crate::AbortTurnDirective>,
+{
+    crate::AbortTurnDirective {
         code: "plugin_abort".to_string(),
         message: "plugin aborted the turn".to_string(),
     }
+    .into()
 }
 
 async fn dispatch_with_terminal_plugins(
-    directives: Vec<(&'static str, crate::PluginDirective)>,
+    directives: Vec<(&'static str, crate::BeforeToolCallPluginDirective)>,
 ) -> crate::ToolCallOutput {
     let factories = directives
         .into_iter()
@@ -296,9 +311,10 @@ async fn reinspection_does_not_emit_a_self_conflict() {
         fixed_before_tool_factory("policy", policy_denial()),
         fixed_before_tool_factory(
             "normalizer",
-            crate::PluginDirective::ReplaceToolArgs {
+            crate::ReplaceToolArgsDirective {
                 args: json!({ "value": "normalized" }),
-            },
+            }
+            .into(),
         ),
     ]);
     let (event_tx, mut events) = mpsc::channel(8);
@@ -330,9 +346,10 @@ async fn replacement_is_seen_by_remaining_plugin_hooks() {
     let inspector_observations = Arc::clone(&inspected);
     let replacer = fixed_before_tool_factory(
         "replace",
-        crate::PluginDirective::ReplaceToolArgs {
+        crate::ReplaceToolArgsDirective {
             args: json!({ "value": "replaced" }),
-        },
+        }
+        .into(),
     );
     let inspector = before_tool_factory(
         "inspect",
@@ -376,9 +393,10 @@ async fn replacement_is_reinspected_by_earlier_policy_in_either_registration_ord
         );
         let replacer = fixed_before_tool_factory(
             "replacer",
-            crate::PluginDirective::ReplaceToolArgs {
+            crate::ReplaceToolArgsDirective {
                 args: json!({ "value": "forbidden" }),
-            },
+            }
+            .into(),
         );
         let mut factories = if policy_first {
             vec![policy, replacer]
@@ -413,9 +431,11 @@ async fn replacement_during_bounded_reinspection_is_a_typed_composition_error() 
         Arc::new(|ctx| {
             Box::pin(async move {
                 if ctx.args["value"] == json!("forbidden") {
-                    Ok(vec![crate::PluginDirective::ReplaceToolArgs {
-                        args: json!({ "value": "second replacement" }),
-                    }])
+                    Ok(vec![crate::BeforeToolCallPluginDirective::from(
+                        crate::ReplaceToolArgsDirective {
+                            args: json!({ "value": "second replacement" }),
+                        },
+                    )])
                 } else {
                     Ok(Vec::new())
                 }
@@ -424,9 +444,10 @@ async fn replacement_during_bounded_reinspection_is_a_typed_composition_error() 
     );
     let later = fixed_before_tool_factory(
         "later",
-        crate::PluginDirective::ReplaceToolArgs {
+        crate::ReplaceToolArgsDirective {
             args: json!({ "value": "forbidden" }),
-        },
+        }
+        .into(),
     );
     let plugins = before_tool_plugin_stack(vec![earlier, later]);
 
@@ -469,9 +490,10 @@ async fn clean_bounded_reinspection_runs_on_replaced_arguments() {
     );
     let later = fixed_before_tool_factory(
         "later",
-        crate::PluginDirective::ReplaceToolArgs {
+        crate::ReplaceToolArgsDirective {
             args: json!({ "value": "replaced" }),
-        },
+        }
+        .into(),
     );
     let context =
         exact_dispatch_context_with_plugins(before_tool_plugin_stack(vec![earlier, later]));
@@ -501,12 +523,14 @@ async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
             let auditor_invocations = Arc::clone(&auditor_invocations);
             Box::pin(async move {
                 auditor_invocations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let mut directives = vec![crate::PluginDirective::emit_runtime_events(vec![
-                    crate::PluginRuntimeEvent::Custom {
-                        name: "audit".to_string(),
-                        payload: json!({ "value": ctx.args["value"] }),
-                    },
-                ])];
+                let mut directives = vec![crate::BeforeToolCallPluginDirective::from(
+                    crate::PluginDirective::emit_runtime_events(vec![
+                        crate::PluginRuntimeEvent::Custom {
+                            name: "audit".to_string(),
+                            payload: json!({ "value": ctx.args["value"] }),
+                        },
+                    ]),
+                )];
                 if ctx.args["value"] == json!("forbidden") {
                     directives.push(policy_denial());
                 }
@@ -516,9 +540,10 @@ async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
     );
     let replacer = fixed_before_tool_factory(
         "replacer",
-        crate::PluginDirective::ReplaceToolArgs {
+        crate::ReplaceToolArgsDirective {
             args: json!({ "value": "forbidden" }),
-        },
+        }
+        .into(),
     );
     let plugins = before_tool_plugin_stack(vec![auditor, replacer]);
     let (event_tx, mut events) = mpsc::channel(8);
@@ -557,15 +582,17 @@ async fn two_unconditional_replacers_are_a_typed_composition_error() {
     let plugins = before_tool_plugin_stack(vec![
         fixed_before_tool_factory(
             "normalizer_one",
-            crate::PluginDirective::ReplaceToolArgs {
+            crate::ReplaceToolArgsDirective {
                 args: json!({ "value": "one" }),
-            },
+            }
+            .into(),
         ),
         fixed_before_tool_factory(
             "normalizer_two",
-            crate::PluginDirective::ReplaceToolArgs {
+            crate::ReplaceToolArgsDirective {
                 args: json!({ "value": "two" }),
-            },
+            }
+            .into(),
         ),
     ]);
 
@@ -593,7 +620,7 @@ async fn two_unconditional_replacers_are_a_typed_composition_error() {
 }
 
 async fn dispatch_with_after_terminal_plugins(
-    directives: Vec<(&'static str, crate::PluginDirective)>,
+    directives: Vec<(&'static str, crate::AfterToolCallPluginDirective)>,
 ) -> crate::ToolCallOutput {
     let factories = directives
         .into_iter()
@@ -609,10 +636,11 @@ async fn dispatch_with_after_terminal_plugins(
     .output
 }
 
-fn successful_replacement(value: &str) -> crate::PluginDirective {
-    crate::PluginDirective::ShortCircuitTool {
+fn successful_replacement(value: &str) -> crate::AfterToolCallPluginDirective {
+    crate::ShortCircuitToolDirective {
         output: crate::ToolCallOutput::success(json!(value)),
     }
+    .into()
 }
 
 #[tokio::test]
@@ -846,12 +874,14 @@ async fn after_tool_reinspection_does_not_reapply_side_effects() {
             let auditor_invocations = Arc::clone(&auditor_invocations);
             Box::pin(async move {
                 auditor_invocations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Ok(vec![crate::PluginDirective::emit_runtime_events(vec![
-                    crate::PluginRuntimeEvent::Custom {
-                        name: "audit".to_string(),
-                        payload: json!({ "value": ctx.result.value_for_projection() }),
-                    },
-                ])])
+                Ok(vec![crate::AfterToolCallPluginDirective::from(
+                    crate::PluginDirective::emit_runtime_events(vec![
+                        crate::PluginRuntimeEvent::Custom {
+                            name: "audit".to_string(),
+                            payload: json!({ "value": ctx.result.value_for_projection() }),
+                        },
+                    ]),
+                )])
             })
         }),
     );
@@ -1025,57 +1055,4 @@ async fn after_tool_terminal_conflict_has_bounded_identity_evidence() {
         payload["ignored_directive"],
         json!("successful_short_circuit")
     );
-}
-
-#[tokio::test]
-async fn displaced_after_tool_replace_args_misuse_emits_conflict_evidence() {
-    let plugins = after_tool_plugin_stack(vec![
-        fixed_after_tool_factory("policy", vec![policy_denial()]),
-        fixed_after_tool_factory(
-            "misuser",
-            vec![crate::PluginDirective::ReplaceToolArgs {
-                args: json!({ "not": "valid after execution" }),
-            }],
-        ),
-    ]);
-    let (event_tx, mut events) = mpsc::channel(8);
-    let session_graph = Arc::new(RecordingSessionGraph::default());
-    let mut context = exact_dispatch_context_with_plugins(plugins);
-    context.event_tx = event_tx;
-    context.session_graph = session_graph.clone();
-
-    let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
-        .await
-        .record
-        .output;
-
-    assert!(!output.is_success());
-    assert_eq!(
-        output.value_for_projection()["code"],
-        json!("policy_denied")
-    );
-    let event = timeout(Duration::from_secs(1), events.recv())
-        .await
-        .expect("misuse conflict receive timed out")
-        .expect("misuse conflict channel closed");
-    let crate::SessionStreamEvent::PluginEvent { plugin_id, event } = event else {
-        panic!("expected plugin runtime event");
-    };
-    assert_eq!(plugin_id, "misuser");
-    let crate::PluginRuntimeEvent::Custom { name, payload } = event else {
-        panic!("expected custom composition event");
-    };
-    assert_eq!(name, "after_tool_call.directive_conflict");
-    assert_eq!(payload["winner_plugin_id"], json!("policy"));
-    assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
-    assert_eq!(payload["ignored_plugin_id"], json!("misuser"));
-    assert_eq!(payload["ignored_directive"], json!("denied_short_circuit"));
-
-    let trace_events = session_graph.events.lock_recover();
-    let [lash_trace::TraceEvent::Custom { name, payload }] = trace_events.as_slice() else {
-        panic!("expected one durable misuse-conflict event: {trace_events:?}");
-    };
-    assert_eq!(name, "plugin.misuser.after_tool_call.directive_conflict");
-    assert_eq!(payload["winner_plugin_id"], json!("policy"));
-    assert_eq!(payload["ignored_plugin_id"], json!("misuser"));
 }
