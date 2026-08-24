@@ -1232,7 +1232,7 @@ derive_mutation_jobs() {{
             workflow.count("cargo test -p lash-postgres-store --doc --locked"), 1
         )
         self.assertIn("name: Build Postgres store tests", build_job)
-        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", build_job)
+        self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", build_job)
         self.assertIn("mkdir -p target/nextest", build_job)
         self.assertIn("-p lash-postgres-store --locked", build_job)
         self.assertIn("if-no-files-found: error", build_job)
@@ -1240,7 +1240,7 @@ derive_mutation_jobs() {{
         self.assertIn(f"name: {artifact_name}", build_job)
 
         self.assertIn("    needs: postgres-store-build\n", run_job)
-        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", run_job)
+        self.assertIn("runs-on: blacksmith-4vcpu-ubuntu-2404", run_job)
         self.assertIn('postgres: ["14", "16", "18"]', run_job)
         self.assertIn("name: Test Postgres store (PG ${{ matrix.postgres }})", run_job)
         self.assertIn(f"name: {artifact_name}", run_job)
