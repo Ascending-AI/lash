@@ -10,6 +10,7 @@ pub mod sansio;
 pub mod schema_contract;
 pub mod session;
 pub mod session_model;
+mod standard_batch;
 pub mod sync;
 pub mod tool_catalog;
 pub mod tool_contract;
@@ -66,6 +67,8 @@ pub use session_model::{
     TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnStop, default_prompt_template,
     messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
 };
+#[doc(hidden)]
+pub use standard_batch::BatchResultRow;
 pub use tool_catalog::{
     ToolCatalog, ToolCatalogBuildInput, ToolCatalogContribution, ToolCatalogEntry,
     ToolContractResolver, build_tool_catalog,

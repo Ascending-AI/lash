@@ -1,6 +1,8 @@
 use lash_core::ToolDefinition;
 use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
+pub type BatchResultRow = lash_sansio::BatchResultRow;
+
 pub fn batch_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:batch",
@@ -83,6 +85,22 @@ mod tests {
         );
         let rendered = definition.compact_contract().render_signature();
         assert!(rendered.contains("results"), "{rendered}");
+    }
+
+    #[test]
+    fn batch_result_row_decode_names_missing_required_field() {
+        let error = serde_json::from_value::<BatchResultRow>(serde_json::json!({
+            "index": 0,
+            "success": true,
+            "duration_ms": 0,
+            "result": "ok"
+        }))
+        .expect_err("row without tool must fail");
+
+        assert!(
+            error.to_string().contains("missing field `tool`"),
+            "{error}"
+        );
     }
 
     #[test]

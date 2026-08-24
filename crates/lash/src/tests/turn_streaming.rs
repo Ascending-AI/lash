@@ -6058,6 +6058,161 @@ async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Res
     Ok(())
 }
 
+#[tokio::test]
+async fn interleaved_standard_parts_keep_order_through_store_history_and_anthropic_request()
+-> Result<()> {
+    let requests = Arc::new(StdMutex::new(Vec::<lash_core::LlmRequest>::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("anthropic")
+        .complete({
+            let requests = Arc::clone(&requests);
+            let calls = Arc::clone(&calls);
+            move |request| {
+                let requests = Arc::clone(&requests);
+                let calls = Arc::clone(&calls);
+                async move {
+                    requests.lock_recover().push(request);
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        return Ok(LlmResponse {
+                            parts: vec![
+                                LlmOutputPart::Text {
+                                    text: "before".to_string(),
+                                    response_meta: None,
+                                },
+                                LlmOutputPart::Reasoning {
+                                    text: "consider".to_string(),
+                                    replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                                        signature: Some("signed-consider".to_string()),
+                                        ..Default::default()
+                                    }),
+                                },
+                                LlmOutputPart::Text {
+                                    text: "after".to_string(),
+                                    response_meta: None,
+                                },
+                                LlmOutputPart::ToolCall {
+                                    call_id: "lookup-1".to_string(),
+                                    tool_name: "app_lookup".to_string(),
+                                    input_json: "{}".to_string(),
+                                    replay: None,
+                                },
+                            ],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        });
+                    }
+                    Ok(text_response("done"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::new(AppTools))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("interleaved-standard-order").open().await?;
+
+    let result = session
+        .turn(TurnInput::text("preserve every part"))
+        .run()
+        .await?;
+
+    let read_view = result.result.state.read_view();
+    let stored_assistant = read_view
+        .messages()
+        .iter()
+        .find(|message| {
+            message.role == lash_core::MessageRole::Assistant
+                && message
+                    .parts
+                    .iter()
+                    .any(|part| part.tool_call_id.as_deref() == Some("lookup-1"))
+        })
+        .expect("stored interleaved assistant message");
+    assert_eq!(
+        stored_assistant
+            .parts
+            .iter()
+            .map(|part| part.kind)
+            .collect::<Vec<_>>(),
+        [
+            lash_core::PartKind::Prose,
+            lash_core::PartKind::Reasoning,
+            lash_core::PartKind::Prose,
+            lash_core::PartKind::ToolCall,
+        ]
+    );
+
+    let requests = requests.lock_recover();
+    assert_eq!(requests.len(), 2);
+    let history_blocks = requests[1]
+        .messages
+        .iter()
+        .find(|message| {
+            message.role == LlmRole::Assistant
+                && message.blocks.iter().any(|block| {
+                    matches!(
+                        block,
+                        LlmContentBlock::ToolCall { call_id, .. } if call_id == "lookup-1"
+                    )
+                })
+        })
+        .expect("provider request assistant history");
+    assert!(
+        matches!(
+            history_blocks.blocks.as_slice(),
+            [
+                LlmContentBlock::Text { text: before, .. },
+                LlmContentBlock::Reasoning { text: reasoning, .. },
+                LlmContentBlock::Text { text: after, .. },
+                LlmContentBlock::ToolCall { call_id, .. },
+            ] if before.as_ref() == "before"
+                && reasoning == "consider"
+                && after.as_ref() == "\n\nafter"
+                && call_id == "lookup-1"
+        ),
+        "provider history blocks: {:#?}",
+        history_blocks.blocks
+    );
+
+    let wire = lash_provider_anthropic::testing::serialize_request(
+        &requests[1],
+        lash_core::provider::CacheRetention::None,
+    )
+    .expect("serialize Anthropic request");
+    let wire_blocks = wire["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages.iter().find_map(|message| {
+                let blocks = message["content"].as_array()?;
+                blocks
+                    .iter()
+                    .any(|block| block["id"] == "lookup-1")
+                    .then_some(blocks)
+            })
+        })
+        .expect("Anthropic assistant content blocks");
+    assert_eq!(
+        wire_blocks
+            .iter()
+            .map(|block| block["type"].as_str().expect("block type"))
+            .collect::<Vec<_>>(),
+        ["text", "text", "text", "tool_use"]
+    );
+    assert_eq!(wire_blocks[0]["text"], "before");
+    assert_eq!(wire_blocks[1]["text"], "consider");
+    assert_eq!(wire_blocks[2]["text"], "\n\nafter");
+    assert_eq!(wire_blocks[3]["id"], "lookup-1");
+    Ok(())
+}
+
 #[cfg(feature = "rlm")]
 #[test]
 fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
