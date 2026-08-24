@@ -36,11 +36,19 @@ set is every correctness leg of that workflow: `Lint`, `Test docs + build cache`
 `Test shard 1/4` through `Test shard 4/4`, `Repository gates`, `Public API
 example coverage`, `Package feature checks`, `Runtime feature boundary`, `Test
 Postgres store (PG 14|16|18)`, `Test S3 store against MinIO`, `Stack budget`, the
-seven `Functional E2E (...)` legs, `Restate + Postgres + MinIO Workers`, the five
+seven `Functional E2E (...)` legs, `Restate + Postgres + MinIO Workers
+(segment 1|2)` plus `Restate workers E2E coverage summary`, the five
 `Confidence fast (...)` shards, and `Confidence fast summary`. `Build Linux
 release cache` is deliberately **not** in that set: it warms a cache for
 release.yml and perf.yml on `main` and is skipped for pull requests and queue
 entries, where the cache it writes is scoped to a ref nothing else can read.
+
+The workers E2E checks are the one required family that does not *execute* on
+pull-request events: their jobs report success in seconds on a PR and run the
+full distributed E2E only in the merge queue (and on `main` pushes and manual
+dispatches). A green PR therefore does not prove workers E2E behavior — for
+changes touching the `lash-restate` geometry, run the local recipes above
+before relying on CI; the queue run at merge time is the execution witness.
 
 That set is enforced by the active `main merge queue` ruleset on the default
 branch: a merge-queue rule (ALLGREEN grouping, squash merges, up to five
