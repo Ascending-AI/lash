@@ -602,7 +602,7 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
         group_key: &str,
     ) -> Result<Vec<UnsettledGroupChild>, RuntimeEffectControllerError> {
         let rows = sqlx::query(
-            "SELECT scope_id, replay_key, envelope_json, status, lease_expires_at_ms
+            "SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
              FROM lash_runtime_effect_replay
              WHERE group_key = $1 AND settlement_seq IS NULL
              ORDER BY replay_key",
@@ -817,12 +817,15 @@ fn stored_effect_row(row: PgRow) -> Result<StoredEffectRow, RuntimeEffectControl
     };
     let lease_expires_at_ms = row.get::<i64, _>("lease_expires_at_ms");
     let due_at_ms = row.get::<Option<i64>, _>("due_at_ms");
+    let state = effect_replay_driver::EffectRowState::from_columns(
+        row.get("status"),
+        row.get("outcome_json"),
+        row.get("error_json"),
+    );
     Ok(StoredEffectRow {
         envelope_hash: row.get("envelope_hash"),
         envelope_json: row.get("envelope_json"),
-        status: row.get("status"),
-        outcome_json: row.get("outcome_json"),
-        error_json: row.get("error_json"),
+        state,
         lease_expires_at_ms: u64::try_from(lease_expires_at_ms)
             .map_err(|_| corrupt("lease_expires_at_ms", lease_expires_at_ms))?,
         due_at_ms: due_at_ms
@@ -898,6 +901,11 @@ fn stored_group_settlement(
     row: PgRow,
 ) -> Result<StoredGroupSettlement, RuntimeEffectControllerError> {
     let sequence = row.get::<i64, _>("settlement_seq");
+    let state = effect_replay_driver::EffectRowState::from_columns(
+        row.get("status"),
+        row.get("outcome_json"),
+        row.get("error_json"),
+    );
     Ok(StoredGroupSettlement {
         sequence: u64::try_from(sequence).map_err(|_| {
             effect_store_message(
@@ -909,9 +917,7 @@ fn stored_group_settlement(
             )
         })?,
         replay_key: row.get("replay_key"),
-        status: row.get("status"),
-        outcome_json: row.get("outcome_json"),
-        error_json: row.get("error_json"),
+        state,
     })
 }
 
@@ -958,11 +964,16 @@ fn group_corrupt(message: String) -> RuntimeEffectControllerError {
 
 fn unsettled_group_child(row: PgRow) -> Result<UnsettledGroupChild, RuntimeEffectControllerError> {
     let lease_expires_at_ms = row.get::<i64, _>("lease_expires_at_ms");
+    let state = effect_replay_driver::EffectRowState::from_columns(
+        row.get("status"),
+        row.get("outcome_json"),
+        row.get("error_json"),
+    );
     Ok(UnsettledGroupChild {
         scope_id: row.get("scope_id"),
         replay_key: row.get("replay_key"),
         envelope_json: row.get("envelope_json"),
-        status: row.get("status"),
+        state,
         lease_expires_at_ms: u64::try_from(lease_expires_at_ms).map_err(|_| {
             effect_store_message(
                 StoreError::StoredDataCorrupt {

@@ -60,6 +60,7 @@
 //! children in one transaction means no partially-retired group ever exists for
 //! rank to be computed over.
 
+use super::effect_replay_driver::EffectRowState;
 use super::group::{GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 
 /// The durable group record a substrate writes before any of its children
@@ -240,12 +241,8 @@ pub struct StoredGroupSettlement {
     pub sequence: u64,
     /// The settled child's replay key, unique within the scope.
     pub replay_key: String,
-    /// Raw `status` column; an unrecognized value is a corrupt row.
-    pub status: String,
-    /// Recorded success outcome, present when `status` is `completed`.
-    pub outcome_json: Option<String>,
-    /// Recorded failure, present when `status` is `failed`.
-    pub error_json: Option<String>,
+    /// The status and payload columns, decoded once by the store.
+    pub state: EffectRowState,
 }
 
 /// A child of a group whose settlement rank has **not** been allocated, read
@@ -282,11 +279,11 @@ pub struct UnsettledGroupChild {
     /// The recorded canonical envelope JSON, so a drain can rebuild the child's
     /// effect without reconstructing the caller's frame.
     pub envelope_json: String,
-    /// Raw `status` column. Always `in_progress` on a healthy journal, since a
-    /// terminal and a rank are written together; any other value is a corrupt
-    /// row and is reported rather than filtered, so the corruption is visible
-    /// to the reader instead of silently shrinking the queue.
-    pub status: String,
+    /// The status and payload columns, decoded once by the store. Always
+    /// [`EffectRowState::InProgress`] on a healthy journal, since a terminal
+    /// and a rank are written together; any other state is reported rather
+    /// than filtered, so corruption stays visible to the reader.
+    pub state: EffectRowState,
     /// Lease expiry of the child's current claim, against which a drain decides
     /// whether the child is still owned by a live driver.
     pub lease_expires_at_ms: u64,

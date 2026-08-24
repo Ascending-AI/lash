@@ -158,23 +158,27 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         now_ms: u64,
         cancel: &CancellationToken,
     ) -> Result<ChildDrainOutcome, RuntimeEffectControllerError> {
-        // The unsettled read promises a `status` and promises not to filter a
-        // wrong one, which is only worth promising if somebody checks. A row
-        // holding a terminal status with no settlement rank breaks N1's
-        // one-transaction pairing, and re-executing it would be the drain
-        // running an effect that already produced an outcome nobody can read:
-        // the pass would attempt it, the confirm read would find it unsettled
-        // still, and it would report a contest that never resolves.
+        // The unsettled read promises a decoded state and promises not to
+        // filter a wrong one, which is only worth promising if somebody checks.
+        // A row holding a terminal or corrupt state with no settlement rank
+        // breaks N1's one-transaction pairing, and re-executing it would be the
+        // drain running an effect that already produced or contradicts an
+        // outcome nobody can read: the pass would attempt it, the confirm read
+        // would find it unsettled still, and it would report a contest that
+        // never resolves.
         //
         // Reported per child rather than raised as the pass's error, because a
         // torn row is one row. Failing the pass would make every healthy
         // sibling of that group undrainable for as long as the corruption
         // lasted — the group would be exactly as stuck as if nothing had been
         // detected, with the detection as the cause.
-        if EffectRowStatus::parse(&child.status) != Some(EffectRowStatus::InProgress) {
-            return Ok(ChildDrainOutcome::Corrupt {
-                status: child.status.clone(),
-            });
+        match &child.state {
+            EffectRowState::InProgress => {}
+            state => {
+                return Ok(ChildDrainOutcome::Corrupt {
+                    status: state.status_column().to_string(),
+                });
+            }
         }
         if record.loser_disposition == LoserPolicy::Cancel {
             return Ok(ChildDrainOutcome::CancelDeclared);

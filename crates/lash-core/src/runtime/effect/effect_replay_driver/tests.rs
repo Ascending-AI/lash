@@ -20,12 +20,22 @@ fn request() -> EffectClaimRequest {
 }
 
 fn row(status: &str) -> StoredEffectRow {
+    row_with_columns(status, None, None)
+}
+
+fn row_with_columns(
+    status: &str,
+    outcome_json: Option<&str>,
+    error_json: Option<&str>,
+) -> StoredEffectRow {
     StoredEffectRow {
         envelope_hash: "hash-1".to_string(),
         envelope_json: "{\"envelope\":1}".to_string(),
-        status: status.to_string(),
-        outcome_json: None,
-        error_json: None,
+        state: EffectRowState::from_columns(
+            status.to_string(),
+            outcome_json.map(str::to_string),
+            error_json.map(str::to_string),
+        ),
         lease_expires_at_ms: 0,
         due_at_ms: None,
     }
@@ -44,6 +54,113 @@ fn status_columns_are_the_persisted_journal_bytes() {
     assert_eq!(EffectRowStatus::Completed.column(), "completed");
     assert_eq!(EffectRowStatus::Failed.column(), "failed");
     assert_eq!(EffectRowStatus::parse("cancelled"), None);
+}
+
+#[test]
+fn row_state_decodes_every_status_payload_combination() {
+    let unexpected = |status, outcome_json_present, error_json_present| {
+        EffectRowState::Corrupt(EffectRowDefect::UnexpectedPayloads {
+            status,
+            outcome_json_present,
+            error_json_present,
+        })
+    };
+    let unknown = || {
+        EffectRowState::Corrupt(EffectRowDefect::UnknownStatus {
+            status: "other".to_string(),
+        })
+    };
+    let cases: Vec<(&str, Option<&str>, Option<&str>, EffectRowState)> = vec![
+        ("in_progress", None, None, EffectRowState::InProgress),
+        (
+            "in_progress",
+            Some("outcome"),
+            None,
+            unexpected(EffectRowStatus::InProgress, true, false),
+        ),
+        (
+            "in_progress",
+            None,
+            Some("error"),
+            unexpected(EffectRowStatus::InProgress, false, true),
+        ),
+        (
+            "in_progress",
+            Some("outcome"),
+            Some("error"),
+            unexpected(EffectRowStatus::InProgress, true, true),
+        ),
+        (
+            "completed",
+            None,
+            None,
+            EffectRowState::Corrupt(EffectRowDefect::MissingOutcome),
+        ),
+        (
+            "completed",
+            Some("outcome"),
+            None,
+            EffectRowState::Settled(EffectTerminal::Completed {
+                outcome_json: "outcome".to_string(),
+            }),
+        ),
+        (
+            "completed",
+            None,
+            Some("error"),
+            EffectRowState::Corrupt(EffectRowDefect::MissingOutcome),
+        ),
+        (
+            "completed",
+            Some("outcome"),
+            Some("error"),
+            unexpected(EffectRowStatus::Completed, true, true),
+        ),
+        (
+            "failed",
+            None,
+            None,
+            EffectRowState::Corrupt(EffectRowDefect::MissingError),
+        ),
+        (
+            "failed",
+            Some("outcome"),
+            None,
+            EffectRowState::Corrupt(EffectRowDefect::MissingError),
+        ),
+        (
+            "failed",
+            None,
+            Some("error"),
+            EffectRowState::Settled(EffectTerminal::Failed {
+                error_json: "error".to_string(),
+            }),
+        ),
+        (
+            "failed",
+            Some("outcome"),
+            Some("error"),
+            unexpected(EffectRowStatus::Failed, true, true),
+        ),
+        ("other", None, None, unknown()),
+        ("other", Some("outcome"), None, unknown()),
+        ("other", None, Some("error"), unknown()),
+        ("other", Some("outcome"), Some("error"), unknown()),
+    ];
+
+    for (status, outcome_json, error_json, expected) in cases {
+        assert_eq!(
+            EffectRowState::from_columns(
+                status.to_string(),
+                outcome_json.map(str::to_string),
+                error_json.map(str::to_string),
+            ),
+            expected,
+            "status={status}, outcome_json={}, error_json={}",
+            outcome_json.is_some(),
+            error_json.is_some(),
+        );
+    }
 }
 
 #[test]
@@ -93,8 +210,11 @@ fn an_envelope_hash_mismatch_outranks_every_status() {
         stored.envelope_hash = "hash-2".to_string();
         stored.envelope_json = "{\"envelope\":2}".to_string();
         stored.lease_expires_at_ms = NOW + TTL;
-        stored.outcome_json = Some("{}".to_string());
-        stored.error_json = Some("{}".to_string());
+        stored.state = EffectRowState::from_columns(
+            status.to_string(),
+            Some("{}".to_string()),
+            Some("{}".to_string()),
+        );
         assert_eq!(
             decide_effect_claim(Some(&stored), &request(), NOW),
             EffectClaimDecision::Report(EffectClaimObservation::ReplayMismatch {
@@ -108,8 +228,7 @@ fn an_envelope_hash_mismatch_outranks_every_status() {
 
 #[test]
 fn a_completed_row_replays_its_outcome_and_recorded_due_time() {
-    let mut stored = row("completed");
-    stored.outcome_json = Some("{\"kind\":\"sleep\"}".to_string());
+    let mut stored = row_with_columns("completed", Some("{\"kind\":\"sleep\"}"), None);
     stored.due_at_ms = Some(NOW + 90);
     assert_eq!(
         decide_effect_claim(Some(&stored), &request(), NOW),
@@ -121,9 +240,28 @@ fn a_completed_row_replays_its_outcome_and_recorded_due_time() {
 }
 
 #[test]
+fn a_completed_row_with_both_payloads_is_corrupt() {
+    let stored = row_with_columns(
+        "completed",
+        Some("{\"kind\":\"sleep\"}"),
+        Some("{\"code\":\"contradiction\"}"),
+    );
+    assert_eq!(
+        decide_effect_claim(Some(&stored), &request(), NOW),
+        EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
+            defect: EffectRowDefect::UnexpectedPayloads {
+                status: EffectRowStatus::Completed,
+                outcome_json_present: true,
+                error_json_present: true,
+            },
+        }),
+        "the store-boundary decoder must not discard the contradictory error payload"
+    );
+}
+
+#[test]
 fn a_failed_row_replays_its_error() {
-    let mut stored = row("failed");
-    stored.error_json = Some("{\"code\":\"boom\"}".to_string());
+    let stored = row_with_columns("failed", None, Some("{\"code\":\"boom\"}"));
     assert_eq!(
         decide_effect_claim(Some(&stored), &request(), NOW),
         EffectClaimDecision::Report(EffectClaimObservation::Failed {
@@ -224,8 +362,7 @@ fn a_takeover_of_a_sleep_without_a_recorded_due_time_derives_one() {
 
 #[test]
 fn strict_replay_never_refuses_a_row_that_exists() {
-    let mut stored = row("completed");
-    stored.outcome_json = Some("{}".to_string());
+    let stored = row_with_columns("completed", Some("{}"), None);
     let request = EffectClaimRequest {
         strict_replay: true,
         ..request()
@@ -352,6 +489,16 @@ fn row_defects_render_the_messages_hosts_already_see() {
     assert_eq!(
         EffectRowDefect::MissingError.message(),
         "failed runtime effect row is missing error_json"
+    );
+    assert_eq!(
+        EffectRowDefect::UnexpectedPayloads {
+            status: EffectRowStatus::Completed,
+            outcome_json_present: true,
+            error_json_present: true,
+        }
+        .message(),
+        "runtime effect replay status `completed` contradicts its payload columns: \
+         outcome_json present = true, error_json present = true"
     );
     assert_eq!(
         EffectRowDefect::UnknownStatus {

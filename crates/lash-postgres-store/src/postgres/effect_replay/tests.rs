@@ -349,7 +349,10 @@ async fn unsettled_children_are_exactly_the_children_without_a_rank() {
         "a claimed child with no terminal holds no rank, so it is unsettled"
     );
     assert_eq!(unsettled[0].scope_id, fixture.scope_id);
-    assert_eq!(unsettled[0].status, "in_progress");
+    assert_eq!(
+        unsettled[0].state,
+        effect_replay_driver::EffectRowState::InProgress
+    );
     assert_eq!(
         unsettled[0].envelope_json, r#"{"json":"k1","hash":"hash-k1"}"#,
         "the row carries the recorded canonical envelope a drain re-executes from"
