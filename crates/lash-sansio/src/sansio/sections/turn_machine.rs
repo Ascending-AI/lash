@@ -34,8 +34,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         Self {
             config,
             state: MachineState::PreparingProtocol,
-            pending_effects: VecDeque::new(),
-            active_effect_redelivery: false,
+            side_effect_outbox: VecDeque::new(),
             next_effect_id: 1,
             next_synthetic_message_id,
             messages,
@@ -93,16 +92,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     pub fn checkpoint(&self) -> TurnCheckpoint<M> {
-        let active_effect_id = self.state.outstanding_effect_id();
-        let pending_effects = self
-            .pending_effects
-            .iter()
-            .filter(|effect| active_effect_id.is_none_or(|id| effect.id() != Some(id)))
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut state = self.state.clone();
+        state.schedule_outstanding_effect();
         TurnCheckpoint {
-            state: self.state.clone(),
-            pending_effects,
+            state,
+            pending_effects: self.side_effect_outbox.iter().cloned().collect(),
             next_effect_id: self.next_effect_id,
             next_synthetic_message_id: self.next_synthetic_message_id,
             messages: self.messages.iter().cloned().collect(),
@@ -121,20 +115,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
         config: TurnMachineConfig<M>,
         checkpoint: TurnCheckpoint<M>,
     ) -> Self {
-        let active_effect_id = checkpoint.state.outstanding_effect_id();
-        let pending_effects = checkpoint
+        let side_effect_outbox = checkpoint
             .pending_effects
             .into_iter()
             .collect::<VecDeque<_>>();
-        let active_effect_redelivery = active_effect_id.is_some()
-            && !pending_effects
-                .iter()
-                .any(|effect| effect.id() == active_effect_id);
         Self {
             config,
             state: checkpoint.state,
-            pending_effects,
-            active_effect_redelivery,
+            side_effect_outbox,
             next_effect_id: checkpoint.next_effect_id,
             next_synthetic_message_id: checkpoint.next_synthetic_message_id,
             messages: MessageSequence::from_owned(checkpoint.messages),
@@ -178,12 +166,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn emit(&mut self, event: SessionStreamEvent) {
-        self.pending_effects.push_back(Effect::Emit(event));
+        self.side_effect_outbox.push_back(Effect::Emit(event));
     }
 
     fn emit_progress(&mut self) {
         let event_delta = self.next_event_delta();
-        self.pending_effects.push_back(Effect::Progress {
+        self.side_effect_outbox.push_back(Effect::Progress {
             messages: self.messages.clone(),
             event_delta,
             protocol_iteration: self.protocol_iteration,
@@ -206,7 +194,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let event_delta = self.next_event_delta();
         let protocol_iteration = self.protocol_iteration;
         self.state = MachineState::Finished;
-        self.pending_effects.push_back(Effect::Done {
+        self.side_effect_outbox.push_back(Effect::Done {
             messages: msgs,
             event_delta,
             protocol_iteration,
@@ -226,27 +214,28 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// Drain the next pending effect. Returns `None` when the host must call
     /// `handle_response()` before more effects become available.
     pub fn poll_effect(&mut self) -> Option<Effect<M>> {
-        if let Some(effect) = self.pending_effects.pop_front() {
+        if let Some(effect) = self.poll_scheduled_effect() {
             return Some(effect);
-        }
-        if self.active_effect_redelivery {
-            self.active_effect_redelivery = false;
-            if let Some(effect) = self.state.outstanding_effect() {
-                return Some(effect);
-            }
         }
 
         match &self.state {
             MachineState::PreparingProtocol => {
                 self.prepare_protocol();
-                self.pending_effects.pop_front()
+                self.poll_scheduled_effect()
             }
             MachineState::PrepareIteration => {
                 self.prepare_protocol_iteration();
-                self.pending_effects.pop_front()
+                self.poll_scheduled_effect()
             }
             _ => None,
         }
+    }
+
+    fn poll_scheduled_effect(&mut self) -> Option<Effect<M>> {
+        if let Some(effect) = self.side_effect_outbox.pop_front() {
+            return Some(effect);
+        }
+        self.state.poll_outstanding_effect()
     }
 
     // ─── State transitions ───
@@ -257,12 +246,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.state = MachineState::WaitingExecutionEnvironment {
                 effect_id: id,
                 update_machine_config: false,
+                delivery: EffectDeliveryStatus::Pending,
             };
-            self.pending_effects
-                .push_back(Effect::SyncExecutionEnvironment {
-                    id,
-                    update_machine_config: false,
-                });
             return;
         }
 
@@ -277,12 +262,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.state = MachineState::WaitingExecutionEnvironment {
                 effect_id: id,
                 update_machine_config: true,
+                delivery: EffectDeliveryStatus::Pending,
             };
-            self.pending_effects
-                .push_back(Effect::SyncExecutionEnvironment {
-                    id,
-                    update_machine_config: true,
-                });
             return;
         }
         let actions = {
@@ -314,38 +295,30 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let id = self.next_id();
         self.state = MachineState::WaitingLlm {
             effect_id: id,
-            request: Arc::clone(&request),
+            request,
             driver_state,
+            delivery: EffectDeliveryStatus::Pending,
         };
-        self.pending_effects
-            .push_back(Effect::LlmCall { id, request });
     }
 
     fn start_tool_calls(&mut self, calls: Vec<PendingToolCall>) {
         let effect_id = self.next_id();
         self.state = MachineState::WaitingTools {
             effect_id,
-            calls: calls.clone(),
-        };
-        self.pending_effects.push_back(Effect::ToolCalls {
-            id: effect_id,
             calls,
-        });
+            delivery: EffectDeliveryStatus::Pending,
+        };
     }
 
     fn start_exec(&mut self, language: String, code: String, driver_state: M::DriverState) {
         let effect_id = self.next_id();
         self.state = MachineState::WaitingExec {
             effect_id,
-            language: language.clone(),
-            code: code.clone(),
-            driver_state,
-        };
-        self.pending_effects.push_back(Effect::ExecCode {
-            id: effect_id,
             language,
             code,
-        });
+            driver_state,
+            delivery: EffectDeliveryStatus::Pending,
+        };
     }
 
     fn schedule_turn_limit_final(&mut self, message: Message) -> bool {
@@ -463,7 +436,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         response: Response,
     ) -> Result<(), TokenUsageOverflow> {
-        self.active_effect_redelivery = false;
         match response {
             Response::ExecutionEnvironmentSynced { id, result } => {
                 self.handle_execution_environment_synced(id, result);
@@ -486,9 +458,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             effect_id: id,
             checkpoint,
             on_empty,
+            delivery: EffectDeliveryStatus::Pending,
         };
-        self.pending_effects
-            .push_back(Effect::Checkpoint { id, checkpoint });
     }
 
     fn handle_execution_environment_synced(
@@ -496,12 +467,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         id: EffectId,
         result: Result<Option<ExecutionEnvironmentSync>, String>,
     ) {
-        let (waiting_id, waiting_update_machine_config) =
+        let (waiting_id, waiting_update_machine_config, delivery) =
             match std::mem::replace(&mut self.state, MachineState::Finished) {
                 MachineState::WaitingExecutionEnvironment {
                     effect_id,
                     update_machine_config,
-                } => (effect_id, update_machine_config),
+                    delivery,
+                } => (effect_id, update_machine_config, delivery),
                 other => {
                     self.state = other;
                     return;
@@ -511,6 +483,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.state = MachineState::WaitingExecutionEnvironment {
                 effect_id: waiting_id,
                 update_machine_config: waiting_update_machine_config,
+                delivery,
             };
             return;
         }
@@ -585,13 +558,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn handle_checkpoint(&mut self, id: EffectId, delivery: CheckpointDelivery) {
-        let (effect_id, checkpoint, on_empty) =
+        let (effect_id, checkpoint, on_empty, effect_delivery) =
             match std::mem::replace(&mut self.state, MachineState::Finished) {
                 MachineState::WaitingCheckpoint {
                     effect_id,
                     checkpoint,
                     on_empty,
-                } => (effect_id, checkpoint, on_empty),
+                    delivery,
+                } => (effect_id, checkpoint, on_empty, delivery),
                 other => {
                     self.state = other;
                     return;
@@ -602,6 +576,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 effect_id,
                 checkpoint,
                 on_empty,
+                delivery: effect_delivery,
             };
             return;
         }
@@ -643,6 +618,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 effect_id,
                 request,
                 driver_state,
+                ..
             } if effect_id == id => Some(WaitingLlmState {
                 request,
                 driver_state,
@@ -824,7 +800,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         });
         if self.config.emit_llm_trace {
             let response_parts = self.llm_response_debug_parts(llm_response);
-            self.pending_effects.push_back(Effect::Log {
+            self.side_effect_outbox.push_back(Effect::Log {
                 event: LogEvent::LlmDebug {
                     session_id: self.config.session_id.clone(),
                     protocol_iteration: self.protocol_iteration,
@@ -841,7 +817,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn record_llm_error(&mut self, error: &LlmCallError) {
         if self.config.emit_llm_trace {
-            self.pending_effects.push_back(Effect::Log {
+            self.side_effect_outbox.push_back(Effect::Log {
                 event: LogEvent::LlmError {
                     session_id: self.config.session_id.clone(),
                     protocol_iteration: self.protocol_iteration,
@@ -879,9 +855,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     fn handle_tool_results(&mut self, id: EffectId, completed: Vec<CompletedToolCall>) {
-        let (waiting_effect_id, waiting_calls) =
+        let (waiting_effect_id, waiting_calls, delivery) =
             match std::mem::replace(&mut self.state, MachineState::Finished) {
-                MachineState::WaitingTools { effect_id, calls } => (effect_id, calls),
+                MachineState::WaitingTools {
+                    effect_id,
+                    calls,
+                    delivery,
+                } => (effect_id, calls, delivery),
                 other => {
                     self.state = other;
                     return;
@@ -892,6 +872,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.state = MachineState::WaitingTools {
                 effect_id: waiting_effect_id,
                 calls: waiting_calls,
+                delivery,
             };
             return;
         }

@@ -255,19 +255,6 @@ impl<M: TurnProtocol> Clone for Effect<M> {
     }
 }
 
-impl<M: TurnProtocol> Effect<M> {
-    fn id(&self) -> Option<EffectId> {
-        match self {
-            Self::SyncExecutionEnvironment { id, .. }
-            | Self::LlmCall { id, .. }
-            | Self::ToolCalls { id, .. }
-            | Self::ExecCode { id, .. }
-            | Self::Checkpoint { id, .. } => Some(*id),
-            Self::Log { .. } | Self::Emit(_) | Self::Progress { .. } | Self::Done { .. } => None,
-        }
-    }
-}
-
 /// Error details from a failed LLM call.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct LlmCallError {
