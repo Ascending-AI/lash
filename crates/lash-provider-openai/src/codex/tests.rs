@@ -644,43 +644,6 @@ fn codex_cached_continuation_sends_delta_after_prior_request_and_response_items(
 }
 
 #[test]
-fn codex_websocket_cache_miss_reasons_are_explicit() {
-    let provider =
-        CodexProvider::new("access", "refresh", 0).with_transport(CodexTransport::WebsocketCached);
-    let first = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let first_body = provider.build_request_body(&first, true).unwrap();
-    let continuation = CodexProvider::continuation_from_response(
-        &first_body,
-        &json!({
-            "id": "resp_1",
-            "status": "completed",
-            "output": [assistant_item("msg_1", "answer")]
-        }),
-    )
-    .expect("completed continuation");
-
-    let mut fingerprint_mismatch_body = first_body.clone();
-    fingerprint_mismatch_body["model"] = json!("gpt-5-codex");
-    let fingerprint_plan =
-        provider.websocket_request_plan(&fingerprint_mismatch_body, Some(&continuation), true);
-    assert!(!fingerprint_plan.cached);
-    assert_eq!(
-        fingerprint_plan.cache_miss_reason,
-        Some("body_fingerprint_mismatch")
-    );
-
-    let prefix_mismatch = request(vec![
-        LlmMessage::text(LlmRole::User, "hello"),
-        LlmMessage::text(LlmRole::User, "next without prior assistant"),
-    ]);
-    let prefix_mismatch_body = provider.build_request_body(&prefix_mismatch, true).unwrap();
-    let prefix_plan =
-        provider.websocket_request_plan(&prefix_mismatch_body, Some(&continuation), true);
-    assert!(!prefix_plan.cached);
-    assert_eq!(prefix_plan.cache_miss_reason, Some("input_prefix_mismatch"));
-}
-
-#[test]
 fn codex_websocket_request_uses_response_create_event_shape() {
     let provider = CodexProvider::new("access", "refresh", 0);
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);

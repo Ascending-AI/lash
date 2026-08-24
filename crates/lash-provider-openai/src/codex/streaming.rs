@@ -34,24 +34,20 @@ use lash_provider_auth::{CredentialCallError, CredentialExecuteError};
 
 use crate::responses_shared as shared;
 
-use super::continuation::{CodexContinuation, CodexWebsocketRequestPlan};
+use super::continuation::{
+    CodexContinuation, CodexWebsocketContextPlan, CodexWebsocketRequestPlan,
+};
 use super::credential::{CodexCredential, credential_transport_error};
 use super::session::{CodexWebSocketAttemptError, CodexWebsocketLease};
 use super::{CodexProvider, CodexTransport, PROVIDER};
 
 #[derive(Clone, Debug)]
-struct CodexWebsocketAttemptDiagnostics {
+struct CodexWebsocketAttemptDiagnostics<'a> {
     configured_transport: CodexTransport,
     reused_connection: bool,
-    cached_request: bool,
-    continuation_available: bool,
-    cache_miss_reason: Option<&'static str>,
-    previous_response_id: Option<String>,
-    full_input_items: usize,
-    sent_input_items: usize,
+    context: &'a CodexWebsocketContextPlan,
     request_bytes: usize,
-    retry_after_stale_previous_response: bool,
-    retry_after_dead_reused_connection: bool,
+    retry_state: CodexWebsocketRetryState,
 }
 
 struct CodexWebsocketAttemptGuard<'a> {
@@ -96,7 +92,7 @@ impl Drop for CodexWebsocketAttemptGuard<'_> {
 }
 
 /// One-shot WebSocket retries already consumed by the current send loop.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct CodexWebsocketRetryState {
     after_stale_previous_response: bool,
     after_dead_reused_connection: bool,
@@ -177,13 +173,12 @@ impl CodexProvider {
                 lease.continuation.as_ref(),
                 allow_cached_context && lease.reusable,
             );
-            let cached_request = plan.cached;
             match self
                 .run_websocket_attempt(
                     &req,
                     &full_body,
                     lease,
-                    plan,
+                    &plan,
                     retry_state,
                     timeouts.chunk_timeout,
                 )
@@ -191,7 +186,7 @@ impl CodexProvider {
             {
                 Ok(response) => return Ok(response),
                 Err(err)
-                    if cached_request
+                    if plan.context.is_continued()
                         && err.stale_previous_response
                         && !err.output_started
                         && !retry_state.after_stale_previous_response =>
@@ -228,7 +223,7 @@ impl CodexProvider {
         req: &LlmRequest,
         full_body: &Value,
         lease: CodexWebsocketLease,
-        plan: CodexWebsocketRequestPlan,
+        plan: &CodexWebsocketRequestPlan,
         retry_state: CodexWebsocketRetryState,
         read_timeout: Duration,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
@@ -262,15 +257,9 @@ impl CodexProvider {
         let diagnostics = CodexWebsocketAttemptDiagnostics {
             configured_transport: self.transport,
             reused_connection: attempt.lease().reused,
-            cached_request: plan.cached,
-            continuation_available: plan.continuation_available,
-            cache_miss_reason: plan.cache_miss_reason,
-            previous_response_id: plan.previous_response_id.clone(),
-            full_input_items: plan.full_input_items,
-            sent_input_items: plan.sent_input_items,
+            context: &plan.context,
             request_bytes: request_body.len(),
-            retry_after_stale_previous_response: retry_state.after_stale_previous_response,
-            retry_after_dead_reused_connection: retry_state.after_dead_reused_connection,
+            retry_state,
         };
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
         let mut events_seen = false;
@@ -467,22 +456,20 @@ impl CodexProvider {
         Ok(response)
     }
 
-    fn websocket_http_summary(&self, diagnostics: &CodexWebsocketAttemptDiagnostics) -> String {
+    fn websocket_http_summary(&self, diagnostics: &CodexWebsocketAttemptDiagnostics<'_>) -> String {
+        let context = diagnostics.context.rendered();
         format!(
             "WS {} transport={:?} reused={} cached={} cache_miss={} retry_after_stale={} retry_after_dead_reused={} input_items={}/{} previous_response_id={} request_bytes={}",
             self.websocket_url,
             diagnostics.configured_transport,
             diagnostics.reused_connection,
-            diagnostics.cached_request,
-            diagnostics.cache_miss_reason.unwrap_or("<none>"),
-            diagnostics.retry_after_stale_previous_response,
-            diagnostics.retry_after_dead_reused_connection,
-            diagnostics.sent_input_items,
-            diagnostics.full_input_items,
-            diagnostics
-                .previous_response_id
-                .as_deref()
-                .unwrap_or("<none>"),
+            context.cached_request,
+            context.cache_miss_reason.unwrap_or("<none>"),
+            diagnostics.retry_state.after_stale_previous_response,
+            diagnostics.retry_state.after_dead_reused_connection,
+            context.sent_input_items,
+            context.full_input_items,
+            context.previous_response_id.unwrap_or("<none>"),
             diagnostics.request_bytes
         )
     }
@@ -490,20 +477,21 @@ impl CodexProvider {
     fn emit_websocket_attempt_trace(
         &self,
         provider_trace: Option<&lash_core::llm::types::LlmProviderTraceSender>,
-        diagnostics: &CodexWebsocketAttemptDiagnostics,
+        diagnostics: &CodexWebsocketAttemptDiagnostics<'_>,
     ) {
+        let context = diagnostics.context.rendered();
         let raw = json!({
             "type": "lash.codex.websocket_request",
             "transport": format!("{:?}", diagnostics.configured_transport),
             "reused_connection": diagnostics.reused_connection,
-            "cached_request": diagnostics.cached_request,
-            "continuation_available": diagnostics.continuation_available,
-            "cache_miss_reason": diagnostics.cache_miss_reason,
-            "retry_after_stale_previous_response": diagnostics.retry_after_stale_previous_response,
-            "retry_after_dead_reused_connection": diagnostics.retry_after_dead_reused_connection,
-            "previous_response_id": diagnostics.previous_response_id,
-            "full_input_items": diagnostics.full_input_items,
-            "sent_input_items": diagnostics.sent_input_items,
+            "cached_request": context.cached_request,
+            "continuation_available": context.continuation_available,
+            "cache_miss_reason": context.cache_miss_reason,
+            "retry_after_stale_previous_response": diagnostics.retry_state.after_stale_previous_response,
+            "retry_after_dead_reused_connection": diagnostics.retry_state.after_dead_reused_connection,
+            "previous_response_id": context.previous_response_id,
+            "full_input_items": context.full_input_items,
+            "sent_input_items": context.sent_input_items,
             "request_bytes": diagnostics.request_bytes,
         })
         .to_string();

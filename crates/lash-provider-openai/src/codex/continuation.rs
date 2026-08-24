@@ -22,12 +22,90 @@ pub(super) struct CodexContinuation {
 #[derive(Clone, Debug)]
 pub(super) struct CodexWebsocketRequestPlan {
     pub(super) body: Value,
-    pub(super) cached: bool,
+    pub(super) context: CodexWebsocketContextPlan,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CodexWebsocketCacheMiss {
+    Disabled { continuation_available: bool },
+    MissingContinuation,
+    BodyFingerprintMismatch,
+    InputPrefixMismatch,
+}
+
+impl CodexWebsocketCacheMiss {
+    pub(super) fn wire_reason(self) -> &'static str {
+        match self {
+            Self::Disabled { .. } => "disabled",
+            Self::MissingContinuation => "missing_continuation",
+            Self::BodyFingerprintMismatch => "body_fingerprint_mismatch",
+            Self::InputPrefixMismatch => "input_prefix_mismatch",
+        }
+    }
+
+    fn continuation_available(self) -> bool {
+        match self {
+            Self::Disabled {
+                continuation_available,
+            } => continuation_available,
+            Self::MissingContinuation => false,
+            Self::BodyFingerprintMismatch | Self::InputPrefixMismatch => true,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) enum CodexWebsocketContextPlan {
+    FullContext {
+        miss: CodexWebsocketCacheMiss,
+        input_items: usize,
+    },
+    Continued {
+        previous_response_id: String,
+        full_input_items: usize,
+        sent_input_items: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct CodexWebsocketRenderedContext<'a> {
+    pub(super) cached_request: bool,
     pub(super) continuation_available: bool,
     pub(super) cache_miss_reason: Option<&'static str>,
-    pub(super) previous_response_id: Option<String>,
+    pub(super) previous_response_id: Option<&'a str>,
     pub(super) full_input_items: usize,
     pub(super) sent_input_items: usize,
+}
+
+impl CodexWebsocketContextPlan {
+    pub(super) fn is_continued(&self) -> bool {
+        matches!(self, Self::Continued { .. })
+    }
+
+    pub(super) fn rendered(&self) -> CodexWebsocketRenderedContext<'_> {
+        match self {
+            Self::FullContext { miss, input_items } => CodexWebsocketRenderedContext {
+                cached_request: false,
+                continuation_available: miss.continuation_available(),
+                cache_miss_reason: Some(miss.wire_reason()),
+                previous_response_id: None,
+                full_input_items: *input_items,
+                sent_input_items: *input_items,
+            },
+            Self::Continued {
+                previous_response_id,
+                full_input_items,
+                sent_input_items,
+            } => CodexWebsocketRenderedContext {
+                cached_request: true,
+                continuation_available: true,
+                cache_miss_reason: None,
+                previous_response_id: Some(previous_response_id),
+                full_input_items: *full_input_items,
+                sent_input_items: *sent_input_items,
+            },
+        }
+    }
 }
 
 impl CodexProvider {
@@ -60,17 +138,19 @@ impl CodexProvider {
         continuation: &CodexContinuation,
         full_body: &Value,
     ) -> Option<Value> {
-        Self::cached_websocket_body_result(continuation, full_body).ok()
+        Self::cached_websocket_body_result(continuation, full_body)
+            .map(|(body, _)| body)
+            .ok()
     }
 
     fn cached_websocket_body_result(
         continuation: &CodexContinuation,
         full_body: &Value,
-    ) -> Result<Value, &'static str> {
+    ) -> Result<(Value, String), CodexWebsocketCacheMiss> {
         let current_fingerprint = Self::body_fingerprint(full_body);
         let current_input = Self::body_input(full_body);
         if continuation.body_fingerprint != current_fingerprint {
-            return Err("body_fingerprint_mismatch");
+            return Err(CodexWebsocketCacheMiss::BodyFingerprintMismatch);
         }
         let mut baseline = continuation.request_input.clone();
         baseline.extend(continuation.response_items.clone());
@@ -80,13 +160,14 @@ impl CodexProvider {
                 .take(baseline.len())
                 .eq(baseline.iter())
         {
-            return Err("input_prefix_mismatch");
+            return Err(CodexWebsocketCacheMiss::InputPrefixMismatch);
         }
 
         let mut body = full_body.clone();
-        body["previous_response_id"] = json!(continuation.previous_response_id);
+        let previous_response_id = continuation.previous_response_id.clone();
+        body["previous_response_id"] = json!(previous_response_id);
         body["input"] = Value::Array(current_input[baseline.len()..].to_vec());
-        Ok(body)
+        Ok((body, previous_response_id))
     }
 
     pub(super) fn websocket_continuation_enabled(&self) -> bool {
@@ -104,28 +185,45 @@ impl CodexProvider {
     ) -> CodexWebsocketRequestPlan {
         let full_input_items = Self::body_input(full_body).len();
         let continuation_available = continuation.is_some();
-        let (body, cached, cache_miss_reason) = match (allow_cached_context, continuation) {
-            (false, _) => (full_body.clone(), false, Some("disabled")),
-            (true, None) => (full_body.clone(), false, Some("missing_continuation")),
+        let (body, context) = match (allow_cached_context, continuation) {
+            (false, _) => (
+                full_body.clone(),
+                CodexWebsocketContextPlan::FullContext {
+                    miss: CodexWebsocketCacheMiss::Disabled {
+                        continuation_available,
+                    },
+                    input_items: full_input_items,
+                },
+            ),
+            (true, None) => (
+                full_body.clone(),
+                CodexWebsocketContextPlan::FullContext {
+                    miss: CodexWebsocketCacheMiss::MissingContinuation,
+                    input_items: full_input_items,
+                },
+            ),
             (true, Some(cached)) => match Self::cached_websocket_body_result(cached, full_body) {
-                Ok(body) => (body, true, None),
-                Err(reason) => (full_body.clone(), false, Some(reason)),
+                Ok((body, previous_response_id)) => {
+                    let sent_input_items = Self::body_input(&body).len();
+                    (
+                        body,
+                        CodexWebsocketContextPlan::Continued {
+                            previous_response_id,
+                            full_input_items,
+                            sent_input_items,
+                        },
+                    )
+                }
+                Err(miss) => (
+                    full_body.clone(),
+                    CodexWebsocketContextPlan::FullContext {
+                        miss,
+                        input_items: full_input_items,
+                    },
+                ),
             },
         };
-        let previous_response_id = body
-            .get("previous_response_id")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let sent_input_items = Self::body_input(&body).len();
-        CodexWebsocketRequestPlan {
-            body,
-            cached,
-            continuation_available,
-            cache_miss_reason,
-            previous_response_id,
-            full_input_items,
-            sent_input_items,
-        }
+        CodexWebsocketRequestPlan { body, context }
     }
 
     pub(super) fn websocket_create_request(body: &Value) -> Value {
@@ -155,5 +253,165 @@ impl CodexProvider {
             response_items: Self::response_output_items(final_response),
             body_fingerprint: Self::body_fingerprint(full_body),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn full_body(input: Vec<Value>) -> Value {
+        json!({
+            "model": "gpt-5.4",
+            "input": input,
+            "stream": true,
+        })
+    }
+
+    fn continuation(first_input: &Value, response_item: &Value) -> CodexContinuation {
+        let body = full_body(vec![first_input.clone()]);
+        CodexContinuation {
+            previous_response_id: "resp_1".to_string(),
+            request_input: vec![first_input.clone()],
+            response_items: vec![response_item.clone()],
+            body_fingerprint: CodexProvider::body_fingerprint(&body),
+        }
+    }
+
+    #[test]
+    fn context_plan_renders_each_outcome_once() {
+        let provider = CodexProvider::new("access", "refresh", 0);
+        let first_input = json!({"type": "message", "role": "user", "content": "hello"});
+        let response_item = json!({"type": "message", "role": "assistant", "content": "answer"});
+        let continuation = continuation(&first_input, &response_item);
+        let first_body = full_body(vec![first_input.clone()]);
+        let disabled_without_continuation =
+            provider.websocket_request_plan(&first_body, None, false);
+        let disabled_with_continuation =
+            provider.websocket_request_plan(&first_body, Some(&continuation), false);
+        let missing_continuation = provider.websocket_request_plan(&first_body, None, true);
+
+        let mut fingerprint_mismatch_body = first_body.clone();
+        fingerprint_mismatch_body["model"] = json!("gpt-5-codex");
+        let fingerprint_mismatch =
+            provider.websocket_request_plan(&fingerprint_mismatch_body, Some(&continuation), true);
+
+        let prefix_mismatch_body = full_body(vec![first_input.clone(), json!({"next": true})]);
+        let prefix_mismatch =
+            provider.websocket_request_plan(&prefix_mismatch_body, Some(&continuation), true);
+
+        let continued_body = full_body(vec![
+            first_input,
+            response_item,
+            json!({"type": "message", "role": "user", "content": "next"}),
+        ]);
+        let continued = provider.websocket_request_plan(&continued_body, Some(&continuation), true);
+
+        let cases = [
+            (
+                "disabled without continuation",
+                disabled_without_continuation,
+                CodexWebsocketRenderedContext {
+                    cached_request: false,
+                    continuation_available: false,
+                    cache_miss_reason: Some("disabled"),
+                    previous_response_id: None,
+                    full_input_items: 1,
+                    sent_input_items: 1,
+                },
+            ),
+            (
+                "disabled with continuation",
+                disabled_with_continuation,
+                CodexWebsocketRenderedContext {
+                    cached_request: false,
+                    continuation_available: true,
+                    cache_miss_reason: Some("disabled"),
+                    previous_response_id: None,
+                    full_input_items: 1,
+                    sent_input_items: 1,
+                },
+            ),
+            (
+                "missing continuation",
+                missing_continuation,
+                CodexWebsocketRenderedContext {
+                    cached_request: false,
+                    continuation_available: false,
+                    cache_miss_reason: Some("missing_continuation"),
+                    previous_response_id: None,
+                    full_input_items: 1,
+                    sent_input_items: 1,
+                },
+            ),
+            (
+                "body fingerprint mismatch",
+                fingerprint_mismatch,
+                CodexWebsocketRenderedContext {
+                    cached_request: false,
+                    continuation_available: true,
+                    cache_miss_reason: Some("body_fingerprint_mismatch"),
+                    previous_response_id: None,
+                    full_input_items: 1,
+                    sent_input_items: 1,
+                },
+            ),
+            (
+                "input prefix mismatch",
+                prefix_mismatch,
+                CodexWebsocketRenderedContext {
+                    cached_request: false,
+                    continuation_available: true,
+                    cache_miss_reason: Some("input_prefix_mismatch"),
+                    previous_response_id: None,
+                    full_input_items: 2,
+                    sent_input_items: 2,
+                },
+            ),
+            (
+                "continued",
+                continued,
+                CodexWebsocketRenderedContext {
+                    cached_request: true,
+                    continuation_available: true,
+                    cache_miss_reason: None,
+                    previous_response_id: Some("resp_1"),
+                    full_input_items: 3,
+                    sent_input_items: 1,
+                },
+            ),
+        ];
+
+        for (outcome, plan, expected) in cases {
+            assert_eq!(plan.context.rendered(), expected, "{outcome}");
+        }
+    }
+
+    #[test]
+    fn cache_miss_wire_reasons_are_exhaustive() {
+        let reasons = [
+            (
+                CodexWebsocketCacheMiss::Disabled {
+                    continuation_available: false,
+                },
+                "disabled",
+            ),
+            (
+                CodexWebsocketCacheMiss::MissingContinuation,
+                "missing_continuation",
+            ),
+            (
+                CodexWebsocketCacheMiss::BodyFingerprintMismatch,
+                "body_fingerprint_mismatch",
+            ),
+            (
+                CodexWebsocketCacheMiss::InputPrefixMismatch,
+                "input_prefix_mismatch",
+            ),
+        ];
+
+        for (miss, expected) in reasons {
+            assert_eq!(miss.wire_reason(), expected);
+        }
     }
 }
