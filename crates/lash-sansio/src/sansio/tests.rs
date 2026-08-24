@@ -626,7 +626,6 @@ fn driver_can_finish_via_checkpoint() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: "Hello".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Hello".to_string(),
                 response_meta: None,
@@ -680,7 +679,6 @@ fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: "Hello".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Hello".to_string(),
                 response_meta: None,
@@ -718,7 +716,6 @@ fn output_limit_stops_as_incomplete_without_assistant_message() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: "partial".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "partial".to_string(),
                 response_meta: None,
@@ -906,7 +903,6 @@ fn checkpoint_messages_resume_prepare_protocol_iteration() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: "Hello".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Hello".to_string(),
                 response_meta: None,
@@ -1315,7 +1311,6 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: "advance".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "advance".to_string(),
                 response_meta: None,

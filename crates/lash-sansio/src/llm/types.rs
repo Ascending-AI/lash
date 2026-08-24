@@ -1530,7 +1530,6 @@ pub struct LlmCallRecord {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct LlmResponse {
-    pub full_text: String,
     pub parts: Vec<LlmOutputPart>,
     pub usage: LlmUsage,
     pub terminal_reason: LlmTerminalReason,
@@ -1553,6 +1552,14 @@ pub struct LlmResponse {
 }
 
 impl LlmResponse {
+    /// Project the visible assistant prose from the response parts.
+    ///
+    /// The parts are the sole response-content authority. In particular, the
+    /// projection applies provider phase visibility before concatenating text.
+    pub fn full_text(&self) -> String {
+        crate::turn_driver::visible_response_text_from_parts(&self.parts)
+    }
+
     /// Stamp LLM Provider-owned replay state at the capture boundary without
     /// ever overwriting an existing, contradictory origin.
     #[doc(hidden)]

@@ -271,7 +271,7 @@ async fn structured_output_refusal_is_content_filter_not_empty_provider_error() 
         .expect("documented refusal is a terminal response");
     assert_eq!(response.terminal_reason, LlmTerminalReason::ContentFilter);
     assert_eq!(
-        response.full_text,
+        response.full_text(),
         "I'm sorry, I cannot assist with that request."
     );
 }
@@ -285,7 +285,7 @@ async fn structured_output_truncation_is_output_limit_not_provider_error() {
         .await
         .expect("documented incomplete event is terminal evidence");
     assert_eq!(response.terminal_reason, LlmTerminalReason::OutputLimit);
-    assert!(response.full_text.is_empty());
+    assert!(response.full_text().is_empty());
 }
 
 #[test]

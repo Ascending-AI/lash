@@ -2,7 +2,6 @@ use super::*;
 
 fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {
     LlmResponse {
-        full_text: text.to_string(),
         parts: vec![LlmOutputPart::Text {
             text: text.to_string(),
             response_meta: None,

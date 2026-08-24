@@ -126,7 +126,6 @@ impl ProductionToolCell {
                             ),
                         };
                         Ok(lash_core::LlmResponse {
-                            full_text: text.clone(),
                             parts: vec![lash_core::LlmOutputPart::Text {
                                 text,
                                 response_meta: None,

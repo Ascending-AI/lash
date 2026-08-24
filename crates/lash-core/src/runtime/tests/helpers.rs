@@ -102,7 +102,6 @@ pub(crate) fn stream_accumulator_preserves_reasoning_when_final_response_has_too
     );
 
     let mut response = LlmResponse {
-        full_text: String::new(),
         parts: vec![LlmOutputPart::ToolCall {
             call_id: "call_1".to_string(),
             tool_name: "exec_command".to_string(),
@@ -137,7 +136,6 @@ pub(crate) fn stream_accumulator_does_not_duplicate_complete_final_response() {
     accumulator.push_text("Done.");
 
     let mut response = LlmResponse {
-        full_text: "Done.".to_string(),
         parts: vec![
             LlmOutputPart::Reasoning {
                 text: "I'll answer.".to_string(),

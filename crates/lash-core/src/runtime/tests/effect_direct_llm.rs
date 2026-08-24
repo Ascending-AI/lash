@@ -8,7 +8,6 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "raw direct answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "raw direct answer".to_string(),
                 response_meta: None,
@@ -91,8 +90,11 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         .await
         .expect("request-id reuse replays the first direct completion");
 
-    assert_eq!(completion.response.full_text, "raw direct answer");
-    assert_eq!(replayed.response.full_text, completion.response.full_text);
+    assert_eq!(completion.response.full_text(), "raw direct answer");
+    assert_eq!(
+        replayed.response.full_text(),
+        completion.response.full_text()
+    );
     assert_eq!(completion.usage.output_tokens, 6);
     assert_eq!(completion.llm_call.call_id.0, "direct-effect-test");
     assert_eq!(

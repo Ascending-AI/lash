@@ -823,7 +823,6 @@ fn text_response(text: &str) -> TestProvider {
     mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: text.to_string(),
                 response_meta: None,

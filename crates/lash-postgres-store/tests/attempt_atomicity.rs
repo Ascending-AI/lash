@@ -527,7 +527,6 @@ async fn public_signal_runtime(
                         ..lash_core::LlmResponse::default()
                     },
                     1 => lash_core::LlmResponse {
-                        full_text: "signal intent complete".to_string(),
                         parts: vec![lash_core::LlmOutputPart::Text {
                             text: "signal intent complete".to_string(),
                             response_meta: None,
@@ -741,7 +740,6 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                             ..lash_core::LlmResponse::default()
                         },
                         1 => lash_core::LlmResponse {
-                            full_text: "child literal".to_string(),
                             parts: vec![lash_core::LlmOutputPart::Text {
                                 text: "child literal".to_string(),
                                 response_meta: None,
@@ -750,7 +748,6 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                             ..lash_core::LlmResponse::default()
                         },
                         2 => lash_core::LlmResponse {
-                            full_text: "migrated tools complete".to_string(),
                             parts: vec![lash_core::LlmOutputPart::Text {
                                 text: "migrated tools complete".to_string(),
                                 response_meta: None,
@@ -794,7 +791,6 @@ fn fig1293_fault_batch_model() -> lash_core::facade_support::ProviderHandle {
                         ..lash_core::LlmResponse::default()
                     },
                     _ => lash_core::LlmResponse {
-                        full_text: "fault batch complete".to_string(),
                         parts: vec![lash_core::LlmOutputPart::Text {
                             text: "fault batch complete".to_string(),
                             response_meta: None,

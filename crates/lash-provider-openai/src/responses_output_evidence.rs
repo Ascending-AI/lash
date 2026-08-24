@@ -222,7 +222,6 @@ impl ResponsesStreamState {
                 .final_response
                 .as_ref()
                 .is_some_and(response_value_has_output_evidence)
-            || !self.full_text.is_empty()
             || !self.pending_text_deltas.is_empty()
             || !self.reasoning_deltas.is_empty()
             || self

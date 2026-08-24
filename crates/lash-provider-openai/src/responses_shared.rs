@@ -646,13 +646,7 @@ pub fn response_from_stream_state(
         Some(final_response) => terminal_reason_from_response_value(final_response, &parts),
         None => terminal_reason_from_parts(&parts),
     };
-    let full_text = if !state.full_text.is_empty() {
-        state.full_text.clone()
-    } else {
-        lash_core::facade_support::visible_response_text_from_parts(&parts)
-    };
     LlmResponse {
-        full_text,
         parts,
         usage: state.usage,
         terminal_reason,
@@ -850,7 +844,6 @@ pub struct ResponsesStreamingToolCall {
 
 #[derive(Clone, Debug, Default)]
 pub struct ResponsesStreamState {
-    pub full_text: String,
     pub pending_text_deltas: Vec<String>,
     pub parts: Vec<LlmOutputPart>,
     pub usage: LlmUsage,
@@ -1009,7 +1002,6 @@ impl ResponsesStreamState {
 
     pub fn merge_final_response(&mut self, response: &Value) {
         if self.streamed_item_content_received {
-            self.recompute_full_text();
             return;
         }
         let structured_message_text = has_structured_message_text(response);
@@ -1083,7 +1075,6 @@ impl ResponsesStreamState {
                 }
             }
         }
-        self.recompute_full_text();
     }
 
     pub fn ensure_text_part_index(&mut self, output_index: Option<usize>) -> usize {
@@ -1187,7 +1178,6 @@ impl ResponsesStreamState {
         if let Some(LlmOutputPart::Text { text: existing, .. }) = self.parts.get_mut(part_index) {
             *existing = text;
         }
-        self.recompute_full_text();
     }
 
     fn append_text_delta_to_part(&mut self, part_index: usize, piece: &str) {
@@ -1199,11 +1189,10 @@ impl ResponsesStreamState {
         }
         self.streamed_item_content_received = true;
         self.pending_text_deltas.push(piece.to_string());
-        self.recompute_full_text();
     }
 
-    pub fn recompute_full_text(&mut self) {
-        self.full_text = lash_core::facade_support::visible_response_text_from_parts(&self.parts);
+    pub fn full_text(&self) -> String {
+        lash_core::facade_support::visible_response_text_from_parts(&self.parts)
     }
 
     pub fn begin_reasoning_part(&mut self, output_index: Option<usize>) {
@@ -1482,12 +1471,6 @@ impl ResponsesStreamState {
                     response_meta: None,
                 }];
             }
-        }
-        if !self.full_text.is_empty() {
-            return vec![LlmOutputPart::Text {
-                text: self.full_text.clone(),
-                response_meta: None,
-            }];
         }
         Vec::new()
     }

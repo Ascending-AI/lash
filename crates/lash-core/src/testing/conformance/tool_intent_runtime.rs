@@ -130,7 +130,6 @@ pub async fn public_signal_intent_wakes_parked_process(
                             ..crate::LlmResponse::default()
                         },
                         1 => crate::LlmResponse {
-                            full_text: "signal delivered".to_string(),
                             parts: vec![crate::LlmOutputPart::Text {
                                 text: "signal delivered".to_string(),
                                 response_meta: None,

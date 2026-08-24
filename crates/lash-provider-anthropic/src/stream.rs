@@ -412,15 +412,13 @@ impl AnthropicProvider {
     pub(crate) fn finalize(
         state: StreamState,
         _origin_model: &str,
-    ) -> (Vec<LlmOutputPart>, String, LlmUsage, LlmTerminalReason) {
+    ) -> (Vec<LlmOutputPart>, LlmUsage, LlmTerminalReason) {
         let mut parts: Vec<LlmOutputPart> = Vec::new();
-        let mut full_text = String::new();
         let stop_reason = state.stop_reason.clone();
         for block in state.blocks {
             match block.kind {
                 BlockKind::Text => {
                     if !block.text.is_empty() {
-                        full_text.push_str(&block.text);
                         parts.push(LlmOutputPart::Text {
                             text: block.text,
                             response_meta: None,
@@ -449,7 +447,7 @@ impl AnthropicProvider {
             Some(_) => LlmTerminalReason::ProviderError,
             None => terminal_reason_from_parts(&parts),
         };
-        (parts, full_text, state.usage, terminal_reason)
+        (parts, state.usage, terminal_reason)
     }
 }
 

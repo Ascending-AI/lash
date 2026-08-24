@@ -605,16 +605,7 @@ fn tool_call_part(call_id: &str, tool_name: &str, input_json: &str) -> LlmOutput
 }
 
 fn llm_response(parts: Vec<LlmOutputPart>) -> LlmResponse {
-    let full_text = parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     LlmResponse {
-        full_text,
         parts,
         response_metadata: Default::default(),
         ..LlmResponse::default()
@@ -844,7 +835,6 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
                             ..lash_core::LlmResponse::default()
                         },
                         1 => lash_core::LlmResponse {
-                            full_text: "intent feedback observed".to_string(),
                             parts: vec![lash_core::LlmOutputPart::Text {
                                 text: "intent feedback observed".to_string(),
                                 response_meta: None,

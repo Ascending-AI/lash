@@ -272,7 +272,7 @@ async fn run_matrix_row(
                 .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
             assert_eq!(completion.terminal_reason, LlmTerminalReason::Stop);
             assert_eq!(
-                completion.full_text.contains(LASHLANG_CLOSE_DELIMITER),
+                completion.full_text().contains(LASHLANG_CLOSE_DELIMITER),
                 literal_present,
                 "{} {dialect} violated the shared delimiter expectation",
                 row.variation
@@ -347,7 +347,7 @@ async fn run_matrix_row(
                 .as_deref()
                 .expect("missing-terminal failure carries parsed partial state");
             assert_eq!(partial.terminal_reason, LlmTerminalReason::Unknown);
-            assert_eq!(partial.full_text, "matrix partial");
+            assert_eq!(partial.full_text(), "matrix partial");
             assert_declared_replay(
                 &partial.parts,
                 &route,
@@ -381,7 +381,7 @@ async fn run_matrix_row(
                 .unwrap_or_else(|error| {
                     panic!("{} {dialect} {case} failed: {error:?}", row.variation)
                 });
-                assert_eq!(completion.full_text, "matrix shape");
+                assert_eq!(completion.full_text(), "matrix shape");
                 assert_eq!(completion.terminal_reason, LlmTerminalReason::Stop);
                 assert_current_success_contract(dialect, &completion, recording);
                 assert_no_empty_stream_output(dialect, case, &events.lock_recover());
@@ -586,7 +586,7 @@ async fn run_matrix_row(
             .await
             .result
             .unwrap_or_else(|error| panic!("{} {dialect} failed: {error:?}", row.variation));
-            assert_eq!(completion.full_text, "matrix retry settled");
+            assert_eq!(completion.full_text(), "matrix retry settled");
             assert_eq!(completion.call_record.attempts.len(), 3);
             assert_eq!(
                 completion
@@ -801,7 +801,7 @@ fn assert_unsupported_stop_disposition(
     completion: &ProviderCompletion,
     recording: &Recording,
 ) {
-    assert!(completion.full_text.contains(LASHLANG_CLOSE_DELIMITER));
+    assert!(completion.full_text().contains(LASHLANG_CLOSE_DELIMITER));
     let disposition = completion
         .generation_disposition
         .as_ref()
@@ -1315,7 +1315,7 @@ fn assert_retry_stream_reduction(
             | LlmStreamEvent::RetryStatus { .. } => {}
         }
     }
-    assert_eq!(accumulated_text, completion.full_text);
+    assert_eq!(accumulated_text, completion.full_text());
     assert_eq!(
         accumulated_evidence.execution_evidence, completion.execution_evidence,
         "{dialect} reset reduction retained stale execution evidence"

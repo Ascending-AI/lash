@@ -328,19 +328,12 @@ impl LlmStreamAccumulator {
         })
     }
 
-    pub(super) fn full_text(&self) -> String {
-        crate::visible_response_text_from_parts(&self.parts)
-    }
-
     pub(super) fn apply_to_response(&self, response: &mut LlmResponse) {
         if self.is_empty() {
             return;
         }
         if response.parts.is_empty() {
             response.parts = self.parts.clone();
-            if response.full_text.is_empty() {
-                response.full_text = self.full_text();
-            }
             return;
         }
 
@@ -349,9 +342,6 @@ impl LlmStreamAccumulator {
         }
 
         response.parts = reconcile_accumulated_parts(&self.parts, &response.parts);
-        if response.full_text.is_empty() {
-            response.full_text = crate::visible_response_text_from_parts(&response.parts);
-        }
     }
 }
 
@@ -407,7 +397,6 @@ fn response_contains_part(response: &LlmResponse, part: &LlmOutputPart) -> bool 
     match part {
         LlmOutputPart::Text { text, .. } => {
             text.trim().is_empty()
-                || response.full_text.contains(text)
                 || response.parts.iter().any(|candidate| {
                     matches!(candidate, LlmOutputPart::Text { text: candidate, .. } if candidate.contains(text))
                 })

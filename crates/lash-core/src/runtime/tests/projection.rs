@@ -172,7 +172,6 @@ async fn tool_result_projector_only_changes_model_observation() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,
@@ -230,7 +229,6 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![LlmStreamEvent::Delta("Stored answer".to_string())],
         response: Ok(LlmResponse {
-            full_text: "Stored answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Stored answer".to_string(),
                 response_meta: None,
@@ -796,7 +794,6 @@ async fn completed_turns_are_persisted_in_session_graph() {
             }),
         ],
         response: Ok(LlmResponse {
-            full_text: "Stored answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Stored answer".to_string(),
                 response_meta: None,

@@ -207,15 +207,7 @@ pub(in crate::runtime) async fn emit_semantic_response_parts(
             _ => {}
         }
     }
-    let full_text = project_assistant_prose(&response.full_text, prose_projector);
-    let parts_text;
-    let full_text = if full_text.is_empty() && !has_text_correlation_ids {
-        parts_text =
-            project_assistant_prose(&response_text_from_parts(&visible_parts), prose_projector);
-        parts_text.as_str()
-    } else {
-        full_text.as_str()
-    };
+    let full_text = project_assistant_prose(&response.full_text(), prose_projector);
     if !emitted_text && !full_text.is_empty() {
         send_independent_turn_event(
             event_tx,
@@ -234,8 +226,4 @@ fn project_assistant_prose(
     projector
         .map(|projector| projector.project_assistant_prose(text))
         .unwrap_or_else(|| text.to_string())
-}
-
-fn response_text_from_parts(parts: &[LlmOutputPart]) -> String {
-    crate::visible_response_text_from_parts(parts)
 }

@@ -439,6 +439,79 @@ fn unstamped_conversation_bodies_keep_loading() {
     );
 }
 
+fn legacy_response_session_node_body(full_text: &str, parts: Vec<crate::LlmOutputPart>) -> String {
+    let response = crate::LlmResponse {
+        parts,
+        response_metadata: Default::default(),
+        ..crate::LlmResponse::default()
+    };
+    let mut payload = serde_json::to_value(response).expect("encode response fixture");
+    payload["full_text"] = serde_json::Value::String(full_text.to_string());
+    serde_json::json!({
+        "schema_version": 2,
+        "timestamp": "2026-08-24T00:00:00Z",
+        "kind": "event",
+        "event": {
+            "Protocol": {
+                "plugin_id": "legacy-response",
+                "payload": payload,
+            }
+        }
+    })
+    .to_string()
+}
+
+fn response_from_protocol_node(node_json: &str) -> crate::LlmResponse {
+    let decoded = SessionNodeRecord::decode_storage_body("node-1".to_string(), None, node_json)
+        .expect("decode legacy response session node");
+    let SessionNodePayload::Event {
+        event: SessionHistoryRecord::Protocol(event),
+    } = decoded.payload
+    else {
+        panic!("fixture must decode as a protocol event");
+    };
+    serde_json::from_value(event.payload).expect("decode upgraded response payload")
+}
+
+#[test]
+fn pre_v3_session_node_synthesizes_missing_visible_text_part() {
+    let response = response_from_protocol_node(&legacy_response_session_node_body(
+        "legacy answer",
+        Vec::new(),
+    ));
+
+    assert_eq!(response.full_text(), "legacy answer");
+    assert_eq!(
+        response
+            .parts
+            .iter()
+            .filter(|part| matches!(part, crate::LlmOutputPart::Text { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn pre_v3_session_node_does_not_duplicate_existing_visible_text_part() {
+    let response = response_from_protocol_node(&legacy_response_session_node_body(
+        "legacy answer",
+        vec![crate::LlmOutputPart::Text {
+            text: "legacy answer".to_string(),
+            response_meta: None,
+        }],
+    ));
+
+    assert_eq!(response.full_text(), "legacy answer");
+    assert_eq!(
+        response
+            .parts
+            .iter()
+            .filter(|part| matches!(part, crate::LlmOutputPart::Text { .. }))
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn stored_bodies_from_a_newer_generation_are_refused() {
     let newer = serde_json::json!({

@@ -369,7 +369,7 @@ mod tests {
             Some("stream_ended_before_message_stop")
         );
         let partial = error.partial_response.as_deref().expect("partial response");
-        assert_eq!(partial.full_text, "partial");
+        assert_eq!(partial.full_text(), "partial");
         assert_eq!(partial.usage.input_tokens, 8);
         assert_eq!(partial.usage.output_tokens, 3);
         assert!(partial.provider_usage.is_some());
@@ -515,7 +515,7 @@ mod tests {
             .iter()
             .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
             .count();
-        let (finalized, _, _, _) = AnthropicProvider::finalize(state, "claude-test");
+        let (finalized, _, _) = AnthropicProvider::finalize(state, "claude-test");
         let finalized_tool_calls = finalized
             .iter()
             .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
@@ -553,7 +553,7 @@ mod tests {
                 .complete(terminal_req)
                 .await
                 .expect("terminal stream")
-                .full_text,
+                .full_text(),
             "done"
         );
 
@@ -572,7 +572,7 @@ mod tests {
                 .complete(tolerant_req)
                 .await
                 .expect("tolerated EOF")
-                .full_text,
+                .full_text(),
             "legacy"
         );
     }
@@ -844,7 +844,7 @@ mod tests {
             ..StreamState::default()
         };
 
-        let (_, _, _, terminal_reason) = AnthropicProvider::finalize(state, "claude-test");
+        let (_, _, terminal_reason) = AnthropicProvider::finalize(state, "claude-test");
 
         assert_eq!(terminal_reason, LlmTerminalReason::Stop);
     }
@@ -856,7 +856,7 @@ mod tests {
             ..StreamState::default()
         };
 
-        let (_, _, _, terminal_reason) = AnthropicProvider::finalize(state, "claude-test");
+        let (_, _, terminal_reason) = AnthropicProvider::finalize(state, "claude-test");
 
         assert_eq!(terminal_reason, LlmTerminalReason::ProviderError);
     }
@@ -1365,7 +1365,7 @@ mod tests {
                         .expect("anthropic sse event parses");
                 }
             }
-            let (parts, _text, usage, terminal) = AnthropicProvider::finalize(state, "claude-test");
+            let (parts, usage, terminal) = AnthropicProvider::finalize(state, "claude-test");
             (parts, usage, terminal)
         }
 
@@ -1564,7 +1564,7 @@ mod tests {
                     AnthropicProvider::process_sse_event(raw, &mut state, Some(&sender), true)
                         .expect("anthropic sse event parses");
                 }
-                let (mut parts, _text, usage, _terminal) =
+                let (mut parts, usage, _terminal) =
                     AnthropicProvider::finalize(state, "claude-test");
                 if matches!(scenario, Scenario::ReasoningReplayRoundTrip) {
                     let route = AnthropicProvider::new("test").route_identity("claude-sonnet-4-6");

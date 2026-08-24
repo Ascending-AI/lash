@@ -297,14 +297,6 @@ impl RuntimeEffectController for RecordingEffectController {
                     };
                     Ok(RuntimeEffectOutcome::LlmCall {
                         result: Box::new(Ok(LlmResponse {
-                            full_text: if parts
-                                .iter()
-                                .any(|part| matches!(part, LlmOutputPart::Text { .. }))
-                            {
-                                "finished".to_string()
-                            } else {
-                                String::new()
-                            },
                             parts,
                             usage: LlmUsage {
                                 input_tokens: 1,
@@ -455,7 +447,6 @@ impl RuntimeEffectController for RecordingEffectController {
                 };
                 Ok(RuntimeEffectOutcome::Direct {
                     result: Box::new(Ok(LlmResponse {
-                        full_text: text.to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: text.to_string(),
                             response_meta: None,
@@ -500,7 +491,6 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "Done".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Done".to_string(),
                 response_meta: None,
@@ -611,7 +601,6 @@ async fn turn_effect_envelope_does_not_carry_checkpoint_payload() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "Done".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Done".to_string(),
                 response_meta: None,
@@ -748,7 +737,6 @@ async fn scoped_borrowed_effect_controller_uses_required_stable_turn_id() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "Done".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Done".to_string(),
                 response_meta: None,
@@ -830,7 +818,6 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: String::new(),
                 parts: vec![LlmOutputPart::ToolCall {
                     call_id: "direct-call-1".to_string(),
                     tool_name: "direct_tool".to_string(),
@@ -844,7 +831,6 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "nested answer".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "nested answer".to_string(),
                     response_meta: None,
@@ -856,7 +842,6 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "finished".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "finished".to_string(),
                     response_meta: None,
@@ -1037,11 +1022,6 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
                 };
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(Ok(LlmResponse {
-                        full_text: if *llm_calls == 1 {
-                            String::new()
-                        } else {
-                            "finished".to_string()
-                        },
                         parts,
                         usage: LlmUsage {
                             input_tokens: 1,
@@ -1496,7 +1476,6 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: String::new(),
                 parts: vec![LlmOutputPart::ToolCall {
                     call_id: "retry-call-1".to_string(),
                     tool_name: "retry_once".to_string(),
@@ -1510,7 +1489,6 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "finished".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "finished".to_string(),
                     response_meta: None,
@@ -1567,7 +1545,6 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: String::new(),
                 parts: vec![
                     LlmOutputPart::ToolCall {
                         call_id: "call-1".to_string(),
@@ -1589,7 +1566,6 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "finished".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "finished".to_string(),
                     response_meta: None,
@@ -1664,7 +1640,6 @@ async fn tool_batch_serializes_child_attempts_when_controller_disallows_concurre
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: String::new(),
                 parts: vec![
                     LlmOutputPart::ToolCall {
                         call_id: "call-1".to_string(),
@@ -1686,7 +1661,6 @@ async fn tool_batch_serializes_child_attempts_when_controller_disallows_concurre
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "finished".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "finished".to_string(),
                     response_meta: None,
@@ -1846,7 +1820,6 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "direct answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "direct answer".to_string(),
                 response_meta: None,
@@ -1922,7 +1895,6 @@ async fn in_turn_direct_completion_uses_effect_controller_without_out_of_band_co
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "direct answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "direct answer".to_string(),
                 response_meta: None,
@@ -1988,7 +1960,10 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
     let response = || MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "direct answer".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "direct answer".to_string(),
+                response_meta: None,
+            }],
             ..LlmResponse::default()
         }),
     };
@@ -2129,7 +2104,6 @@ async fn direct_effect_restores_required_streaming_for_provider_execution() {
             async move {
                 captured.store(request.stream_events.is_some(), Ordering::SeqCst);
                 Ok(LlmResponse {
-                    full_text: "direct answer".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "direct answer".to_string(),
                         response_meta: None,
@@ -2217,7 +2191,7 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         .await
         .expect("direct llm completion");
 
-    assert_eq!(completion.response.full_text, "raw direct answer");
+    assert_eq!(completion.response.full_text(), "raw direct answer");
     let envelope = recorder
         .envelopes()
         .into_iter()

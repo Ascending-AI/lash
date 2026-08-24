@@ -119,7 +119,10 @@ fn direct_mock_call() -> super::helpers::MockCall {
     super::helpers::MockCall {
         stream_events: Vec::new(),
         response: Ok(crate::LlmResponse {
-            full_text: DIRECT_TEXT.to_string(),
+            parts: vec![crate::LlmOutputPart::Text {
+                text: DIRECT_TEXT.to_string(),
+                response_meta: None,
+            }],
             ..crate::LlmResponse::default()
         }),
     }
@@ -1299,7 +1302,7 @@ async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal()
                 )
                 .await
                 .expect("attempt-scoped direct llm completion");
-            assert_eq!(completion.response.full_text, DIRECT_TEXT);
+            assert_eq!(completion.response.full_text(), DIRECT_TEXT);
             Ok(attempt_done_outcome())
         }),
     )

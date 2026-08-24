@@ -896,7 +896,6 @@ impl Provider for ScriptedProvider {
                 ..Default::default()
             },
             ProviderOperation::AfterToolRequest => crate::LlmResponse {
-                full_text: "trace turn complete".to_string(),
                 parts: vec![crate::LlmOutputPart::Text {
                     text: "trace turn complete".to_string(),
                     response_meta: None,

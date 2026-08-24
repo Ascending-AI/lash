@@ -59,7 +59,7 @@ async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
         .expect("join idle WebSocket fallback")
         .expect("sse fallback response");
 
-    assert_eq!(response.full_text, "fallback");
+    assert_eq!(response.full_text(), "fallback");
     assert_eq!(ws.captured().len(), 1);
     assert_eq!(http.captured_len(), 1);
 }

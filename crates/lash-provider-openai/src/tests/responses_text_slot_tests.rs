@@ -19,7 +19,7 @@ fn responses_final_answer_phase_hides_commentary_from_visible_text() {
     }
 
     let parts = state.response_parts();
-    assert_eq!(state.full_text, "Final answer.");
+    assert_eq!(state.full_text(), "Final answer.");
     assert_eq!(
         parts
             .iter()
@@ -28,7 +28,6 @@ fn responses_final_answer_phase_hides_commentary_from_visible_text() {
         2
     );
     let response = LlmResponse {
-        full_text: state.full_text.clone(),
         parts,
         response_metadata: Default::default(),
         ..LlmResponse::default()
@@ -72,5 +71,5 @@ fn responses_text_delta_before_item_added_yields_one_text_part() {
         })
         .collect::<Vec<_>>();
     assert_eq!(texts, vec!["Hello world"], "parts: {parts:?}");
-    assert_eq!(state.full_text, "Hello world");
+    assert_eq!(state.full_text(), "Hello world");
 }

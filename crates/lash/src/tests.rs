@@ -1904,7 +1904,6 @@ fn mock_provider() -> ProviderHandle {
                 events.send(LlmStreamEvent::Delta(reply.clone()));
             }
             Ok(LlmResponse {
-                full_text: reply.clone(),
                 parts: vec![LlmOutputPart::Text {
                     text: reply,
                     response_meta: None,
@@ -1937,7 +1936,6 @@ fn tool_roundtrip_provider() -> ProviderHandle {
             ..LlmResponse::default()
         },
         LlmResponse {
-            full_text: "done".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "done".to_string(),
                 response_meta: None,
@@ -1985,7 +1983,6 @@ fn agent_frame_switch_provider() -> ProviderHandle {
 
 fn text_response(text: &str) -> LlmResponse {
     LlmResponse {
-        full_text: text.to_string(),
         parts: vec![LlmOutputPart::Text {
             text: text.to_string(),
             response_meta: None,
@@ -2008,7 +2005,6 @@ fn queued_text_provider(texts: Vec<impl Into<String>>) -> ProviderHandle {
             .map(|text| {
                 let text = text.into();
                 LlmResponse {
-                    full_text: text.clone(),
                     parts: vec![LlmOutputPart::Text {
                         text,
                         response_meta: None,
@@ -2055,7 +2051,6 @@ fn semantic_group_provider() -> ProviderHandle {
         .kind("embed-test")
         .complete(|_request| async move {
             Ok(LlmResponse {
-                full_text: "firstsecond".to_string(),
                 parts: vec![
                     LlmOutputPart::Text {
                         text: "first".to_string(),
@@ -2089,7 +2084,6 @@ fn text_provider(kind: &'static str, _model: &'static str, text: &'static str) -
         .kind(kind)
         .complete(move |_request| async move {
             Ok(LlmResponse {
-                full_text: text.to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: text.to_string(),
                     response_meta: None,
@@ -2119,7 +2113,6 @@ fn recording_text_provider(
                 seen.lock_recover()
                     .push((request.model, request.model_variant));
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,
@@ -2194,7 +2187,6 @@ fn recording_prompt_provider(seen: Arc<std::sync::Mutex<Vec<String>>>) -> Provid
             async move {
                 seen.lock_recover().push(system_text(&request));
                 Ok(LlmResponse {
-                    full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "ok".to_string(),
                         response_meta: None,
@@ -2244,7 +2236,6 @@ fn retry_once_provider() -> ProviderHandle {
                     ));
                 }
                 Ok(LlmResponse {
-                    full_text: "retried".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "retried".to_string(),
                         response_meta: None,

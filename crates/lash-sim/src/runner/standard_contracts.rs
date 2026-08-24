@@ -392,14 +392,16 @@ pub(super) fn run_standard_protocol_contract(
                     ))
                 })?;
                 let expected_parts = parts.clone();
-                let expected_full_text = standard_full_text(&expected_parts);
+                let expected_full_text =
+                    lash_core::facade_support::visible_response_text_from_parts(&expected_parts);
                 let expected_part_summary = llm_output_parts_contract_summary(&expected_parts);
-                let response = llm_response_with_parts(expected_full_text.clone(), parts);
+                let response = llm_response_with_parts(parts);
                 require(
-                    response.full_text == expected_full_text,
+                    response.full_text() == expected_full_text,
                     format!(
                         "{scenario_name} provider response full_text changed: expected {:?}, got {:?}",
-                        expected_full_text, response.full_text
+                        expected_full_text,
+                        response.full_text()
                     ),
                 )?;
                 let response_part_summary = llm_output_parts_contract_summary(&response.parts);
@@ -412,7 +414,7 @@ pub(super) fn run_standard_protocol_contract(
                 )?;
                 observed
                     .llm_response_full_texts
-                    .push(response.full_text.clone());
+                    .push(response.full_text().clone());
                 observed.llm_response_parts.push(response_part_summary);
                 machine.handle_response(lash_core::sansio::Response::LlmComplete {
                     id: llm_id,
@@ -530,20 +532,8 @@ fn standard_tool_call_part(call_id: &str, tool_name: &str, input_json: &str) -> 
     }
 }
 
-fn standard_full_text(parts: &[LlmOutputPart]) -> String {
-    parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(super) fn llm_response_with_parts(full_text: String, parts: Vec<LlmOutputPart>) -> LlmResponse {
+pub(super) fn llm_response_with_parts(parts: Vec<LlmOutputPart>) -> LlmResponse {
     LlmResponse {
-        full_text,
         parts,
         response_metadata: Default::default(),
         ..Default::default()
@@ -552,13 +542,10 @@ pub(super) fn llm_response_with_parts(full_text: String, parts: Vec<LlmOutputPar
 
 pub(super) fn text_llm_response(text: impl Into<String>) -> LlmResponse {
     let text = text.into();
-    llm_response_with_parts(
-        text.clone(),
-        vec![LlmOutputPart::Text {
-            text,
-            response_meta: None,
-        }],
-    )
+    llm_response_with_parts(vec![LlmOutputPart::Text {
+        text,
+        response_meta: None,
+    }])
 }
 
 pub(super) fn tool_call_llm_response(

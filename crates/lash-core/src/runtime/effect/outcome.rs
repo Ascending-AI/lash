@@ -61,7 +61,7 @@ pub(crate) fn emit_llm_trace_completed(
         context,
         lash_trace::TraceEvent::LlmCallCompleted {
             response: crate::trace::trace_llm_response(
-                response.full_text.clone(),
+                response.full_text(),
                 duration_ms,
                 Some(response.terminal_reason),
                 crate::trace::trace_output_parts(&response.parts),

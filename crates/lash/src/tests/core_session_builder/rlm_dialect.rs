@@ -377,7 +377,6 @@ async fn projected_bindings_reach_a_served_prompt_once_in_the_sessions_dialect()
                     async move {
                         served.lock_recover().push(format!("{request:?}"));
                         Ok(LlmResponse {
-                            full_text: "done".to_string(),
                             parts: vec![LlmOutputPart::Text {
                                 text: "done".to_string(),
                                 response_meta: None,

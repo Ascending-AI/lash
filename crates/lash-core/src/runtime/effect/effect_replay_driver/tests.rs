@@ -3,6 +3,66 @@ use super::*;
 const NOW: u64 = 1_000_000;
 const TTL: u64 = 30_000;
 
+fn legacy_llm_call_outcome(full_text: &str, parts: Vec<crate::LlmOutputPart>) -> String {
+    let outcome = RuntimeEffectOutcome::LlmCall {
+        result: Box::new(Ok(crate::LlmResponse {
+            parts,
+            response_metadata: Default::default(),
+            ..crate::LlmResponse::default()
+        })),
+        text_streamed: false,
+        call_record: None,
+    };
+    let mut value = serde_json::to_value(outcome).expect("encode legacy outcome fixture");
+    value["result"]["Ok"]["full_text"] = serde_json::Value::String(full_text.to_string());
+    serde_json::to_string(&value).expect("encode legacy outcome JSON")
+}
+
+fn decoded_llm_response(outcome_json: &str) -> crate::LlmResponse {
+    let RuntimeEffectOutcome::LlmCall { result, .. } =
+        decode_runtime_effect_outcome(outcome_json).expect("decode legacy LLM outcome")
+    else {
+        panic!("fixture must decode as an LLM-call outcome");
+    };
+    result.expect("fixture carries a successful LLM response")
+}
+
+#[test]
+fn pre_bump_journal_synthesizes_missing_visible_text_part() {
+    let response = decoded_llm_response(&legacy_llm_call_outcome("legacy answer", Vec::new()));
+
+    assert_eq!(response.full_text(), "legacy answer");
+    assert_eq!(
+        response
+            .parts
+            .iter()
+            .filter(|part| matches!(part, crate::LlmOutputPart::Text { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn pre_bump_journal_does_not_duplicate_existing_visible_text_part() {
+    let response = decoded_llm_response(&legacy_llm_call_outcome(
+        "legacy answer",
+        vec![crate::LlmOutputPart::Text {
+            text: "legacy answer".to_string(),
+            response_meta: None,
+        }],
+    ));
+
+    assert_eq!(response.full_text(), "legacy answer");
+    assert_eq!(
+        response
+            .parts
+            .iter()
+            .filter(|part| matches!(part, crate::LlmOutputPart::Text { .. }))
+            .count(),
+        1
+    );
+}
+
 fn request() -> EffectClaimRequest {
     EffectClaimRequest {
         scope_id: "session:s1".to_string(),

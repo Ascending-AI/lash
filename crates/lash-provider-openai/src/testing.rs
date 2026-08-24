@@ -20,8 +20,8 @@ impl ResponsesStreamParser {
         crate::responses_shared::parse_sse_payload(provider, payload, &mut self.state)
     }
 
-    pub fn full_text(&self) -> &str {
-        &self.state.full_text
+    pub fn full_text(&self) -> String {
+        self.state.full_text()
     }
 
     pub fn response_parts_len(&self) -> usize {

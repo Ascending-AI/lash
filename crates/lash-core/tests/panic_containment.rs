@@ -430,7 +430,6 @@ fn policy(provider_id: &str) -> SessionPolicy {
 
 fn text_response(text: &str) -> LlmResponse {
     LlmResponse {
-        full_text: text.to_string(),
         parts: vec![LlmOutputPart::Text {
             text: text.to_string(),
             response_meta: None,

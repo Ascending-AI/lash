@@ -377,7 +377,6 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,
@@ -497,7 +496,6 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "process registered".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "process registered".to_string(),
                     response_meta: None,
@@ -778,7 +776,6 @@ async fn parent_turn_receives_live_child_token_usage_events() {
                 reasoning_output_tokens: 1,
             })],
             response: Ok(LlmResponse {
-                full_text: "child session".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "child session".to_string(),
                     response_meta: None,
@@ -795,7 +792,6 @@ async fn parent_turn_receives_live_child_token_usage_events() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,
@@ -961,7 +957,6 @@ async fn nested_child_turns_use_independent_default_task_stacks() {
     let text = |value: &str| MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: value.to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: value.to_string(),
                 response_meta: None,
@@ -1039,7 +1034,6 @@ async fn parent_turn_keeps_cached_only_child_usage_live() {
                 reasoning_output_tokens: 0,
             })],
             response: Ok(LlmResponse {
-                full_text: "cached child".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "cached child".to_string(),
                     response_meta: None,
@@ -1051,7 +1045,6 @@ async fn parent_turn_keeps_cached_only_child_usage_live() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,
@@ -1196,7 +1189,6 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         MockCall {
             stream_events: vec![child_turn_usage_event()],
             response: Ok(LlmResponse {
-                full_text: "retried child turn".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "retried child turn".to_string(),
                     response_meta: None,
@@ -1209,7 +1201,6 @@ async fn cancelled_managed_child_turn_releases_its_registration_and_live_usage()
         MockCall {
             stream_events: vec![child_turn_usage_event()],
             response: Ok(LlmResponse {
-                full_text: "cancelled child recovered".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "cancelled child recovered".to_string(),
                     response_meta: None,

@@ -404,7 +404,8 @@ fn validate_direct_output(output: &DirectOutputSpec, response: &LlmResponse) -> 
     let DirectOutputSpec::JsonSchema(schema) = output else {
         return Ok(());
     };
-    let parsed: serde_json::Value = serde_json::from_str(response.full_text.trim())
+    let response_text = response.full_text();
+    let parsed: serde_json::Value = serde_json::from_str(response_text.trim())
         .map_err(|err| format!("expected JSON: {err}"))?;
     LashSchema::new(schema.schema.canonical().clone()).validate(&parsed)
 }
@@ -567,7 +568,6 @@ mod tests {
             .kind("direct-trace-success")
             .complete(|_request| async {
                 Ok(LlmResponse {
-                    full_text: "direct success".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "direct success".to_string(),
                         response_meta: None,
@@ -588,7 +588,7 @@ mod tests {
             .complete(DirectRequest::text("trace-model", "trace success"))
             .await
             .expect("direct success should complete");
-        assert_eq!(response.full_text, "direct success");
+        assert_eq!(response.full_text(), "direct success");
 
         let provider = TestProvider::builder()
             .kind("direct-trace-failure")
@@ -605,7 +605,10 @@ mod tests {
             .kind("direct-trace-structured-rejection")
             .complete(|_request| async {
                 Ok(LlmResponse {
-                    full_text: "{}".to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: "{}".to_string(),
+                        response_meta: None,
+                    }],
                     usage: LlmUsage {
                         input_tokens: 17,
                         output_tokens: 3,
@@ -672,7 +675,6 @@ mod tests {
                 async move {
                     *captured_for_provider.lock_recover() = Some(request);
                     Ok(LlmResponse {
-                        full_text: "provider delegated response".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "provider delegated response".to_string(),
                             response_meta: None,
@@ -699,7 +701,7 @@ mod tests {
             .await
             .expect("direct completion should delegate");
 
-        assert_eq!(response.full_text, "provider delegated response");
+        assert_eq!(response.full_text(), "provider delegated response");
         assert_eq!(response.llm_call.attempts.len(), 1);
         let captured = captured_request
             .lock_recover()
@@ -722,7 +724,10 @@ mod tests {
             .kind("direct-validation-provider")
             .complete(|_request| async {
                 Ok(LlmResponse {
-                    full_text: r#"{"items":[]}"#.to_string(),
+                    parts: vec![LlmOutputPart::Text {
+                        text: r#"{"items":[]}"#.to_string(),
+                        response_meta: None,
+                    }],
                     usage: LlmUsage {
                         input_tokens: 17,
                         output_tokens: 3,
@@ -765,7 +770,7 @@ mod tests {
         let DirectLlmError::InvalidResponse { result, .. } = &err else {
             panic!("expected invalid response, got {err:?}");
         };
-        assert_eq!(result.full_text, r#"{"items":[]}"#);
+        assert_eq!(result.full_text(), r#"{"items":[]}"#);
         assert_eq!(result.usage.input_tokens, 17);
         assert_eq!(result.usage.output_tokens, 3);
         assert_eq!(result.terminal_reason, LlmTerminalReason::Stop);
@@ -846,7 +851,10 @@ mod tests {
                 async move {
                     *captured.lock_recover() = Some(request.model_variant.clone());
                     Ok(LlmResponse {
-                        full_text: "ok".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "ok".to_string(),
+                            response_meta: None,
+                        }],
                         terminal_reason: LlmTerminalReason::Stop,
                         response_metadata: Default::default(),
                         ..Default::default()

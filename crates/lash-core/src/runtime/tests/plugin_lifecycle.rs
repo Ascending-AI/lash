@@ -56,7 +56,6 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
         mock_provider(vec![MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "finished".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "finished".to_string(),
                     response_meta: None,

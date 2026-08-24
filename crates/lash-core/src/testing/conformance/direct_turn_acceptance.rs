@@ -19,7 +19,6 @@ const SESSION_ID: &str = "root";
 
 fn text_response(text: &str) -> crate::LlmResponse {
     crate::LlmResponse {
-        full_text: text.to_string(),
         parts: vec![crate::LlmOutputPart::Text {
             text: text.to_string(),
             response_meta: None,

@@ -886,7 +886,6 @@ mod tests {
 finish "done through route"
 </lashlang>"#;
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,

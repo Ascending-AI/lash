@@ -841,7 +841,7 @@ async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {
         .await
         .expect("cached follow-up response");
 
-    assert_eq!(response.full_text, "done");
+    assert_eq!(response.full_text(), "done");
     let diagnostics = websocket_diagnostics(&trace);
     assert_eq!(diagnostics.len(), 2, "{transport:?}");
     assert_eq!(diagnostics[0]["transport"], format!("{transport:?}"));
@@ -898,7 +898,7 @@ async fn assert_trace_stale_retry_for_transport(transport: CodexTransport) {
         .await
         .expect("stale retry response");
 
-    assert_eq!(response.full_text, "recovered");
+    assert_eq!(response.full_text(), "recovered");
     let diagnostics = websocket_diagnostics(&trace);
     assert_eq!(diagnostics.len(), 3, "{transport:?}");
     assert_eq!(diagnostics[1]["reused_connection"], true);
@@ -978,7 +978,7 @@ async fn codex_scripted_websocket_full_turn_sends_response_create() {
         .await
         .expect("websocket response");
 
-    assert_eq!(response.full_text, "ok");
+    assert_eq!(response.full_text(), "ok");
     let captured = ws.captured();
     assert_eq!(captured.len(), 1);
     assert_eq!(captured[0]["type"], "response.create");
@@ -1043,7 +1043,7 @@ async fn codex_scripted_websocket_cached_follow_up_omits_previous_assistant_outp
     ]);
     let response = provider.complete(second).await.expect("second response");
 
-    assert_eq!(response.full_text, "done");
+    assert_eq!(response.full_text(), "done");
     assert!(
         response
             .http_summary
@@ -1218,7 +1218,7 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
     );
     let response = provider.complete(second).await.expect("second response");
 
-    assert_eq!(response.full_text, "done");
+    assert_eq!(response.full_text(), "done");
     assert!(
         response
             .http_summary
@@ -1297,7 +1297,7 @@ async fn codex_scripted_websocket_stale_previous_response_retries_full_context_o
         .await
         .expect("stale retry response");
 
-    assert_eq!(response.full_text, "recovered");
+    assert_eq!(response.full_text(), "recovered");
     assert!(
         response
             .http_summary
@@ -1365,7 +1365,7 @@ async fn codex_stale_continuation_after_allocation_only_event_still_recovers() {
     let captured = ws.captured();
     assert_eq!(captured.len(), 3);
     let response = result.expect("allocation-only stale response retries with full context");
-    assert_eq!(response.full_text, "recovered");
+    assert_eq!(response.full_text(), "recovered");
     assert_eq!(captured[1]["previous_response_id"], "resp_1");
     assert!(captured[2].get("previous_response_id").is_none());
     assert_eq!(captured[2]["input"], full_body["input"]);
@@ -1421,7 +1421,7 @@ async fn codex_scripted_websocket_dead_reused_socket_reconnects_full_context() {
         .await
         .expect("dead reused socket reconnect response");
 
-    assert_eq!(response.full_text, "reconnected");
+    assert_eq!(response.full_text(), "reconnected");
     assert!(
         response
             .http_summary
@@ -1472,7 +1472,7 @@ async fn codex_scripted_websocket_incomplete_terminal_response_is_not_cached() {
         .await
         .expect("fresh response after incomplete terminal");
 
-    assert_eq!(response.full_text, "fresh");
+    assert_eq!(response.full_text(), "fresh");
     assert!(
         response
             .http_summary
@@ -1514,8 +1514,8 @@ async fn codex_auto_with_distinct_scopes_uses_uncached_websockets() {
     let first_response = provider.complete(first).await.expect("first response");
     let second_response = provider.complete(second).await.expect("second response");
 
-    assert_eq!(first_response.full_text, "one");
-    assert_eq!(second_response.full_text, "two");
+    assert_eq!(first_response.full_text(), "one");
+    assert_eq!(second_response.full_text(), "two");
     assert!(
         second_response
             .http_summary
@@ -1584,8 +1584,8 @@ async fn codex_uncached_websockets_survive_a_failed_accept_between_connections()
     let first_response = provider.complete(first).await.expect("first response");
     let second_response = provider.complete(second).await.expect("second response");
 
-    assert_eq!(first_response.full_text, "one");
-    assert_eq!(second_response.full_text, "two");
+    assert_eq!(first_response.full_text(), "one");
+    assert_eq!(second_response.full_text(), "two");
     assert_eq!(
         ws.handshakes().len(),
         2,
@@ -1643,7 +1643,7 @@ async fn codex_scripted_websocket_accept_loop_retries_every_error_kind() {
 
     let response = provider.complete(only).await.expect("response");
 
-    assert_eq!(response.full_text, "one");
+    assert_eq!(response.full_text(), "one");
     assert_eq!(
         ws.handshakes().len(),
         1,
@@ -1819,7 +1819,7 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
         .await
         .expect("first SSE fallback response");
 
-    assert_eq!(first.full_text, "fallback-one");
+    assert_eq!(first.full_text(), "fallback-one");
     assert!(
         provider
             .websocket_fallback_reason(&request(vec![LlmMessage::text(LlmRole::User, "hello")]))
@@ -1838,7 +1838,7 @@ async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
         .await
         .expect("second SSE fallback response");
 
-    assert_eq!(second.full_text, "fallback-two");
+    assert_eq!(second.full_text(), "fallback-two");
     assert_eq!(ws.captured().len(), 0);
     assert_eq!(http.captured_len(), 2);
     let sse_request = http.captured().remove(0);
@@ -1970,7 +1970,7 @@ async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tol
         Some("websocket_closed_before_completed")
     );
     let partial = error.partial_response.as_deref().expect("partial response");
-    assert_eq!(partial.full_text, "partial");
+    assert_eq!(partial.full_text(), "partial");
     assert_eq!(partial.usage.input_tokens, 4);
     assert_eq!(partial.usage.output_tokens, 1);
     assert!(partial.provider_usage.is_some());
@@ -1988,7 +1988,7 @@ async fn codex_websocket_clean_eof_requires_terminal_event_unless_explicitly_tol
         .complete(tolerant_request)
         .await
         .expect("explicit EOF tolerance accepts clean close");
-    assert_eq!(response.full_text, "partial");
+    assert_eq!(response.full_text(), "partial");
     assert_eq!(http.captured_len(), 0);
 }
 
@@ -2049,7 +2049,7 @@ fn codex_stream_assembles_single_message_item_once() {
     );
 
     let response = response_from_state(state);
-    assert_eq!(response.full_text, "Hello");
+    assert_eq!(response.full_text(), "Hello");
     assert_eq!(response.parts.len(), 1);
     assert_eq!(
         response.parts[0],
@@ -2080,7 +2080,7 @@ fn codex_stream_replayed_message_item_does_not_duplicate_text() {
     }
 
     let response = response_from_state(state);
-    assert_eq!(response.full_text, "The sentence.");
+    assert_eq!(response.full_text(), "The sentence.");
     assert_eq!(
         response
             .parts
@@ -2105,7 +2105,7 @@ fn codex_stream_completed_response_merges_existing_message_by_id() {
     }
 
     let response = response_from_state(state);
-    assert_eq!(response.full_text, "Final answer.");
+    assert_eq!(response.full_text(), "Final answer.");
     assert_eq!(response.parts.len(), 1);
 }
 
@@ -2125,7 +2125,7 @@ fn codex_stream_distinct_message_ids_stay_separate_without_inserted_separator() 
     }
 
     let response = response_from_state(state);
-    assert_eq!(response.full_text, "One.Two.");
+    assert_eq!(response.full_text(), "One.Two.");
     assert_eq!(response.parts.len(), 2);
     assert_eq!(
         response.parts,
@@ -2183,7 +2183,7 @@ fn codex_stream_preserves_reasoning_message_and_tool_call_once() {
     );
 
     let response = response_from_state(state);
-    assert_eq!(response.full_text, "Hi");
+    assert_eq!(response.full_text(), "Hi");
     assert_eq!(emitted_parts.len(), 3);
     assert_eq!(
         emitted_parts

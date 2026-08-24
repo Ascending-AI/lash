@@ -766,7 +766,7 @@ fn retryable_http_rejection(failure: &LlmTransportError) -> bool {
 }
 
 pub(super) fn response_has_output_evidence(response: &LlmResponse) -> bool {
-    !response.full_text.is_empty()
+    !response.full_text().is_empty()
         || response
             .provider_usage
             .as_ref()

@@ -203,7 +203,7 @@ async fn run_once_direct_llm_client(chat_turns: usize) -> anyhow::Result<Runtime
             )
         })?;
         validate_direct_llm_response(turn_index, &response)?;
-        response_bytes += response.full_text.len();
+        response_bytes += response.full_text().len();
         let run_turn_ms = elapsed_ms(turn_started);
         let run_turn_alloc = alloc_delta(turn_before_alloc, allocator_stats());
         let after_turn_memory = process_memory_sample();

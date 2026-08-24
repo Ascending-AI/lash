@@ -314,7 +314,6 @@ finish "registered"
                         lashlang_block(TRIGGER_SOURCE)
                     };
                     Ok(crate::provider::LlmResponse {
-                        full_text: text.clone(),
                         parts: vec![crate::direct::LlmOutputPart::Text {
                             text,
                             response_meta: None,

@@ -949,7 +949,6 @@ fn scripted_provider(
                     ));
                 };
                 Ok(LlmResponse {
-                    full_text: text.clone(),
                     parts: vec![LlmOutputPart::Text {
                         text,
                         response_meta: None,

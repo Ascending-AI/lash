@@ -805,6 +805,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // over the pair. Effect databases follow the crate's reject-and-recreate
 // convention, so an existing effect database is deleted on upgrade rather than
 // migrated — release-notes material, not a host's discovery.
+// Version 12 removes the duplicated `LlmResponse.full_text` member from
+// runtime-effect outcomes. Pre-cutover journal JSON is upgraded only at the
+// effect replay decode boundary.
 //
 // The index-only carve-out documented on `SCHEMA_VERSION` applies here for the
 // same reason and with the same limit: an additive non-unique
@@ -823,7 +826,7 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // version guard's projection elides a *new* index statement but not the SQL
 // comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
 // bump the carve-out exists to avoid.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 11;
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 12;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

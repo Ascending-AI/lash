@@ -609,12 +609,13 @@ pub(super) fn run_rlm_protocol_contract(
                 let expected_parts = parts.clone();
                 let expected_full_text = rlm_full_text(&expected_parts);
                 let expected_part_summary = llm_output_parts_contract_summary(&expected_parts);
-                let response = llm_response_with_parts(expected_full_text.clone(), parts);
+                let response = llm_response_with_parts(parts);
                 require(
-                    response.full_text == expected_full_text,
+                    response.full_text() == expected_full_text,
                     format!(
                         "{scenario_name} provider response full_text changed: expected {:?}, got {:?}",
-                        expected_full_text, response.full_text
+                        expected_full_text,
+                        response.full_text()
                     ),
                 )?;
                 require(
@@ -635,7 +636,7 @@ pub(super) fn run_rlm_protocol_contract(
                 )?;
                 observed
                     .llm_response_full_texts
-                    .push(response.full_text.clone());
+                    .push(response.full_text().clone());
                 observed.llm_response_part_counts.push(response.parts.len());
                 observed.llm_response_parts.push(response_part_summary);
                 observed.llm_response_text_streamed.push(text_streamed);

@@ -131,7 +131,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Err(tool_call) => {
                 actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
                     protocol_iteration: ctx.protocol_iteration(),
-                    content: llm_response.full_text,
+                    content: llm_response.full_text(),
                     duration_ms: 0,
                 }));
                 native_tool_call_failure_actions(&mut actions, ctx.protocol_iteration(), tool_call);

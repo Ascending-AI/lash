@@ -81,7 +81,6 @@ fn transform_final_response(
     }
 
     let spliced = detector.spliced_response_text();
-    response.full_text = spliced.clone();
     response
         .parts
         .retain(|part| !matches!(part, lash_core::LlmOutputPart::Text { .. }));
@@ -758,7 +757,6 @@ mod tests {
         let response = transform_final_response(
             &detector,
             lash_core::LlmResponse {
-                full_text: "provider partial".to_string(),
                 parts: vec![
                     lash_core::LlmOutputPart::Reasoning {
                         text: "thought".to_string(),
@@ -781,7 +779,7 @@ mod tests {
             }) if actual == &replay
         ));
         assert_eq!(
-            response.full_text,
+            response.full_text(),
             "Visible.\n<lashlang>\nprint \"hi\"\n</lashlang>"
         );
     }
@@ -814,7 +812,6 @@ mod tests {
 
     fn response_with_text(text: &str) -> lash_core::LlmResponse {
         lash_core::LlmResponse {
-            full_text: text.to_string(),
             parts: vec![lash_core::LlmOutputPart::Text {
                 text: text.to_string(),
                 response_meta: None,
@@ -877,18 +874,18 @@ mod tests {
 
         let response = transform_final_response(&d, response_with_text(raw_final));
         assert_eq!(
-            response.full_text,
+            response.full_text(),
             "Visible before code.\n%% ordinary prose\n<lashlang>\nfinish \"ok\"\n</lashlang>"
         );
-        assert_eq!(response.full_text.matches("<lashlang>").count(), 1);
-        assert_eq!(response.full_text.matches("</lashlang>").count(), 1);
-        let span = first_lashlang_cell_span(&response.full_text).expect("cell parses");
+        assert_eq!(response.full_text().matches("<lashlang>").count(), 1);
+        assert_eq!(response.full_text().matches("</lashlang>").count(), 1);
+        let span = first_lashlang_cell_span(&response.full_text()).expect("cell parses");
         assert_eq!(
-            &response.full_text[span.body_start..span.body_end],
+            &response.full_text()[span.body_start..span.body_end],
             "finish \"ok\""
         );
         assert!(
-            !response.full_text[span.end_tag_end..].contains("ignored"),
+            !response.full_text()[span.end_tag_end..].contains("ignored"),
             "suffix after the close tag must not survive streaming abort normalization"
         );
         let text_parts = response
@@ -899,7 +896,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(text_parts, vec![response.full_text.as_str()]);
+        assert_eq!(text_parts, vec![response.full_text().as_str()]);
     }
 
     #[test]
@@ -908,7 +905,6 @@ mod tests {
         let (d, visible) = stream_chunks(&["Plan.\n<lash", "lang>\nfinish \"ok\"\n</lashlang>"]);
         assert_eq!(visible, "Plan.\n");
         let response = lash_core::LlmResponse {
-            full_text: raw_final.to_string(),
             execution_evidence: Some(lash_core::ExecutionEvidence {
                 served_model: Some("provider/model".to_string()),
                 provider_response_id: Some("response-1".to_string()),
@@ -937,10 +933,10 @@ mod tests {
 
         let response = transform_final_response(&d, response);
         assert_eq!(
-            response.full_text,
+            response.full_text(),
             "Plan.\n<lashlang>\nfinish \"ok\"\n</lashlang>"
         );
-        assert_eq!(response.full_text.matches("<lashlang>").count(), 1);
+        assert_eq!(response.full_text().matches("<lashlang>").count(), 1);
         assert_eq!(
             response
                 .execution_evidence
@@ -961,7 +957,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(text_parts, vec![response.full_text.as_str()]);
+        assert_eq!(text_parts, vec![response.full_text().as_str()]);
     }
 
     #[test]
@@ -971,7 +967,7 @@ mod tests {
 
         let response = response_with_text("Visible only");
         let transformed = transform_final_response(&d, response.clone());
-        assert_eq!(transformed.full_text, response.full_text);
+        assert_eq!(transformed.full_text(), response.full_text());
         assert_eq!(transformed.parts, response.parts);
     }
 
@@ -1032,7 +1028,7 @@ mod tests {
 
         let response = response_with_text("Visible.\n<lashlang>\nfinish 1");
         let transformed = transform_final_response(&d, response.clone());
-        assert_eq!(transformed.full_text, response.full_text);
+        assert_eq!(transformed.full_text(), response.full_text());
         assert_eq!(transformed.parts, response.parts);
     }
 

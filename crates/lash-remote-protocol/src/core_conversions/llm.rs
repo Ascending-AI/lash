@@ -295,8 +295,8 @@ impl From<RemoteLlmRequestScope> for core_llm::LlmRequestScope {
 
 impl RemoteLlmResponse {
     pub fn from_core(request_id: impl Into<String>, value: core_llm::LlmResponse) -> Self {
+        let full_text = value.full_text();
         let core_llm::LlmResponse {
-            full_text,
             parts,
             usage,
             terminal_reason,
@@ -340,7 +340,7 @@ impl From<RemoteLlmResponse> for core_llm::LlmResponse {
     fn from(value: RemoteLlmResponse) -> Self {
         let RemoteLlmResponse {
             request_id: _,
-            full_text,
+            full_text: _,
             output_parts,
             usage,
             terminal_reason,
@@ -356,7 +356,6 @@ impl From<RemoteLlmResponse> for core_llm::LlmResponse {
             data: response_metadata,
         } = provider_metadata;
         Self {
-            full_text,
             parts: output_parts.into_iter().map(Into::into).collect(),
             usage: usage.into(),
             terminal_reason: terminal_reason.into(),

@@ -661,11 +661,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     prompt_input_tokens,
                     self.config.max_context_tokens,
                 );
-                self.record_llm_usage(
-                    &llm_response,
-                    usage,
-                    self.llm_response_text(&llm_response),
-                )?;
+                let response_text = llm_response.full_text();
+                self.record_llm_usage(&llm_response, usage, &response_text)?;
                 if self.handle_terminal_llm_response(&llm_response, text_streamed) {
                     return Ok(());
                 }
@@ -703,10 +700,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
             }
         };
 
+        let response_text = llm_response.full_text();
         let visible_text = self
             .config
             .protocol_driver
-            .project_visible_assistant_prose(&llm_response.full_text);
+            .project_visible_assistant_prose(&response_text);
         if !text_streamed && !visible_text.is_empty() {
             self.emit(SessionStreamEvent::TextDelta {
                 content: visible_text.clone(),
@@ -739,10 +737,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         });
         self.finish(outcome);
         true
-    }
-
-    fn llm_response_text<'a>(&self, llm_response: &'a LlmResponse) -> &'a str {
-        &llm_response.full_text
     }
 
     fn llm_response_debug_parts(&self, llm_response: &LlmResponse) -> Option<Value> {

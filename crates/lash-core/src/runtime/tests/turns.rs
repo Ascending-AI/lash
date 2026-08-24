@@ -486,7 +486,6 @@ fn attachment_put_transport() -> TestProvider {
                         ..LlmResponse::default()
                     },
                     1 => LlmResponse {
-                        full_text: "attachment stored".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "attachment stored".to_string(),
                             response_meta: None,
@@ -598,7 +597,6 @@ async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
             MockCall {
                 stream_events: Vec::new(),
                 response: Ok(LlmResponse {
-                    full_text: "committed before delivery".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "committed before delivery".to_string(),
                         response_meta: None,
@@ -610,7 +608,6 @@ async fn dropping_suspended_host_delivery_keeps_committed_state_adopted() {
             MockCall {
                 stream_events: Vec::new(),
                 response: Ok(LlmResponse {
-                    full_text: "resident commit survived drop".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "resident commit survived drop".to_string(),
                         response_meta: None,
@@ -699,7 +696,6 @@ async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reload() {
                         ..LlmResponse::default()
                     },
                     1 => LlmResponse {
-                        full_text: "resident state reloaded".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "resident state reloaded".to_string(),
                             response_meta: None,
@@ -921,7 +917,6 @@ async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_tea
         .kind("mock")
         .complete(|_| async {
             Ok(LlmResponse {
-                full_text: "answered".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "answered".to_string(),
                     response_meta: None,
@@ -1031,7 +1026,6 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
                     index => panic!("unexpected provider call {index}"),
                 };
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,
@@ -1144,7 +1138,6 @@ async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_s
         .requires_streaming(true)
         .complete(|_| async move {
             Ok(LlmResponse {
-                full_text: "follow-on must fail before commit".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "follow-on must fail before commit".to_string(),
                     response_meta: None,
@@ -1339,7 +1332,6 @@ async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
         .requires_streaming(true)
         .complete(move |_| async move {
             Ok(LlmResponse {
-                full_text: "must not commit".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "must not commit".to_string(),
                     response_meta: None,
@@ -1382,7 +1374,6 @@ async fn capture_abort_releases_lease_and_claim_for_prompt_peer_reclaim() {
         mock_provider(vec![MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "peer reclaimed".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "peer reclaimed".to_string(),
                     response_meta: None,
@@ -1445,7 +1436,6 @@ async fn follow_on_capture_failure_returns_the_committed_frame_and_handoff_is_re
                         ..LlmResponse::default()
                     },
                     1 => LlmResponse {
-                        full_text: "recovered follow-on".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "recovered follow-on".to_string(),
                             response_meta: None,
@@ -2524,7 +2514,6 @@ async fn turn_provider_override_does_not_persist_into_session_policy_or_agent_fr
         .kind("alt")
         .complete(|_| async {
             Ok(LlmResponse {
-                full_text: "alt response".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "alt response".to_string(),
                     response_meta: None,
@@ -2643,7 +2632,6 @@ async fn normal_turn_stores_effective_user_text_in_state() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "Done".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Done".to_string(),
                 response_meta: None,
@@ -2830,7 +2818,6 @@ async fn assembled_turn_reports_turn_timing_from_injected_clock() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "Done".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Done".to_string(),
                 response_meta: None,
@@ -2871,7 +2858,6 @@ async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "First answer.".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "First answer.".to_string(),
                     response_meta: None,
@@ -2883,7 +2869,6 @@ async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "Second answer.".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "Second answer.".to_string(),
                     response_meta: None,
@@ -2971,7 +2956,6 @@ async fn queued_checkpoint_input_preserves_images() {
                     "Second answer."
                 };
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,
@@ -3059,7 +3043,6 @@ async fn checkpoint_hook_can_inject_messages() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "First answer.".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "First answer.".to_string(),
                     response_meta: None,
@@ -3071,7 +3054,6 @@ async fn checkpoint_hook_can_inject_messages() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "Second answer.".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "Second answer.".to_string(),
                     response_meta: None,
@@ -3138,7 +3120,6 @@ async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "first".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "first".to_string(),
                 response_meta: None,
@@ -3278,7 +3259,6 @@ async fn checkpoint_attachment_failure_leaves_active_input_pending_without_appli
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "first".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "first".to_string(),
                 response_meta: None,
@@ -3373,7 +3353,6 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "first".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "first".to_string(),
                     response_meta: None,
@@ -3385,7 +3364,6 @@ async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() 
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "answer".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "answer".to_string(),
                     response_meta: None,
@@ -3525,7 +3503,6 @@ async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
                     other => panic!("unexpected provider call {other}"),
                 };
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,
@@ -3660,7 +3637,6 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
                     "wake checkpoint response"
                 };
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,
@@ -3755,7 +3731,6 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "selected wake response".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "selected wake response".to_string(),
                 response_meta: None,
@@ -3873,7 +3848,6 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
                 let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if call == 0 {
                     return Ok(LlmResponse {
-                        full_text: "initial queued input response".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "initial queued input response".to_string(),
                             response_meta: None,
@@ -4045,7 +4019,6 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
                     tokio::time::sleep(provider_stall).await;
                 }
                 Ok(LlmResponse {
-                    full_text: "stalled turn response".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "stalled turn response".to_string(),
                         response_meta: None,
@@ -4193,7 +4166,6 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
                         })
                     }
                     1 => Ok(LlmResponse {
-                        full_text: "follow-on complete".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "follow-on complete".to_string(),
                             response_meta: None,
@@ -4202,7 +4174,6 @@ async fn queued_frame_switch_finishes_follow_on_before_next_queued_turn() {
                         ..LlmResponse::default()
                     }),
                     2 => Ok(LlmResponse {
-                        full_text: "second queued complete".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "second queued complete".to_string(),
                             response_meta: None,
@@ -4313,7 +4284,6 @@ async fn committed_frame_handoff_survives_before_inline_claim_and_pump_recovers_
                         ..LlmResponse::default()
                     }),
                     1 => Ok(LlmResponse {
-                        full_text: "recovered follow-on".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "recovered follow-on".to_string(),
                             response_meta: None,
@@ -4685,7 +4655,6 @@ async fn stream_prepared_turn_follows_agent_frame_switch() {
                         ..LlmResponse::default()
                     }),
                     1 => Ok(LlmResponse {
-                        full_text: "prepared follow-on complete".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "prepared follow-on complete".to_string(),
                             response_meta: None,
@@ -4771,7 +4740,6 @@ async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue() {
                         ..LlmResponse::default()
                     }),
                     1 => Ok(LlmResponse {
-                        full_text: "final turn still commits".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "final turn still commits".to_string(),
                             response_meta: None,
@@ -4965,7 +4933,6 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
                         ..LlmResponse::default()
                     }),
                     1 => Ok(LlmResponse {
-                        full_text: "must not silently reacquire".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "must not silently reacquire".to_string(),
                             response_meta: None,
@@ -5108,7 +5075,6 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
                         ..LlmResponse::default()
                     }),
                     1 => Ok(LlmResponse {
-                        full_text: "must not reach the follow-on".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "must not reach the follow-on".to_string(),
                             response_meta: None,
@@ -5240,7 +5206,6 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
                         ..LlmResponse::default()
                     }),
                     1 => Ok(LlmResponse {
-                        full_text: "retained lease follow-on".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "retained lease follow-on".to_string(),
                             response_meta: None,
@@ -5249,7 +5214,6 @@ async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
                         ..LlmResponse::default()
                     }),
                     2 => Ok(LlmResponse {
-                        full_text: "reacquired lease turn".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "reacquired lease turn".to_string(),
                             response_meta: None,
@@ -5369,7 +5333,6 @@ async fn lost_lease_and_reacquisition_force_graph_reloads() {
                         ..LlmResponse::default()
                     },
                     1 => LlmResponse {
-                        full_text: "reacquired lease turn".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "reacquired lease turn".to_string(),
                             response_meta: None,
@@ -5655,7 +5618,6 @@ async fn leading_session_command_drains_before_queued_turn() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "queued answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "queued answer".to_string(),
                 response_meta: None,
@@ -5704,7 +5666,6 @@ async fn idle_ordering_read_is_independent_of_pending_command_depth() {
         let transport = mock_provider(vec![MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: format!("answer after {backlog_depth} commands"),
                 parts: vec![LlmOutputPart::Text {
                     text: format!("answer after {backlog_depth} commands"),
                     response_meta: None,
@@ -5755,7 +5716,6 @@ async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "first turn answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "first turn answer".to_string(),
                 response_meta: None,
@@ -5828,7 +5788,6 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
             async move {
                 captured_requests.lock_recover().push(req);
                 Ok(LlmResponse {
-                    full_text: "saw event".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "saw event".to_string(),
                         response_meta: None,
@@ -6104,7 +6063,6 @@ async fn parent_end_failure_after_effect_loop_cancellation_returns_session_for_n
                         std::future::pending::<Result<LlmResponse, LlmTransportError>>().await
                     }
                     2 => Ok(LlmResponse {
-                        full_text: "second turn started".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "second turn started".to_string(),
                             response_meta: None,
@@ -6231,7 +6189,6 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
 
                     stream.send(LlmStreamEvent::Delta("success".to_string()));
                     Ok(LlmResponse {
-                        full_text: "success".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
                             response_meta: None,
@@ -6308,7 +6265,6 @@ async fn counted_provider_regeneration_emits_one_host_visible_attempt_reset() {
                         .expect("stream events")
                         .send(LlmStreamEvent::Delta("success".to_string()));
                     Ok(LlmResponse {
-                        full_text: "success".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
                             response_meta: None,
@@ -6395,7 +6351,6 @@ async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset(
                         .expect("stream events")
                         .send(LlmStreamEvent::Delta("success".to_string()));
                     Ok(LlmResponse {
-                        full_text: "success".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "success".to_string(),
                             response_meta: None,
@@ -6484,7 +6439,10 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
                             crate::llm::transport::TransportRetryVerdict::RetryableTransient,
                         )
                         .with_partial_response(LlmResponse {
-                            full_text: lost_text,
+                            parts: vec![LlmOutputPart::Text {
+                                text: lost_text,
+                                response_meta: None,
+                            }],
                             usage,
                             provider_usage: Some(serde_json::json!({
                                 "prompt_tokens": 32,
@@ -6497,7 +6455,6 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
 
                     stream.send(LlmStreamEvent::Delta("replacement".to_string()));
                     Ok(LlmResponse {
-                        full_text: "replacement".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "replacement".to_string(),
                             response_meta: None,
@@ -6601,7 +6558,6 @@ async fn foreground_turn_is_refused_when_session_lane_is_held() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "foreground proceeded".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "foreground proceeded".to_string(),
                 response_meta: None,
@@ -6657,7 +6613,6 @@ async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "queued answer".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "queued answer".to_string(),
                 response_meta: None,
@@ -7276,7 +7231,6 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
                             ..LlmResponse::default()
                         },
                         1 => LlmResponse {
-                            full_text: "stale conversational tail".to_string(),
                             parts: vec![LlmOutputPart::Text {
                                 text: "stale conversational tail".to_string(),
                                 response_meta: None,
@@ -7343,7 +7297,6 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
     let successor_transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "successor wins".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "successor wins".to_string(),
                 response_meta: None,
@@ -7432,7 +7385,6 @@ async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_final_commit
                         .expect("provider continue receiver available");
                     let _ = rx.await;
                     Ok(LlmResponse {
-                        full_text: "committed under head CAS".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "committed under head CAS".to_string(),
                             response_meta: None,
@@ -7479,7 +7431,6 @@ async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_final_commit
     let successor_transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "successor continued from landed tail".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "successor continued from landed tail".to_string(),
                 response_meta: None,
@@ -7602,7 +7553,6 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
             async move {
                 if captured_calls.fetch_add(1, Ordering::SeqCst) == 0 {
                     return Ok(LlmResponse {
-                        full_text: "reach the active-turn checkpoint".to_string(),
                         parts: vec![LlmOutputPart::Text {
                             text: "reach the active-turn checkpoint".to_string(),
                             response_meta: None,
@@ -7620,7 +7570,6 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
                     .expect("provider continue receiver available");
                 let _ = rx.await;
                 Ok(LlmResponse {
-                    full_text: "stale claim completion".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "stale claim completion".to_string(),
                         response_meta: None,
@@ -7900,7 +7849,6 @@ async fn finish_turn_commit_uses_head_cas_after_advisory_lease_expiry() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "committed after lease expiry".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "committed after lease expiry".to_string(),
                 response_meta: None,
@@ -7952,7 +7900,6 @@ async fn prepared_checkpoint_continues_after_advisory_lease_expiry() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: "provider reached".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "provider reached".to_string(),
                 response_meta: None,
@@ -8003,7 +7950,6 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "first answer".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "first answer".to_string(),
                     response_meta: None,
@@ -8015,7 +7961,6 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "acknowledged".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "acknowledged".to_string(),
                     response_meta: None,
@@ -8199,7 +8144,6 @@ async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_histor
             async move {
                 provider_calls.fetch_add(1, Ordering::SeqCst);
                 Ok(LlmResponse {
-                    full_text: "retained answer".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "retained answer".to_string(),
                         response_meta: None,
@@ -8314,7 +8258,6 @@ async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_default() {
             async move {
                 captured_requests.lock_recover().push(req);
                 Ok(LlmResponse {
-                    full_text: "both wakes answered".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "both wakes answered".to_string(),
                         response_meta: None,
@@ -8721,7 +8664,6 @@ async fn session_manager_can_run_child_session_turn() {
             }),
         ],
         response: Ok(LlmResponse {
-            full_text: "child session".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "child session".to_string(),
                 response_meta: None,
@@ -9075,7 +9017,6 @@ async fn turn_driver_normalizes_alias_effort_into_outgoing_request() {
             async move {
                 *captured.lock_recover() = Some(req.model_variant.clone());
                 Ok(LlmResponse {
-                    full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "ok".to_string(),
                         response_meta: None,
@@ -9246,7 +9187,6 @@ async fn session_generation_options_reach_every_provider_request() {
             async move {
                 captured.lock_recover().push(req.generation.clone());
                 Ok(LlmResponse {
-                    full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "ok".to_string(),
                         response_meta: None,
@@ -9341,7 +9281,6 @@ async fn omitted_generation_options_are_reported_on_the_turn_llm_call_record() {
         .kind("disposition-reporting")
         .complete(move |_req| async move {
             Ok(LlmResponse {
-                full_text: "ok".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "ok".to_string(),
                     response_meta: None,
@@ -9425,7 +9364,6 @@ async fn an_output_token_cap_above_the_model_clamps_and_says_so() {
             async move {
                 captured.lock_recover().push(req.generation.clone());
                 Ok(LlmResponse {
-                    full_text: "ok".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "ok".to_string(),
                         response_meta: None,

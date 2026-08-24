@@ -918,7 +918,6 @@ fn fig793_llm_envelope() -> RuntimeEffectEnvelope {
 fn fig793_llm_outcome() -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::LlmCall {
         result: Box::new(Ok(lash_core::LlmResponse {
-            full_text: "journaled response".to_string(),
             parts: vec![lash_core::LlmOutputPart::Text {
                 text: "journaled response".to_string(),
                 response_meta: None,
@@ -9344,7 +9343,6 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                             ..lash_core::LlmResponse::default()
                         },
                         1 => lash_core::LlmResponse {
-                            full_text: "child literal".to_string(),
                             parts: vec![lash_core::LlmOutputPart::Text {
                                 text: "child literal".to_string(),
                                 response_meta: None,
@@ -9353,7 +9351,6 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                             ..lash_core::LlmResponse::default()
                         },
                         2 => lash_core::LlmResponse {
-                            full_text: "migrated tools complete".to_string(),
                             parts: vec![lash_core::LlmOutputPart::Text {
                                 text: "migrated tools complete".to_string(),
                                 response_meta: None,
@@ -9623,7 +9620,6 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
                         "Restate replay should return the recorded LLM effect"
                     );
                     Ok(lash_core::LlmResponse {
-                        full_text: "committed once".to_string(),
                         parts: vec![lash_core::LlmOutputPart::Text {
                             text: "committed once".to_string(),
                             response_meta: None,
@@ -9741,7 +9737,6 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                             ..lash_core::LlmResponse::default()
                         },
                         1 => lash_core::LlmResponse {
-                            full_text: "parent end complete".to_string(),
                             parts: vec![lash_core::LlmOutputPart::Text {
                                 text: "parent end complete".to_string(),
                                 response_meta: None,
@@ -10201,7 +10196,6 @@ async fn restate_replay_lease_acquisition_takes_recorded_branch() {
                         std::future::pending::<()>().await;
                     }
                     Ok(lash_core::LlmResponse {
-                        full_text: "fresh worker progressed".to_string(),
                         parts: vec![lash_core::LlmOutputPart::Text {
                             text: "fresh worker progressed".to_string(),
                             response_meta: None,
@@ -10504,7 +10498,6 @@ handle = start replay_probe(tools: tools)
 finish (await handle)?
 </lashlang>"#;
                     Ok(lash_core::LlmResponse {
-                        full_text: source.to_string(),
                         parts: vec![lash_core::LlmOutputPart::Text {
                             text: source.to_string(),
                             response_meta: None,
