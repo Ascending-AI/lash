@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -334,7 +334,7 @@ impl PluginSession {
         &self,
         ctx: PromptHookContext,
     ) -> Result<Vec<PromptContribution>, PluginError> {
-        let mut out = collect_owned_async(
+        Ok(collect_owned_async(
             &self.contributions.prompt_contributors,
             ctx,
             "prompt_contributor",
@@ -344,21 +344,7 @@ impl PluginSession {
         .await?
         .into_iter()
         .map(|owned| owned.value)
-        .collect::<Vec<_>>();
-        let mut seen = BTreeSet::new();
-        out.retain(|contribution| {
-            seen.insert((
-                format!("{:?}", contribution.slot),
-                contribution.priority,
-                contribution.content.trim().to_string(),
-            ))
-        });
-        out.sort_by(|a, b| {
-            format!("{:?}", a.slot)
-                .cmp(&format!("{:?}", b.slot))
-                .then(a.priority.cmp(&b.priority))
-        });
-        Ok(out)
+        .collect())
     }
 
     pub async fn before_turn(
