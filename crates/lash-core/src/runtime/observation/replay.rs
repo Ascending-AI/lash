@@ -77,8 +77,9 @@ impl SessionCursor {
     /// Validate and adopt a cursor token produced by a custom live-replay store.
     ///
     /// Lash keeps the token opaque to ordinary consumers, while custom store
-    /// implementations need to return their persisted cursor values through
-    /// [`SessionObservationEvent`] and [`LiveReplayStore::current_cursor`].
+    /// implementations use persisted cursor values to construct
+    /// [`SessionObservationEvent`] values and implement
+    /// [`LiveReplayStore::current_cursor`].
     ///
     /// Integrator class (ADR 0051): **custom live-replay store implementors**.
     pub fn from_store_token(token: impl Into<String>) -> Result<Self, SessionCursorError> {
@@ -101,31 +102,31 @@ impl SessionCursor {
     pub(crate) fn parse_for_session(
         &self,
         expected_session_id: &str,
-    ) -> Result<ParsedSessionCursor, SessionCursorError> {
+    ) -> Result<ParsedSessionCursor<'_>, SessionCursorError> {
         let parsed = self.parse()?;
         if parsed.session_id != expected_session_id {
             return Err(SessionCursorError::WrongSession {
                 expected_session_id: expected_session_id.to_string(),
-                actual_session_id: parsed.session_id,
+                actual_session_id: parsed.session_id.to_string(),
             });
         }
         Ok(parsed)
     }
 
-    fn parse(&self) -> Result<ParsedSessionCursor, SessionCursorError> {
+    fn parse(&self) -> Result<ParsedSessionCursor<'_>, SessionCursorError> {
         let payload = self.0.strip_prefix(SESSION_CURSOR_PREFIX).ok_or_else(|| {
             SessionCursorError::Malformed {
                 message: "missing cursor prefix".to_string(),
             }
         })?;
         let mut parts = payload.splitn(4, ':');
-        let replay_incarnation_id = parts
-            .next()
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| SessionCursorError::Malformed {
-                message: "missing replay incarnation id".to_string(),
-            })?
-            .to_string();
+        let replay_incarnation_id =
+            parts
+                .next()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| SessionCursorError::Malformed {
+                    message: "missing replay incarnation id".to_string(),
+                })?;
         let revision = parts
             .next()
             .ok_or_else(|| SessionCursorError::Malformed {
@@ -149,8 +150,7 @@ impl SessionCursor {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| SessionCursorError::Malformed {
                 message: "missing session id".to_string(),
-            })?
-            .to_string();
+            })?;
         Ok(ParsedSessionCursor {
             replay_incarnation_id,
             session_id,
@@ -172,10 +172,10 @@ impl fmt::Display for SessionCursor {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct ParsedSessionCursor {
-    pub replay_incarnation_id: String,
-    pub session_id: String,
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ParsedSessionCursor<'a> {
+    pub replay_incarnation_id: &'a str,
+    pub session_id: &'a str,
     pub revision: SessionRevision,
     pub live_position: u64,
 }
@@ -198,13 +198,57 @@ pub struct SessionObservation {
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct SessionObservationEvent {
-    pub session_id: String,
-    pub replay_incarnation_id: String,
     pub turn_id: Option<String>,
-    pub revision: SessionRevision,
     pub cursor: SessionCursor,
     pub payload: SessionObservationEventPayload,
+}
+
+impl SessionObservationEvent {
+    /// Construct an event from a live-replay store's durable cursor.
+    ///
+    /// The cursor is validated before the event is constructed, preserving the
+    /// invariant that the event's identity accessors can parse it infallibly.
+    /// Construction outside `lash-core` goes through [`Self::new`].
+    ///
+    /// Integrator class (ADR 0051): **custom live-replay store implementors**.
+    pub fn new(
+        turn_id: Option<String>,
+        cursor: SessionCursor,
+        payload: SessionObservationEventPayload,
+    ) -> Result<Self, SessionCursorError> {
+        cursor.parse()?;
+        Ok(Self {
+            turn_id,
+            cursor,
+            payload,
+        })
+    }
+
+    /// Returns the session named by this event's durable cursor.
+    pub fn session_id(&self) -> &str {
+        self.cursor
+            .parse()
+            .expect("store-created observation event cursor must parse")
+            .session_id
+    }
+
+    /// Returns the replay-store incarnation named by this event's durable cursor.
+    pub fn replay_incarnation_id(&self) -> &str {
+        self.cursor
+            .parse()
+            .expect("store-created observation event cursor must parse")
+            .replay_incarnation_id
+    }
+
+    /// Returns the session revision named by this event's durable cursor.
+    pub fn revision(&self) -> SessionRevision {
+        self.cursor
+            .parse()
+            .expect("store-created observation event cursor must parse")
+            .revision
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -422,7 +466,7 @@ impl LiveReplaySubscription {
 
     pub(super) fn contains_committed_at_or_after(&self, revision: SessionRevision) -> bool {
         self.replay.iter().any(|event| {
-            event.revision >= revision
+            event.revision() >= revision
                 && matches!(
                     &event.payload,
                     SessionObservationEventPayload::Committed { .. }
@@ -867,21 +911,14 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             .enumerate()
             .map(|(offset, draft)| {
                 let position = start_position + offset as u64;
-                Arc::new(SessionObservationEvent {
-                    session_id: session_id.to_string(),
-                    replay_incarnation_id: self.replay_incarnation_id.clone(),
-                    turn_id: draft.turn_id,
-                    revision,
-                    cursor: SessionCursor::new(
-                        &self.replay_incarnation_id,
-                        session_id,
-                        revision,
-                        position,
-                    ),
-                    payload: draft.payload,
-                })
+                SessionObservationEvent::new(
+                    draft.turn_id,
+                    SessionCursor::new(&self.replay_incarnation_id, session_id, revision, position),
+                    draft.payload,
+                )
+                .map(Arc::new)
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, SessionCursorError>>()?;
         let reservation_id = uuid::Uuid::new_v4().to_string();
         buffer.tail_position = end_position;
         buffer.reservations.insert(
@@ -925,8 +962,8 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let session_id = events
             .first()
             .expect("prepared publications are non-empty")
-            .session_id
-            .clone();
+            .session_id()
+            .to_string();
         let mut sessions = self.sessions.lock_recover();
         let buffer = sessions.get_mut(&session_id).ok_or_else(|| {
             LiveReplayStoreError::Store("prepared live replay session is missing".to_string())
@@ -981,10 +1018,10 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         }
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
-        if let Some(buffer) = sessions.get_mut(&parsed.session_id) {
+        if let Some(buffer) = sessions.get_mut(parsed.session_id) {
             Self::trim_locked(&self.config, buffer, now);
         }
-        let buffer = sessions.get(&parsed.session_id);
+        let buffer = sessions.get(parsed.session_id);
         if let Some(reason) = Self::gap_reason_for_cursor(buffer, parsed.live_position) {
             return Ok(LiveReplayOutcome::Gap(reason));
         }
@@ -1013,7 +1050,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let now = self.clock.now();
         let mut sessions = self.sessions.lock_recover();
         let buffer = sessions
-            .entry(parsed.session_id.clone())
+            .entry(parsed.session_id.to_string())
             .or_insert_with(LiveReplaySessionBuffer::new);
         Self::trim_locked(&self.config, buffer, now);
         if let Some(reason) = Self::gap_reason_for_cursor(Some(buffer), parsed.live_position) {
@@ -1040,7 +1077,7 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
                 buffer
                     .events
                     .iter()
-                    .find(|stored| stored.event.revision > revision)
+                    .find(|stored| stored.event.revision() > revision)
                     .map_or(buffer.tail_position, |stored| {
                         stored.position.saturating_sub(1)
                     })
@@ -1118,6 +1155,31 @@ mod tests {
         SessionObservationEventPayload::TurnActivity(crate::TurnActivity::independent(
             crate::TurnEvent::AssistantProseDelta { text: text.into() },
         ))
+    }
+
+    #[test]
+    fn session_observation_event_constructor_rejects_malformed_cursor() {
+        let malformed = serde_json::from_str::<SessionCursor>("\"not-a-cursor\"")
+            .expect("transparent cursor deserialize");
+        let error = SessionObservationEvent::new(None, malformed, activity("invalid"))
+            .expect_err("malformed cursor must fail at event construction");
+
+        assert!(matches!(error, SessionCursorError::Malformed { .. }));
+    }
+
+    #[test]
+    fn session_observation_event_accessors_return_cursor_facts() {
+        let event = SessionObservationEvent::new(
+            Some("turn-1".to_string()),
+            SessionCursor::from_store_token("lashsc2:incarnation-1:7:42:session-1")
+                .expect("valid store cursor"),
+            activity("valid"),
+        )
+        .expect("construct event from valid cursor");
+
+        assert_eq!(event.session_id(), "session-1");
+        assert_eq!(event.replay_incarnation_id(), "incarnation-1");
+        assert_eq!(event.revision(), SessionRevision::new(7));
     }
 
     #[test]
@@ -1302,7 +1364,7 @@ mod tests {
             panic!("expected replay");
         };
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].revision, SessionRevision(2));
+        assert_eq!(events[0].revision(), SessionRevision(2));
     }
 
     #[test]
@@ -1361,7 +1423,7 @@ mod tests {
             .await
             .expect("subscription open")
             .expect("replay");
-        assert_eq!(first.session_id, "s");
+        assert_eq!(first.session_id(), "s");
         store
             .publish_test_event("s", SessionRevision(0), None, activity("b"))
             .expect("append b");

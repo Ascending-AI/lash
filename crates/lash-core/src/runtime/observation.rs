@@ -516,7 +516,7 @@ impl RuntimeHandle {
         requested_revision == authoritative_revision
             || (requested_revision < authoritative_revision
                 && events.into_iter().any(|event| {
-                    event.revision >= authoritative_revision
+                    event.revision() >= authoritative_revision
                         && matches!(
                             &event.payload,
                             SessionObservationEventPayload::Committed { .. }

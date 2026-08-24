@@ -414,7 +414,7 @@ async fn staged_rlm_fact_set_emits_resident_changed_at_the_same_revision() -> Re
     assert!(matches!(
         events.as_slice(),
         [event]
-            if event.revision == lash_core::SessionRevision::new(0)
+            if event.revision() == lash_core::SessionRevision::new(0)
                 && matches!(
                     event.payload,
                     lash_core::SessionObservationEventPayload::ResidentChanged { .. }

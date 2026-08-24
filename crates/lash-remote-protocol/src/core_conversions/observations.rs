@@ -109,12 +109,10 @@ impl RemoteSessionObservationEvent {
         event: Arc<lash_core::SessionObservationEvent>,
     ) -> Result<Self, RemoteProtocolError> {
         let lash_core::SessionObservationEvent {
-            session_id,
-            replay_incarnation_id,
             turn_id,
-            revision,
             cursor,
             payload,
+            ..
         } = event.as_ref();
         let payload = match payload {
             lash_core::SessionObservationEventPayload::TurnActivity(activity) => {
@@ -150,13 +148,19 @@ impl RemoteSessionObservationEvent {
                 }
             }
         };
+        let session_id = lash_core::SessionObservationEvent::session_id(event.as_ref()).to_string();
+        let replay_incarnation_id =
+            lash_core::SessionObservationEvent::replay_incarnation_id(event.as_ref()).to_string();
+        let turn_id = turn_id.clone();
+        let revision = lash_core::SessionObservationEvent::revision(event.as_ref()).as_u64();
+        let cursor = cursor.to_string();
         Ok(Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
-            session_id: session_id.clone(),
-            replay_incarnation_id: replay_incarnation_id.clone(),
-            turn_id: turn_id.clone(),
-            revision: revision.as_u64(),
-            cursor: cursor.to_string(),
+            session_id,
+            replay_incarnation_id,
+            turn_id,
+            revision,
+            cursor,
             event: payload,
         })
     }

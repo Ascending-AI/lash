@@ -292,18 +292,20 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
     )
     .expect("append second session-a event");
 
-    assert_eq!(first_a.session_id, "session-a");
-    assert_eq!(first_a.revision, revision);
+    assert_eq!(first_a.session_id(), "session-a");
+    assert_eq!(first_a.revision(), revision);
     assert_eq!(first_a.turn_id.as_deref(), Some("alpha-turn"));
-    assert_eq!(second_a.revision, SessionRevision::new(8));
+    assert_eq!(second_a.revision(), SessionRevision::new(8));
     assert_eq!(first_b.turn_id, None);
     assert_eq!(second_a.turn_id, None);
     assert_eq!(
-        first_a.replay_incarnation_id, second_a.replay_incarnation_id,
+        first_a.replay_incarnation_id(),
+        second_a.replay_incarnation_id(),
         "one store construction must stamp one stable replay incarnation"
     );
     assert_eq!(
-        first_a.replay_incarnation_id, first_b.replay_incarnation_id,
+        first_a.replay_incarnation_id(),
+        first_b.replay_incarnation_id(),
         "the replay incarnation is store-scoped rather than session-scoped"
     );
     assert_ne!(
@@ -311,7 +313,7 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
         second_a.cursor.as_str(),
         "each appended event must receive a distinct cursor"
     );
-    assert_eq!(first_b.session_id, "session-b");
+    assert_eq!(first_b.session_id(), "session-b");
 
     let replay_a =
         expect_live_replay_replayed(store.replay_after_cursor(&start_a), "session-a replay");
@@ -489,7 +491,7 @@ async fn empty_is_proven_continuity_not_missing_history(store: Arc<dyn LiveRepla
     );
 
     let ahead = crate::SessionCursor::new(
-        &existing.replay_incarnation_id,
+        existing.replay_incarnation_id(),
         "ahead-session",
         revision,
         99,
@@ -593,11 +595,23 @@ fn publish_one(
         revision,
         vec![LiveReplayEventDraft::new(turn_id, payload)],
     )?;
-    store
+    let event = store
         .publish_prepared(prepared)?
         .into_iter()
         .next()
-        .ok_or_else(|| LiveReplayStoreError::Store("published batch was empty".to_string()))
+        .ok_or_else(|| LiveReplayStoreError::Store("published batch was empty".to_string()))?;
+    assert_event_readers_match_cursor(&event, session_id);
+    Ok(event)
+}
+
+fn assert_event_readers_match_cursor(event: &SessionObservationEvent, expected_session_id: &str) {
+    let parsed = event
+        .cursor
+        .parse_for_session(expected_session_id)
+        .expect("every emitted live replay event must carry a valid cursor for its session");
+    assert_eq!(event.session_id(), parsed.session_id);
+    assert_eq!(event.replay_incarnation_id(), parsed.replay_incarnation_id);
+    assert_eq!(event.revision(), parsed.revision);
 }
 
 fn expect_live_replay_replayed(
