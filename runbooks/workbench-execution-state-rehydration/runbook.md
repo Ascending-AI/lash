@@ -72,10 +72,8 @@ the post-restart code ran — never on the assistant's ability to recall.
 - Durable truth: `<data-dir>/session-id` and `<data-dir>/trace.jsonl`. Trace records use
   serde-flattened payloads, so `type` and `request` sit at the record's top level and
   request messages have the shape `{ "role": ..., "blocks": [{ "kind": ..., "text": ... }] }`.
-  `llm_call_started` is a top-level record type. `exec_code_started` is not: select a
-  record with `type == "protocol_step"` and
-  `payload.diagnostic.phase == "exec_code_started"`; its exact executed source is at
-  `payload.diagnostic.payload.code`.
+  `llm_call_started` and `exec_code_started` are top-level record types: select a record
+  with `type == "exec_code_started"`; its exact executed source is at top-level `code`.
 - The bound-variable preamble the runtime builds from live execution state opens with the
   literal sentence `These variables are already bound in lashlang.` Its presence, plus the
   variable name and marker in the same request, is the hydration witness used below.

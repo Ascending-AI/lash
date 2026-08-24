@@ -53,7 +53,7 @@
             <td><code>TraceSink</code> / <code>TraceRecord</code></td>
             <td><code>lash_trace::TraceRecord</code> (<code>TraceEvent</code>)</td>
             <td>Durable diagnostics: every provider call, tool call, prompt build, usage delta, protocol step, and Lashlang graph update.</td>
-            <td>Versioned JSONL schema. <code>TRACE_SCHEMA_VERSION = <span data-format-version="TRACE_SCHEMA_VERSION">8</span></code>; version 5 added composition snapshots, version 6 added replay-drop evidence naming typed minting and serving LLM Provider routes, including endpoints, version 7 renames the Lashlang execution records to language-tagged ones, and version 8 types the turn/effect/wait/timer outcomes — the journaled-effect, durable-wait and durable-timer statuses become closed enums, <code>turn_completed</code> replaces its status/done-reason/frame-switch triple with one <code>TraceTurnOutcome</code>, and the language execution map drops the four identity fields the execution identity already carries. The retry attempt outcome remains free-form by explicit carve-out until v9 (FIG-1832).</td>
+            <td>Versioned JSONL schema. <code>TRACE_SCHEMA_VERSION = <span data-format-version="TRACE_SCHEMA_VERSION">9</span></code>; version 5 added composition snapshots, version 6 added replay-drop evidence naming typed minting and serving LLM Provider routes, including endpoints, version 7 renamed the Lashlang execution records to language-tagged ones, version 8 typed the turn/effect/wait/timer outcomes, and version 9 promotes the four runtime exec diagnostics to first-class typed events with typed per-tool status while removing the redundant <code>tool_call_count</code> and <code>terminal_finish_present</code> fields. The retry attempt outcome remains free-form by explicit FIG-1827 carve-out and is tracked by FIG-1832.</td>
             <td>You need billing, audit, offline analysis, OpenTelemetry export, or a rendered trace. See <a href="./tracing.html">Tracing</a>.</td>
           </tr>
           <tr>
@@ -118,27 +118,23 @@ flowchart TD
       </div>
     </div>
     <div class="section-header" style="margin-top: var(--space-xl)">
-      <h3>The exec-code completion diagnostic</h3>
-      <p>Code-block execution also writes a diagnostic to the trace with a per-tool roll-up.</p>
+      <h3>The exec-code trace events</h3>
+      <p>Code-block execution writes typed phase events to the trace, including a per-tool completion roll-up.</p>
     </div>
-    <p>On the trace channel, an <code>exec_code_completed</code> diagnostic rides a <code>ProtocolStep</code> record (<code>plugin_id: "runtime"</code>). Its free-form payload carries a <code>tool_calls</code> array of <code>{ call_id, name, duration_ms, status }</code> plus a <code>tool_call_count</code> equal to the array length. Because <code>ProtocolStep</code> payloads are opaque JSON, this roll-up was added without bumping <code>TRACE_SCHEMA_VERSION</code>.</p>
+    <p>On the trace channel, <code>ExecCodeStarted</code>, <code>ExecCodeCompleted</code>, <code>ExecCodeFailed</code>, and <code>ObservationProjection</code> are first-class <code>TraceEvent</code> variants. <code>ExecCodeCompleted</code> carries a typed <code>tool_calls</code> array of <code>{ call_id, name, duration_ms, status }</code>; <code>status</code> uses the existing <code>TraceToolCallStatus</code> snake-case vocabulary. Consumers derive the count from the array and terminal presence from <code>terminal_finish</code>.</p>
     <pre data-lang="json"><code>{
-  "type": "protocol_step",
-  "plugin_id": "runtime",
-  "payload": {
-    "diagnostic": {
-      "phase": "exec_code_completed",
-      "payload": {
-        "duration_ms": 43,
-        "observation_count": 2,
-        "tool_call_count": 2,
-        "tool_calls": [
-          { "call_id": "call-3", "name": "exec_command", "duration_ms": 41, "status": "success" },
-          { "call_id": "call-4", "name": "fetch_url",    "duration_ms":  2, "status": "success" }
-        ]
-      }
-    }
-  }
+  "type": "exec_code_completed",
+  "duration_ms": 43,
+  "output": "first result\nsecond result",
+  "output_chars": 26,
+  "observation_count": 2,
+  "observation_truncation": [],
+  "error": null,
+  "terminal_finish": null,
+  "tool_calls": [
+    { "call_id": "call-3", "name": "exec_command", "duration_ms": 41, "status": "success" },
+    { "call_id": "call-4", "name": "fetch_url",    "duration_ms":  2, "status": "success" }
+  ]
 }</code></pre>
     <div class="section-header" style="margin-top: var(--space-xl)">
       <h3>OpenTelemetry span names</h3>
@@ -149,9 +145,9 @@ flowchart TD
         <thead><tr><th>Span name</th><th>Source event</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><code>lash.tool</code></td><td><code>ToolCallStarted</code> / <code>ToolCallCompleted</code></td><td>One per tool call, standard <em>and</em> code-exec. Keyed by <code>tool:&lt;call_id&gt;</code>; carries <code>lash.tool.name</code>, <code>lash.tool.status</code>, <code>lash.tool.duration_ms</code>.</td></tr>
-          <tr><td><code>lash.exec_code</code></td><td><code>ProtocolStep</code> (exec diagnostics)</td><td>The <code>exec_code_started</code> / <code>exec_code_completed</code> / <code>exec_code_failed</code> phases collapse into this one family; the precise phase rides the <code>lash.protocol.diagnostic_phase</code> attribute.</td></tr>
-          <tr><td><code>lash.observation_projection</code></td><td><code>ProtocolStep</code> (observation diagnostic)</td><td>Observation-projection diagnostics get their own name.</td></tr>
-          <tr><td><code>lash.protocol_step</code></td><td><code>ProtocolStep</code> (other)</td><td>Plain protocol steps that carry no diagnostic phase.</td></tr>
+          <tr><td><code>lash.exec_code</code></td><td><code>ExecCodeStarted</code> / <code>ExecCodeCompleted</code> / <code>ExecCodeFailed</code></td><td>The three typed exec phases collapse into this one family; the precise event kind rides the <code>lash.protocol.diagnostic_phase</code> attribute.</td></tr>
+          <tr><td><code>lash.observation_projection</code></td><td><code>ObservationProjection</code></td><td>The typed observation-projection event keeps its distinct name.</td></tr>
+          <tr><td><code>lash.protocol_step</code></td><td><code>ProtocolStep</code></td><td>Host and plugin protocol steps retain the opaque escape hatch.</td></tr>
         </tbody>
       </table>
     </div>
@@ -220,7 +216,7 @@ flowchart TD
         <dt><code>RemoteTurnActivity</code> — the external wire boundary</dt>
         <dd>The versioned wire mirror is the external stability boundary. <code>RemoteTurnActivity</code> carries <code>protocol_version</code> (equal to <code>REMOTE_PROTOCOL_VERSION</code>); <code>validate()</code> rejects an envelope from an unsupported version. The wire enum is deliberately narrower than <code>TurnEvent</code>: <code>QueuedInputAccepted</code> maps to typed <code>TurnInputApplied { applications }</code> evidence carrying admission, turn, committed-message, and optional active-checkpoint identity without display text. Hosts reconcile a missed live application through the durable application read, not by parsing <code>RuntimeDiagnostic</code> or treating a pending-input snapshot as evidence. The other three host-internal variants — <code>QueuedWorkStarted</code>, <code>PluginRuntime</code>, and <code>QueuedMessagesCommitted</code> — collapse into <code>RuntimeDiagnostic { kind, data }</code>. Every other variant maps one to one, containment keys included. Bump <code>REMOTE_PROTOCOL_VERSION</code> for a breaking wire change.</dd>
         <dt><code>TraceRecord</code> — the durable diagnostics boundary</dt>
-        <dd><code>TRACE_SCHEMA_VERSION</code> governs the durable JSONL schema. Adding a <code>TraceEvent</code> variant is breaking for closed-enum readers and <strong>does</strong> bump the version; version 5 adds <code>CompositionChanged</code>, version 6 adds <code>ProviderReplayDropped</code> with typed minting and serving LLM Provider routes, version 7 renames the Lashlang execution records to language-tagged ones, and version 8 types the turn/effect/wait/timer outcomes — the journaled-effect, durable-wait and durable-timer statuses become closed enums, <code>turn_completed</code> replaces its status/done-reason/frame-switch triple with one <code>TraceTurnOutcome</code>, and the language execution map drops the four identity fields the execution identity already carries. The retry attempt outcome remains free-form by explicit carve-out until v9 (FIG-1832). Adding an optional (skip-when-<code>None</code>) field is additive only for readers that ignore unknown fields. Renaming a field, removing a field, or changing the meaning of an existing field also bumps it. The free-form <code>Custom { name, payload }</code> and <code>ProtocolStep { plugin_id, payload }</code> payloads are opaque JSON; adding to or reshaping data inside them never forces a bump — which is exactly why the <code>exec_code_completed</code> <code>tool_calls</code> roll-up shipped additively.</dd>
+        <dd><code>TRACE_SCHEMA_VERSION</code> governs the durable JSONL schema. Adding a <code>TraceEvent</code> variant is breaking for closed-enum readers and <strong>does</strong> bump the version; version 5 adds <code>CompositionChanged</code>, version 6 adds <code>ProviderReplayDropped</code> with typed minting and serving LLM Provider routes, version 7 renames the Lashlang execution records to language-tagged ones, version 8 types the turn/effect/wait/timer outcomes, and version 9 replaces the four opaque runtime exec-diagnostic envelopes with typed events, types the completed event's per-tool roll-up, and removes <code>tool_call_count</code> and <code>terminal_finish_present</code>. The retry attempt outcome remains free-form by explicit FIG-1827 carve-out and is tracked by FIG-1832. Adding an optional (skip-when-<code>None</code>) field is additive only for readers that ignore unknown fields. Renaming a field, removing a field, or changing the meaning of an existing field also bumps it. The free-form <code>Custom { name, payload }</code> and <code>ProtocolStep { plugin_id, payload }</code> payloads remain opaque JSON for host and plugin payloads.</dd>
       </dl>
     </div>
     <div class="callout">

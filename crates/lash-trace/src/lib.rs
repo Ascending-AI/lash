@@ -35,6 +35,7 @@ mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
 
+pub use lash_sansio::TextProjectionMetadata;
 pub use lashlang_graph::{
     TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
     TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
@@ -55,8 +56,7 @@ pub use lashlang_graph::{
 ///   field is a breaking change and **does** bump this version.
 /// - The free-form [`TraceEvent::Custom`] and [`TraceEvent::ProtocolStep`]
 ///   payloads are opaque `serde_json::Value`; adding to or reshaping the data
-///   inside them never forces a bump. (This is why the `exec_code_completed`
-///   diagnostic's `tool_calls` payload was purely additive.)
+///   inside them never forces a bump.
 ///
 /// Version 5 adds the `composition_changed` event.
 /// Version 6 adds the `provider_replay_dropped` event with typed minting and
@@ -72,7 +72,11 @@ pub use lashlang_graph::{
 /// and the cancellation evidence, and the language execution map drops the
 /// four identity fields already carried by
 /// [`TraceLanguageExecutionIdentity`].
-pub const TRACE_SCHEMA_VERSION: u32 = 8;
+/// Version 9 promotes the four runtime exec diagnostic phases from opaque
+/// [`TraceEvent::ProtocolStep`] payloads to typed events, types each completed
+/// exec's tool-call roll-up, and removes the redundant `tool_call_count` and
+/// `terminal_finish_present` fields.
+pub const TRACE_SCHEMA_VERSION: u32 = 9;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -357,6 +361,26 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempts: Option<Vec<TraceRetryAttempt>>,
     },
+    ExecCodeStarted {
+        code: String,
+        code_chars: usize,
+    },
+    ExecCodeCompleted {
+        duration_ms: u64,
+        output: String,
+        output_chars: usize,
+        observation_count: usize,
+        observation_truncation: Vec<TextProjectionMetadata>,
+        error: Option<String>,
+        terminal_finish: Option<Value>,
+        tool_calls: Vec<TraceExecToolCall>,
+    },
+    ExecCodeFailed {
+        error: String,
+    },
+    ObservationProjection {
+        projections: Vec<TextProjectionMetadata>,
+    },
     /// A Restate `ctx.run` effect is about to cross its journal command boundary.
     JournaledEffectStarted {
         effect_name: String,
@@ -426,8 +450,8 @@ pub enum TraceEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRetryAttempt {
     pub ordinal: u32,
-    /// Free-form by explicit FIG-1827 carve-out; joins the typed-enum family on
-    /// the next `TRACE_SCHEMA_VERSION` bump (v9), tracked as FIG-1832.
+    /// Free-form by explicit FIG-1827 carve-out; typing it is tracked as
+    /// FIG-1832 and requires its own schema ruling.
     pub outcome: String,
     pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -519,6 +543,10 @@ impl TraceEvent {
             | Self::ProviderStreamEvent { .. }
             | Self::RuntimeStreamEvent { .. }
             | Self::ToolCallStarted { .. }
+            | Self::ExecCodeStarted { .. }
+            | Self::ExecCodeCompleted { .. }
+            | Self::ExecCodeFailed { .. }
+            | Self::ObservationProjection { .. }
             | Self::JournaledEffectStarted { .. }
             | Self::DurableWaitParked { .. }
             | Self::DurableTimerStarted { .. }
@@ -556,6 +584,10 @@ impl TraceEvent {
             Self::RuntimeStreamEvent { .. } => "runtime_stream_event",
             Self::ToolCallStarted { .. } => "tool_call_started",
             Self::ToolCallCompleted { .. } => "tool_call_completed",
+            Self::ExecCodeStarted { .. } => "exec_code_started",
+            Self::ExecCodeCompleted { .. } => "exec_code_completed",
+            Self::ExecCodeFailed { .. } => "exec_code_failed",
+            Self::ObservationProjection { .. } => "observation_projection",
             Self::JournaledEffectStarted { .. } => "journaled_effect_started",
             Self::JournaledEffectSettled { .. } => "journaled_effect_settled",
             Self::DurableWaitParked { .. } => "durable_wait_parked",
@@ -616,6 +648,14 @@ pub enum TraceToolCallStatus {
     Success,
     Failure,
     Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceExecToolCall {
+    pub call_id: Option<String>,
+    pub name: String,
+    pub duration_ms: u64,
+    pub status: TraceToolCallStatus,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

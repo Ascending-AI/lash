@@ -6665,9 +6665,8 @@ finish "done""#,
     let events = events.snapshot().await;
 
     // Every collected RLM tool record carries a call_id, so the code block's
-    // `tool_call_ids` aggregate (which filters `Some(call_id)`) can never drop
-    // a call and disagree with the trace's `tool_call_count`
-    // (`output.tool_calls.len()`).
+    // `tool_call_ids` aggregate (which filters `Some(call_id)`) cannot drop a
+    // call.
     let completed_ids = events
         .iter()
         .filter_map(|event| match &event.event {
@@ -6792,48 +6791,24 @@ finish "done""#,
         "RLM tool span identity must be tool:<call_id>"
     );
 
-    // Task 2: the exec_code_completed runtime diagnostic carries a structured
-    // tool_calls array whose length matches tool_call_count.
-    let exec_completed = entries
-        .iter()
-        .find(|entry| {
-            entry.get("type").and_then(|v| v.as_str()) == Some("protocol_step")
-                && entry
-                    .get("payload")
-                    .and_then(|payload| payload.get("diagnostic"))
-                    .and_then(|diagnostic| diagnostic.get("phase"))
-                    .and_then(|v| v.as_str())
-                    == Some("exec_code_completed")
+    // The typed exec-code completion carries its structured tool-call roll-up.
+    let tool_calls = logged
+        .lines()
+        .find_map(|line| {
+            let record = serde_json::from_str::<lash_trace::TraceRecord>(line).ok()?;
+            let lash_trace::TraceEvent::ExecCodeCompleted { tool_calls, .. } = record.event else {
+                return None;
+            };
+            Some(tool_calls)
         })
-        .expect("exec_code_completed diagnostic");
-    let diagnostic_payload = exec_completed
-        .get("payload")
-        .and_then(|payload| payload.get("diagnostic"))
-        .and_then(|diagnostic| diagnostic.get("payload"))
-        .expect("diagnostic payload");
-    let tool_calls = diagnostic_payload
-        .get("tool_calls")
-        .and_then(|v| v.as_array())
-        .expect("structured tool_calls array");
-    let tool_call_count = diagnostic_payload
-        .get("tool_call_count")
-        .and_then(|v| v.as_u64())
-        .expect("tool_call_count");
-    assert_eq!(tool_calls.len() as u64, tool_call_count);
+        .expect("typed exec-code completion event");
     assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0].call_id.as_deref(), Some(call_id));
+    assert_eq!(tool_calls[0].name, "app_lookup");
     assert_eq!(
-        tool_calls[0].get("call_id").and_then(|v| v.as_str()),
-        Some(call_id)
+        tool_calls[0].status,
+        lash_trace::TraceToolCallStatus::Success
     );
-    assert_eq!(
-        tool_calls[0].get("name").and_then(|v| v.as_str()),
-        Some("app_lookup")
-    );
-    assert_eq!(
-        tool_calls[0].get("status").and_then(|v| v.as_str()),
-        Some("success")
-    );
-    assert!(tool_calls[0].get("duration_ms").is_some());
 
     let _ = std::fs::remove_file(&trace_path);
     Ok(())

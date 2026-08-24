@@ -5,35 +5,87 @@
 use opentelemetry::trace::noop::NoopTracerProvider;
 
 use super::*;
-use crate::{TraceLlmRequest, TraceRecord};
+use crate::{TraceEvent, TraceLlmRequest, TraceRecord};
 
 #[test]
-fn protocol_step_exec_diagnostics_get_distinct_span_names() {
-    let diagnostic =
-        |phase: &str| serde_json::json!({ "diagnostic": { "phase": phase, "payload": {} } });
-    // Exec-code diagnostics collapse into the lash.exec_code family, with
-    // the precise phase available as an attribute; other diagnostics keep a
-    // phase-scoped name; plain protocol steps stay lash.protocol_step.
+fn typed_exec_diagnostics_preserve_the_otel_span_family() {
     assert_eq!(
-        protocol_step_span_name(&diagnostic("exec_code_started")),
-        "lash.exec_code"
+        typed_diagnostic_span_name(&TraceEvent::ExecCodeStarted {
+            code: "print(1)".to_string(),
+            code_chars: 8,
+        }),
+        Some("lash.exec_code")
     );
     assert_eq!(
-        protocol_step_span_name(&diagnostic("exec_code_completed")),
-        "lash.exec_code"
+        typed_diagnostic_span_name(&TraceEvent::ExecCodeCompleted {
+            duration_ms: 3,
+            output: "1".to_string(),
+            output_chars: 1,
+            observation_count: 1,
+            observation_truncation: Vec::new(),
+            error: None,
+            terminal_finish: None,
+            tool_calls: Vec::new(),
+        }),
+        Some("lash.exec_code")
     );
     assert_eq!(
-        protocol_step_span_name(&diagnostic("observation_projection")),
-        "lash.observation_projection"
+        typed_diagnostic_span_name(&TraceEvent::ExecCodeFailed {
+            error: "boom".to_string(),
+        }),
+        Some("lash.exec_code")
     );
     assert_eq!(
-        protocol_step_span_name(&serde_json::json!({ "code": "print 1" })),
-        "lash.protocol_step"
+        typed_diagnostic_span_name(&TraceEvent::ObservationProjection {
+            projections: Vec::new(),
+        }),
+        Some("lash.observation_projection")
     );
     assert_eq!(
-        protocol_step_diagnostic_phase(&diagnostic("exec_code_completed")),
-        Some("exec_code_completed")
+        typed_diagnostic_span_name(&TraceEvent::ProtocolStep {
+            plugin_id: "custom".to_string(),
+            payload: serde_json::json!({ "code": "print 1" }),
+        }),
+        None
     );
+}
+
+#[test]
+fn typed_exec_diagnostic_attributes_keep_the_protocol_otel_contract() {
+    let record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::ExecCodeCompleted {
+            duration_ms: 3,
+            output: "1".to_string(),
+            output_chars: 1,
+            observation_count: 1,
+            observation_truncation: Vec::new(),
+            error: None,
+            terminal_finish: None,
+            tool_calls: Vec::new(),
+        },
+    );
+    let attrs = event_attributes(
+        &record,
+        &OtelTraceOptions {
+            include_payload_json: true,
+            ..OtelTraceOptions::default()
+        },
+    );
+    let value = |key: &str| {
+        attrs
+            .iter()
+            .find(|attribute| attribute.key.as_str() == key)
+            .map(|attribute| attribute.value.to_string())
+            .unwrap_or_else(|| panic!("missing OTel attribute {key}"))
+    };
+
+    assert_eq!(value("lash.protocol.plugin_id"), "runtime");
+    assert_eq!(value("lash.protocol.diagnostic_phase"), record.event.kind());
+    let payload = value("lash.protocol.payload_json");
+    assert!(payload.contains(record.event.kind()));
+    assert!(!payload.contains("tool_call_count"));
+    assert!(!payload.contains("terminal_finish_present"));
 }
 
 #[test]
