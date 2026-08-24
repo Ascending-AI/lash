@@ -144,13 +144,11 @@ impl TestLocalProcessRegistry {
             .get_mut(delivery_id)
             .expect("force reasonless discard for an existing wake delivery");
         assert_eq!(
-            delivery.state,
+            delivery.state(),
             super::super::WakeDeliveryState::Enqueuing,
             "reasonless discard injection requires an enqueuing wake delivery"
         );
-        delivery.state = super::super::WakeDeliveryState::Discarded;
-        delivery.claim_token = None;
-        delivery.discard_reason = None;
+        delivery.disposition = super::super::WakeDeliveryDisposition::DiscardedUnattributed;
     }
 
     #[doc(hidden)]

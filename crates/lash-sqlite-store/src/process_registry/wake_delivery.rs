@@ -50,9 +50,10 @@ pub(super) async fn update_wake_delivery_state(
     conn: &SqliteConnection,
     delivery_id: &str,
     claim_token: &str,
-    state: lash_core::WakeDeliveryState,
-    reason: Option<lash_core::WakeDiscardReason>,
+    disposition: lash_core::WakeDeliveryDisposition,
 ) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
+    let state = disposition.state();
+    let reason = disposition.discard_reason();
     let delivery_id = delivery_id.to_string();
     let claim_token = claim_token.to_string();
     conn.write_flow(move |tx| {

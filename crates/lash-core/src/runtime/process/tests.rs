@@ -502,7 +502,7 @@ async fn prune_serializes_same_id_reregistration_and_fresh_wake_cleanup() {
     registry
         .mark_wake_enqueued(
             &claimed.delivery_id,
-            claimed.claim_token.as_deref().expect("wake claim token"),
+            claimed.claim_token().expect("wake claim token"),
         )
         .await
         .expect("settle old wake delivery");

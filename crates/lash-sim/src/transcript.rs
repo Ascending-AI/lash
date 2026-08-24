@@ -520,12 +520,14 @@ mod tests {
             .expect("read wake delivery")
             .into_iter()
             .find(|delivery| {
-                delivery.discard_reason == Some(lash_core::WakeDiscardReason::Retargeted)
+                delivery.disposition.discard_reason()
+                    == Some(lash_core::WakeDiscardReason::Retargeted)
             })
             .expect("retargeted delivery");
         assert_eq!(
             retargeted
-                .discard_reason
+                .disposition
+                .discard_reason()
                 .expect("retargeted delivery reason")
                 .as_str(),
             "retargeted",

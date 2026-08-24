@@ -31,7 +31,9 @@ use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWakeDelivery};
 #[cfg(test)]
 use super::model::ProcessStatus;
 use super::model::{PROCESS_LEASE_SCHEMA_VERSION, ProcessLease};
-use super::registry::{WakeDelivery, WakeDeliveryState, WakeDiscardReason};
+use super::registry::{
+    WakeDelivery, WakeDeliveryDisposition, WakeDeliveryState, WakeDiscardReason,
+};
 
 /// Failure text for a persisted registry payload that will not decode.
 ///
@@ -509,17 +511,32 @@ impl WakeDeliveryRow {
             &self.delivery_id,
             self.discard_reason_label.as_deref(),
         )?;
+        let disposition = match (state, self.claim_token) {
+            (WakeDeliveryState::Pending, _) => WakeDeliveryDisposition::Pending,
+            (WakeDeliveryState::Enqueuing, Some(claim_token)) => {
+                WakeDeliveryDisposition::Enqueuing { claim_token }
+            }
+            (WakeDeliveryState::Enqueuing, None) => {
+                return Err(PluginError::Session(format!(
+                    "wake delivery `{}` is enqueuing without a claim token",
+                    self.delivery_id
+                )));
+            }
+            (WakeDeliveryState::Enqueued, _) => WakeDeliveryDisposition::Enqueued,
+            (WakeDeliveryState::Discarded, _) => match discard_reason {
+                Some(reason) => WakeDeliveryDisposition::Discarded { reason },
+                None => WakeDeliveryDisposition::DiscardedUnattributed,
+            },
+        };
         let wake = decode_process_wake_delivery(&self.delivery_json)?;
         Ok(WakeDelivery {
             delivery_id: self.delivery_id,
             wake,
-            state,
-            claim_token: self.claim_token,
+            disposition,
             attempts: self.attempts as u64,
             first_attempt_ms: self.first_attempt_ms.map(|value| value as u64),
             next_attempt_at_ms: self.next_attempt_at_ms as u64,
             expires_at_ms: self.expires_at_ms as u64,
-            discard_reason,
         })
     }
 }
@@ -1190,13 +1207,13 @@ mod tests {
         let delivery_id = row.delivery_id.clone();
         let delivery = row.project().expect("a well-formed row projects");
         assert_eq!(delivery.delivery_id, delivery_id);
-        assert_eq!(delivery.state, WakeDeliveryState::Enqueuing);
-        assert_eq!(delivery.claim_token.as_deref(), Some("claim"));
+        assert_eq!(delivery.state(), WakeDeliveryState::Enqueuing);
+        assert_eq!(delivery.claim_token().expect("claim token"), "claim");
         assert_eq!(delivery.attempts, 2);
         assert_eq!(delivery.first_attempt_ms, Some(11));
         assert_eq!(delivery.next_attempt_at_ms, 12);
         assert_eq!(delivery.expires_at_ms, 13);
-        assert_eq!(delivery.discard_reason, None);
+        assert_eq!(delivery.disposition.discard_reason(), None);
         assert_eq!(delivery.wake.sequence, 4);
         assert_eq!(delivery.wake.target_session_id, "session");
     }
@@ -1277,8 +1294,51 @@ mod tests {
         }
         .project()
         .expect("a discarded row projects");
-        assert_eq!(delivery.state, WakeDeliveryState::Discarded);
-        assert_eq!(delivery.discard_reason, Some(WakeDiscardReason::Retargeted));
+        assert_eq!(delivery.state(), WakeDeliveryState::Discarded);
+        assert_eq!(
+            delivery.disposition,
+            WakeDeliveryDisposition::Discarded {
+                reason: WakeDiscardReason::Retargeted
+            }
+        );
+    }
+
+    #[test]
+    fn a_discarded_wake_delivery_without_a_reason_projects_as_unattributed() {
+        let delivery = WakeDeliveryRow {
+            state_label: "discarded".to_string(),
+            discard_reason_label: None,
+            claim_token: None,
+            ..wake_row()
+        }
+        .project()
+        .expect("a deliberately-valid reasonless discard projects");
+
+        assert_eq!(
+            delivery.disposition,
+            WakeDeliveryDisposition::DiscardedUnattributed
+        );
+        assert_eq!(delivery.state(), WakeDeliveryState::Discarded);
+    }
+
+    #[test]
+    fn an_enqueuing_wake_delivery_without_a_claim_token_is_refused() {
+        let delivery_id = format!("wake:v1:sha256:{}", "a".repeat(64));
+        let error = WakeDeliveryRow {
+            delivery_id: delivery_id.clone(),
+            claim_token: None,
+            ..wake_row()
+        }
+        .project()
+        .expect_err("an enqueuing delivery without its claim token must be refused");
+
+        assert!(
+            matches!(&error, PluginError::Session(message)
+            if message == &format!(
+                "wake delivery `{delivery_id}` is enqueuing without a claim token"
+            )),
+            "unexpected refusal: {error}"
+        );
     }
 
     #[test]

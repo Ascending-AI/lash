@@ -157,8 +157,8 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         })
         .context("old-target sender row is absent")?;
     anyhow::ensure!(
-        old_delivery.state == WakeDeliveryState::Discarded
-            && old_delivery.discard_reason == Some(WakeDiscardReason::Retargeted),
+        old_delivery.state() == WakeDeliveryState::Discarded
+            && old_delivery.disposition.discard_reason() == Some(WakeDiscardReason::Retargeted),
         "old pending delivery was not durably discarded as retargeted: {old_delivery:?}"
     );
 
@@ -219,8 +219,8 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         json!({
             "checkpoint": "retargeted",
             "process_id": RETARGET_PROCESS_ID,
-            "old_delivery_state": old_delivery.state,
-            "old_discard_reason": old_delivery.discard_reason,
+            "old_delivery_state": old_delivery.state(),
+            "old_discard_reason": old_delivery.disposition.discard_reason(),
             "audit_event": "process.subscription_retargeted",
             "old_target_turn_count": old_batches.len(),
             "new_target": new_wake.target_session_id,
@@ -284,9 +284,9 @@ async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()>
         .find(|delivery| delivery.wake.process_id == PROCESS_ID)
         .context("crash-window wake was not claimable")?;
     anyhow::ensure!(
-        delivery.state == WakeDeliveryState::Enqueuing,
+        delivery.state() == WakeDeliveryState::Enqueuing,
         "claimed delivery was not enqueuing: {:?}",
-        delivery.state
+        delivery.state()
     );
 
     let target = storage.session_store(SESSION_ID);
@@ -300,7 +300,7 @@ async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()>
             "checkpoint": "receiver_enqueued_sender_unmarked",
             "process_id": PROCESS_ID,
             "delivery_id": delivery.delivery_id,
-            "claim_token": delivery.claim_token,
+            "claim_token": delivery.claim_token().context("claimed delivery token")?,
             "batch_id": batch.batch_id,
             "enqueue_seq": batch.enqueue_seq,
         })
@@ -357,9 +357,9 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
         .collect::<Vec<_>>();
 
     anyhow::ensure!(
-        delivery.state == WakeDeliveryState::Enqueued,
+        delivery.state() == WakeDeliveryState::Enqueued,
         "recovered sender row did not settle enqueued: {:?}",
-        delivery.state
+        delivery.state()
     );
     anyhow::ensure!(
         report.floor_absorbed == 1,
@@ -382,7 +382,7 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
             "delivery_id": delivery.delivery_id,
             "sequence": delivery.wake.sequence,
             "attempts": delivery.attempts,
-            "sender_state": delivery.state,
+            "sender_state": delivery.state(),
             "floor_absorbed": report.floor_absorbed,
             "receiver_turn_count": batches.len(),
             "receiver_batch_id": batches[0].batch_id,

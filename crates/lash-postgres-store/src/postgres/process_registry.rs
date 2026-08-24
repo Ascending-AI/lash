@@ -1,5 +1,5 @@
 use crate::*;
-use lash_core::facade_support;
+use lash_core::facade_support::{self, registry_transitions::ProcessLeaseReclaimDecision};
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
 #[path = "process_registry/parent_end.rs"]
@@ -1116,14 +1116,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
         delivery_id: &str,
         claim_token: &str,
     ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
-        update_wake_delivery_state(
-            &self.pool,
-            delivery_id,
-            claim_token,
-            lash_core::WakeDeliveryState::Enqueued,
-            None,
-        )
-        .await
+        let disposition = lash_core::WakeDeliveryDisposition::Enqueued;
+        update_wake_delivery_state(&self.pool, delivery_id, claim_token, disposition).await
     }
 
     async fn discard_wake_delivery(
@@ -1132,14 +1126,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
         claim_token: &str,
         reason: lash_core::WakeDiscardReason,
     ) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
-        update_wake_delivery_state(
-            &self.pool,
-            delivery_id,
-            claim_token,
-            lash_core::WakeDeliveryState::Discarded,
-            Some(reason),
-        )
-        .await
+        let disposition = lash_core::WakeDeliveryDisposition::Discarded { reason };
+        update_wake_delivery_state(&self.pool, delivery_id, claim_token, disposition).await
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), PluginError> {
@@ -1193,7 +1181,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
             let delivery = load_wake_delivery_tx(&mut tx, delivery_id).await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost {
-                state: delivery.state,
+                state: delivery.state(),
             });
         }
         Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
@@ -1299,9 +1287,9 @@ impl ProcessRegistry for PostgresProcessRegistry {
                         retained_process_lease_fencing_token(&mut tx, process_id).await?,
                     )?
                 }
-                registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {
-                    fencing_token,
-                } => fencing_token,
+                ProcessLeaseReclaimDecision::AcquireOnObservedFence { fencing_token } => {
+                    fencing_token
+                }
                 registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
                     tx.commit().await.map_err(plugin_sqlx_error)?;
                     return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });

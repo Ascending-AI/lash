@@ -1805,7 +1805,7 @@ async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn Process
         .expect("list wake deliveries");
     assert!(deliveries.iter().any(|delivery| {
         delivery.wake.process_id == process_id
-            && delivery.discard_reason == Some(crate::WakeDiscardReason::Retargeted)
+            && delivery.disposition.discard_reason() == Some(crate::WakeDiscardReason::Retargeted)
     }));
     assert!(
         registry

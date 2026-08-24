@@ -1182,14 +1182,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
         delivery_id: &str,
         claim_token: &str,
     ) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
-        update_wake_delivery_state(
-            &self.conn,
-            delivery_id,
-            claim_token,
-            lash_core::WakeDeliveryState::Enqueued,
-            None,
-        )
-        .await
+        let disposition = lash_core::WakeDeliveryDisposition::Enqueued;
+        update_wake_delivery_state(&self.conn, delivery_id, claim_token, disposition).await
     }
 
     async fn discard_wake_delivery(
@@ -1198,14 +1192,8 @@ impl ProcessRegistry for SqliteProcessRegistry {
         claim_token: &str,
         reason: lash_core::WakeDiscardReason,
     ) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
-        update_wake_delivery_state(
-            &self.conn,
-            delivery_id,
-            claim_token,
-            lash_core::WakeDeliveryState::Discarded,
-            Some(reason),
-        )
-        .await
+        let disposition = lash_core::WakeDeliveryDisposition::Discarded { reason };
+        update_wake_delivery_state(&self.conn, delivery_id, claim_token, disposition).await
     }
 
     async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<(), lash_core::PluginError> {
@@ -1262,7 +1250,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     if changed == 0 {
                         let delivery = load_wake_delivery_conn(tx, &delivery_id)?;
                         return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost {
-                            state: delivery.state,
+                            state: delivery.state(),
                         });
                     }
                     Ok(lash_core::WakeDeliveryClaimOutcome::Applied)

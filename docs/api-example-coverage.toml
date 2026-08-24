@@ -1000,7 +1000,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessRegistry::count_non_terminal_processes"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1229#async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1217#async fn count_non_terminal_processes(&self) -> Result<usize, PluginError> {"
 
 [[api]]
 symbol = "lash::process::ProcessRegistry::wake_allocation_floor_for_testing"
@@ -71336,14 +71336,6 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
-symbol = "lash_core::WakeDelivery::claim_token"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
-
-[[api]]
 symbol = "lash_core::WakeDelivery::delivery_id"
 kind = "field"
 availability = "default+all-features"
@@ -71352,7 +71344,7 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
-symbol = "lash_core::WakeDelivery::discard_reason"
+symbol = "lash_core::WakeDelivery::disposition"
 kind = "field"
 availability = "default+all-features"
 area = "processes"
@@ -71393,7 +71385,7 @@ reason = "Concrete host class: alternative durable effect hosts and process subs
 
 [[api]]
 symbol = "lash_core::WakeDelivery::state"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
@@ -71490,6 +71482,86 @@ reason = "Concrete host class: alternative durable effect hosts and process subs
 [[api]]
 symbol = "lash_core::WakeDeliveryClaimOutcome::ClaimLost::state"
 kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition"
+kind = "enum"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::Discarded"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::Discarded::reason"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::DiscardedUnattributed"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::Enqueued"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::Enqueuing"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::Enqueuing::claim_token"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::Pending"
+kind = "variant"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::discard_reason"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDeliveryDisposition::state"
+kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
@@ -76635,7 +76707,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1441#.flat_map(|process_id| facade_support::process_runtime_session_ids(process_id))"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1429#.flat_map(|process_id| facade_support::process_runtime_session_ids(process_id))"
 
 [[api]]
 symbol = "lash_core::facade_support::process_signal_event_type"
@@ -76853,7 +76925,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1249#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1237#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence"
@@ -76861,7 +76933,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1269#registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1257#registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease"
@@ -76869,7 +76941,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1249#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1237#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease::lease"
@@ -76877,7 +76949,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1249#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1237#registry_transitions::ProcessLeaseClaimDecision::ExtendHeldLease { lease } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ReportBusy"
@@ -76885,7 +76957,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1265#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1253#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseClaimDecision::ReportBusy::holder"
@@ -76893,7 +76965,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1265#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1253#registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision"
@@ -76901,7 +76973,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1295#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1283#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence"
@@ -76909,7 +76981,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1302#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1290#ProcessLeaseReclaimDecision::AcquireOnObservedFence { fencing_token } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::AcquireOnObservedFence::fencing_token"
@@ -76917,7 +76989,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1303#fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1290#ProcessLeaseReclaimDecision::AcquireOnObservedFence { fencing_token } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence"
@@ -76925,7 +76997,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1295#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1283#registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::ReportBusy"
@@ -76933,7 +77005,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1305#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1293#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseReclaimDecision::ReportBusy::holder"
@@ -76941,7 +77013,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1305#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1293#registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::ProcessLeaseRow"
@@ -77141,7 +77213,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1325#registry_transitions::authorize_process_lease_write("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1313#registry_transitions::authorize_process_lease_write("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::decide_process_lease_claim"
@@ -77149,7 +77221,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1243#let fencing_token = match registry_transitions::decide_process_lease_claim("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1231#let fencing_token = match registry_transitions::decide_process_lease_claim("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::decide_process_lease_reclaim"
@@ -77157,7 +77229,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1294#match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now)? {"
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1282#match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now)? {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::next_process_lease_fencing_token"
@@ -77165,7 +77237,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1270#registry_transitions::next_process_lease_fencing_token("
+usage = "crates/lash-postgres-store/src/postgres/process_registry.rs:1258#registry_transitions::next_process_lease_fencing_token("
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::process_lease_still_holds"
@@ -77205,7 +77277,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:149#let state = registry_transitions::wake_delivery_state_from_label(delivery_id, &current)?;"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:150#let state = registry_transitions::wake_delivery_state_from_label(delivery_id, &current)?;"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::wake_discard_reason_from_label"
