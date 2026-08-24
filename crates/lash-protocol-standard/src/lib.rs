@@ -31,6 +31,7 @@ use lash_core::session_model::{
 };
 
 mod batch;
+pub use batch::BatchResultRow;
 pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
@@ -204,24 +205,22 @@ async fn execute_orchestration(
 
     for spec in specs.into_iter().take(BATCH_MAX_TOOL_CALLS) {
         if spec.tool == "batch" {
-            immediate_outcomes.push(serde_json::json!({
-                "index": spec.index,
-                "tool": spec.tool,
-                "success": false,
-                "duration_ms": 0,
-                "error": "Tool 'batch' is not allowed inside batch",
-            }));
+            immediate_outcomes.push(BatchResultRow::failure(
+                spec.index,
+                spec.tool,
+                0,
+                serde_json::json!("Tool 'batch' is not allowed inside batch"),
+            ));
             continue;
         }
         let Some(manifest) = context.callable_tool_manifest(&spec.tool) else {
             let error = format!("Tool '{}' is unavailable in this session", spec.tool);
-            immediate_outcomes.push(serde_json::json!({
-                "index": spec.index,
-                "tool": spec.tool,
-                "success": false,
-                "duration_ms": 0,
-                "error": error,
-            }));
+            immediate_outcomes.push(BatchResultRow::failure(
+                spec.index,
+                spec.tool,
+                0,
+                error.into(),
+            ));
             continue;
         };
         parallel_specs.push((
@@ -257,29 +256,15 @@ async fn execute_orchestration(
             output: outcome.output,
             duration_ms: 0,
         });
-        let mut result_record = serde_json::Map::new();
-        result_record.insert("index".to_string(), serde_json::json!(index));
-        result_record.insert("tool".to_string(), serde_json::json!(tool_record.tool));
-        result_record.insert(
-            "success".to_string(),
-            serde_json::json!(tool_record.output.is_success()),
-        );
-        result_record.insert(
-            "duration_ms".to_string(),
-            // Batch results are replay data. Wall-clock child timing remains
-            // available on traces, but cannot participate in a cross-tier
-            // literal outcome.
-            serde_json::json!(0),
-        );
-        result_record.insert(
-            if tool_record.output.is_success() {
-                "result".to_string()
-            } else {
-                "error".to_string()
-            },
-            tool_record.output.value_for_projection(),
-        );
-        immediate_outcomes.push(Value::Object(result_record));
+        let value = tool_record.output.value_for_projection();
+        // Batch results are replay data. Wall-clock child timing remains
+        // available on traces, but cannot participate in a cross-tier
+        // literal outcome.
+        immediate_outcomes.push(if tool_record.output.is_success() {
+            BatchResultRow::success(index, tool_record.tool, 0, value)
+        } else {
+            BatchResultRow::failure(index, tool_record.tool, 0, value)
+        });
     }
 
     for overflow_index in BATCH_MAX_TOOL_CALLS
@@ -289,27 +274,20 @@ async fn execute_orchestration(
             .map(|value| value.len())
             .unwrap_or_default()
     {
-        immediate_outcomes.push(serde_json::json!({
-            "index": overflow_index,
-            "tool": args
-                .get("tool_calls")
+        immediate_outcomes.push(BatchResultRow::failure(
+            overflow_index,
+            args.get("tool_calls")
                 .and_then(|value| value.as_array())
                 .and_then(|items| items.get(overflow_index))
                 .and_then(|item| item.get("tool"))
                 .and_then(|value| value.as_str())
                 .unwrap_or("unknown"),
-            "success": false,
-            "duration_ms": 0,
-            "error": "Maximum of 25 tool calls allowed in batch",
-        }));
+            0,
+            serde_json::json!("Maximum of 25 tool calls allowed in batch"),
+        ));
     }
 
-    immediate_outcomes.sort_by_key(|outcome| {
-        outcome
-            .get("index")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(u64::MAX)
-    });
+    immediate_outcomes.sort_by_key(|outcome| outcome.index);
     ToolOutcome::ok(serde_json::json!({
         "results": immediate_outcomes,
     }))
@@ -369,11 +347,131 @@ fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolOutcome> {
 /// chain-of-thought ordering.
 pub struct StandardDriver;
 
+#[derive(Clone, Debug)]
 struct StandardToolCall {
     call_id: String,
     tool_name: String,
     input_json: String,
     replay: Option<ProviderReplayMeta>,
+}
+
+#[derive(Clone, Debug)]
+enum StandardResponsePart {
+    Text {
+        text: String,
+        response_meta: Option<ResponseTextMeta>,
+    },
+    Reasoning {
+        text: String,
+        replay: Option<ProviderReasoningReplay>,
+    },
+    ToolCall(StandardToolCall),
+}
+
+#[derive(Debug)]
+struct StandardResponse {
+    assistant_text: String,
+    parts: Vec<StandardResponsePart>,
+}
+
+fn collect_standard_response(llm_response: &LlmResponse) -> StandardResponse {
+    let mut assistant_text = String::new();
+    let mut parts = Vec::new();
+
+    for part in normalized_response_parts(llm_response) {
+        match part {
+            LlmOutputPart::Text {
+                text,
+                response_meta,
+            } => {
+                if text.trim().is_empty() {
+                    continue;
+                }
+                let previous_len = assistant_text.len();
+                append_assistant_text_part(&mut assistant_text, &text);
+                parts.push(StandardResponsePart::Text {
+                    text: assistant_text[previous_len..].to_string(),
+                    response_meta,
+                });
+            }
+            LlmOutputPart::Reasoning { text, replay } => {
+                let text = text.trim().to_string();
+                if text.is_empty() && replay.as_ref().is_none_or(|meta| meta.is_empty()) {
+                    continue;
+                }
+                parts.push(StandardResponsePart::Reasoning { text, replay });
+            }
+            LlmOutputPart::ToolCall {
+                call_id,
+                tool_name,
+                input_json,
+                replay,
+            } => parts.push(StandardResponsePart::ToolCall(StandardToolCall {
+                call_id,
+                tool_name,
+                input_json,
+                replay,
+            })),
+        }
+    }
+
+    StandardResponse {
+        assistant_text,
+        parts,
+    }
+}
+
+fn reassemble_standard_response(
+    assistant_id: &str,
+    parts: Vec<StandardResponsePart>,
+) -> (Vec<Part>, Vec<PendingToolCall>) {
+    let mut message_parts = Vec::with_capacity(parts.len());
+    let mut calls = Vec::new();
+
+    for part in parts {
+        match part {
+            StandardResponsePart::Text {
+                text,
+                response_meta,
+            } => {
+                if text.trim().is_empty() {
+                    continue;
+                }
+                message_parts.push(Part::prose(
+                    format!("{assistant_id}.p{}", message_parts.len()),
+                    text,
+                    response_meta,
+                ));
+            }
+            StandardResponsePart::Reasoning { text, replay } => {
+                message_parts.push(reasoning_part(
+                    assistant_id,
+                    message_parts.len(),
+                    text,
+                    replay,
+                ));
+            }
+            StandardResponsePart::ToolCall(tool_call) => {
+                message_parts.push(Part::tool_call(
+                    format!("{assistant_id}.p{}", message_parts.len()),
+                    tool_call.input_json.clone(),
+                    tool_call.call_id.clone(),
+                    tool_call.tool_name.clone(),
+                    tool_call.replay.clone(),
+                ));
+                let args = serde_json::from_str::<Value>(&tool_call.input_json)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                calls.push(PendingToolCall {
+                    call_id: tool_call.call_id,
+                    tool_name: tool_call.tool_name,
+                    args,
+                    replay: tool_call.replay,
+                });
+            }
+        }
+    }
+
+    (message_parts, calls)
 }
 
 fn last_message_has_tool_result(ctx: &DriverContextView<'_>) -> bool {
@@ -401,71 +499,34 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction> {
-        let response_parts = normalized_response_parts(&llm_response);
-        let mut assistant_text = String::new();
-        let mut assistant_text_parts: Vec<(String, Option<ResponseTextMeta>)> = Vec::new();
-        let mut tool_calls: Vec<StandardToolCall> = Vec::new();
-        // Reasoning items captured with their position in the original
-        // response. The `usize` is the index in `tool_calls` that this
-        // reasoning item originally preceded, so we can interleave
-        // reasoning → tool_call in the provider's original emission order.
-        // `Option<ProviderReasoningReplay>` carries roundtrip payload
-        // when present (fix 1.3b); when None, the item is display-only
-        // (fix 1.3a) — still rendered in the UI but never re-fed.
-        let mut reasoning_items: Vec<(usize, Option<ProviderReasoningReplay>, String)> = Vec::new();
+        let response = collect_standard_response(&llm_response);
         let mut actions = Vec::new();
 
-        for part in response_parts {
-            match part {
-                LlmOutputPart::Text {
-                    text,
-                    response_meta,
-                } => {
-                    if !text.is_empty() {
-                        let previous_len = assistant_text.len();
-                        append_assistant_text_part(&mut assistant_text, &text);
-                        assistant_text_parts
-                            .push((assistant_text[previous_len..].to_string(), response_meta));
-                        if !text_streamed {
-                            actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
-                                content: assistant_text[previous_len..].to_string(),
-                            }));
-                        }
-                    }
-                }
-                LlmOutputPart::Reasoning { text, replay } => {
-                    let trimmed = text.trim().to_string();
-                    // Skip fully-empty reasoning items (no display text and
-                    // no roundtrip payload).
-                    if trimmed.is_empty() && replay.as_ref().is_none_or(|meta| meta.is_empty()) {
-                        continue;
-                    }
-                    reasoning_items.push((tool_calls.len(), replay, trimmed));
-                }
-                LlmOutputPart::ToolCall {
-                    call_id,
-                    tool_name,
-                    input_json,
-                    replay,
-                } => {
-                    tool_calls.push(StandardToolCall {
-                        call_id,
-                        tool_name,
-                        input_json,
-                        replay,
-                    });
+        if !text_streamed {
+            for part in &response.parts {
+                if let StandardResponsePart::Text { text, .. } = part {
+                    actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {
+                        content: text.clone(),
+                    }));
                 }
             }
         }
 
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: ctx.protocol_iteration(),
-            content: assistant_text.clone(),
+            content: response.assistant_text.clone(),
             duration_ms: 0,
         }));
 
-        if tool_calls.is_empty() {
-            if assistant_text.trim().is_empty() && reasoning_items.is_empty() {
+        let has_tool_calls = response
+            .parts
+            .iter()
+            .any(|part| matches!(part, StandardResponsePart::ToolCall(_)));
+        let asst_id = standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant");
+        let (assistant_parts, calls) = reassemble_standard_response(&asst_id, response.parts);
+
+        if !has_tool_calls {
+            if assistant_parts.is_empty() {
                 if last_message_has_tool_result(&ctx) {
                     // A model can intentionally complete a tool-only request
                     // with an empty final answer, e.g. when the user says
@@ -484,64 +545,23 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 return actions;
             }
 
-            let asst_id = standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant");
-            let mut parts_out = Vec::new();
-            for (_, meta, text) in reasoning_items {
-                parts_out.push(reasoning_part(&asst_id, parts_out.len(), text, meta));
-            }
-            append_assistant_prose(&mut parts_out, &asst_id, assistant_text_parts);
-            if parts_out.is_empty() {
-                actions.extend(empty_response_actions());
-                return actions;
-            }
+            actions.push(DriverAction::AppendEvents(vec![conversation_event(
+                Message {
+                    id: asst_id,
+                    role: MessageRole::Assistant,
+                    parts: shared_parts(assistant_parts),
+                    origin: None,
+                },
+            )]));
             actions.push(DriverAction::StartCheckpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
                     TurnFinish::AssistantMessage {
-                        text: assistant_text.clone(),
+                        text: response.assistant_text,
                     },
                 )),
             });
             return actions;
-        }
-
-        let asst_id = standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "assistant");
-        let mut assistant_parts = Vec::new();
-        append_assistant_prose(&mut assistant_parts, &asst_id, assistant_text_parts);
-
-        let mut calls = Vec::new();
-        // Interleave reasoning items with tool calls to preserve the
-        // original emission order. Some provider replays expect the
-        // sequence `reasoning → function_call` from the turn in which both
-        // were produced; swapping them can drop the reasoning/tool pairing.
-        let mut reasoning_iter = reasoning_items.into_iter().peekable();
-        for (tool_index, tool_call) in tool_calls.into_iter().enumerate() {
-            while let Some((insert_index, _, _)) = reasoning_iter.peek() {
-                if *insert_index > tool_index {
-                    break;
-                }
-                let (_, meta, text) = reasoning_iter.next().expect("peek ok");
-                assistant_parts.push(reasoning_part(&asst_id, assistant_parts.len(), text, meta));
-            }
-            assistant_parts.push(Part::tool_call(
-                format!("{}.p{}", asst_id, assistant_parts.len()),
-                tool_call.input_json.clone(),
-                tool_call.call_id.clone(),
-                tool_call.tool_name.clone(),
-                tool_call.replay.clone(),
-            ));
-
-            let args = serde_json::from_str::<Value>(&tool_call.input_json)
-                .unwrap_or_else(|_| serde_json::json!({}));
-            calls.push(PendingToolCall {
-                call_id: tool_call.call_id,
-                tool_name: tool_call.tool_name,
-                args,
-                replay: tool_call.replay,
-            });
-        }
-        for (_, meta, text) in reasoning_iter {
-            assistant_parts.push(reasoning_part(&asst_id, assistant_parts.len(), text, meta));
         }
 
         if !assistant_parts.is_empty() {
@@ -664,23 +684,6 @@ fn append_model_return_parts(
     }
 }
 
-fn append_assistant_prose(
-    parts: &mut Vec<Part>,
-    assistant_id: &str,
-    prose: impl IntoIterator<Item = (String, Option<lash_core::llm::types::ResponseTextMeta>)>,
-) {
-    for (content, response_meta) in prose {
-        if content.trim().is_empty() {
-            continue;
-        }
-        parts.push(Part::prose(
-            format!("{assistant_id}.p{}", parts.len()),
-            content,
-            response_meta,
-        ));
-    }
-}
-
 fn empty_response_actions() -> [DriverAction; 2] {
     [
         DriverAction::Emit(make_error_event(
@@ -757,6 +760,187 @@ mod tests {
 
         assert_eq!(first, replay);
         assert_ne!(first, next_turn);
+    }
+
+    fn sequence_part(kind: usize, position: usize) -> (LlmOutputPart, PartKind, String) {
+        match kind {
+            0 => {
+                let marker = format!("text-{position}");
+                (
+                    LlmOutputPart::Text {
+                        text: marker.clone(),
+                        response_meta: None,
+                    },
+                    PartKind::Prose,
+                    marker,
+                )
+            }
+            1 => {
+                let marker = format!("reasoning-{position}");
+                (
+                    LlmOutputPart::Reasoning {
+                        text: marker.clone(),
+                        replay: None,
+                    },
+                    PartKind::Reasoning,
+                    marker,
+                )
+            }
+            2 => {
+                let marker = format!("tool-{position}");
+                (
+                    LlmOutputPart::ToolCall {
+                        call_id: format!("call-{position}"),
+                        tool_name: marker.clone(),
+                        input_json: format!(r#"{{"position":{position}}}"#),
+                        replay: None,
+                    },
+                    PartKind::ToolCall,
+                    marker,
+                )
+            }
+            _ => unreachable!("base-three sequence kind"),
+        }
+    }
+
+    #[test]
+    fn mixed_response_sequences_reassemble_in_arrival_order() {
+        for len in 1_u32..=5 {
+            for encoded in 0..3_usize.pow(len) {
+                let mut cursor = encoded;
+                let mut input = Vec::with_capacity(len as usize);
+                let mut expected = Vec::with_capacity(len as usize);
+                for position in 0..len as usize {
+                    let (part, kind, marker) = sequence_part(cursor % 3, position);
+                    cursor /= 3;
+                    input.push(part);
+                    expected.push((kind, marker));
+                }
+
+                let response = collect_standard_response(&LlmResponse {
+                    parts: input,
+                    ..LlmResponse::default()
+                });
+                let (actual, calls) = reassemble_standard_response("assistant", response.parts);
+
+                assert_eq!(actual.len(), expected.len(), "sequence {encoded} len {len}");
+                for (position, (actual, (expected_kind, marker))) in
+                    actual.iter().zip(expected.iter()).enumerate()
+                {
+                    assert_eq!(
+                        actual.kind, *expected_kind,
+                        "kind at {position} in sequence {encoded} len {len}"
+                    );
+                    match actual.kind {
+                        PartKind::ToolCall => assert_eq!(
+                            actual.tool_name.as_deref(),
+                            Some(marker.as_str()),
+                            "tool marker at {position} in sequence {encoded} len {len}"
+                        ),
+                        _ => assert!(
+                            actual.content.contains(marker),
+                            "content marker at {position} in sequence {encoded} len {len}: {actual:?}"
+                        ),
+                    }
+                }
+                assert_eq!(
+                    calls.len(),
+                    expected
+                        .iter()
+                        .filter(|(kind, _)| *kind == PartKind::ToolCall)
+                        .count(),
+                    "tool dispatch count in sequence {encoded} len {len}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn former_no_tool_and_tool_branch_scrambles_preserve_original_order() {
+        let cases = [
+            vec![sequence_part(1, 0).0, sequence_part(0, 1).0],
+            vec![
+                sequence_part(0, 0).0,
+                sequence_part(1, 1).0,
+                sequence_part(2, 2).0,
+            ],
+        ];
+
+        let actual = cases
+            .into_iter()
+            .map(|parts| {
+                let response = collect_standard_response(&LlmResponse {
+                    parts,
+                    ..LlmResponse::default()
+                });
+                reassemble_standard_response("assistant", response.parts)
+                    .0
+                    .into_iter()
+                    .map(|part| part.kind)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual[0], [PartKind::Reasoning, PartKind::Prose]);
+        assert_eq!(
+            actual[1],
+            [PartKind::Prose, PartKind::Reasoning, PartKind::ToolCall]
+        );
+    }
+
+    #[derive(Clone, Debug)]
+    struct WhitespaceInterleavedProvider;
+
+    #[async_trait::async_trait]
+    impl lash_core::facade_support::Provider for WhitespaceInterleavedProvider {
+        fn kind(&self) -> &'static str {
+            "stub"
+        }
+
+        fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+            lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+        }
+
+        fn options(&self) -> lash_core::facade_support::ProviderOptions {
+            lash_core::facade_support::ProviderOptions::default()
+        }
+
+        fn set_options(&mut self, _options: lash_core::facade_support::ProviderOptions) {}
+
+        fn serialize_config(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+
+        async fn complete(
+            &mut self,
+            _request: lash_core::LlmRequest,
+        ) -> Result<lash_core::LlmResponse, lash_core::facade_support::LlmTransportError> {
+            Ok(lash_core::LlmResponse {
+                parts: vec![
+                    lash_core::LlmOutputPart::Text {
+                        text: "a".to_string(),
+                        response_meta: None,
+                    },
+                    lash_core::LlmOutputPart::Text {
+                        text: "   ".to_string(),
+                        response_meta: None,
+                    },
+                    lash_core::LlmOutputPart::Reasoning {
+                        text: "r".to_string(),
+                        replay: None,
+                    },
+                    lash_core::LlmOutputPart::Text {
+                        text: "b".to_string(),
+                        response_meta: None,
+                    },
+                ],
+                ..lash_core::LlmResponse::default()
+            })
+        }
+
+        fn clone_boxed(&self) -> Box<dyn lash_core::facade_support::Provider> {
+            Box::new(self.clone())
+        }
     }
 
     #[derive(Clone, Debug)]
@@ -1031,6 +1215,104 @@ mod tests {
             }
             local_executor.execute(envelope).await
         }
+    }
+
+    #[tokio::test]
+    async fn whitespace_only_text_does_not_split_terminal_history() {
+        let provider_handle = lash_core::facade_support::ProviderHandle::new(
+            lash_core::facade_support::ProviderComponents::new(Box::new(
+                WhitespaceInterleavedProvider,
+            )),
+        );
+        let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        );
+        host.providers.provider_resolver = Arc::new(
+            lash_core::facade_support::SingleProviderResolver::new(provider_handle),
+        );
+        let policy = lash_core::SessionPolicy {
+            provider_id: "stub".to_string(),
+            model: lash_core::ModelSpec::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("valid model"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let scoped_controller = lash_core::ScopedEffectController::shared(
+            Arc::new(CountingEffectController::default()),
+            lash_core::ExecutionScope::turn("whitespace-response-session", "turn-1"),
+        )
+        .expect("scoped controller");
+        let mut runtime = Box::pin(
+            lash_core::facade_support::LashRuntime::builder(
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
+                lash_core::LeaseOwnerIdentity::opaque(
+                    "protocol-standard-test-worker",
+                    "protocol-standard-test-boot",
+                ),
+            )
+            .with_session_id("whitespace-response-session")
+            .with_policy(policy)
+            .with_runtime_host(host)
+            .with_plugin_factories(vec![Arc::new(StandardProtocolPluginFactory::new())])
+            .build(),
+        )
+        .await
+        .expect("runtime");
+
+        let turn = runtime
+            .stream_turn(
+                lash_core::TurnInput::text("respond with mixed parts"),
+                lash_core::facade_support::TurnOptions::new(
+                    tokio_util::sync::CancellationToken::new(),
+                    scoped_controller,
+                ),
+            )
+            .await
+            .expect("turn");
+
+        let finish_text = match &turn.outcome {
+            lash_core::facade_support::TurnOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage { text },
+            ) => text,
+            outcome => panic!("unexpected turn outcome: {outcome:?}"),
+        };
+        let read_view = turn.state.read_view();
+        let assistant_messages = read_view
+            .messages()
+            .iter()
+            .filter(|message| message.role == MessageRole::Assistant)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            assistant_messages.len(),
+            1,
+            "the terminal output must not materialize a duplicate assistant message"
+        );
+        let stored = assistant_messages[0];
+        assert_eq!(
+            stored
+                .parts
+                .iter()
+                .map(|part| part.kind)
+                .collect::<Vec<_>>(),
+            [PartKind::Prose, PartKind::Reasoning, PartKind::Prose]
+        );
+        let rendered_text = stored
+            .parts
+            .iter()
+            .filter(|part| {
+                matches!(
+                    part.kind,
+                    PartKind::Prose | PartKind::Text | PartKind::Attachment | PartKind::ToolResult
+                )
+            })
+            .map(|part| part.content.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        assert_eq!(finish_text, &rendered_text);
     }
 
     #[tokio::test]

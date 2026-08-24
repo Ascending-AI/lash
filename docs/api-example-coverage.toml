@@ -12071,7 +12071,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MessageRole::System"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:141#role: MessageRole::System,"
+usage = "crates/lash-protocol-standard/src/lib.rs:142#role: MessageRole::System,"
 
 [[api]]
 symbol = "lash::messages::MessageRole::User"
@@ -67801,7 +67801,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:391#vec![DriverAction::StartLlm {"
+usage = "crates/lash-protocol-standard/src/lib.rs:489#vec![DriverAction::StartLlm {"
 
 [[api]]
 symbol = "lash_core::DriverContextView"
@@ -67809,7 +67809,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:379#fn last_message_has_tool_result(ctx: &DriverContextView<'_>) -> bool {"
+usage = "crates/lash-protocol-standard/src/lib.rs:477#fn last_message_has_tool_result(ctx: &DriverContextView<'_>) -> bool {"
 
 [[api]]
 symbol = "lash_core::Effect"
@@ -67936,7 +67936,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:627#_result: Result<lash_core::ExecResponse, String>,"
+usage = "crates/lash-protocol-standard/src/lib.rs:647#_result: Result<lash_core::ExecResponse, String>,"
 
 [[api]]
 symbol = "lash_core::ExecResponse::degraded_bindings"
@@ -71177,7 +71177,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:124#config: TurnDriverConfig::chat("
+usage = "crates/lash-protocol-standard/src/lib.rs:125#config: TurnDriverConfig::chat("
 
 [[api]]
 symbol = "lash_core::TurnDriverPreamble"
@@ -71185,7 +71185,7 @@ kind = "type_alias"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:120#fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {"
+usage = "crates/lash-protocol-standard/src/lib.rs:121#fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode"
@@ -72045,7 +72045,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:697#SessionHistoryRecord::Conversation(ConversationRecord::from_message(message))"
+usage = "crates/lash-protocol-standard/src/lib.rs:700#SessionHistoryRecord::Conversation(ConversationRecord::from_message(message))"
 
 [[api]]
 symbol = "lash_core::facade_support::ConversationRecord::from_message"
@@ -72053,7 +72053,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:697#SessionHistoryRecord::Conversation(ConversationRecord::from_message(message))"
+usage = "crates/lash-protocol-standard/src/lib.rs:700#SessionHistoryRecord::Conversation(ConversationRecord::from_message(message))"
 
 [[api]]
 symbol = "lash_core::facade_support::ConversationRecord::id"
@@ -72281,7 +72281,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:639#model_return: lash_core::facade_support::ModelToolReturn,"
+usage = "crates/lash-protocol-standard/src/lib.rs:659#model_return: lash_core::facade_support::ModelToolReturn,"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturn::call_id"
@@ -72289,7 +72289,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:650#model_return.call_id.clone(),"
+usage = "crates/lash-protocol-standard/src/lib.rs:670#model_return.call_id.clone(),"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturn::from_output"
@@ -72313,7 +72313,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:651#model_return.tool_name.clone(),"
+usage = "crates/lash-protocol-standard/src/lib.rs:671#model_return.tool_name.clone(),"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturnPart"
@@ -72321,7 +72321,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:643#lash_core::facade_support::ModelToolReturnPart::Text { text } => {"
+usage = "crates/lash-protocol-standard/src/lib.rs:663#lash_core::facade_support::ModelToolReturnPart::Text { text } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturnPart::Attachment"
@@ -72329,7 +72329,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:654#lash_core::facade_support::ModelToolReturnPart::Attachment(source) => {"
+usage = "crates/lash-protocol-standard/src/lib.rs:674#lash_core::facade_support::ModelToolReturnPart::Attachment(source) => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturnPart::Attachment::0"
@@ -72337,7 +72337,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:654#lash_core::facade_support::ModelToolReturnPart::Attachment(source) => {"
+usage = "crates/lash-protocol-standard/src/lib.rs:674#lash_core::facade_support::ModelToolReturnPart::Attachment(source) => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturnPart::Text"
@@ -72345,7 +72345,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:643#lash_core::facade_support::ModelToolReturnPart::Text { text } => {"
+usage = "crates/lash-protocol-standard/src/lib.rs:663#lash_core::facade_support::ModelToolReturnPart::Text { text } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturnPart::Text::text"
@@ -72353,7 +72353,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:643#lash_core::facade_support::ModelToolReturnPart::Text { text } => {"
+usage = "crates/lash-protocol-standard/src/lib.rs:663#lash_core::facade_support::ModelToolReturnPart::Text { text } => {"
 
 [[api]]
 symbol = "lash_core::facade_support::ModelToolReturnPart::text"
@@ -72361,7 +72361,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-plugin-tool-output-budget/src/lib.rs:297#return vec![ModelToolReturnPart::text(render_projected_model_value("
+usage = "crates/lash-plugin-tool-output-budget/src/lib.rs:300#return Ok(vec![ModelToolReturnPart::text("
 
 [[api]]
 symbol = "lash_core::test_support::OpenAttachmentSourcePolicy"
@@ -72379,7 +72379,7 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_provider::orchestration::OrchestratingToolDef"]
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:158#pub fn standard_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {"
+usage = "crates/lash-protocol-standard/src/lib.rs:159#pub fn standard_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {"
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestratingToolDef::from_first_party"
@@ -72388,7 +72388,7 @@ availability = "default+all-features"
 aliases = ["lash_core::tool_provider::orchestration::OrchestratingToolDef::from_first_party"]
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:162#unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }"
+usage = "crates/lash-protocol-standard/src/lib.rs:163#unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }"
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestratingToolImplementation"
@@ -72396,7 +72396,7 @@ kind = "trait"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:159#let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> ="
+usage = "crates/lash-protocol-standard/src/lib.rs:160#let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> ="
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestratingToolImplementation::contract"
@@ -72404,7 +72404,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:173#fn contract(&self) -> Arc<lash_core::ToolContract> {"
+usage = "crates/lash-protocol-standard/src/lib.rs:174#fn contract(&self) -> Arc<lash_core::ToolContract> {"
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestratingToolImplementation::execute"
@@ -72412,7 +72412,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:177#async fn execute("
+usage = "crates/lash-protocol-standard/src/lib.rs:178#async fn execute("
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestratingToolImplementation::manifest"
@@ -72436,7 +72436,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:180#context: &lash_core::facade_support::OrchestrationContext<'_>,"
+usage = "crates/lash-protocol-standard/src/lib.rs:181#context: &lash_core::facade_support::OrchestrationContext<'_>,"
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestrationContext::sessions"
@@ -72468,7 +72468,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:242#.call_tool_batch("
+usage = "crates/lash-protocol-standard/src/lib.rs:241#.call_tool_batch("
 
 [[api]]
 symbol = "lash_core::facade_support::OrchestrationContext::callable_tool_manifest"
@@ -72540,7 +72540,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:232#context.tool_call_id().unwrap_or(\"batch\"),"
+usage = "crates/lash-protocol-standard/src/lib.rs:231#context.tool_call_id().unwrap_or(\"batch\"),"
 
 [[api]]
 symbol = "lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION"
@@ -74278,7 +74278,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:430#actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {"
+usage = "crates/lash-protocol-standard/src/lib.rs:508#actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::ChildTokenUsage"
@@ -74456,7 +74456,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:461#actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {"
+usage = "crates/lash-protocol-standard/src/lib.rs:515#actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::LlmResponse::content"
@@ -74473,7 +74473,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:464#duration_ms: 0,"
+usage = "crates/lash-protocol-standard/src/lib.rs:518#duration_ms: 0,"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::LlmResponse::protocol_iteration"
@@ -74481,7 +74481,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:462#protocol_iteration: ctx.protocol_iteration(),"
+usage = "crates/lash-protocol-standard/src/lib.rs:516#protocol_iteration: ctx.protocol_iteration(),"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::Message"
@@ -74601,7 +74601,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-standard/src/lib.rs:430#actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {"
+usage = "crates/lash-protocol-standard/src/lib.rs:508#actions.push(DriverAction::Emit(SessionStreamEvent::TextDelta {"
 
 [[api]]
 symbol = "lash_core::facade_support::SessionStreamEvent::TextDelta::content"

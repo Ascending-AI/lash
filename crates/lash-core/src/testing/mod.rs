@@ -1856,7 +1856,7 @@ mod test_protocol_fakes {
             return crate::ToolOutcome::err_fmt("Invalid tool_calls: expected at least one call");
         }
 
-        let mut results = Vec::new();
+        let mut results: Vec<lash_sansio::BatchResultRow> = Vec::new();
         let mut parallel_specs = Vec::new();
         for (index, item) in raw_calls.iter().enumerate().take(MAX) {
             let Some(obj) = item.as_object() else {
@@ -1875,13 +1875,12 @@ mod test_protocol_fakes {
                 ));
             };
             if tool == "batch" {
-                results.push(serde_json::json!({
-                    "index": index,
-                    "tool": tool,
-                    "success": false,
-                    "duration_ms": 0,
-                    "error": "Tool 'batch' is not allowed inside batch",
-                }));
+                results.push(lash_sansio::BatchResultRow::failure(
+                    index,
+                    tool,
+                    0,
+                    serde_json::json!("Tool 'batch' is not allowed inside batch"),
+                ));
                 continue;
             }
             let parameters = obj
@@ -1889,13 +1888,12 @@ mod test_protocol_fakes {
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
             let Some(manifest) = context.callable_tool_manifest(tool) else {
-                results.push(serde_json::json!({
-                    "index": index,
-                    "tool": tool,
-                    "success": false,
-                    "duration_ms": 0,
-                    "error": format!("Tool '{tool}' is unavailable in this session"),
-                }));
+                results.push(lash_sansio::BatchResultRow::failure(
+                    index,
+                    tool,
+                    0,
+                    serde_json::json!(format!("Tool '{tool}' is unavailable in this session")),
+                ));
                 continue;
             };
             parallel_specs.push((
@@ -1921,49 +1919,55 @@ mod test_protocol_fakes {
                 output: outcome.output,
                 duration_ms: 0,
             });
-            let mut record = serde_json::Map::new();
-            record.insert("index".to_string(), serde_json::json!(index));
-            record.insert("tool".to_string(), serde_json::json!(tool_record.tool));
-            record.insert(
-                "success".to_string(),
-                serde_json::json!(tool_record.output.is_success()),
-            );
-            record.insert(
-                "duration_ms".to_string(),
-                serde_json::json!(tool_record.duration_ms),
-            );
-            record.insert(
-                if tool_record.output.is_success() {
-                    "result"
-                } else {
-                    "error"
-                }
-                .to_string(),
-                tool_record.output.value_for_projection(),
-            );
-            results.push(serde_json::Value::Object(record));
+            let value = tool_record.output.value_for_projection();
+            results.push(if tool_record.output.is_success() {
+                lash_sansio::BatchResultRow::success(
+                    index,
+                    tool_record.tool,
+                    tool_record.duration_ms,
+                    value,
+                )
+            } else {
+                lash_sansio::BatchResultRow::failure(
+                    index,
+                    tool_record.tool,
+                    tool_record.duration_ms,
+                    value,
+                )
+            });
         }
 
         for overflow_index in MAX..raw_calls.len() {
-            results.push(serde_json::json!({
-                "index": overflow_index,
-                "tool": raw_calls
+            results.push(lash_sansio::BatchResultRow::failure(
+                overflow_index,
+                raw_calls
                     .get(overflow_index)
                     .and_then(|item| item.get("tool"))
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown"),
-                "success": false,
-                "duration_ms": 0,
-                "error": "Maximum of 25 tool calls allowed in batch",
-            }));
+                0,
+                serde_json::json!("Maximum of 25 tool calls allowed in batch"),
+            ));
         }
 
-        results.sort_by_key(|r| {
-            r.get("index")
-                .and_then(|value| value.as_u64())
-                .unwrap_or(u64::MAX)
-        });
+        results.sort_by_key(|row| row.index);
         crate::ToolOutcome::ok(serde_json::json!({ "results": results }))
+    }
+
+    #[test]
+    fn test_batch_result_row_decode_names_missing_required_field() {
+        let error = serde_json::from_value::<lash_sansio::BatchResultRow>(serde_json::json!({
+            "index": 0,
+            "tool": "probe",
+            "success": true,
+            "result": "ok"
+        }))
+        .expect_err("row without duration_ms must fail");
+
+        assert!(
+            error.to_string().contains("missing field `duration_ms`"),
+            "{error}"
+        );
     }
 
     struct TestProtocolDriver;

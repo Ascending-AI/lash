@@ -2171,6 +2171,7 @@ name = "lash-plugin-tool-output-budget"
 version = "0.0.0-dev"
 dependencies = [
  "lash-core",
+ "lash-protocol-standard",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2441,6 +2442,7 @@ dependencies = [
  "lash-postgres-store",
  "lash-protocol-rlm",
  "lash-protocol-standard",
+ "lash-provider-anthropic",
  "lash-remote-protocol",
  "lash-rlm-types",
  "lash-sansio",

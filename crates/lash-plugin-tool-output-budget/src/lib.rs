@@ -275,31 +275,34 @@ impl SessionPlugin for ToolOutputBudgetPlugin {
 
 fn register_projector(reg: &mut PluginRegistrar, budget: Budget) -> Result<(), PluginError> {
     reg.tool_results().projector(Arc::new(move |ctx| {
-        Box::pin(async move { Ok(project_tool_result(&budget, ctx)) })
+        Box::pin(async move { project_tool_result(&budget, ctx) })
     }))
 }
 
-fn project_tool_result(budget: &Budget, ctx: ToolResultProjectionContext) -> ModelToolReturn {
-    let parts = project_model_parts(budget, &ctx);
-    ModelToolReturn {
+fn project_tool_result(
+    budget: &Budget,
+    ctx: ToolResultProjectionContext,
+) -> Result<ModelToolReturn, PluginError> {
+    let parts = project_model_parts(budget, &ctx)?;
+    Ok(ModelToolReturn {
         call_id: ctx.call_id.clone(),
         tool_name: ctx.tool_name.clone(),
         parts,
-    }
+    })
 }
 
 fn project_model_parts(
     budget: &Budget,
     ctx: &ToolResultProjectionContext,
-) -> Vec<ModelToolReturnPart> {
+) -> Result<Vec<ModelToolReturnPart>, PluginError> {
     if ctx.tool_name == "batch" {
-        let value = project_batch_value(budget, ctx);
-        return vec![ModelToolReturnPart::text(render_projected_model_value(
-            &value,
-        ))];
+        let value = project_batch_value(budget, ctx)?;
+        return Ok(vec![ModelToolReturnPart::text(
+            render_projected_model_value(&value),
+        )]);
     }
 
-    match &ctx.output.outcome {
+    Ok(match &ctx.output.outcome {
         ToolCallOutcome::Success(value) => project_tool_value_parts(budget, ctx, value),
         ToolCallOutcome::Failure(failure) => {
             let mut parts = vec![ModelToolReturnPart::text(
@@ -327,7 +330,7 @@ fn project_model_parts(
             }
             parts
         }
-    }
+    })
 }
 
 fn render_projected_model_value(value: &serde_json::Value) -> String {
@@ -557,10 +560,13 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn project_batch_value(budget: &Budget, ctx: &ToolResultProjectionContext) -> serde_json::Value {
+fn project_batch_value(
+    budget: &Budget,
+    ctx: &ToolResultProjectionContext,
+) -> Result<serde_json::Value, PluginError> {
     let value = ctx.output.value_for_projection();
     let Some(map) = value.as_object() else {
-        return project_json_value(&value, budget, ctx);
+        return Ok(project_json_value(&value, budget, ctx));
     };
 
     let mut projected = serde_json::Map::new();
@@ -568,65 +574,43 @@ fn project_batch_value(budget: &Budget, ctx: &ToolResultProjectionContext) -> se
     let results = map
         .get("results")
         .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .enumerate()
-                .map(|(index, item)| project_batch_child_value(index, item, budget, ctx))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        .map_or_else(
+            || Ok(Vec::new()),
+            |items| {
+                items
+                    .iter()
+                    .map(|item| project_batch_child_value(item, budget, ctx))
+                    .collect::<Result<Vec<_>, PluginError>>()
+            },
+        )?;
     projected.insert("results".to_string(), serde_json::Value::Array(results));
-    serde_json::Value::Object(projected)
+    Ok(serde_json::Value::Object(projected))
 }
 
 fn project_batch_child_value(
-    index: usize,
     item: &serde_json::Value,
     budget: &Budget,
     ctx: &ToolResultProjectionContext,
-) -> serde_json::Value {
-    let Some(map) = item.as_object() else {
-        return project_json_value(item, budget, ctx);
-    };
+) -> Result<serde_json::Value, PluginError> {
+    let row = serde_json::from_value::<lash_protocol_standard::BatchResultRow>(item.clone())
+        .map_err(|error| PluginError::Session(format!("invalid batch result row: {error}")))?;
+    let child_value = row.value().clone();
+    let child_args = batch_child_args(&ctx.args, row.index);
 
-    let tool_name = map
-        .get("tool")
-        .and_then(|value| value.as_str())
-        .or_else(|| batch_child_tool_name(&ctx.args, index))
-        .unwrap_or("tool")
-        .to_string();
-    let success = map
-        .get("success")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    let duration_ms = map
-        .get("duration_ms")
-        .and_then(|value| value.as_u64())
-        .unwrap_or_default();
-    let child_value = if success {
-        map.get("result")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null)
-    } else {
-        map.get("error").cloned().unwrap_or(serde_json::Value::Null)
-    };
-    let child_args = batch_child_args(&ctx.args, index);
-
-    let projected_child = if tool_name == "batch" || !success {
+    let projected_child = if row.tool == "batch" || !row.success {
         project_json_value(&child_value, budget, ctx)
     } else {
         let model_return = project_tool_result(
             budget,
             ToolResultProjectionContext {
                 session_id: ctx.session_id.clone(),
-                call_id: format!("{}.{}", ctx.call_id, index),
-                tool_name: tool_name.clone(),
+                call_id: format!("{}.{}", ctx.call_id, row.index),
+                tool_name: row.tool.clone(),
                 args: child_args,
                 output: lash_core::ToolCallOutput::success(child_value.clone()),
-                duration_ms,
+                duration_ms: row.duration_ms,
             },
-        );
+        )?;
         let rendered = render_model_return_parts(&model_return.parts);
         rendered
             .parse::<serde_json::Value>()
@@ -634,21 +618,22 @@ fn project_batch_child_value(
     };
 
     let mut projected = serde_json::Map::new();
-    if let Some(value) = map.get("index") {
-        projected.insert("index".to_string(), value.clone());
-    }
-    projected.insert("tool".to_string(), serde_json::json!(tool_name));
-    projected.insert("success".to_string(), serde_json::json!(success));
-    projected.insert("duration_ms".to_string(), serde_json::json!(duration_ms));
+    projected.insert("index".to_string(), serde_json::json!(row.index));
+    projected.insert("tool".to_string(), serde_json::json!(row.tool));
+    projected.insert("success".to_string(), serde_json::json!(row.success));
     projected.insert(
-        if success {
+        "duration_ms".to_string(),
+        serde_json::json!(row.duration_ms),
+    );
+    projected.insert(
+        if row.success {
             "result".to_string()
         } else {
             "error".to_string()
         },
         projected_child,
     );
-    serde_json::Value::Object(projected)
+    Ok(serde_json::Value::Object(projected))
 }
 
 fn render_model_return_parts(parts: &[ModelToolReturnPart]) -> String {
@@ -700,15 +685,6 @@ fn project_json_value(
         ),
         other => other.clone(),
     }
-}
-
-fn batch_child_tool_name(batch_args: &serde_json::Value, index: usize) -> Option<&str> {
-    batch_args
-        .get("tool_calls")
-        .and_then(|value| value.as_array())
-        .and_then(|items| items.get(index))
-        .and_then(|value| value.get("tool"))
-        .and_then(|value| value.as_str())
 }
 
 fn batch_child_args(batch_args: &serde_json::Value, index: usize) -> serde_json::Value {
@@ -828,7 +804,8 @@ mod tests {
                 })),
                 duration_ms: 1,
             },
-        );
+        )
+        .expect("project tool result");
         let output = render_model_return_parts(&projected.parts);
         assert!(output.contains("Full output saved to: /tmp/existing-shell-output.log"));
         assert!(output.contains("Use the shell tool or host-provided file access"));
@@ -865,7 +842,8 @@ mod tests {
                 })),
                 duration_ms: 1,
             },
-        );
+        )
+        .expect("project tool result");
         assert!(render_model_return_parts(&projected.parts).contains("bytes truncated"));
     }
 
@@ -880,13 +858,14 @@ mod tests {
                 args: json!({}),
                 output: lash_core::ToolCallOutput::success(json!({
                     "results": [
-                        {"tool": "read_file", "success": true, "duration_ms": 1, "result": "very long child payload"},
-                        {"tool": "grep", "success": false, "duration_ms": 1, "error": "boom"}
+                        {"index": 0, "tool": "read_file", "success": true, "duration_ms": 1, "result": "very long child payload"},
+                        {"index": 1, "tool": "grep", "success": false, "duration_ms": 1, "error": "boom"}
                     ]
                 })),
                 duration_ms: 1,
             },
-        );
+        )
+        .expect("project batch result");
         let projected_value: serde_json::Value =
             serde_json::from_str(&render_model_return_parts(&projected.parts)).unwrap();
         let results = projected_value
@@ -915,13 +894,14 @@ mod tests {
                 args: json!({}),
                 output: lash_core::ToolCallOutput::success(json!({
                     "results": [
-                        {"tool": "read_file", "success": true, "duration_ms": 1, "result": "child payload"},
-                        {"tool": "grep", "success": false, "duration_ms": 1, "error": "boom"}
+                        {"index": 0, "tool": "read_file", "success": true, "duration_ms": 1, "result": "child payload"},
+                        {"index": 1, "tool": "grep", "success": false, "duration_ms": 1, "error": "boom"}
                     ]
                 })),
                 duration_ms: 1,
             },
-        );
+        )
+        .expect("project batch result");
         let projected_value: serde_json::Value =
             serde_json::from_str(&render_model_return_parts(&projected.parts)).unwrap();
         let details = projected_value
@@ -935,6 +915,34 @@ mod tests {
             .unwrap_or_default();
         assert!(child_result.contains("truncated"));
         assert_eq!(details[1].get("error"), Some(&json!("boom")));
+    }
+
+    #[test]
+    fn batch_projection_decode_names_missing_required_row_field() {
+        let error = project_tool_result(
+            &Budget::from(ToolOutputBudgetConfig::default()),
+            ToolResultProjectionContext {
+                session_id: "root".to_string(),
+                call_id: "call".to_string(),
+                tool_name: "batch".to_string(),
+                args: json!({}),
+                output: lash_core::ToolCallOutput::success(json!({
+                    "results": [{
+                        "index": 0,
+                        "tool": "read_file",
+                        "duration_ms": 1,
+                        "result": "payload"
+                    }]
+                })),
+                duration_ms: 1,
+            },
+        )
+        .expect_err("row without success must fail");
+
+        assert!(
+            error.to_string().contains("missing field `success`"),
+            "{error}"
+        );
     }
 
     #[test]
