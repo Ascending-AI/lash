@@ -146,7 +146,7 @@ impl RemoteProcessProvenance {
         self.originator.validate(type_name)
     }
 }
-
+#[rustfmt::skip] #[cfg(all(test, feature = "core-conversions"))] mod core_process_status_label_tests { include!("core_process_status_label_tests.rs"); }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessDefinitionIdentity {
     #[serde(default)]
