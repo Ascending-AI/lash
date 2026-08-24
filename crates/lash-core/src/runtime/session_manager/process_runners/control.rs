@@ -655,9 +655,9 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         if runner.registry().get_process(process_id).await?.is_none() {
-            return Err(crate::PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(crate::runtime::registry_transitions::unknown_process(
+                process_id,
+            ));
         }
         let _ = (managed, session_id);
         runner
@@ -676,9 +676,9 @@ impl ProcessCapability {
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         if runner.registry().get_process(process_id).await?.is_none() {
-            return Err(crate::PluginError::Session(format!(
-                "unknown process `{process_id}`"
-            )));
+            return Err(crate::runtime::registry_transitions::unknown_process(
+                process_id,
+            ));
         }
         let _ = (managed, session_id);
         runner.cancel(process_id, reason).await
@@ -746,9 +746,7 @@ impl ProcessCapability {
             .registry()
             .get_process(process_id)
             .await?
-            .ok_or_else(|| {
-                crate::PluginError::Session(format!("unknown process `{process_id}`"))
-            })?;
+            .ok_or_else(|| crate::runtime::registry_transitions::unknown_process(process_id))?;
         if record.is_terminal() {
             return Err(crate::PluginError::ProcessAlreadyTerminal {
                 process_id: process_id.to_string(),
