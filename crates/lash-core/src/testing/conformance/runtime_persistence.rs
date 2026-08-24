@@ -580,6 +580,10 @@ where
     // leases, plus the commit-side completion atomicity it shares with
     // [`SessionCommitStore`].
     queued_work_source_keys_are_idempotent_and_list_ordered(make("queued-work-source-keys")).await;
+    concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing(make(
+        "concurrent-queued-work-source-key",
+    ))
+    .await;
     decorated_queued_work_source_key_replay_reports_absorbed(make(
         "decorated-queued-work-source-key",
     ))
@@ -4705,6 +4709,56 @@ async fn queued_work_source_keys_are_idempotent_and_list_ordered(
         vec![first.batch_id.as_str(), second.batch_id.as_str()]
     );
     assert!(listed[0].enqueue_seq < listed[1].enqueue_seq);
+}
+
+async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let draft = || {
+        queued_draft(
+            "concurrent-queued-work-source-key",
+            "concurrent idempotent enqueue",
+            DeliveryPolicy::EarliestSafeBoundary,
+        )
+        .with_source_key("source:concurrent-idempotent-enqueue")
+    };
+    let barrier = Arc::new(tokio::sync::Barrier::new(3));
+    let left_store = Arc::clone(&store);
+    let right_store = Arc::clone(&store);
+    let left_barrier = Arc::clone(&barrier);
+    let right_barrier = Arc::clone(&barrier);
+    let left = crate::task::spawn(async move {
+        left_barrier.wait().await;
+        left_store.enqueue_queued_work_with_outcome(draft()).await
+    });
+    let right = crate::task::spawn(async move {
+        right_barrier.wait().await;
+        right_store.enqueue_queued_work_with_outcome(draft()).await
+    });
+    barrier.wait().await;
+    let left = left
+        .await
+        .expect("join left concurrent idempotent enqueue")
+        .expect("left concurrent idempotent enqueue must not fail");
+    let right = right
+        .await
+        .expect("join right concurrent idempotent enqueue")
+        .expect("right concurrent idempotent enqueue must not fail");
+    let inserted = [&left, &right]
+        .into_iter()
+        .filter(|outcome| matches!(outcome, crate::QueuedWorkEnqueueOutcome::Inserted(_)))
+        .count();
+    let existing = [&left, &right]
+        .into_iter()
+        .filter(|outcome| matches!(outcome, crate::QueuedWorkEnqueueOutcome::Existing(_)))
+        .count();
+
+    assert_eq!(inserted, 1, "exactly one concurrent enqueue must insert");
+    assert_eq!(
+        existing, 1,
+        "exactly one concurrent enqueue must be absorbed"
+    );
+    assert_eq!(left.batch().batch_id, right.batch().batch_id);
 }
 
 async fn decorated_queued_work_source_key_replay_reports_absorbed(

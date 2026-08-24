@@ -13,7 +13,7 @@ use lash::persistence::{
     MaintenanceFailure, MaintenanceRefusal, MaintenanceResult, OperationId,
     OrphanedTurnInputScope, PersistedSessionConfig, PersistedSessionRead, PendingTurnInputDraft,
     QueuedWorkBatch,
-    QueuedWorkBatchDraft,
+    QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
     QueuedWorkStore,
     SelectedQueuedWorkClaimOutcome,
@@ -234,10 +234,10 @@ impl TurnInputStore for FacadeStore {
 
 #[async_trait]
 impl QueuedWorkStore for FacadeStore {
-    async fn enqueue_queued_work(
+    async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: QueuedWorkBatchDraft,
-    ) -> Result<QueuedWorkBatch, StoreError> {
+    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
         unreachable!("compile-only facade store")
     }
 

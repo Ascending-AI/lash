@@ -557,11 +557,13 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
 
 #[async_trait]
 impl lash_core::QueuedWorkStore for SnapshotStore {
-    async fn enqueue_queued_work(
+    async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: lash_core::runtime::QueuedWorkBatchDraft,
-    ) -> std::result::Result<lash_core::runtime::QueuedWorkBatch, lash_core::store::StoreError>
-    {
+    ) -> std::result::Result<
+        lash_core::runtime::QueuedWorkEnqueueOutcome,
+        lash_core::store::StoreError,
+    > {
         Err(lash_core::store::StoreError::Backend(
             "queued work is not supported by SnapshotStore".to_string(),
         ))
@@ -1149,11 +1151,13 @@ impl lash_core::TurnInputStore for BoundSessionStore {
 
 #[async_trait]
 impl lash_core::QueuedWorkStore for BoundSessionStore {
-    async fn enqueue_queued_work(
+    async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: lash_core::runtime::QueuedWorkBatchDraft,
-    ) -> std::result::Result<lash_core::runtime::QueuedWorkBatch, lash_core::store::StoreError>
-    {
+    ) -> std::result::Result<
+        lash_core::runtime::QueuedWorkEnqueueOutcome,
+        lash_core::store::StoreError,
+    > {
         unreachable!("BoundSessionStore does not serve queued work")
     }
 

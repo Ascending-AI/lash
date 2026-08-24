@@ -236,7 +236,37 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     } else {
         None
     };
-    if let Some(source_key) = batch.source_key.as_deref() {
+    let batch_id = derive_batch_id(
+        &batch.session_id,
+        batch.source_key.as_deref(),
+        now,
+        Some(nonce),
+    );
+    let inserted = conn
+        .execute(
+            "INSERT INTO queued_work_batches (
+            batch_id, session_id, source_key, delivery_policy, work_kind,
+            authority_json, merge_key, available_at_ms, enqueued_at_ms
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT (session_id, source_key) DO NOTHING",
+            params![
+                batch_id,
+                batch.session_id,
+                batch.source_key.as_deref(),
+                batch.delivery_policy.as_str(),
+                batch.kind().as_str(),
+                encode_json(&batch.authority)?,
+                batch.merge_key.as_deref(),
+                sql_available_at_ms,
+                now as i64,
+            ],
+        )
+        .map_err(sqlite_error)?;
+    if inserted == 0 {
+        let source_key = batch.source_key.as_deref().ok_or_else(|| {
+            StoreError::Backend("queued work insert without source key was ignored".to_string())
+        })?;
         let existing_id: Option<String> = conn
             .query_row(
                 "SELECT batch_id FROM queued_work_batches
@@ -246,12 +276,12 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             )
             .optional()
             .map_err(sqlite_error)?;
-        if let Some(batch_id) = existing_id {
-            let existing = load_queued_batch_by_id_conn(conn, &batch_id)?.ok_or_else(|| {
-                StoreError::Backend("queued work source row disappeared".to_string())
-            })?;
-            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
-        }
+        let existing_id = existing_id.ok_or_else(|| {
+            StoreError::Backend("queued work conflict row disappeared".to_string())
+        })?;
+        let existing = load_queued_batch_by_id_conn(conn, &existing_id)?
+            .ok_or_else(|| StoreError::Backend("queued work source row disappeared".to_string()))?;
+        return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
     }
     let allocation_floor = allocation_floor
         .map(|value| {
@@ -274,31 +304,6 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
             allocation_floor,
         });
     }
-    let batch_id = derive_batch_id(
-        &batch.session_id,
-        batch.source_key.as_deref(),
-        now,
-        Some(nonce),
-    );
-    conn.execute(
-        "INSERT INTO queued_work_batches (
-            batch_id, session_id, source_key, delivery_policy, work_kind,
-            authority_json, merge_key, available_at_ms, enqueued_at_ms
-         )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            batch_id,
-            batch.session_id,
-            batch.source_key.as_deref(),
-            batch.delivery_policy.as_str(),
-            batch.kind().as_str(),
-            encode_json(&batch.authority)?,
-            batch.merge_key.as_deref(),
-            sql_available_at_ms,
-            now as i64,
-        ],
-    )
-    .map_err(sqlite_error)?;
     for (index, payload) in batch.payloads.iter().enumerate() {
         let item_id = format!("{batch_id}:item:{index}");
         conn.execute(
