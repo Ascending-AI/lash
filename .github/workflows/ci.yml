@@ -82,7 +82,7 @@ env:
   LASH_CI_FEATURES: ""
   # The linker is a property of the caches this workflow shares, not of any
   # one job's step list. RUSTFLAGS is part of cargo's per-unit fingerprint, so
-  # a job that restores `linux-debug` under a different RUSTFLAGS than the job
+  # a job that restores `linux-debug-e2e` under a different RUSTFLAGS than the job
   # that wrote it logs "cache restored" and then cold-builds the whole graph —
   # which is exactly what the five container/E2E readers did while the flag
   # was appended by the sccache action they never ran. Setting it here makes
@@ -96,7 +96,7 @@ env:
   LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
 
 jobs:
-  # Sole writer of the shared linux-debug cache and the doctest gate. It builds
+  # Sole writer of the shared linux-debug-e2e cache and the doctest gate. It builds
   # the superset (`cargo check --workspace --all-targets` plus the doctest
   # link) that every read-only debug-profile job restores. The nextest run is
   # sharded out to the test-shard matrix below.
@@ -144,7 +144,7 @@ jobs:
           # This job builds a superset of what the other debug-profile jobs
           # (test shards, Postgres store, Restate E2E, the distributed-workers
           # e2e workflow) need, so it is the sole writer of the shared cache.
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
 
       - name: Install protoc
         uses: ./.github/actions/install-tools
@@ -210,6 +210,20 @@ jobs:
           # shellcheck disable=SC2086
           cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
 
+      # The Restate E2E job restores this cache read-only, but its three
+      # package-scoped graphs are not populated by the workspace-wide builds
+      # above. Warm those exact graphs here so its readers recover dependency
+      # artifacts from rust-cache and matching compilation units from sccache.
+      # rust-cache's save-time cleaning still removes workspace-crate artifacts,
+      # and neither cache avoids linking, so the readers rebuild those parts.
+      # This extra compilation exists solely to shorten the Restate job's wall
+      # clock; --no-run keeps its debug-graph tests from executing twice.
+      - name: Warm Restate E2E build graphs
+        run: |
+          cargo build --locked --release -p lash-restate-postgres-workers-e2e --bins
+          cargo test --no-run --locked -p lash-s3-store
+          cargo test --no-run --locked -p lash-runtime --features rlm
+
       - name: Report sccache stats
         if: always()
         run: sccache --show-stats
@@ -249,7 +263,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -343,7 +357,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -395,7 +409,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Setup sccache
@@ -443,7 +457,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -536,7 +550,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -575,7 +589,7 @@ jobs:
         run: sccache --show-stats
 
   # The workspace test suite, sharded by nextest partitions so it drops off the
-  # critical path. Restore-only against the linux-debug cache the test-doc job
+  # critical path. Restore-only against the linux-debug-e2e cache the test-doc job
   # writes; sccache absorbs the workspace test-binary codegen that rust-cache's
   # read-only restore cannot save, sharing it across the shards and runs.
   # --no-fail-fast so one failure never hides the rest (the alpha.82 lesson).
@@ -630,7 +644,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc and nextest
@@ -754,10 +768,10 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          # The test-doc job is the sole writer of the shared linux-debug cache;
+          # The test-doc job is the sole writer of the shared linux-debug-e2e cache;
           # the lint job only reads it so clippy reuses the checked dependency
           # graph.
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -923,7 +937,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc and nextest
@@ -1055,7 +1069,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc and nextest
@@ -1064,7 +1078,7 @@ jobs:
           tool: protoc,nextest
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
+      # restores the `linux-debug-e2e` cache without routing through the sccache
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
@@ -1130,7 +1144,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -1139,7 +1153,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
+      # restores the `linux-debug-e2e` cache without routing through the sccache
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
@@ -1213,7 +1227,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -1222,7 +1236,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
+      # restores the `linux-debug-e2e` cache without routing through the sccache
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
@@ -1383,7 +1397,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -1392,7 +1406,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
+      # restores the `linux-debug-e2e` cache without routing through the sccache
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
@@ -1488,7 +1502,7 @@ jobs:
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
-          shared-key: linux-debug
+          shared-key: linux-debug-e2e
           save-if: false
 
       - name: Install protoc
@@ -1497,7 +1511,7 @@ jobs:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache without routing through the sccache
+      # restores the `linux-debug-e2e` cache without routing through the sccache
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
