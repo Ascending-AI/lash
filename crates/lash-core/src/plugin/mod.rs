@@ -97,11 +97,14 @@ pub use snapshot::{
     SnapshotReader, SnapshotWriter,
 };
 pub use tool_catalog::{
-    CheckpointApplication, PluginAbort, PluginDirective, PrepareTurnRequest, ToolCatalogContext,
-    TurnFinalization, TurnPreparation,
+    AbortTurnDirective, AfterToolCallPluginDirective, AfterTurnPluginDirective,
+    BeforeToolCallPluginDirective, CheckpointApplication, EnqueueMessagesDirective, PluginAbort,
+    PluginDirective, PrepareTurnRequest, ReplaceToolArgsDirective, ShortCircuitToolDirective,
+    ToolCatalogContext, TurnFinalization, TurnPluginDirective, TurnPreparation,
 };
 pub(crate) use tool_catalog::{
-    PluginTerminalStrength, emit_plugin_runtime_events, plugin_runtime_session_events,
+    AmbientDirectiveAction, AmbientDirectiveError, PluginTerminalStrength,
+    emit_plugin_runtime_events, interpret_ambient_directive, plugin_runtime_session_events,
 };
 pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
     // Protocol plugins must be registered by the embedder before calling

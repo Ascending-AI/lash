@@ -29,13 +29,13 @@ gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
 # vanishes among thousands; see the comment above the tombstones themselves.
-removal_verdicts_recorded = 776
+removal_verdicts_recorded = 786
 
 # The number of `file.rs::Symbol::path` citations the reasons carry. The citation
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2709
+prose_citations_recorded = 2683
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -18205,7 +18205,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::token_usage"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:57#let used = ctx.state.token_usage().total().max(0) as usize;"
+usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:58#let used = ctx.state.token_usage().total().max(0) as usize;"
 
 [[api]]
 symbol = "lash::persistence::SessionReadView::turn_index"
@@ -21502,193 +21502,481 @@ disposition = "unused-justify"
 reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ContextError::Session::0` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::prepare_turn_context`. Consumer class: the runtime-agnostic sans-io layer and judged downstream-host runbooks -- this field is exercised in-repo at crates/lash-sansio/src/prompt.rs::PromptFingerprint::write#`self.0.hash(state);`, crates/lash-sansio/src/prompt.rs::slot_order#`crate::PromptSlot::Execution => 1,`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
 
 [[api]]
+symbol = "lash::plugins::AbortTurnDirective"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AbortTurnDirective","lash_core::plugin::tool_catalog::AbortTurnDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AbortTurnDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AbortTurnDirective::code"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AbortTurnDirective::code","lash_core::plugin::tool_catalog::AbortTurnDirective::code"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AbortTurnDirective::code to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AbortTurnDirective::message"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AbortTurnDirective::message","lash_core::plugin::tool_catalog::AbortTurnDirective::message"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AbortTurnDirective::message to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::AbortTurn"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::AbortTurn","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::AbortTurn"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::AbortTurn to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::AbortTurn::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::AbortTurn::0","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::AbortTurn::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::AbortTurn::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::Ambient"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::Ambient","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::Ambient"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::Ambient to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::Ambient::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::Ambient::0","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::Ambient::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::Ambient::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::EnqueueMessages"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::EnqueueMessages","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::EnqueueMessages"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::EnqueueMessages to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::EnqueueMessages::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::EnqueueMessages::0","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::EnqueueMessages::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::EnqueueMessages::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::ShortCircuitTool"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::ShortCircuitTool","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::ShortCircuitTool"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::ShortCircuitTool to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::ShortCircuitTool::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::ShortCircuitTool::0","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::ShortCircuitTool::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::ShortCircuitTool::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterToolCallPluginDirective::short_circuit"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterToolCallPluginDirective::short_circuit","lash_core::plugin::tool_catalog::AfterToolCallPluginDirective::short_circuit"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterToolCallPluginDirective::short_circuit to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterTurnPluginDirective"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterTurnPluginDirective","lash_core::plugin::tool_catalog::AfterTurnPluginDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterTurnPluginDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterTurnPluginDirective::Ambient"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterTurnPluginDirective::Ambient","lash_core::plugin::tool_catalog::AfterTurnPluginDirective::Ambient"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterTurnPluginDirective::Ambient to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterTurnPluginDirective::Ambient::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterTurnPluginDirective::Ambient::0","lash_core::plugin::tool_catalog::AfterTurnPluginDirective::Ambient::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterTurnPluginDirective::Ambient::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterTurnPluginDirective::EnqueueMessages"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterTurnPluginDirective::EnqueueMessages","lash_core::plugin::tool_catalog::AfterTurnPluginDirective::EnqueueMessages"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterTurnPluginDirective::EnqueueMessages to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::AfterTurnPluginDirective::EnqueueMessages::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::AfterTurnPluginDirective::EnqueueMessages::0","lash_core::plugin::tool_catalog::AfterTurnPluginDirective::EnqueueMessages::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::AfterTurnPluginDirective::EnqueueMessages::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::AbortTurn"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::AbortTurn","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::AbortTurn"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::AbortTurn to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::AbortTurn::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::AbortTurn::0","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::AbortTurn::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::AbortTurn::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::Ambient"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::Ambient","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::Ambient"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::Ambient to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::Ambient::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::Ambient::0","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::Ambient::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::Ambient::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::ReplaceToolArgs"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::ReplaceToolArgs","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::ReplaceToolArgs"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::ReplaceToolArgs to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::ReplaceToolArgs::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::ReplaceToolArgs::0","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::ReplaceToolArgs::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::ReplaceToolArgs::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::ShortCircuitTool"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::ShortCircuitTool","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::ShortCircuitTool"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::ShortCircuitTool to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::ShortCircuitTool::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::ShortCircuitTool::0","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::ShortCircuitTool::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::ShortCircuitTool::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::BeforeToolCallPluginDirective::short_circuit"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::BeforeToolCallPluginDirective::short_circuit","lash_core::plugin::tool_catalog::BeforeToolCallPluginDirective::short_circuit"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::BeforeToolCallPluginDirective::short_circuit to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::EnqueueMessagesDirective"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::EnqueueMessagesDirective","lash_core::plugin::tool_catalog::EnqueueMessagesDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::EnqueueMessagesDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::EnqueueMessagesDirective::messages"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::EnqueueMessagesDirective::messages","lash_core::plugin::tool_catalog::EnqueueMessagesDirective::messages"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::EnqueueMessagesDirective::messages to a plugin boundary example and assert its externally observable result."
+
+[[api]]
 symbol = "lash::plugins::PluginDirective"
 kind = "enum"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective", "lash_core::plugin::tool_catalog::PluginDirective"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: `lash::plugins::PluginDirective` is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names this type directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn` because its canonical identity is the lash-core one. Consumer class: the RLM protocol crate and in-repo workspace code -- this type is exercised in-repo at crates/lash-protocol-rlm/src/plugin/tool_args.rs::normalize_projected_tool_args#`) -> Result<Vec<PluginDirective>, PluginError> {`, crates/lash-protocol-rlm/src/plugin/tool_args.rs::normalize_projected_tool_args#`Ok(vec![PluginDirective::ReplaceToolArgs { args: normalized }])`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::AbortTurn"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::AbortTurn", "lash_core::plugin::tool_catalog::PluginDirective::AbortTurn"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::AbortTurn` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`PluginDirective::AbortTurn { code, message } => {`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::AbortTurn::code"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::AbortTurn::code", "lash_core::plugin::tool_catalog::PluginDirective::AbortTurn::code"]
+aliases = ["lash_core::facade_support::PluginDirective","lash_core::plugin::tool_catalog::PluginDirective"]
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash::plugins::PluginDirective::AbortTurn::code to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::AbortTurn::message"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::AbortTurn::message", "lash_core::plugin::tool_catalog::PluginDirective::AbortTurn::message"]
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::plugins::PluginDirective::AbortTurn::message to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash::plugins::PluginDirective to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::CreateSession"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::CreateSession", "lash_core::plugin::tool_catalog::PluginDirective::CreateSession"]
+aliases = ["lash_core::facade_support::PluginDirective::CreateSession","lash_core::plugin::tool_catalog::PluginDirective::CreateSession"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::CreateSession` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/tool_dispatch/directives.rs::BeforeToolDirectiveFold::apply#`PluginDirective::CreateSession { request } => {`, crates/lash-core/src/tool_dispatch/directives.rs::apply_after_tool_directives#`PluginDirective::CreateSession { request } => {`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::CreateSession to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::CreateSession::request"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::CreateSession::request", "lash_core::plugin::tool_catalog::PluginDirective::CreateSession::request"]
+aliases = ["lash_core::facade_support::PluginDirective::CreateSession::request","lash_core::plugin::tool_catalog::PluginDirective::CreateSession::request"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::CreateSession::request` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`PluginDirective::CreateSession { request } => {`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`.create_session(*request)`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::CreateSession::request to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitRuntimeEvents"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents", "lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents"]
+aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents","lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs::tests::soft_budget_warning_emits_plugin_event_not_user_message#`let lash_core::plugin::PluginDirective::EmitRuntimeEvents { events } = &directives[0]`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::EmitRuntimeEvents to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitRuntimeEvents::events"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents::events", "lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents::events"]
+aliases = ["lash_core::facade_support::PluginDirective::EmitRuntimeEvents::events","lash_core::plugin::tool_catalog::PluginDirective::EmitRuntimeEvents::events"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitRuntimeEvents::events` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: the RLM protocol crate and core runtime internals -- this field is exercised in-repo at crates/lash-protocol-rlm/src/plugin/protocol_session.rs::tests::soft_budget_warning_emits_plugin_event_not_user_message#`let lash_core::plugin::PluginDirective::EmitRuntimeEvents { events } = &directives[0]`, crates/lash-core/src/tool_dispatch/directives.rs::BeforeToolDirectiveFold::apply#`PluginDirective::EmitRuntimeEvents { events } => {`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::EmitRuntimeEvents::events to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitTrace"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EmitTrace", "lash_core::plugin::tool_catalog::PluginDirective::EmitTrace"]
+aliases = ["lash_core::facade_support::PluginDirective::EmitTrace","lash_core::plugin::tool_catalog::PluginDirective::EmitTrace"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitTrace` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/tool_dispatch/directives.rs::BeforeToolDirectiveFold::apply#`PluginDirective::EmitTrace {`, crates/lash-core/src/tool_dispatch/directives.rs::BeforeToolDirectiveFold::apply#`.await;`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::EmitTrace to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitTrace::context"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EmitTrace::context", "lash_core::plugin::tool_catalog::PluginDirective::EmitTrace::context"]
+aliases = ["lash_core::facade_support::PluginDirective::EmitTrace::context","lash_core::plugin::tool_catalog::PluginDirective::EmitTrace::context"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitTrace::context` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`context,`, crates/lash-core/src/tool_dispatch/directives.rs::BeforeToolDirectiveFold::apply#`context: &ToolDispatchContext<'_>,`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::EmitTrace::context to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitTrace::name"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EmitTrace::name", "lash_core::plugin::tool_catalog::PluginDirective::EmitTrace::name"]
+aliases = ["lash_core::facade_support::PluginDirective::EmitTrace::name","lash_core::plugin::tool_catalog::PluginDirective::EmitTrace::name"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitTrace::name` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`name,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`name: format!(\"plugin.{}.{}\", emitted.plugin_id, name),`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::EmitTrace::name to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::EmitTrace::payload"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EmitTrace::payload", "lash_core::plugin::tool_catalog::PluginDirective::EmitTrace::payload"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::EmitTrace::payload` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`payload,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`payload,`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::EnqueueMessages"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EnqueueMessages", "lash_core::plugin::tool_catalog::PluginDirective::EnqueueMessages"]
+aliases = ["lash_core::facade_support::PluginDirective::EmitTrace::payload","lash_core::plugin::tool_catalog::PluginDirective::EmitTrace::payload"]
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash::plugins::PluginDirective::EnqueueMessages to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::EnqueueMessages::messages"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::EnqueueMessages::messages", "lash_core::plugin::tool_catalog::PluginDirective::EnqueueMessages::messages"]
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::plugins::PluginDirective::EnqueueMessages::messages to the agent-workbench plugin/tool setup example and assert its externally observable result."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::ReplaceToolArgs"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::ReplaceToolArgs", "lash_core::plugin::tool_catalog::PluginDirective::ReplaceToolArgs"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::ReplaceToolArgs` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: the RLM protocol crate and in-repo workspace code -- this variant is exercised in-repo at crates/lash-protocol-rlm/src/plugin/tool_args.rs::normalize_projected_tool_args#`Ok(vec![PluginDirective::ReplaceToolArgs { args: normalized }])`, crates/lash-protocol-rlm/src/plugin/tool_args.rs::tests::renaming_a_tool_does_not_change_projection_policy#`let [lash_core::plugin::PluginDirective::ReplaceToolArgs { args: normalized }] =`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::ReplaceToolArgs::args"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::ReplaceToolArgs::args", "lash_core::plugin::tool_catalog::PluginDirective::ReplaceToolArgs::args"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::ReplaceToolArgs::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: in-repo workspace code and the RLM protocol crate -- this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs::plugin_types_are_nameable#`Box::pin(async move { Ok(vec![PluginDirective::ReplaceToolArgs { args: ctx.args }]) })`, crates/lash-protocol-rlm/src/plugin/tool_args.rs::normalize_projected_tool_args#`let original = ctx.args;`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::ShortCircuitTool"
-kind = "variant"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::ShortCircuitTool", "lash_core::plugin::tool_catalog::PluginDirective::ShortCircuitTool"]
-area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::ShortCircuitTool` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this variant is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`PluginDirective::ReplaceToolArgs { .. } | PluginDirective::ShortCircuitTool { .. } => Err(`, and no example reaches it, which is what keeps the row unused."
-
-[[api]]
-symbol = "lash::plugins::PluginDirective::ShortCircuitTool::output"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::ShortCircuitTool::output", "lash_core::plugin::tool_catalog::PluginDirective::ShortCircuitTool::output"]
-area = "plugins"
-disposition = "unused-add"
-reason = "Add lash::plugins::PluginDirective::ShortCircuitTool::output to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash::plugins::PluginDirective::EmitTrace::payload to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::emit_runtime_events"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::emit_runtime_events", "lash_core::plugin::tool_catalog::PluginDirective::emit_runtime_events"]
+aliases = ["lash_core::facade_support::PluginDirective::emit_runtime_events","lash_core::plugin::tool_catalog::PluginDirective::emit_runtime_events"]
 area = "plugins"
 disposition = "unused-add"
-reason = "Add lash::plugins::PluginDirective::emit_runtime_events to the agent-workbench plugin/tool setup example and assert its externally observable result."
+reason = "Add lash::plugins::PluginDirective::emit_runtime_events to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginDirective::emit_trace"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::emit_trace", "lash_core::plugin::tool_catalog::PluginDirective::emit_trace"]
+aliases = ["lash_core::facade_support::PluginDirective::emit_trace","lash_core::plugin::tool_catalog::PluginDirective::emit_trace"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::emit_trace` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/tool_dispatch/directives.rs::BeforeToolDirectiveFold::apply#`emit_trace(context, &plugin_id, name, payload, *trace_context).await`, crates/lash-core/src/tool_dispatch/directives.rs::BeforeToolDirectiveFold::apply#`plugin_id,`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::PluginDirective::emit_trace to a plugin boundary example and assert its externally observable result."
 
 [[api]]
-symbol = "lash::plugins::PluginDirective::short_circuit"
+symbol = "lash::plugins::ReplaceToolArgsDirective"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::ReplaceToolArgsDirective","lash_core::plugin::tool_catalog::ReplaceToolArgsDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::ReplaceToolArgsDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::ReplaceToolArgsDirective::args"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::ReplaceToolArgsDirective::args","lash_core::plugin::tool_catalog::ReplaceToolArgsDirective::args"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::ReplaceToolArgsDirective::args to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::ShortCircuitToolDirective"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::ShortCircuitToolDirective","lash_core::plugin::tool_catalog::ShortCircuitToolDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::ShortCircuitToolDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::ShortCircuitToolDirective::new"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::facade_support::PluginDirective::short_circuit", "lash_core::plugin::tool_catalog::PluginDirective::short_circuit"]
+aliases = ["lash_core::facade_support::ShortCircuitToolDirective::new","lash_core::plugin::tool_catalog::ShortCircuitToolDirective::new"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::PluginDirective::short_circuit` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_turn`. Consumer evidence: this function is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs::plugin_types_are_nameable#`Box::pin(async move { Ok(vec![PluginDirective::short_circuit(ctx.result)]) })`, and no example reaches it, which is what keeps the row unused."
+disposition = "unused-add"
+reason = "Add lash::plugins::ShortCircuitToolDirective::new to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::ShortCircuitToolDirective::output"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::ShortCircuitToolDirective::output","lash_core::plugin::tool_catalog::ShortCircuitToolDirective::output"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::ShortCircuitToolDirective::output to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::TurnPluginDirective"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnPluginDirective","lash_core::plugin::tool_catalog::TurnPluginDirective"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnPluginDirective to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::TurnPluginDirective::AbortTurn"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnPluginDirective::AbortTurn","lash_core::plugin::tool_catalog::TurnPluginDirective::AbortTurn"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnPluginDirective::AbortTurn to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::TurnPluginDirective::AbortTurn::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnPluginDirective::AbortTurn::0","lash_core::plugin::tool_catalog::TurnPluginDirective::AbortTurn::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnPluginDirective::AbortTurn::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::TurnPluginDirective::Ambient"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnPluginDirective::Ambient","lash_core::plugin::tool_catalog::TurnPluginDirective::Ambient"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnPluginDirective::Ambient to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::TurnPluginDirective::Ambient::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnPluginDirective::Ambient::0","lash_core::plugin::tool_catalog::TurnPluginDirective::Ambient::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnPluginDirective::Ambient::0 to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::TurnPluginDirective::EnqueueMessages"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnPluginDirective::EnqueueMessages","lash_core::plugin::tool_catalog::TurnPluginDirective::EnqueueMessages"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnPluginDirective::EnqueueMessages to a plugin boundary example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::plugins::TurnPluginDirective::EnqueueMessages::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::facade_support::TurnPluginDirective::EnqueueMessages::0","lash_core::plugin::tool_catalog::TurnPluginDirective::EnqueueMessages::0"]
+area = "plugins"
+disposition = "unused-add"
+reason = "Add lash::plugins::TurnPluginDirective::EnqueueMessages::0 to a plugin boundary example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::plugins::PluginError"
@@ -24126,7 +24414,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionGraphService::append_session_nodes"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:97#async fn append_session_nodes("
+usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:99#async fn append_session_nodes("
 
 [[api]]
 symbol = "lash::plugins::SessionGraphService::emit_trace_event"
@@ -24417,7 +24705,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::args"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolCallHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_tool_call`. Consumer evidence: this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs::plugin_types_are_nameable#`Box::pin(async move { Ok(vec![PluginDirective::ReplaceToolArgs { args: ctx.args }]) })`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolCallHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::before_tool_call`. Consumer evidence: this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs::plugin_types_are_nameable#`ReplaceToolArgsDirective { args: ctx.args },`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::argument_projection"
@@ -24699,7 +24987,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::args"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer evidence: this field is exercised in-repo at crates/lash/tests/ui/facade_boundary_types_are_public.rs::plugin_types_are_nameable#`Box::pin(async move { Ok(vec![PluginDirective::ReplaceToolArgs { args: ctx.args }]) })`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::plugins::ToolResultHookContext::args` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::after_tool_call`. Consumer evidence: this field is passed into the hook context at crates/lash-core/src/tool_dispatch/execution.rs::finalize_tool_result_with_execution_context#`args.clone(),`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::duration_ms"
@@ -66717,7 +67005,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TokenUsage::total"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:57#let used = ctx.state.token_usage().total().max(0) as usize;"
+usage = "crates/lash-protocol-rlm/src/plugin/protocol_session.rs:58#let used = ctx.state.token_usage().total().max(0) as usize;"
 
 [[api]]
 symbol = "lash::usage::TokenUsageOverflow"
@@ -77685,7 +77973,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::apply_checkpoint` hands `CheckpointApplication` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::append_plugin_messages#`messages: &mut crate::MessageSequence,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`PluginDirective::EnqueueMessages { messages } => {`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::apply_checkpoint` hands `CheckpointApplication` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::append_plugin_messages#`messages: &mut crate::MessageSequence,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`TurnPluginDirective::EnqueueMessages(directive) => {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::tool_catalog::PluginAbort"
@@ -77693,7 +77981,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::tool_catalog::TurnPreparation::abort` hands `PluginAbort` to hosts (plugin and tool implementers). Consumer class: core runtime internals and the remote-protocol crate -- this type is exercised in-repo at crates/lash-remote-protocol/src/core_conversions/turn_result.rs::RemoteTurnStop::from#`lash_core::facade_support::TurnStop::PluginAbort => Self::PluginAbort,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`Ok(DirectiveAction::Abort(PluginAbort { code, message }))`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::tool_catalog::TurnPreparation::abort` hands `PluginAbort` to hosts (plugin and tool implementers). Consumer class: core runtime internals and the remote-protocol crate -- this type is exercised in-repo at crates/lash-remote-protocol/src/core_conversions/turn_result.rs::RemoteTurnStop::from#`lash_core::facade_support::TurnStop::PluginAbort => Self::PluginAbort,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`TurnPluginDirective::AbortTurn(directive) => Ok(DirectiveAction::Abort(PluginAbort {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::tool_catalog::PluginAbort::code"
@@ -77725,7 +78013,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::prepare_turn_with_phase_probe` hands `PrepareTurnRequest` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::append_plugin_messages#`messages: &mut crate::MessageSequence,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`PluginDirective::EnqueueMessages { messages } => {`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::prepare_turn_with_phase_probe` hands `PrepareTurnRequest` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::append_plugin_messages#`messages: &mut crate::MessageSequence,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`TurnPluginDirective::EnqueueMessages(directive) => {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::plugin::tool_catalog::PrepareTurnRequest::session_graph"
@@ -77898,7 +78186,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::prepare_turn_with_phase_probe` hands `TurnPreparation` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::append_plugin_messages#`messages: &mut crate::MessageSequence,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`PluginDirective::EnqueueMessages { messages } => {`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::plugin::session_obj::PluginSession::prepare_turn_with_phase_probe` hands `TurnPreparation` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/plugin/session_obj/directives.rs::append_plugin_messages#`messages: &mut crate::MessageSequence,`, crates/lash-core/src/plugin/session_obj/directives.rs::interpret_directive#`TurnPluginDirective::EnqueueMessages(directive) => {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::provider::handle::ProviderCompletion"
@@ -89192,6 +89480,66 @@ kind = "function"
 [[removal_verdict]]
 symbol = "lash::persistence::WorkClaim::record_initial_turn_application"
 kind = "function"
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::AbortTurn"
+kind = "variant"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved abort into the boundary enums that permit it and made the payload shared."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::AbortTurn::code"
+kind = "field"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved this field to lash::plugins::AbortTurnDirective::code."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::AbortTurn::message"
+kind = "field"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved this field to lash::plugins::AbortTurnDirective::message."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::EnqueueMessages"
+kind = "variant"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved message enqueue into only the boundary enums that permit it."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::EnqueueMessages::messages"
+kind = "field"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved this field to lash::plugins::EnqueueMessagesDirective::messages."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::ReplaceToolArgs"
+kind = "variant"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved argument replacement to the before-tool boundary enum."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::ReplaceToolArgs::args"
+kind = "field"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved this field to lash::plugins::ReplaceToolArgsDirective::args."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::ShortCircuitTool"
+kind = "variant"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved tool short-circuiting into the two tool-boundary enums."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::ShortCircuitTool::output"
+kind = "field"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved this field to lash::plugins::ShortCircuitToolDirective::output."
+
+[[removal_verdict]]
+symbol = "lash::plugins::PluginDirective::short_circuit"
+kind = "function"
+superseded_by = "unused-add"
+reason = "FIG-2008 moved this constructor to both tool-boundary directive enums."
 
 [[removal_verdict]]
 symbol = "lash::plugins::PluginSpec::orchestrating_tools"

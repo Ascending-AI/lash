@@ -136,13 +136,11 @@ secondary channel remains best-effort when full or closed.
   no self-conflict.
 - A `CreateSession` or `EmitTrace` error contributes a denied terminal without
   stopping the directive fold. Later directives, including side effects, still
-  run. An invalid after-tool `ReplaceToolArgs` likewise contributes a denial. If
-  another plugin's equal-strength denial displaces its message, the standard
-  conflict event still identifies the winning and ignored plugins and directive
-  kinds; `displaced_after_tool_replace_args_misuse_emits_conflict_evidence`
-  locks that evidence path.
-- `PluginDirective` remains a transient in-process value with the same public
-  and serde shape; the change needs no persistence or wire migration.
+  run.
+- Tool-hook directives remain transient in-process values. Each hook boundary
+  has its own directive enum, so a directive that is illegal at that boundary
+  is a compile error and needs no runtime denial, persistence migration, or
+  wire migration.
 
 FIG-1399 records the reconsideration scope for replacement semantics once real
 multi-plugin compositions provide evidence for a different policy. That scope

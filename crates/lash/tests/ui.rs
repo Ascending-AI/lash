@@ -31,6 +31,7 @@ fn model_selection_requires_model_and_variant_together() {
     t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_announcement_requires_a_replay_key.rs");
+    t.compile_fail("tests/ui/after_turn_cannot_abort.rs");
     t.pass("tests/ui/facade_boundary_types_are_public.rs");
     t.pass("tests/ui/prompt_types_are_public.rs");
     t.pass("tests/ui/remote_protocol_types_are_public.rs");

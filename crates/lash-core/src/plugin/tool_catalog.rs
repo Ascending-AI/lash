@@ -1,5 +1,5 @@
 use lash_sansio::ToolCallOutput;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::sync::mpsc;
 
 use super::*;
@@ -92,42 +92,12 @@ impl PluginTerminalStrength {
     }
 }
 
-/// An action emitted by a plugin hook for the runtime to apply at that hook's boundary.
-///
-/// Before-tool-call hooks compose monotonically. Argument replacements take effect immediately;
-/// earlier before-tool hooks are reinspected once with the replacement, and another replacement
-/// during that bounded pass is rejected with
-/// [`PluginError::BeforeToolCallReplacementConflict`]. Reinspection honors denials and aborts
-/// only; side effects from the initial pass are not applied again.
-/// Terminal directives are joined by restrictiveness: abort beats a denied or cancelled
-/// short-circuit, which beats a successful short-circuit. Equal-strength conflicts use plugin ID
-/// as a stable tie-breaker, and a single plugin's first-emitted equal-strength terminal wins. The
-/// runtime emits inter-plugin terminal conflicts on the session trace seam and also attempts a
-/// plugin-attributed runtime event without blocking dispatch. At the after-tool seam successful
-/// result replacements are likewise reinspected once by earlier hooks. That pass honors only
-/// denials and aborts, never repeats side effects, and rejects another successful replacement with
-/// [`PluginError::AfterToolCallReplacementConflict`]. The same terminal strength ordering applies,
-/// and equal-strength result replacements remain first-emitted-wins after clean reinspection.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// An ambient action legal at every plugin-hook boundary.
+#[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-// justification: directives are transient public plugin values and the common short-circuit output avoids another allocation.
-#[allow(clippy::large_enum_variant)]
 pub enum PluginDirective {
-    AbortTurn {
-        code: String,
-        message: String,
-    },
-    EnqueueMessages {
-        messages: Vec<PluginMessage>,
-    },
     CreateSession {
         request: Box<SessionCreateRequest>,
-    },
-    ReplaceToolArgs {
-        args: serde_json::Value,
-    },
-    ShortCircuitTool {
-        output: ToolCallOutput,
     },
     EmitRuntimeEvents {
         events: Vec<PluginRuntimeEvent>,
@@ -142,37 +112,6 @@ pub enum PluginDirective {
 }
 
 impl PluginDirective {
-    /// Return the terminal strength of this directive, if it is terminal.
-    pub(crate) fn terminal_strength(&self) -> Option<PluginTerminalStrength> {
-        match self {
-            Self::AbortTurn { .. } => Some(PluginTerminalStrength::AbortTurn),
-            Self::ShortCircuitTool { output } => {
-                if output.is_success() {
-                    Some(PluginTerminalStrength::SuccessfulShortCircuit)
-                } else {
-                    Some(PluginTerminalStrength::DeniedShortCircuit)
-                }
-            }
-            Self::EnqueueMessages { .. }
-            | Self::CreateSession { .. }
-            | Self::ReplaceToolArgs { .. }
-            | Self::EmitRuntimeEvents { .. }
-            | Self::EmitTrace { .. } => None,
-        }
-    }
-
-    pub fn short_circuit(result: ToolOutcome) -> Self {
-        Self::ShortCircuitTool {
-            output: result.into_done_output().unwrap_or_else(|_| {
-                ToolCallOutput::failure(crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Internal,
-                    "pending_tool_short_circuit",
-                    "plugin short-circuit directives require completed tool output",
-                ))
-            }),
-        }
-    }
-
     pub fn emit_runtime_events(events: Vec<PluginRuntimeEvent>) -> Self {
         Self::EmitRuntimeEvents { events }
     }
@@ -182,6 +121,295 @@ impl PluginDirective {
             name: name.into(),
             payload,
             context: Box::new(lash_trace::TraceContext::default()),
+        }
+    }
+}
+
+/// Payload shared by hook boundaries that may abort the current turn.
+#[derive(Clone, Debug, Serialize)]
+pub struct AbortTurnDirective {
+    pub code: String,
+    pub message: String,
+}
+
+/// Payload shared by hook boundaries that may enqueue messages.
+#[derive(Clone, Debug, Serialize)]
+pub struct EnqueueMessagesDirective {
+    pub messages: Vec<PluginMessage>,
+}
+
+/// Payload for replacing the arguments passed to a tool.
+#[derive(Clone, Debug, Serialize)]
+pub struct ReplaceToolArgsDirective {
+    pub args: serde_json::Value,
+}
+
+/// Payload shared by tool-hook boundaries that may replace a tool result.
+#[derive(Clone, Debug, Serialize)]
+pub struct ShortCircuitToolDirective {
+    pub output: ToolCallOutput,
+}
+
+impl ShortCircuitToolDirective {
+    pub fn new(result: ToolOutcome) -> Self {
+        Self {
+            output: result.into_done_output().unwrap_or_else(|_| {
+                ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "pending_tool_short_circuit",
+                    "plugin short-circuit directives require completed tool output",
+                ))
+            }),
+        }
+    }
+}
+
+/// Directives legal from `before_turn` and checkpoint hooks.
+#[derive(Clone, Debug, Serialize)]
+pub enum TurnPluginDirective {
+    Ambient(PluginDirective),
+    AbortTurn(AbortTurnDirective),
+    EnqueueMessages(EnqueueMessagesDirective),
+}
+
+/// Directives legal from `after_turn` hooks.
+#[derive(Clone, Debug, Serialize)]
+pub enum AfterTurnPluginDirective {
+    Ambient(PluginDirective),
+    EnqueueMessages(EnqueueMessagesDirective),
+}
+
+/// Directives legal from `before_tool_call` hooks.
+///
+/// Argument replacements take effect immediately; earlier before-tool hooks are reinspected once
+/// with the replacement, and another replacement during that bounded pass is rejected with
+/// [`PluginError::BeforeToolCallReplacementConflict`]. Reinspection honors denials and aborts
+/// only; side effects from the initial pass are not applied again. Terminal directives are joined
+/// by restrictiveness: abort beats a denied or cancelled short-circuit, which beats a successful
+/// short-circuit. Equal-strength conflicts use plugin ID as a stable tie-breaker, and a single
+/// plugin's first-emitted equal-strength terminal wins.
+#[derive(Clone, Debug, Serialize)]
+// justification: directives are transient public plugin values and the short-circuit output avoids another allocation.
+#[allow(clippy::large_enum_variant)]
+pub enum BeforeToolCallPluginDirective {
+    Ambient(PluginDirective),
+    AbortTurn(AbortTurnDirective),
+    ReplaceToolArgs(ReplaceToolArgsDirective),
+    ShortCircuitTool(ShortCircuitToolDirective),
+}
+
+/// Directives legal from `after_tool_call` hooks.
+///
+/// Successful result replacements reinspect earlier hooks once. That pass honors only denials and
+/// aborts, never repeats side effects, and rejects another successful replacement with
+/// [`PluginError::AfterToolCallReplacementConflict`]. Terminal directives use the same strength
+/// ordering as the before-tool seam, while equal-strength replacements remain first-emitted-wins.
+#[derive(Clone, Debug, Serialize)]
+// justification: directives are transient public plugin values and the short-circuit output avoids another allocation.
+#[allow(clippy::large_enum_variant)]
+pub enum AfterToolCallPluginDirective {
+    Ambient(PluginDirective),
+    AbortTurn(AbortTurnDirective),
+    ShortCircuitTool(ShortCircuitToolDirective),
+    EnqueueMessages(EnqueueMessagesDirective),
+}
+
+macro_rules! impl_ambient_conversion {
+    ($($directive:ty),+ $(,)?) => {
+        $(
+            impl From<PluginDirective> for $directive {
+                fn from(value: PluginDirective) -> Self {
+                    Self::Ambient(value)
+                }
+            }
+        )+
+    };
+}
+
+impl_ambient_conversion!(
+    TurnPluginDirective,
+    AfterTurnPluginDirective,
+    BeforeToolCallPluginDirective,
+    AfterToolCallPluginDirective,
+);
+
+impl From<AbortTurnDirective> for TurnPluginDirective {
+    fn from(value: AbortTurnDirective) -> Self {
+        Self::AbortTurn(value)
+    }
+}
+
+impl From<AbortTurnDirective> for BeforeToolCallPluginDirective {
+    fn from(value: AbortTurnDirective) -> Self {
+        Self::AbortTurn(value)
+    }
+}
+
+impl From<AbortTurnDirective> for AfterToolCallPluginDirective {
+    fn from(value: AbortTurnDirective) -> Self {
+        Self::AbortTurn(value)
+    }
+}
+
+impl From<EnqueueMessagesDirective> for TurnPluginDirective {
+    fn from(value: EnqueueMessagesDirective) -> Self {
+        Self::EnqueueMessages(value)
+    }
+}
+
+impl From<EnqueueMessagesDirective> for AfterTurnPluginDirective {
+    fn from(value: EnqueueMessagesDirective) -> Self {
+        Self::EnqueueMessages(value)
+    }
+}
+
+impl From<EnqueueMessagesDirective> for AfterToolCallPluginDirective {
+    fn from(value: EnqueueMessagesDirective) -> Self {
+        Self::EnqueueMessages(value)
+    }
+}
+
+impl From<ReplaceToolArgsDirective> for BeforeToolCallPluginDirective {
+    fn from(value: ReplaceToolArgsDirective) -> Self {
+        Self::ReplaceToolArgs(value)
+    }
+}
+
+impl From<ShortCircuitToolDirective> for BeforeToolCallPluginDirective {
+    fn from(value: ShortCircuitToolDirective) -> Self {
+        Self::ShortCircuitTool(value)
+    }
+}
+
+impl From<ShortCircuitToolDirective> for AfterToolCallPluginDirective {
+    fn from(value: ShortCircuitToolDirective) -> Self {
+        Self::ShortCircuitTool(value)
+    }
+}
+
+fn short_circuit_terminal_strength(output: &ToolCallOutput) -> PluginTerminalStrength {
+    if output.is_success() {
+        PluginTerminalStrength::SuccessfulShortCircuit
+    } else {
+        PluginTerminalStrength::DeniedShortCircuit
+    }
+}
+
+impl BeforeToolCallPluginDirective {
+    pub fn short_circuit(result: ToolOutcome) -> Self {
+        Self::ShortCircuitTool(ShortCircuitToolDirective::new(result))
+    }
+
+    pub(crate) fn replacement_args(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::ReplaceToolArgs(directive) => Some(&directive.args),
+            Self::Ambient(_) | Self::AbortTurn(_) | Self::ShortCircuitTool(_) => None,
+        }
+    }
+
+    pub(crate) fn terminal_strength(&self) -> Option<PluginTerminalStrength> {
+        match self {
+            Self::AbortTurn(_) => Some(PluginTerminalStrength::AbortTurn),
+            Self::ShortCircuitTool(directive) => {
+                Some(short_circuit_terminal_strength(&directive.output))
+            }
+            Self::Ambient(_) | Self::ReplaceToolArgs(_) => None,
+        }
+    }
+}
+
+impl AfterToolCallPluginDirective {
+    pub fn short_circuit(result: ToolOutcome) -> Self {
+        Self::ShortCircuitTool(ShortCircuitToolDirective::new(result))
+    }
+
+    pub(crate) fn successful_replacement(&self) -> Option<ToolOutcome> {
+        match self {
+            Self::ShortCircuitTool(directive) if directive.output.is_success() => {
+                Some(ToolOutcome::from_output(directive.output.clone()))
+            }
+            Self::ShortCircuitTool(_)
+            | Self::Ambient(_)
+            | Self::AbortTurn(_)
+            | Self::EnqueueMessages(_) => None,
+        }
+    }
+
+    pub(crate) fn terminal_strength(&self) -> Option<PluginTerminalStrength> {
+        match self {
+            Self::AbortTurn(_) => Some(PluginTerminalStrength::AbortTurn),
+            Self::ShortCircuitTool(directive) => {
+                Some(short_circuit_terminal_strength(&directive.output))
+            }
+            Self::Ambient(_) | Self::EnqueueMessages(_) => None,
+        }
+    }
+}
+
+pub(crate) enum AmbientDirectiveAction {
+    EmitRuntimeEvents {
+        plugin_id: String,
+        events: Vec<PluginRuntimeEvent>,
+    },
+    None,
+}
+
+pub(crate) enum AmbientDirectiveError {
+    CreateSession(String),
+    EmitTrace(PluginError),
+}
+
+impl AmbientDirectiveError {
+    pub(crate) fn into_plugin_error(self) -> PluginError {
+        match self {
+            Self::CreateSession(message) => PluginError::Session(message),
+            Self::EmitTrace(error) => error,
+        }
+    }
+
+    pub(crate) fn message(&self) -> String {
+        match self {
+            Self::CreateSession(message) => message.clone(),
+            Self::EmitTrace(error) => error.to_string(),
+        }
+    }
+}
+
+pub(crate) async fn interpret_ambient_directive(
+    emitted: PluginOwned<PluginDirective>,
+    session_lifecycle: &Arc<dyn SessionLifecycleService>,
+    session_graph: &Arc<dyn SessionGraphService>,
+) -> Result<AmbientDirectiveAction, AmbientDirectiveError> {
+    match emitted.value {
+        PluginDirective::CreateSession { request } => {
+            session_lifecycle
+                .create_session(*request)
+                .await
+                .map_err(|error| AmbientDirectiveError::CreateSession(error.to_string()))?;
+            Ok(AmbientDirectiveAction::None)
+        }
+        PluginDirective::EmitRuntimeEvents { events } => {
+            Ok(AmbientDirectiveAction::EmitRuntimeEvents {
+                plugin_id: emitted.plugin_id,
+                events,
+            })
+        }
+        PluginDirective::EmitTrace {
+            name,
+            payload,
+            context,
+        } => {
+            session_graph
+                .emit_trace_event(
+                    *context,
+                    lash_trace::TraceEvent::Custom {
+                        name: format!("plugin.{}.{}", emitted.plugin_id, name),
+                        payload,
+                    },
+                )
+                .await
+                .map_err(AmbientDirectiveError::EmitTrace)?;
+            Ok(AmbientDirectiveAction::None)
         }
     }
 }
@@ -198,58 +426,80 @@ mod tests {
         );
         assert!(PluginTerminalStrength::DeniedShortCircuit < PluginTerminalStrength::AbortTurn);
 
-        let cases: Vec<(PluginDirective, Option<PluginTerminalStrength>)> = vec![
+        let before_cases: Vec<(
+            BeforeToolCallPluginDirective,
+            Option<PluginTerminalStrength>,
+        )> = vec![
             (
-                PluginDirective::AbortTurn {
+                BeforeToolCallPluginDirective::AbortTurn(AbortTurnDirective {
                     code: "test".into(),
                     message: "abort".into(),
-                },
+                }),
                 Some(PluginTerminalStrength::AbortTurn),
             ),
             (
-                PluginDirective::ShortCircuitTool {
+                BeforeToolCallPluginDirective::ShortCircuitTool(ShortCircuitToolDirective {
                     output: ToolCallOutput::success(serde_json::json!("ok")),
-                },
+                }),
                 Some(PluginTerminalStrength::SuccessfulShortCircuit),
             ),
             (
-                PluginDirective::ShortCircuitTool {
+                BeforeToolCallPluginDirective::ShortCircuitTool(ShortCircuitToolDirective {
                     output: ToolCallOutput::failure(crate::ToolFailure::runtime(
                         crate::ToolFailureClass::Internal,
                         "err",
                         "denied",
                     )),
-                },
+                }),
                 Some(PluginTerminalStrength::DeniedShortCircuit),
             ),
-            (PluginDirective::EnqueueMessages { messages: vec![] }, None),
             (
-                PluginDirective::CreateSession {
+                BeforeToolCallPluginDirective::Ambient(PluginDirective::CreateSession {
                     request: Box::new(SessionCreateRequest::root(
                         SessionStartPoint::Empty,
                         PluginOptions::default(),
                     )),
-                },
+                }),
                 None,
             ),
             (
-                PluginDirective::ReplaceToolArgs {
+                BeforeToolCallPluginDirective::ReplaceToolArgs(ReplaceToolArgsDirective {
                     args: serde_json::json!({}),
-                },
+                }),
                 None,
             ),
-            (PluginDirective::EmitRuntimeEvents { events: vec![] }, None),
             (
-                PluginDirective::EmitTrace {
+                BeforeToolCallPluginDirective::Ambient(PluginDirective::EmitTrace {
                     name: "trace".into(),
                     payload: serde_json::json!({}),
                     context: Box::default(),
-                },
+                }),
                 None,
             ),
         ];
 
-        for (directive, expected_strength) in cases {
+        for (directive, expected_strength) in before_cases {
+            assert_eq!(directive.terminal_strength(), expected_strength);
+        }
+
+        let after_cases = [
+            AfterToolCallPluginDirective::AbortTurn(AbortTurnDirective {
+                code: "test".into(),
+                message: "abort".into(),
+            }),
+            AfterToolCallPluginDirective::ShortCircuitTool(ShortCircuitToolDirective {
+                output: ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "err",
+                    "denied",
+                )),
+            }),
+        ];
+        let expected = [
+            Some(PluginTerminalStrength::AbortTurn),
+            Some(PluginTerminalStrength::DeniedShortCircuit),
+        ];
+        for (directive, expected_strength) in after_cases.into_iter().zip(expected) {
             assert_eq!(directive.terminal_strength(), expected_strength);
         }
     }

@@ -241,7 +241,11 @@ pub mod facade_support {
     pub use crate::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use crate::llm::transport::LlmTransportError;
     pub use crate::llm::transport::ProviderFailure;
+    pub use crate::plugin::AbortTurnDirective;
+    pub use crate::plugin::AfterToolCallPluginDirective;
+    pub use crate::plugin::AfterTurnPluginDirective;
     pub use crate::plugin::AssistantResponseTransform;
+    pub use crate::plugin::BeforeToolCallPluginDirective;
     pub use crate::plugin::CheckpointHookContext;
     pub use crate::plugin::CompactionContext;
     pub use crate::plugin::ContextCompaction;
@@ -249,6 +253,7 @@ pub mod facade_support {
     pub use crate::plugin::ContextError;
     pub use crate::plugin::DirectCompletion;
     pub use crate::plugin::DirectLlmCompletion;
+    pub use crate::plugin::EnqueueMessagesDirective;
     pub use crate::plugin::PersistentRuntimeServices;
     pub use crate::plugin::PluginCommand;
     pub use crate::plugin::PluginDirective;
@@ -269,6 +274,7 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PromptHookContext;
+    pub use crate::plugin::ReplaceToolArgsDirective;
     pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
@@ -276,6 +282,7 @@ pub mod facade_support {
     pub use crate::plugin::SessionPlugin;
     pub use crate::plugin::SessionStateChangedContext;
     pub use crate::plugin::SessionTurnRequest;
+    pub use crate::plugin::ShortCircuitToolDirective;
     pub use crate::plugin::SnapshotReader;
     pub use crate::plugin::SnapshotWriter;
     pub use crate::plugin::ToolCatalogContribution;
@@ -284,6 +291,7 @@ pub mod facade_support {
     pub use crate::plugin::TurnContextTransform;
     pub use crate::plugin::TurnHookContext;
     pub use crate::plugin::TurnHookReport;
+    pub use crate::plugin::TurnPluginDirective;
     pub use crate::plugin::TurnResultHookContext;
     pub use crate::plugin::TurnTransformContext;
     pub use crate::plugin::session_types::facade_ops::AgentFrameReasonFacadeOps;

@@ -350,7 +350,7 @@ impl PluginSession {
     pub async fn before_turn(
         &self,
         ctx: TurnHookContext,
-    ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
         self.before_turn_with_phase_probe(ctx, None).await
     }
 
@@ -358,7 +358,7 @@ impl PluginSession {
         &self,
         ctx: TurnHookContext,
         phase_probe: Option<&Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
         collect_owned_async(
             &self.contributions.before_turn_hooks,
             ctx,
@@ -372,24 +372,22 @@ impl PluginSession {
     pub async fn before_tool_call(
         &self,
         mut ctx: ToolCallHookContext,
-    ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<BeforeToolCallPluginDirective>>, PluginError> {
         let mut out = Vec::new();
         for (index, registered) in self.contributions.before_tool_call_hooks.iter().enumerate() {
             let directives = (registered.hook)(ctx.clone()).await?;
             for directive in directives {
-                let replaces_args = matches!(directive, PluginDirective::ReplaceToolArgs { .. });
-                if let PluginDirective::ReplaceToolArgs { args } = &directive {
-                    ctx.args = args.clone();
-                }
+                let replacement_args = directive.replacement_args().cloned();
                 out.push(PluginOwned {
                     plugin_id: registered.plugin_id.clone(),
                     value: directive,
                 });
-                if replaces_args {
+                if let Some(replacement_args) = replacement_args {
+                    ctx.args = replacement_args;
                     for earlier in &self.contributions.before_tool_call_hooks[..index] {
                         let repeated = (earlier.hook)(ctx.clone()).await?;
                         for directive in repeated {
-                            if matches!(directive, PluginDirective::ReplaceToolArgs { .. }) {
+                            if directive.replacement_args().is_some() {
                                 return Err(PluginError::BeforeToolCallReplacementConflict {
                                     replacing_plugin_id: registered.plugin_id.clone(),
                                     repeated_plugin_id: earlier.plugin_id.clone(),
@@ -416,18 +414,13 @@ impl PluginSession {
     pub async fn after_tool_call(
         &self,
         mut ctx: ToolResultHookContext,
-    ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<AfterToolCallPluginDirective>>, PluginError> {
         let mut out = Vec::new();
         let mut effective_replacement: Option<ToolOutcome> = None;
         for (index, registered) in self.contributions.after_tool_call_hooks.iter().enumerate() {
             let directives = (registered.hook)(ctx.clone()).await?;
             for directive in directives {
-                let replacement = match &directive {
-                    PluginDirective::ShortCircuitTool { output } if output.is_success() => {
-                        Some(ToolOutcome::from_output(output.clone()))
-                    }
-                    _ => None,
-                };
+                let replacement = directive.successful_replacement();
                 out.push(PluginOwned {
                     plugin_id: registered.plugin_id.clone(),
                     value: directive,
@@ -437,10 +430,7 @@ impl PluginSession {
                     for earlier in &self.contributions.after_tool_call_hooks[..index] {
                         let repeated = (earlier.hook)(ctx.clone()).await?;
                         for directive in repeated {
-                            if matches!(
-                                &directive,
-                                PluginDirective::ShortCircuitTool { output } if output.is_success()
-                            ) {
+                            if directive.successful_replacement().is_some() {
                                 return Err(PluginError::AfterToolCallReplacementConflict {
                                     replacing_plugin_id: registered.plugin_id.clone(),
                                     repeated_plugin_id: earlier.plugin_id.clone(),
@@ -472,7 +462,7 @@ impl PluginSession {
     pub async fn after_turn(
         &self,
         ctx: TurnResultHookContext,
-    ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
         self.after_turn_with_phase_probe(ctx, None).await
     }
 
@@ -480,7 +470,7 @@ impl PluginSession {
         &self,
         ctx: TurnResultHookContext,
         phase_probe: Option<&Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<AfterTurnPluginDirective>>, PluginError> {
         collect_owned_async(
             &self.contributions.after_turn_hooks,
             ctx,
@@ -494,7 +484,7 @@ impl PluginSession {
     pub async fn at_checkpoint(
         &self,
         ctx: CheckpointHookContext,
-    ) -> Result<Vec<PluginOwned<PluginDirective>>, PluginError> {
+    ) -> Result<Vec<PluginOwned<TurnPluginDirective>>, PluginError> {
         collect_owned_async(
             &self.contributions.checkpoint_hooks,
             ctx,

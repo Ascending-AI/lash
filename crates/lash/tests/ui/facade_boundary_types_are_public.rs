@@ -30,9 +30,10 @@ use lash::persistence::{
 };
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::plugins::{
-    AfterToolCallHook, BeforeToolCallHook, CompactionContext, ContextCompaction, ContextCompactor,
-    ContextError, PluginDirective, PluginHost, PluginSpec, PluginSpecBuilder, PluginSpecFactory,
-    ToolCallHookContext, ToolCatalogContribution, ToolResultHookContext,
+    AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
+    BeforeToolCallPluginDirective, CompactionContext, ContextCompaction, ContextCompactor,
+    ContextError, PluginHost, PluginSpec, PluginSpecBuilder, PluginSpecFactory,
+    ReplaceToolArgsDirective, ToolCallHookContext, ToolCatalogContribution, ToolResultHookContext,
 };
 use lash::provider::{
     ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy,
@@ -401,10 +402,18 @@ fn persistence_types_are_nameable(
 
 fn plugin_types_are_nameable() -> PluginHost {
     let before: BeforeToolCallHook = Arc::new(|ctx: ToolCallHookContext| {
-        Box::pin(async move { Ok(vec![PluginDirective::ReplaceToolArgs { args: ctx.args }]) })
+        Box::pin(async move {
+            Ok(vec![BeforeToolCallPluginDirective::ReplaceToolArgs(
+                ReplaceToolArgsDirective { args: ctx.args },
+            )])
+        })
     });
     let after: AfterToolCallHook = Arc::new(|ctx: ToolResultHookContext| {
-        Box::pin(async move { Ok(vec![PluginDirective::short_circuit(ctx.result)]) })
+        Box::pin(async move {
+            Ok(vec![AfterToolCallPluginDirective::short_circuit(
+                ctx.result,
+            )])
+        })
     });
     let builder: PluginSpecBuilder = Arc::new(move |_ctx| {
         Ok(PluginSpec::new()
