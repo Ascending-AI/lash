@@ -534,12 +534,13 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
                     .engine_state,
                 vec![1, 2, 3]
             );
-            Ok(crate::ProcessRunOutcome::Terminal(Box::new(
-                ProcessAwaitOutput::Success {
+            Ok(crate::ProcessRunOutcome::Terminal {
+                output: Box::new(ProcessAwaitOutput::Success {
                     value: serde_json::json!({ "segments": 2 }),
                     control: None,
-                },
-            )))
+                }),
+                actions: Vec::new(),
+            })
         }
     }
 }
@@ -580,12 +581,13 @@ impl crate::ProcessEngine for SnapshotRecordingEngine {
         payload: serde_json::Value,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         self.payloads.lock_recover().push(payload);
-        Ok(crate::ProcessRunOutcome::Terminal(Box::new(
-            ProcessAwaitOutput::Success {
+        Ok(crate::ProcessRunOutcome::Terminal {
+            output: Box::new(ProcessAwaitOutput::Success {
                 value: serde_json::json!({ "recorded": true }),
                 control: None,
-            },
-        )))
+            }),
+            actions: Vec::new(),
+        })
     }
 }
 
@@ -601,12 +603,13 @@ impl crate::ProcessEngine for NestedProcessEngine {
         _payload: serde_json::Value,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
-        Ok(crate::ProcessRunOutcome::Terminal(Box::new(
-            ProcessAwaitOutput::Success {
+        Ok(crate::ProcessRunOutcome::Terminal {
+            output: Box::new(ProcessAwaitOutput::Success {
                 value: serde_json::json!({ "nested": "done" }),
                 control: None,
-            },
-        )))
+            }),
+            actions: Vec::new(),
+        })
     }
 }
 

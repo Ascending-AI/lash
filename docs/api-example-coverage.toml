@@ -29,7 +29,7 @@ gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
 # vanishes among thousands; see the comment above the tombstones themselves.
-removal_verdicts_recorded = 775
+removal_verdicts_recorded = 776
 
 # The number of `file.rs::Symbol::path` citations the reasons carry. The citation
 # check only reads a reference that names a symbol, so stripping the `::path` off
@@ -25095,7 +25095,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonWriter::EngineGaveUp"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/workflow.rs:370#writer: AbandonWriter::EngineGaveUp,"
+usage = "crates/lash-restate/src/process/workflow.rs:365#writer: AbandonWriter::EngineGaveUp,"
 
 [[api]]
 symbol = "lash::process::AbandonWriter::OwnerDrain"
@@ -25122,7 +25122,7 @@ availability = "default+all-features"
 aliases = ["lash_core::AbandonWriter::Sweep"]
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-restate/src/process/workflow.rs:347#writer: AbandonWriter::Sweep,"
+usage = "crates/lash-restate/src/process/workflow.rs:342#writer: AbandonWriter::Sweep,"
 
 [[api]]
 symbol = "lash::process::CausalRef"
@@ -46786,7 +46786,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::queue_drain"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:8323#ExecutionScope::queue_drain(\"session\", \"drain\"),"
+usage = "crates/lash-restate/src/tests.rs:8322#ExecutionScope::queue_drain(\"session\", \"drain\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -46806,7 +46806,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionScope::session_delete"]
 area = "sessions-turns"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:8324#ExecutionScope::session_delete(\"session\"),"
+usage = "crates/lash-restate/src/tests.rs:8323#ExecutionScope::session_delete(\"session\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -48996,7 +48996,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectController::wants_segment_boundary"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:482#let Some(reason) = controller.wants_segment_boundary(&progress) else {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:477#let Some(reason) = controller.wants_segment_boundary(&progress) else {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectControllerError"
@@ -68949,15 +68949,23 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
-reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+reason = "Concrete host class: process-engine adapters return terminal output and any recorded child policies through one representation so durable workers cannot lose teardown actions."
 
 [[api]]
-symbol = "lash_core::ProcessRunOutcome::Terminal::0"
+symbol = "lash_core::ProcessRunOutcome::Terminal::actions"
 kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
-reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+reason = "Concrete host class: Lashlang and ToolCall process engines hand a possibly-empty list of recorded parent-end actions to the durable worker at their true terminal boundary."
+
+[[api]]
+symbol = "lash_core::ProcessRunOutcome::Terminal::output"
+kind = "field"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "Concrete host class: durable process workers commit this terminal output in the same operation as any retained teardown plan."
 
 [[api]]
 symbol = "lash_core::ProcessSpawnProvenance"
@@ -70061,7 +70069,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:499#lash_core::SegmentHandover {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:494#lash_core::SegmentHandover {"
 
 [[api]]
 symbol = "lash_core::SegmentHandover::engine_state"
@@ -70069,7 +70077,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:502#engine_state,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:497#engine_state,"
 
 [[api]]
 symbol = "lash_core::SegmentHandover::program_hash"
@@ -70077,7 +70085,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:501#program_hash: program_hash.clone(),"
+usage = "crates/lash-lashlang-runtime/src/process.rs:496#program_hash: program_hash.clone(),"
 
 [[api]]
 symbol = "lash_core::SegmentHandover::reason"
@@ -70085,7 +70093,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:500#reason,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:495#reason,"
 
 [[api]]
 symbol = "lash_core::SegmentProgress"
@@ -70806,7 +70814,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:863#kind: lash_core::WaitKind::Signal {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:858#kind: lash_core::WaitKind::Signal {"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal"
@@ -70814,7 +70822,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:863#kind: lash_core::WaitKind::Signal {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:858#kind: lash_core::WaitKind::Signal {"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::event_type"
@@ -70822,7 +70830,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:865#event_type: event_type.clone(),"
+usage = "crates/lash-lashlang-runtime/src/process.rs:860#event_type: event_type.clone(),"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::key"
@@ -70830,7 +70838,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:896#lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:891#lash_core::WaitKind::Signal { key: wait_key, .. } if wait_key == key => {"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::name"
@@ -70838,7 +70846,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:864#name: name.clone(),"
+usage = "crates/lash-lashlang-runtime/src/process.rs:859#name: name.clone(),"
 
 [[api]]
 symbol = "lash_core::WaitKind::Signal::ordinal"
@@ -70846,7 +70854,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:867#ordinal: event_ordinal,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:862#ordinal: event_ordinal,"
 
 [[api]]
 symbol = "lash_core::WaitState"
@@ -70870,7 +70878,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:863#kind: lash_core::WaitKind::Signal {"
+usage = "crates/lash-lashlang-runtime/src/process.rs:858#kind: lash_core::WaitKind::Signal {"
 
 [[api]]
 symbol = "lash_core::WaitState::since_ms"
@@ -70878,7 +70886,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:862#since_ms,"
+usage = "crates/lash-lashlang-runtime/src/process.rs:857#since_ms,"
 
 [[api]]
 symbol = "lash_core::WakeDelivery"
@@ -74959,7 +74967,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:918#Ok(lash_core::facade_support::current_epoch_ms())"
+usage = "crates/lash-lashlang-runtime/src/process.rs:913#Ok(lash_core::facade_support::current_epoch_ms())"
 
 [[api]]
 symbol = "lash_core::facade_support::default_trigger_source_key"
@@ -76200,7 +76208,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:850#let key = lash_core::facade_support::process_signal_wait_key("
+usage = "crates/lash-lashlang-runtime/src/process.rs:845#let key = lash_core::facade_support::process_signal_wait_key("
 
 [[api]]
 symbol = "lash_core::facade_support::process_wake_delivery"
@@ -78008,7 +78016,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:386#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
+usage = "crates/lash-lashlang-runtime/src/process.rs:381#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
 
 [[api]]
 symbol = "lash_core::runtime::RuntimeNamedPhase::begin"
@@ -78016,7 +78024,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-lashlang-runtime/src/process.rs:386#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
+usage = "crates/lash-lashlang-runtime/src/process.rs:381#lash_core::runtime::RuntimeNamedPhase::begin(phase_probe, \"rlm_process.shutdown\");"
 
 [[api]]
 symbol = "lash_core::runtime::RuntimeTurnPhaseProbeSlot"
@@ -78048,7 +78056,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-restate/src/tests.rs:13099#probe_slot.set_for_session("
+usage = "crates/lash-restate/src/tests.rs:13101#probe_slot.set_for_session("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -83817,44 +83825,12 @@ disposition = "unused-justify"
 reason = "Core durable-host contract identifying the terminal parent that owns the retained teardown plan."
 
 [[api]]
-symbol = "lash_core::ProcessRunOutcome::TerminalWithParentEnd"
-kind = "variant"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: process-engine adapters return terminal output together with recorded child policies so the worker can commit both atomically."
-
-[[api]]
-symbol = "lash_core::ProcessRunOutcome::TerminalWithParentEnd::actions"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: Lashlang and ToolCall process engines hand recorded parent-end actions to the durable worker at their true terminal boundary."
-
-[[api]]
-symbol = "lash_core::ProcessRunOutcome::TerminalWithParentEnd::output"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: durable process workers commit this terminal outcome in the same operation as the retained teardown plan."
-
-[[api]]
-symbol = "lash_core::ProcessRunOutcome::into_terminal_parts"
-kind = "function"
-availability = "default+all-features"
-area = "processes"
-disposition = "unused-justify"
-reason = "Concrete host class: durable process adapters normalize both terminal variants into output plus recorded parent-end actions."
-
-[[api]]
 symbol = "lash_core::ProcessRunOutcome::is_terminal"
 kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
-reason = "Concrete host class: the Lashlang process engine uses this helper to distinguish segment handovers from either terminal variant."
+reason = "Concrete host class: the Lashlang process engine uses this helper to distinguish segment handovers from the terminal variant."
 
 [[api]]
 symbol = "lash_core::ProcessRunOutcome::terminal_output"
@@ -83862,7 +83838,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
-reason = "Concrete host class: the Lashlang process engine projects terminal output without dropping the separately retained parent-end actions."
+reason = "Concrete host class: the Lashlang process engine projects terminal output without dropping the actions carried alongside it."
 
 [[api]]
 symbol = "lash_core::RuntimeExecutionContext::parent_end_actions"
@@ -90208,6 +90184,10 @@ symbol = "lash_core::PreparedContext::messages"
 kind = "field"
 superseded_by = "used-asserted"
 reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: used-asserted at lash::plugins::PreparedContext::messages."
+
+[[removal_verdict]]
+symbol = "lash_core::ProcessRunOutcome::TerminalWithParentEnd"
+kind = "variant"
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState"

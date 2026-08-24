@@ -1212,12 +1212,7 @@ impl DurableProcessWorker {
             {
                 // Ran to a terminal outcome (success or a process-level failure) while
                 // holding the lease: this owner is the single writer of the terminal.
-                Ok(crate::ProcessRunOutcome::Terminal(output)) => {
-                    return self
-                        .finish_terminal_run(&lease, &process_id, output, Vec::new())
-                        .await;
-                }
-                Ok(crate::ProcessRunOutcome::TerminalWithParentEnd { output, actions }) => {
+                Ok(crate::ProcessRunOutcome::Terminal { output, actions }) => {
                     return self
                         .finish_terminal_run(&lease, &process_id, output, actions)
                         .await;

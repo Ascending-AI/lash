@@ -366,15 +366,10 @@ pub async fn run_lashlang_process(
         .await
     };
     output = match output {
-        lash_core::ProcessRunOutcome::Terminal(output_value) => {
-            let actions = host.ctx.parent_end_actions();
-            if actions.is_empty() {
-                lash_core::ProcessRunOutcome::Terminal(output_value)
-            } else {
-                lash_core::ProcessRunOutcome::TerminalWithParentEnd {
-                    output: output_value,
-                    actions,
-                }
+        lash_core::ProcessRunOutcome::Terminal { output, .. } => {
+            lash_core::ProcessRunOutcome::Terminal {
+                output,
+                actions: host.ctx.parent_end_actions(),
             }
         }
         other => other,

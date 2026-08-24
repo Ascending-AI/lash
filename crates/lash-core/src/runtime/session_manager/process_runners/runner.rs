@@ -36,29 +36,28 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     }),
                 )
                 .await;
-                if actions.is_empty() {
-                    Ok(crate::ProcessRunOutcome::Terminal(Box::new(output)))
-                } else {
-                    Ok(crate::ProcessRunOutcome::TerminalWithParentEnd {
-                        output: Box::new(output),
-                        actions,
-                    })
-                }
+                Ok(crate::ProcessRunOutcome::Terminal {
+                    output: Box::new(output),
+                    actions,
+                })
             }
             crate::ProcessInput::SessionTurn {
                 create_request,
                 turn_input,
                 ..
-            } => Ok(crate::ProcessRunOutcome::Terminal(Box::new(
-                Box::pin(self.run_process_session_turn(
-                    registration,
-                    *create_request.clone(),
-                    *turn_input.clone(),
-                    scoped_effect_controller,
-                    cancellation,
-                ))
-                .await,
-            ))),
+            } => Ok(crate::ProcessRunOutcome::Terminal {
+                output: Box::new(
+                    Box::pin(self.run_process_session_turn(
+                        registration,
+                        *create_request.clone(),
+                        *turn_input.clone(),
+                        scoped_effect_controller,
+                        cancellation,
+                    ))
+                    .await,
+                ),
+                actions: Vec::new(),
+            }),
             crate::ProcessInput::Engine { kind, payload } => {
                 let engine = match self.current.host.core.process_engines.require(kind) {
                     Ok(engine) => engine,
