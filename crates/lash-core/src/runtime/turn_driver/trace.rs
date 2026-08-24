@@ -54,28 +54,6 @@ impl RuntimeTurnDriver<'_> {
         }
     }
 
-    pub(super) fn emit_protocol_diagnostic_trace(
-        &self,
-        protocol_iteration: usize,
-        phase: &str,
-        payload: serde_json::Value,
-    ) {
-        let protocol_event = crate::ProtocolEvent::typed(
-            "runtime",
-            serde_json::json!({
-                "diagnostic": {
-                    "phase": phase,
-                    "payload": payload,
-                }
-            }),
-        )
-        .expect("protocol diagnostic event serializes");
-        self.emit_trace(
-            protocol_iteration,
-            protocol_step_trace_event(&protocol_event),
-        );
-    }
-
     pub(super) fn mark_phase_end(&self, phase: RuntimeTurnPhase) {
         if let Some(probe) = self.turn_phase_probe.as_ref() {
             probe.end(phase);

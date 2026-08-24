@@ -339,13 +339,12 @@ impl RuntimeTurnDriver<'_> {
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
         let iteration = machine.protocol_iteration();
         if self.host.core.tracing.trace_sink.is_some() {
-            self.emit_protocol_diagnostic_trace(
+            self.emit_trace(
                 iteration,
-                "exec_code_started",
-                serde_json::json!({
-                    "code": code,
-                    "code_chars": code.chars().count(),
-                }),
+                lash_trace::TraceEvent::ExecCodeStarted {
+                    code: code.clone(),
+                    code_chars: code.chars().count(),
+                },
             );
         }
         let invocation = match self.turn_effect_invocation(machine, id, RuntimeEffectKind::ExecCode)
@@ -481,49 +480,53 @@ impl RuntimeTurnDriver<'_> {
                 let tool_calls = output
                     .tool_calls
                     .iter()
-                    .map(|record| {
-                        serde_json::json!({
-                            "call_id": record.call_id,
-                            "name": record.tool,
-                            "duration_ms": record.duration_ms,
-                            "status": format!("{:?}", record.output.status())
-                                .to_ascii_lowercase(),
-                        })
+                    .map(|record| lash_trace::TraceExecToolCall {
+                        call_id: record.call_id.clone(),
+                        name: record.tool.clone(),
+                        duration_ms: record.duration_ms,
+                        status: match record.output.status() {
+                            lash_sansio::ToolCallStatus::Success => {
+                                lash_trace::TraceToolCallStatus::Success
+                            }
+                            lash_sansio::ToolCallStatus::Failure => {
+                                lash_trace::TraceToolCallStatus::Failure
+                            }
+                            lash_sansio::ToolCallStatus::Cancelled => {
+                                lash_trace::TraceToolCallStatus::Cancelled
+                            }
+                        },
                     })
                     .collect::<Vec<_>>();
-                self.emit_protocol_diagnostic_trace(
+                self.emit_trace(
                     iteration,
-                    "exec_code_completed",
-                    serde_json::json!({
-                        "duration_ms": output.duration_ms,
-                        "output": observations_text,
-                        "output_chars": observations_text.chars().count(),
-                        "observation_count": output.observations.len(),
-                        "observation_truncation": output.observation_truncation,
-                        "error": output.error,
-                        "terminal_finish": output.terminal_finish,
-                        "terminal_finish_present": output.terminal_finish.is_some(),
-                        "tool_call_count": output.tool_calls.len(),
-                        "tool_calls": tool_calls,
-                    }),
+                    lash_trace::TraceEvent::ExecCodeCompleted {
+                        duration_ms: output.duration_ms,
+                        output: observations_text.clone(),
+                        output_chars: observations_text.chars().count(),
+                        observation_count: output.observations.len(),
+                        observation_truncation: output.observation_truncation.clone(),
+                        error: output.error.clone(),
+                        terminal_finish: output.terminal_finish.clone(),
+                        tool_calls,
+                    },
                 );
                 if !output.observation_truncation.is_empty() {
-                    self.emit_protocol_diagnostic_trace(
+                    self.emit_trace(
                         iteration,
-                        "observation_projection",
-                        serde_json::json!({
-                            "projections": output.observation_truncation,
-                        }),
+                        lash_trace::TraceEvent::ObservationProjection {
+                            projections: output.observation_truncation.clone(),
+                        },
                     );
                 }
             }
         } else if let Err(error) = &result
             && self.host.core.tracing.trace_sink.is_some()
         {
-            self.emit_protocol_diagnostic_trace(
+            self.emit_trace(
                 iteration,
-                "exec_code_failed",
-                serde_json::json!({ "error": error }),
+                lash_trace::TraceEvent::ExecCodeFailed {
+                    error: error.clone(),
+                },
             );
         }
         self.handle_machine_response(

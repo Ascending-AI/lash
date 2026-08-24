@@ -11,26 +11,26 @@ use std::collections::BTreeSet;
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceDurableTimerStatus, TraceDurableWaitResolution,
     TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
-    TraceError, TraceEvent, TraceJournaledEffectStatus, TraceLanguageChildExecution,
-    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse, TraceProviderReplayDropEvent,
-    TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
-    TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord, TraceRuntimeScope,
-    TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage, TraceToolCallOutcome,
-    TraceToolCallOutput, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
-    TraceTurnFailureReason, TraceTurnOutcome,
+    TraceError, TraceEvent, TraceExecToolCall, TraceJournaledEffectStatus,
+    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
+    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
+    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRecord,
+    TraceRuntimeScope, TraceRuntimeStreamEvent, TraceRuntimeSubject, TraceTokenUsage,
+    TraceToolCallOutcome, TraceToolCallOutput, TraceToolCallStatus, TraceTurnCancellationEvidence,
+    TraceTurnCompletionReason, TraceTurnFailureReason, TraceTurnOutcome,
 };
 use serde_json::json;
 
 #[test]
-fn trace_schema_version_is_pinned_at_8() {
+fn trace_schema_version_is_pinned_at_9() {
     // Tripwire. This is the current on-disk trace schema version. Every reader
     // (viewer, exporter, OTel bridge) keys off it, so a change here must be a
     // deliberate, documented schema bump — see the crate-level rustdoc and the
     // `TRACE_SCHEMA_VERSION` doc comment for the bump policy. If this fails,
     // read that policy before touching the constant.
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 9);
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
         lash_trace::ensure_trace_schema_version(3),
         Err(lash_trace::TraceSchemaVersionError {
             actual: 3,
-            expected: 8,
+            expected: 9,
         })
     );
 }
@@ -51,7 +51,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("schema-3 trace records must be refused during typed decode");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 8"
+        "unsupported trace schema version 3; expected 9"
     );
 
     let stale_and_malformed = r#"{"schema_version":3,"payload":"not a current event"}"#;
@@ -59,7 +59,7 @@ fn documented_trace_record_decode_rejects_schema_3_before_payload_interpretation
         .expect_err("the version refusal must precede current-shape validation");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 3; expected 8"
+        "unsupported trace schema version 3; expected 9"
     );
 }
 
@@ -73,7 +73,18 @@ fn new_records_stamp_the_schema_version() {
     );
     assert_eq!(record.schema_version, lash_trace::TRACE_SCHEMA_VERSION);
     let json = serde_json::to_value(&record).unwrap();
-    assert_eq!(json["schema_version"], 8);
+    assert_eq!(json["schema_version"], 9);
+}
+
+#[test]
+fn schema_8_exec_protocol_record_is_refused_before_old_envelope_interpretation() {
+    let stored_v8 = r#"{"schema_version":8,"id":"v8-exec","timestamp":"2026-08-24T09:00:00+00:00","context":{},"type":"protocol_step","plugin_id":"runtime","payload":{"diagnostic":{"phase":"exec_code_completed","payload":{"tool_call_count":0,"tool_calls":[],"terminal_finish":null,"terminal_finish_present":false}}}}"#;
+    let error = serde_json::from_str::<TraceRecord>(stored_v8)
+        .expect_err("schema-8 trace records must be refused before decoding the old envelope");
+    assert_eq!(
+        error.to_string(),
+        "unsupported trace schema version 8; expected 9"
+    );
 }
 
 fn token_usage_sample() -> TraceTokenUsage {
@@ -266,6 +277,17 @@ fn event_samples() -> Vec<TraceEvent> {
             duration_ms: 3,
             attempts: None,
         },
+        TraceEvent::ExecCodeStarted {
+            code: "print(1)".to_string(),
+            code_chars: 8,
+        },
+        exec_code_completed_event(),
+        TraceEvent::ExecCodeFailed {
+            error: "boom".to_string(),
+        },
+        TraceEvent::ObservationProjection {
+            projections: Vec::new(),
+        },
         TraceEvent::JournaledEffectStarted {
             effect_name: "lash:turn:llm:1".to_string(),
             effect_kind: "llm_call".to_string(),
@@ -366,6 +388,10 @@ trace_event_kinds! {
     RuntimeStreamEvent => "runtime_stream_event",
     ToolCallStarted => "tool_call_started",
     ToolCallCompleted => "tool_call_completed",
+    ExecCodeStarted => "exec_code_started",
+    ExecCodeCompleted => "exec_code_completed",
+    ExecCodeFailed => "exec_code_failed",
+    ObservationProjection => "observation_projection",
     JournaledEffectStarted => "journaled_effect_started",
     JournaledEffectSettled => "journaled_effect_settled",
     DurableWaitParked => "durable_wait_parked",
@@ -433,7 +459,7 @@ fn composition_change_is_a_complete_snapshot_at_schema_version_five() {
     );
     let mut json = serde_json::to_value(&record).expect("serialize composition snapshot");
 
-    assert_eq!(json["schema_version"], 8);
+    assert_eq!(json["schema_version"], 9);
     json["schema_version"] = json!(5);
     assert_eq!(json["schema_version"], 5);
     assert_eq!(json["type"], "composition_changed");
@@ -508,7 +534,7 @@ fn historical_v4_reader_refuses_v5_before_interpreting_new_closed_enum_variant()
         },
     );
     let current_wire = serde_json::to_string(&record).expect("serialize composition event");
-    let wire = current_wire.replacen("\"schema_version\":8", "\"schema_version\":5", 1);
+    let wire = current_wire.replacen("\"schema_version\":9", "\"schema_version\":5", 1);
     assert_eq!(
         read_with_historical_v4_reader(&wire),
         Err(HistoricalV4ReadError::UnsupportedVersion {
@@ -580,7 +606,7 @@ fn historical_v5_reader_refuses_v6_provider_replay_dropped_before_interpreting_v
         },
     );
     let current_wire = serde_json::to_string(&record).expect("serialize replay-drop event");
-    let wire = current_wire.replacen("\"schema_version\":8", "\"schema_version\":6", 1);
+    let wire = current_wire.replacen("\"schema_version\":9", "\"schema_version\":6", 1);
     assert_eq!(
         read_with_historical_v5_reader(&wire),
         Err(HistoricalV5ReadError::UnsupportedVersion {
@@ -661,8 +687,8 @@ fn historical_v6_reader_refuses_v7_language_execution_before_interpreting_varian
         },
     );
     let current_wire =
-        serde_json::to_string(&record).expect("serialize v8 language-execution event");
-    let wire = current_wire.replacen("\"schema_version\":8", "\"schema_version\":7", 1);
+        serde_json::to_string(&record).expect("serialize current language-execution event");
+    let wire = current_wire.replacen("\"schema_version\":9", "\"schema_version\":7", 1);
     assert_eq!(
         read_with_historical_v6_reader(&wire),
         Err(HistoricalV6ReadError::UnsupportedVersion {
@@ -737,7 +763,8 @@ fn historical_v7_reader_refuses_v8_turn_outcome_before_interpreting_payload() {
             },
         },
     );
-    let wire = serde_json::to_string(&record).expect("serialize v8 turn_completed");
+    let current_wire = serde_json::to_string(&record).expect("serialize current turn_completed");
+    let wire = current_wire.replacen("\"schema_version\":9", "\"schema_version\":8", 1);
     assert_eq!(
         read_with_historical_v7_reader(&wire),
         Err(HistoricalV7ReadError::UnsupportedVersion {
@@ -756,30 +783,30 @@ fn historical_v7_reader_refuses_v8_turn_outcome_before_interpreting_payload() {
     );
 }
 
-/// FIG-1758: the other direction of the same gate — the current v8 decoder must
+/// FIG-1758: the other direction of the same gate — the current decoder must
 /// refuse a stored v7 record on its version, before the old flat
 /// `status`/`done_reason` payload reaches the typed event decoder.
 #[test]
 fn current_reader_refuses_a_stored_v7_turn_completed_record() {
     let stored_v7 = r#"{"schema_version":7,"id":"v7-turn","timestamp":"2026-08-19T09:12:33.101+00:00","context":{},"type":"turn_completed","status":"failed","done_reason":"cancelled"}"#;
     let error = serde_json::from_str::<TraceRecord>(stored_v7)
-        .expect_err("v7 trace records must be refused by the v8 decoder");
+        .expect_err("v7 trace records must be refused by the current decoder");
     assert_eq!(
         error.to_string(),
-        "unsupported trace schema version 7; expected 8",
+        "unsupported trace schema version 7; expected 9",
         "the version refusal must precede payload interpretation"
     );
 
     // The same bytes at the current version are undecodable for a second,
-    // independent reason: v8 has no flat `status`/`done_reason` pair. The
+    // independent reason: the current schema has no flat `status`/`done_reason` pair. The
     // version gate is what keeps that shape error from ever being the message a
     // stale reader sees.
-    let forced_v8 = stored_v7.replacen("\"schema_version\":7", "\"schema_version\":8", 1);
-    let error = serde_json::from_str::<TraceRecord>(&forced_v8)
+    let forced_v9 = stored_v7.replacen("\"schema_version\":7", "\"schema_version\":9", 1);
+    let error = serde_json::from_str::<TraceRecord>(&forced_v9)
         .expect_err("without the version gate, the v7 payload shape is undecodable");
     assert!(
         error.to_string().contains("outcome"),
-        "expected the missing `outcome` field to break the v8 decoder, got: {error}"
+        "expected the missing `outcome` field to break the current decoder, got: {error}"
     );
 }
 
@@ -1293,27 +1320,16 @@ fn retry_attempts_are_optional_additive_event_fields() {
     );
     assert!(json["attempts"][1].get("reason").is_none());
     assert!(json["attempts"][1].get("delay_ms").is_none());
-    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
+    assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 9);
 }
 
 #[test]
-fn protocol_step_exec_diagnostic_full_shape() {
-    // Mirrors the runtime's `exec_code_completed` diagnostic: a `runtime`
-    // ProtocolStep whose payload nests `diagnostic.{phase,payload}` with the
-    // per-call `tool_calls` array.
-    let event = exec_code_completed_protocol_step();
+fn typed_exec_code_completed_full_shape() {
+    let event = exec_code_completed_event();
     let json = serde_json::to_value(&event).unwrap();
-    assert_eq!(json["type"], "protocol_step");
-    assert_eq!(json["plugin_id"], "runtime");
+    assert_eq!(json["type"], "exec_code_completed");
     assert_eq!(
-        json["payload"]["diagnostic"]["phase"],
-        "exec_code_completed"
-    );
-
-    let payload = &json["payload"]["diagnostic"]["payload"];
-    assert_eq!(payload["tool_call_count"], 1);
-    assert_eq!(
-        payload["tool_calls"],
+        json["tool_calls"],
         json!([{
             "call_id": "call-1",
             "name": "read_file",
@@ -1321,6 +1337,8 @@ fn protocol_step_exec_diagnostic_full_shape() {
             "status": "success",
         }])
     );
+    assert!(json.get("tool_call_count").is_none());
+    assert!(json.get("terminal_finish_present").is_none());
 }
 
 #[test]
@@ -1465,31 +1483,21 @@ fn custom_full_shape() {
     );
 }
 
-fn exec_code_completed_protocol_step() -> TraceEvent {
-    TraceEvent::ProtocolStep {
-        plugin_id: "runtime".to_string(),
-        payload: json!({
-            "diagnostic": {
-                "phase": "exec_code_completed",
-                "payload": {
-                    "duration_ms": 12,
-                    "output": "hello\nworld",
-                    "output_chars": 11,
-                    "observation_count": 2,
-                    "observation_truncation": [],
-                    "error": null,
-                    "terminal_finish": null,
-                    "terminal_finish_present": false,
-                    "tool_call_count": 1,
-                    "tool_calls": [{
-                        "call_id": "call-1",
-                        "name": "read_file",
-                        "duration_ms": 5,
-                        "status": "success",
-                    }],
-                },
-            },
-        }),
+fn exec_code_completed_event() -> TraceEvent {
+    TraceEvent::ExecCodeCompleted {
+        duration_ms: 12,
+        output: "hello\nworld".to_string(),
+        output_chars: 11,
+        observation_count: 2,
+        observation_truncation: Vec::new(),
+        error: None,
+        terminal_finish: None,
+        tool_calls: vec![TraceExecToolCall {
+            call_id: Some("call-1".to_string()),
+            name: "read_file".to_string(),
+            duration_ms: 5,
+            status: TraceToolCallStatus::Success,
+        }],
     }
 }
 
@@ -1512,7 +1520,7 @@ fn jsonl_round_trip_preserves_records() {
         ),
         TraceRecord::new(
             TraceContext::default().for_session("root"),
-            exec_code_completed_protocol_step(),
+            exec_code_completed_event(),
         ),
         TraceRecord::new(
             TraceContext::default().for_session("root"),
@@ -1538,7 +1546,7 @@ fn jsonl_round_trip_preserves_records() {
 
     assert_eq!(parsed, records, "JSONL round-trip must preserve records");
     for record in &parsed {
-        assert_eq!(record.schema_version, 8);
+        assert_eq!(record.schema_version, 9);
     }
 
     // Pin the diagnostic's `tool_calls` entry fields explicitly on the parsed
@@ -1549,7 +1557,7 @@ fn jsonl_round_trip_preserves_records() {
         .expect("exec diagnostic line present");
     let value: serde_json::Value =
         serde_json::from_str(diagnostic_line).expect("parse diagnostic line");
-    let tool_call = &value["payload"]["diagnostic"]["payload"]["tool_calls"][0];
+    let tool_call = &value["tool_calls"][0];
     assert_eq!(tool_call["call_id"], "call-1");
     assert_eq!(tool_call["name"], "read_file");
     assert_eq!(tool_call["duration_ms"], 5);
@@ -1597,7 +1605,7 @@ fn durable_step_events_round_trip_at_schema_version_six() {
         let record = TraceRecord::new(TraceContext::default().for_session("s1"), event);
         let json = serde_json::to_value(&record).expect("serialize durable trace event");
         assert_eq!(json["schema_version"], lash_trace::TRACE_SCHEMA_VERSION);
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 9);
         assert_eq!(json["type"], expected_kind);
         let decoded: TraceRecord = serde_json::from_value(json).expect("round trip event");
         assert_eq!(decoded.event.kind(), expected_kind);

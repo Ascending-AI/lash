@@ -185,6 +185,10 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::RollingHistoryPromptPruned { .. }
         | TraceEvent::EffectEnvelopeDiff { .. }
         | TraceEvent::ProtocolStep { .. }
+        | TraceEvent::ExecCodeStarted { .. }
+        | TraceEvent::ExecCodeCompleted { .. }
+        | TraceEvent::ExecCodeFailed { .. }
+        | TraceEvent::ObservationProjection { .. }
         | TraceEvent::TokenUsage { .. }
         | TraceEvent::JournaledEffectStarted { .. }
         | TraceEvent::JournaledEffectSettled { .. }

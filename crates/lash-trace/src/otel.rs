@@ -312,8 +312,17 @@ where
             TraceEvent::RollingHistoryCompactionCompleted { .. } => {
                 self.emit_instant(record, "lash.rolling_history.compaction_completed", None)
             }
-            TraceEvent::ProtocolStep { payload, .. } => {
-                self.emit_instant(record, protocol_step_span_name(payload), None)
+            TraceEvent::ExecCodeStarted { .. }
+            | TraceEvent::ExecCodeCompleted { .. }
+            | TraceEvent::ExecCodeFailed { .. }
+            | TraceEvent::ObservationProjection { .. } => self.emit_instant(
+                record,
+                typed_diagnostic_span_name(&record.event)
+                    .expect("typed diagnostic has an OTel span name"),
+                None,
+            ),
+            TraceEvent::ProtocolStep { .. } => {
+                self.emit_instant(record, "lash.protocol_step", None)
             }
             TraceEvent::TokenUsage { .. } => self.emit_instant(record, "lash.token_usage", None),
             TraceEvent::LanguageExecution { .. } => {
@@ -858,13 +867,23 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
         }
         TraceEvent::ProtocolStep { plugin_id, payload } => {
             attrs.push(KeyValue::new("lash.protocol.plugin_id", plugin_id.clone()));
-            if let Some(phase) = protocol_step_diagnostic_phase(payload) {
-                attrs.push(KeyValue::new(
-                    "lash.protocol.diagnostic_phase",
-                    phase.to_string(),
-                ));
-            }
             push_payload_json(&mut attrs, options, "lash.protocol.payload_json", payload);
+        }
+        TraceEvent::ExecCodeStarted { .. }
+        | TraceEvent::ExecCodeCompleted { .. }
+        | TraceEvent::ExecCodeFailed { .. }
+        | TraceEvent::ObservationProjection { .. } => {
+            attrs.push(KeyValue::new("lash.protocol.plugin_id", "runtime"));
+            attrs.push(KeyValue::new(
+                "lash.protocol.diagnostic_phase",
+                record.event.kind(),
+            ));
+            push_payload_json(
+                &mut attrs,
+                options,
+                "lash.protocol.payload_json",
+                &typed_diagnostic_protocol_payload(&record.event),
+            );
         }
         TraceEvent::TokenUsage { usage, cumulative } => {
             usage_attributes(&mut attrs, "lash.usage", usage);
@@ -1236,26 +1255,26 @@ fn tool_key(event: &TraceEvent) -> Option<String> {
     }
 }
 
-/// Runtime diagnostics ride on `ProtocolStep` under a `diagnostic.phase`
-/// envelope (see lash-core's `emit_protocol_diagnostic_trace`). Extract that
-/// phase so diagnostics get distinguishable span names/attributes instead of a
-/// uniform `lash.protocol_step`.
-fn protocol_step_diagnostic_phase(payload: &Value) -> Option<&str> {
-    payload
-        .get("diagnostic")
-        .and_then(|diagnostic| diagnostic.get("phase"))
-        .and_then(Value::as_str)
+fn typed_diagnostic_protocol_payload(event: &TraceEvent) -> Value {
+    let mut payload = serde_json::to_value(event).unwrap_or(Value::Null);
+    if let Value::Object(object) = &mut payload {
+        object.remove("type");
+    }
+    serde_json::json!({
+        "diagnostic": {
+            "phase": event.kind(),
+            "payload": payload,
+        }
+    })
 }
 
-/// Map a `ProtocolStep` to a span name. Runtime exec diagnostics collapse into
-/// the `lash.exec_code` family (with the precise phase carried as an
-/// attribute); other diagnostics keep a phase-scoped `lash.<noun>` name. Plain
-/// protocol steps stay `lash.protocol_step`.
-fn protocol_step_span_name(payload: &Value) -> &'static str {
-    match protocol_step_diagnostic_phase(payload) {
-        Some("exec_code_started" | "exec_code_completed" | "exec_code_failed") => "lash.exec_code",
-        Some("observation_projection") => "lash.observation_projection",
-        _ => "lash.protocol_step",
+fn typed_diagnostic_span_name(event: &TraceEvent) -> Option<&'static str> {
+    match event {
+        TraceEvent::ExecCodeStarted { .. }
+        | TraceEvent::ExecCodeCompleted { .. }
+        | TraceEvent::ExecCodeFailed { .. } => Some("lash.exec_code"),
+        TraceEvent::ObservationProjection { .. } => Some("lash.observation_projection"),
+        _ => None,
     }
 }
 
