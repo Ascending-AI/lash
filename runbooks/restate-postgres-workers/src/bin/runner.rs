@@ -35,9 +35,206 @@ use tokio::process::Command;
 
 const DEFAULT_RUNNER_STALL_TIMEOUT: Duration = Duration::from_secs(240);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkflowSegment {
+    One,
+    Two,
+}
+
+impl WorkflowSegment {
+    const fn number(self) -> u8 {
+        match self {
+            Self::One => 1,
+            Self::Two => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SegmentSelection {
+    All,
+    One,
+    Two,
+}
+
+impl SegmentSelection {
+    fn from_env() -> Result<Self> {
+        match std::env::var("LASH_E2E_WORKFLOW_SEGMENT") {
+            Err(std::env::VarError::NotPresent) => Ok(Self::All),
+            Ok(raw) if raw.is_empty() => Ok(Self::All),
+            Ok(raw) if raw == "1" => Ok(Self::One),
+            Ok(raw) if raw == "2" => Ok(Self::Two),
+            Ok(raw) => anyhow::bail!("LASH_E2E_WORKFLOW_SEGMENT must be `1` or `2`, got `{raw}`"),
+            Err(error) => Err(error).context("read LASH_E2E_WORKFLOW_SEGMENT"),
+        }
+    }
+
+    const fn includes(self, segment: WorkflowSegment) -> bool {
+        matches!(self, Self::All)
+            || matches!(
+                (self, segment),
+                (Self::One, WorkflowSegment::One) | (Self::Two, WorkflowSegment::Two)
+            )
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::One => "1",
+            Self::Two => "2",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct WorkflowSpec {
+    id: &'static str,
+    segment: WorkflowSegment,
+}
+
+// FIG-2040 dependency map and measured split (2026-08-24 baseline progress log):
+//
+// Segment 1 (~4m22s) owns the cold-process AwaitEvent vectors and these chains:
+// - e2e-main -> queued work -> e2e-main-wake
+// - e2e-trigger-setup -> button delivery -> trigger process terminal
+// - e2e-signal-suspend-setup -> e2e-failover -> e2e-failover-wake ->
+//   e2e-signal-first -> e2e-signal-second -> signal process terminal
+// - e2e-process-llm-query -> e2e-process-llm-query-replay
+// - e2e-durable-input -> e2e-parent-durable-input-after-child -> engine promise conformance
+// The async-completion workflow is independent and stays in its original position.
+//
+// Segment 2 (~3m31s) owns these independent chains:
+// - e2e-tool-batch -> e2e-tool-batch-failover
+// - the four frame-switch workflows, in their current order
+// - e2e-suspended-sleep-cancel
+// - e2e-engine-restart-{cancel,suspended-sleep,complete}, including the complete
+//   engine-restart-ready/engine-restart-complete shell handshake
+// - the four ordered turn-control workflows, then the durable-wait index gates
+// - e2e-turn-break-glass, which remains last because it strands a shared lease
+//
+// Each CI leg has a fresh stack, so schema/reset/readiness/deployment bootstrap is
+// intentionally repeated. No workflow setup is duplicated between segments.
+// This is the single authoritative workflow inventory used by execution manifests
+// and the CI coverage summary; workflow ids must not be copied into those layers.
+const WORKFLOW_INVENTORY: &[WorkflowSpec] = &[
+    WorkflowSpec {
+        id: "e2e-main",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-main-wake",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-trigger-setup",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-signal-suspend-setup",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-failover",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-failover-wake",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-signal-first",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-signal-second",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-async-completion",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-process-llm-query",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-process-llm-query-replay",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-durable-input",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-parent-durable-input-after-child",
+        segment: WorkflowSegment::One,
+    },
+    WorkflowSpec {
+        id: "e2e-tool-batch",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-tool-batch-failover",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-segment-loop",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-frame-switch-queued",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-frame-switch-prepared",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-frame-switch-crash",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-frame-switch-cancel",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-suspended-sleep-cancel",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-engine-restart-suspended-sleep",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-engine-restart-cancel",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-engine-restart-complete",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-turn-cancel-before-start",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-turn-cancel-cross-process",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-turn-cancel-seal-race",
+        segment: WorkflowSegment::Two,
+    },
+    WorkflowSpec {
+        id: "e2e-turn-cancel-crash-recovery",
+        segment: WorkflowSegment::Two,
+    },
+];
+
 struct RunnerProgress {
     last_update: Instant,
     description: String,
+    completed_workflows: BTreeSet<String>,
 }
 
 fn runner_progress() -> &'static Mutex<RunnerProgress> {
@@ -46,6 +243,7 @@ fn runner_progress() -> &'static Mutex<RunnerProgress> {
         Mutex::new(RunnerProgress {
             last_update: Instant::now(),
             description: "runner startup".to_string(),
+            completed_workflows: BTreeSet::new(),
         })
     })
 }
@@ -56,6 +254,9 @@ fn report_workflow_progress(workflow_id: &str, phase: &str) {
         let mut progress = runner_progress().lock_recover();
         progress.last_update = Instant::now();
         progress.description.clone_from(&description);
+        if phase == "completed" {
+            progress.completed_workflows.insert(workflow_id.to_string());
+        }
     }
     eprintln!(
         "[{}] workers-e2e progress: {description}",
@@ -74,7 +275,50 @@ fn runner_stall_timeout() -> Result<Duration> {
     Ok(Duration::from_secs(seconds))
 }
 
+fn selected_workflow_ids(selection: SegmentSelection) -> Vec<&'static str> {
+    WORKFLOW_INVENTORY
+        .iter()
+        .filter(|workflow| selection.includes(workflow.segment))
+        .map(|workflow| workflow.id)
+        .collect()
+}
+
+fn write_completed_workflow_manifest(selection: SegmentSelection) -> Result<()> {
+    let expected = selected_workflow_ids(selection)
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<BTreeSet<_>>();
+    let completed = runner_progress().lock_recover().completed_workflows.clone();
+    anyhow::ensure!(
+        completed == expected,
+        "completed workflow set did not match segment {} inventory: missing={:?}, unexpected={:?}",
+        selection.label(),
+        expected.difference(&completed).collect::<Vec<_>>(),
+        completed.difference(&expected).collect::<Vec<_>>()
+    );
+
+    let Some(path) = std::env::var_os("LASH_E2E_COMPLETED_WORKFLOW_MANIFEST") else {
+        return Ok(());
+    };
+    let path = PathBuf::from(path);
+    let contents = WORKFLOW_INVENTORY
+        .iter()
+        .filter(|workflow| selection.includes(workflow.segment))
+        .map(|workflow| workflow.id)
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&path, format!("{contents}\n"))
+        .with_context(|| format!("write completed workflow manifest `{}`", path.display()))?;
+    Ok(())
+}
+
 fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--workflow-inventory") {
+        for workflow in WORKFLOW_INVENTORY {
+            println!("{}\t{}", workflow.segment.number(), workflow.id);
+        }
+        return Ok(());
+    }
     lash_core::panic_containment::set_loud(true);
     let stack_bytes = e2e_tokio_thread_stack_bytes()?;
     tokio::runtime::Builder::new_multi_thread()
@@ -112,7 +356,125 @@ async fn async_main() -> Result<()> {
         runner_stall_timeout()?,
     ));
 
-    let conformance_ingress = ingress_url.clone();
+    let selection = SegmentSelection::from_env()?;
+    let segment_one = if selection.includes(WorkflowSegment::One) {
+        Some(
+            run_workflow_segment_one(
+                &storage,
+                &admin_url,
+                &ingress_url,
+                &mock_provider_base_url,
+                trace_dir.clone(),
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+
+    if std::env::var("LASH_E2E_WAKE_RCA_ONLY").as_deref() == Ok("1") {
+        anyhow::ensure!(
+            selection.includes(WorkflowSegment::One),
+            "LASH_E2E_WAKE_RCA_ONLY requires workflow segment 1"
+        );
+        assert_durable_input_attempts(storage.pool()).await?;
+        println!(
+            "wake RCA soak passed: failover; queued-drain; waiter-before-resolution; resolution-before-waiter"
+        );
+        watchdog.abort();
+        return Ok(());
+    }
+    if segment_one.is_some() {
+        assert_no_active_lash_restate_invocations(&admin_url).await?;
+        assert_no_problem_lash_restate_invocations(&admin_url).await?;
+    }
+
+    if selection.includes(WorkflowSegment::Two) {
+        run_workflow_segment_two(&storage, &ingress_url, &admin_url).await?;
+    }
+
+    let expected_workflows = selected_workflow_ids(selection);
+    let responses = wait_for_terminal_results(storage.pool(), &expected_workflows).await?;
+
+    if selection.includes(WorkflowSegment::One) {
+        assert_processes_terminal(storage.pool()).await?;
+    }
+    assert_no_duplicate_runtime_rows(storage.pool()).await?;
+    assert_worker_distribution(storage.pool()).await?;
+    assert_failover(storage.pool(), selection).await?;
+    assert_provider_calls(storage.pool(), selection).await?;
+    if selection.includes(WorkflowSegment::Two) {
+        assert_frame_switch_provider_order(storage.pool()).await?;
+    }
+    assert_tool_and_turn_telemetry(storage.pool(), selection).await?;
+    if selection.includes(WorkflowSegment::Two) {
+        assert_tool_batch_side_effects(storage.pool()).await?;
+    }
+    if selection.includes(WorkflowSegment::One) {
+        assert_durable_input_attempts(storage.pool()).await?;
+        let output = segment_one.as_ref().context("segment 1 output missing")?;
+        assert_trigger_delivery(storage.pool(), &output.trigger_process_id).await?;
+    }
+    assert_attachments_round_trip(storage.pool(), &attachment_store, &responses).await?;
+    if selection.includes(WorkflowSegment::One) {
+        assert_reopened_session_agrees(
+            &storage,
+            &mock_provider_base_url,
+            trace_dir.clone(),
+            &ingress_url,
+            &responses,
+        )
+        .await?;
+    }
+    if let Some(dir) = &trace_dir {
+        assert_traces(dir, selection).await?;
+    }
+    if selection.includes(WorkflowSegment::Two) {
+        drive_break_glass_scenario(&storage, &ingress_url, &admin_url).await?;
+    }
+    assert_no_active_lash_restate_invocations(&admin_url).await?;
+    write_completed_workflow_manifest(selection)?;
+
+    if selection == SegmentSelection::All {
+        let output = segment_one.as_ref().context("segment 1 output missing")?;
+        println!(
+            "restate-postgres-workers e2e passed: {} workflows; suspended-sleep gates: post-suspension-cancel; engine-restart gates: journal-replay, suspended-sleep-cancel, post-restart-cancel-evidence, post-restart-completion; turn-control gates: cross-process, before-start, seal-race, crash-recovery, terminal-attach, break-glass-negative; trigger process {}; signal process {}; traces {}",
+            responses.len(),
+            output.trigger_process_id,
+            output.signal_process_id,
+            trace_dir
+                .as_ref()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_else(|| "disabled".to_string())
+        );
+    } else {
+        println!(
+            "restate-postgres-workers e2e segment {} passed: {} workflows; traces {}",
+            selection.label(),
+            responses.len(),
+            trace_dir
+                .as_ref()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_else(|| "disabled".to_string())
+        );
+    }
+    watchdog.abort();
+    Ok(())
+}
+
+struct SegmentOneOutput {
+    trigger_process_id: String,
+    signal_process_id: String,
+}
+
+async fn run_workflow_segment_one(
+    storage: &PostgresStorage,
+    admin_url: &str,
+    ingress_url: &str,
+    mock_provider_base_url: &str,
+    trace_dir: Option<PathBuf>,
+) -> Result<SegmentOneOutput> {
+    let conformance_ingress = ingress_url.to_string();
     lash_core::testing::conformance::effect_host_await_events_cold_instance(|| {
         Arc::new(RestateEffectHost::new(conformance_ingress.clone()))
             as Arc<dyn lash_core::EffectHost>
@@ -122,7 +484,7 @@ async fn async_main() -> Result<()> {
         "Restate cold-instance AwaitEvent conformance passed: layer_a_vectors={}",
         lash_core::testing::conformance::COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT
     );
-    run_cold_process_await_event_vectors(&admin_url, &ingress_url).await?;
+    run_cold_process_await_event_vectors(admin_url, ingress_url).await?;
 
     let main_request = TurnRequest {
         workflow_id: "e2e-main".to_string(),
@@ -130,14 +492,14 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::KitchenSink,
         signal: None,
     };
-    submit_workflow(&ingress_url, &main_request).await?;
+    submit_workflow(ingress_url, &main_request).await?;
     let main_response = wait_for_terminal_result(storage.pool(), &main_request.workflow_id).await?;
     assert_kitchen_sink_response(&main_response, true)?;
     wait_for_queued_work(
-        &storage,
-        &mock_provider_base_url,
+        storage,
+        mock_provider_base_url,
         trace_dir.clone(),
-        &ingress_url,
+        ingress_url,
     )
     .await?;
     let main_wake_request = TurnRequest {
@@ -146,7 +508,7 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::DrainQueued,
         signal: None,
     };
-    submit_workflow(&ingress_url, &main_wake_request).await?;
+    submit_workflow(ingress_url, &main_wake_request).await?;
     let main_wake_response =
         wait_for_terminal_result(storage.pool(), &main_wake_request.workflow_id).await?;
     assert_queued_wake_response(&main_wake_response)?;
@@ -157,15 +519,15 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::TriggerSetup,
         signal: None,
     };
-    submit_workflow(&ingress_url, &trigger_request).await?;
+    submit_workflow(ingress_url, &trigger_request).await?;
     let trigger_setup_response =
         wait_for_terminal_result(storage.pool(), &trigger_request.workflow_id).await?;
     assert_trigger_setup_response(&trigger_setup_response)?;
     let trigger_process_id = emit_button_event(
-        &storage,
-        &mock_provider_base_url,
+        storage,
+        mock_provider_base_url,
         trace_dir.clone(),
-        &ingress_url,
+        ingress_url,
     )
     .await?;
     wait_for_process_terminal(storage.pool(), &trigger_process_id).await?;
@@ -176,7 +538,7 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::SignalSuspend,
         signal: None,
     };
-    submit_workflow(&ingress_url, &signal_setup_request).await?;
+    submit_workflow(ingress_url, &signal_setup_request).await?;
     let signal_setup_response =
         wait_for_terminal_result(storage.pool(), &signal_setup_request.workflow_id).await?;
     let signal_process_id = assert_signal_suspend_setup_response(&signal_setup_response)?;
@@ -188,16 +550,16 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::KitchenSink,
         signal: None,
     };
-    submit_workflow(&ingress_url, &failover_request).await?;
+    submit_workflow(ingress_url, &failover_request).await?;
     let failover_response =
         wait_for_terminal_result(storage.pool(), &failover_request.workflow_id).await?;
     assert_kitchen_sink_response(&failover_response, true)?;
     wait_for_process_signal_wait(storage.pool(), &signal_process_id, "first", 1).await?;
     wait_for_queued_work(
-        &storage,
-        &mock_provider_base_url,
+        storage,
+        mock_provider_base_url,
         trace_dir.clone(),
-        &ingress_url,
+        ingress_url,
     )
     .await?;
     let failover_wake_request = TurnRequest {
@@ -206,13 +568,13 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::DrainQueued,
         signal: None,
     };
-    submit_workflow(&ingress_url, &failover_wake_request).await?;
+    submit_workflow(ingress_url, &failover_wake_request).await?;
     let failover_wake_response =
         wait_for_terminal_result(storage.pool(), &failover_wake_request.workflow_id).await?;
     assert_queued_wake_response(&failover_wake_response)?;
 
     submit_signal_workflow(
-        &ingress_url,
+        ingress_url,
         storage.pool(),
         "e2e-signal-first",
         &signal_process_id,
@@ -223,7 +585,7 @@ async fn async_main() -> Result<()> {
     .await?;
     wait_for_process_signal_wait(storage.pool(), &signal_process_id, "second", 1).await?;
     submit_signal_workflow(
-        &ingress_url,
+        ingress_url,
         storage.pool(),
         "e2e-signal-second",
         &signal_process_id,
@@ -241,7 +603,7 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::AsyncCompletion,
         signal: None,
     };
-    submit_workflow(&ingress_url, &async_request).await?;
+    submit_workflow(ingress_url, &async_request).await?;
     let async_response =
         wait_for_terminal_result(storage.pool(), &async_request.workflow_id).await?;
     assert_async_completion_response(&async_response)?;
@@ -256,7 +618,7 @@ async fn async_main() -> Result<()> {
             scenario: TurnScenario::ProcessLlmQuery,
             signal: None,
         };
-        submit_workflow(&ingress_url, &request).await?;
+        submit_workflow(ingress_url, &request).await?;
         let response = wait_for_terminal_result(storage.pool(), workflow_id).await?;
         assert_process_llm_query_response(&response)?;
     }
@@ -267,10 +629,10 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::DurableInputRequest,
         signal: None,
     };
-    submit_workflow(&ingress_url, &durable_input_request).await?;
+    submit_workflow(ingress_url, &durable_input_request).await?;
     let (durable_key, durable_waiter_worker) =
         wait_for_durable_input_key(storage.pool(), &durable_input_request.workflow_id).await?;
-    wait_for_durable_wait_attached(&admin_url, &durable_key).await?;
+    wait_for_durable_wait_attached(admin_url, &durable_key).await?;
     let durable_resolve = resolve_durable_wait_from_peer_worker(
         &durable_waiter_worker,
         &durable_key,
@@ -296,7 +658,7 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::ParentDurableInputAfterChild,
         signal: None,
     };
-    submit_workflow(&ingress_url, &parent_durable_input_request).await?;
+    submit_workflow(ingress_url, &parent_durable_input_request).await?;
     let (parent_durable_key, parent_waiter_worker) =
         wait_for_durable_input_key(storage.pool(), &parent_durable_input_request.workflow_id)
             .await?;
@@ -326,28 +688,28 @@ async fn async_main() -> Result<()> {
     let parent_durable_response =
         wait_for_terminal_result(storage.pool(), &parent_durable_input_request.workflow_id).await?;
     assert_parent_durable_input_response(&parent_durable_response)?;
-    run_engine_promise_conformance(&admin_url, &ingress_url).await?;
+    run_engine_promise_conformance(admin_url, ingress_url).await?;
     println!(
         "durable-wait wake gates passed: waiter-before-resolution; resolution-before-waiter; peer-worker resolution across failover"
     );
-    if std::env::var("LASH_E2E_WAKE_RCA_ONLY").as_deref() == Ok("1") {
-        assert_durable_input_attempts(storage.pool()).await?;
-        println!(
-            "wake RCA soak passed: failover; queued-drain; waiter-before-resolution; resolution-before-waiter"
-        );
-        watchdog.abort();
-        return Ok(());
-    }
-    assert_no_active_lash_restate_invocations(&admin_url).await?;
-    assert_no_problem_lash_restate_invocations(&admin_url).await?;
+    Ok(SegmentOneOutput {
+        trigger_process_id,
+        signal_process_id,
+    })
+}
 
+async fn run_workflow_segment_two(
+    storage: &PostgresStorage,
+    ingress_url: &str,
+    admin_url: &str,
+) -> Result<()> {
     let tool_batch_request = TurnRequest {
         workflow_id: "e2e-tool-batch".to_string(),
         fail_once: false,
         scenario: TurnScenario::ToolBatch,
         signal: None,
     };
-    submit_workflow(&ingress_url, &tool_batch_request).await?;
+    submit_workflow(ingress_url, &tool_batch_request).await?;
     let tool_batch_response =
         wait_for_terminal_result(storage.pool(), &tool_batch_request.workflow_id).await?;
     assert_tool_batch_response(&tool_batch_response)?;
@@ -358,7 +720,7 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::ToolBatch,
         signal: None,
     };
-    submit_workflow(&ingress_url, &tool_batch_failover_request).await?;
+    submit_workflow(ingress_url, &tool_batch_failover_request).await?;
     let tool_batch_failover_response =
         wait_for_terminal_result(storage.pool(), &tool_batch_failover_request.workflow_id).await?;
     assert_tool_batch_response(&tool_batch_failover_response)?;
@@ -369,7 +731,7 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::SegmentLoop,
         signal: None,
     };
-    submit_workflow(&ingress_url, &segment_loop_request).await?;
+    submit_workflow(ingress_url, &segment_loop_request).await?;
     let segment_loop_response =
         wait_for_terminal_result(storage.pool(), &segment_loop_request.workflow_id).await?;
     assert_segment_loop_response(&segment_loop_response)?;
@@ -380,7 +742,7 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::FrameSwitchQueued,
         signal: None,
     };
-    submit_workflow(&ingress_url, &frame_queued_request).await?;
+    submit_workflow(ingress_url, &frame_queued_request).await?;
     let frame_queued_response =
         wait_for_terminal_result(storage.pool(), &frame_queued_request.workflow_id).await?;
     assert_frame_switch_queued_response(&frame_queued_response)?;
@@ -391,13 +753,13 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::FrameSwitchPrepared,
         signal: None,
     };
-    submit_workflow(&ingress_url, &frame_prepared_request).await?;
+    submit_workflow(ingress_url, &frame_prepared_request).await?;
     let frame_prepared_response =
         wait_for_terminal_result(storage.pool(), &frame_prepared_request.workflow_id).await?;
     assert_frame_switch_prepared_response(&frame_prepared_response)?;
 
     report_workflow_progress("e2e-frame-switch-crash", "starting");
-    let frame_crash_response = drive_frame_switch_crash_process(&storage).await?;
+    let frame_crash_response = drive_frame_switch_crash_process(storage).await?;
     report_workflow_progress("e2e-frame-switch-crash", "completed");
     assert_frame_switch_crash_response(&frame_crash_response)?;
 
@@ -407,54 +769,15 @@ async fn async_main() -> Result<()> {
         scenario: TurnScenario::FrameSwitchCancel,
         signal: None,
     };
-    submit_workflow(&ingress_url, &frame_cancel_request).await?;
+    submit_workflow(ingress_url, &frame_cancel_request).await?;
     let frame_cancel_response =
         wait_for_terminal_result(storage.pool(), &frame_cancel_request.workflow_id).await?;
     assert_frame_switch_cancel_response(&frame_cancel_response)?;
 
-    drive_suspended_sleep_cancel_scenario(&storage, &ingress_url, &admin_url).await?;
-    drive_engine_restart_scenario(&storage, &ingress_url, &admin_url).await?;
-    drive_turn_control_scenarios(&storage, &ingress_url).await?;
-    drive_durable_wait_index_scenarios(&ingress_url, &admin_url).await?;
-
-    let responses = wait_for_terminal_results(storage.pool(), 26).await?;
-
-    assert_processes_terminal(storage.pool()).await?;
-    assert_no_duplicate_runtime_rows(storage.pool()).await?;
-    assert_worker_distribution(storage.pool()).await?;
-    assert_failover(storage.pool()).await?;
-    assert_provider_calls(storage.pool()).await?;
-    assert_frame_switch_provider_order(storage.pool()).await?;
-    assert_tool_and_turn_telemetry(storage.pool()).await?;
-    assert_tool_batch_side_effects(storage.pool()).await?;
-    assert_durable_input_attempts(storage.pool()).await?;
-    assert_trigger_delivery(storage.pool(), &trigger_process_id).await?;
-    assert_attachments_round_trip(storage.pool(), &attachment_store, &responses).await?;
-    assert_reopened_session_agrees(
-        &storage,
-        &mock_provider_base_url,
-        trace_dir.clone(),
-        &ingress_url,
-        &responses,
-    )
-    .await?;
-    if let Some(dir) = &trace_dir {
-        assert_traces(dir).await?;
-    }
-    drive_break_glass_scenario(&storage, &ingress_url, &admin_url).await?;
-    assert_no_active_lash_restate_invocations(&admin_url).await?;
-
-    println!(
-        "restate-postgres-workers e2e passed: {} workflows; suspended-sleep gates: post-suspension-cancel; engine-restart gates: journal-replay, suspended-sleep-cancel, post-restart-cancel-evidence, post-restart-completion; turn-control gates: cross-process, before-start, seal-race, crash-recovery, terminal-attach, break-glass-negative; trigger process {}; signal process {}; traces {}",
-        responses.len(),
-        trigger_process_id,
-        signal_process_id,
-        trace_dir
-            .as_ref()
-            .map(|dir| dir.display().to_string())
-            .unwrap_or_else(|| "disabled".to_string())
-    );
-    watchdog.abort();
+    drive_suspended_sleep_cancel_scenario(storage, ingress_url, admin_url).await?;
+    drive_engine_restart_scenario(storage, ingress_url, admin_url).await?;
+    drive_turn_control_scenarios(storage, ingress_url).await?;
+    drive_durable_wait_index_scenarios(ingress_url, admin_url).await?;
     Ok(())
 }
 
@@ -1185,8 +1508,9 @@ async fn wait_for_terminal_result(pool: &sqlx::PgPool, workflow_id: &str) -> Res
 
 async fn wait_for_terminal_results(
     pool: &sqlx::PgPool,
-    expected: usize,
+    expected_workflows: &[&str],
 ) -> Result<Vec<TurnResponse>> {
+    let expected = expected_workflows.iter().copied().collect::<BTreeSet<_>>();
     let deadline = Instant::now() + Duration::from_secs(180);
     while Instant::now() < deadline {
         let rows = sqlx::query_as::<_, TerminalResultRow>(
@@ -1198,16 +1522,28 @@ async fn wait_for_terminal_results(
         .fetch_all(pool)
         .await
         .context("load terminal results")?;
-        if rows.len() >= expected {
+        let actual = rows
+            .iter()
+            .map(|row| row.0.as_str())
+            .collect::<BTreeSet<_>>();
+        if actual == expected {
             return rows
                 .into_iter()
                 .map(response_from_row)
                 .collect::<Result<Vec<_>>>();
         }
+        anyhow::ensure!(
+            actual.is_subset(&expected),
+            "terminal results contained workflows outside the selected inventory: {:?}",
+            actual.difference(&expected).collect::<Vec<_>>()
+        );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     dump_workflow_timeout_diagnostics(pool, "aggregate-terminal-results").await;
-    anyhow::bail!("timed out waiting for {expected} completed workflows")
+    anyhow::bail!(
+        "timed out waiting for {} completed workflows",
+        expected_workflows.len()
+    )
 }
 
 async fn load_terminal_result(
@@ -3075,12 +3411,17 @@ async fn assert_worker_distribution(pool: &sqlx::PgPool) -> Result<()> {
     Ok(())
 }
 
-async fn assert_failover(pool: &sqlx::PgPool) -> Result<()> {
-    for workflow_id in [
-        "e2e-failover",
-        "e2e-tool-batch-failover",
-        "e2e-process-llm-query-replay",
-    ] {
+async fn assert_failover(pool: &sqlx::PgPool, selection: SegmentSelection) -> Result<()> {
+    let workflow_ids = match selection {
+        SegmentSelection::All => &[
+            "e2e-failover",
+            "e2e-tool-batch-failover",
+            "e2e-process-llm-query-replay",
+        ][..],
+        SegmentSelection::One => &["e2e-failover", "e2e-process-llm-query-replay"][..],
+        SegmentSelection::Two => &["e2e-tool-batch-failover"][..],
+    };
+    for workflow_id in workflow_ids {
         // FIG-1671 cede semantics (ADR 0069 §5(d)): the identity of the worker
         // that finishes a failed-over turn is not the invariant — convergence on
         // the journaled acceptance is. This gate used to require a *peer* to
@@ -3103,7 +3444,7 @@ async fn assert_failover(pool: &sqlx::PgPool) -> Result<()> {
              FROM lash_e2e_failover_markers
              WHERE workflow_id = $1",
         )
-        .bind(workflow_id)
+        .bind(*workflow_id)
         .fetch_one(pool)
         .await
         .with_context(|| format!("load failover exit marker for `{workflow_id}`"))?;
@@ -3113,7 +3454,7 @@ async fn assert_failover(pool: &sqlx::PgPool) -> Result<()> {
              FROM lash_e2e_terminal_results
              WHERE workflow_id = $1",
         )
-        .bind(workflow_id)
+        .bind(*workflow_id)
         .fetch_one(pool)
         .await
         .with_context(|| format!("count failover final rows for `{workflow_id}`"))?;
@@ -3125,7 +3466,7 @@ async fn assert_failover(pool: &sqlx::PgPool) -> Result<()> {
     Ok(())
 }
 
-async fn assert_provider_calls(pool: &sqlx::PgPool) -> Result<()> {
+async fn assert_provider_calls(pool: &sqlx::PgPool, selection: SegmentSelection) -> Result<()> {
     let bad_model: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM lash_e2e_provider_calls WHERE model <> 'e2e-mock'",
     )
@@ -3133,40 +3474,44 @@ async fn assert_provider_calls(pool: &sqlx::PgPool) -> Result<()> {
     .await
     .context("count provider calls with wrong model")?;
     anyhow::ensure!(bad_model == 0, "provider saw {bad_model} wrong-model calls");
-    let failover_calls: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_e2e_provider_calls
-         WHERE workflow_id = 'e2e-failover' AND scenario = 'kitchen_sink'",
-    )
-    .fetch_one(pool)
-    .await
-    .context("count failover provider calls")?;
-    anyhow::ensure!(
-        failover_calls == 1,
-        "expected one durable failover provider completion, got {failover_calls}"
-    );
-    let tool_batch_failover_calls: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM lash_e2e_provider_calls
-         WHERE workflow_id = 'e2e-tool-batch-failover' AND scenario = 'tool_batch'",
-    )
-    .fetch_one(pool)
-    .await
-    .context("count tool-batch failover provider calls")?;
-    anyhow::ensure!(
-        tool_batch_failover_calls == 1,
-        "expected one durable tool-batch failover provider completion, got {tool_batch_failover_calls}"
-    );
-    for workflow_id in ["e2e-process-llm-query", "e2e-process-llm-query-replay"] {
-        let direct_calls: i64 = sqlx::query_scalar(
+    if selection.includes(WorkflowSegment::One) {
+        let failover_calls: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM lash_e2e_provider_calls
-             WHERE workflow_id = $1 AND scenario = 'process_llm_query_direct'",
+             WHERE workflow_id = 'e2e-failover' AND scenario = 'kitchen_sink'",
         )
-        .bind(workflow_id)
         .fetch_one(pool)
         .await
-        .with_context(|| format!("count process llm_query direct calls for `{workflow_id}`"))?;
+        .context("count failover provider calls")?;
         anyhow::ensure!(
-            direct_calls == 1,
-            "workflow `{workflow_id}` invoked the llm_query provider {direct_calls} times; completed-attempt replay must reuse the recorded attempt"
+            failover_calls == 1,
+            "expected one durable failover provider completion, got {failover_calls}"
+        );
+        for workflow_id in ["e2e-process-llm-query", "e2e-process-llm-query-replay"] {
+            let direct_calls: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM lash_e2e_provider_calls
+                 WHERE workflow_id = $1 AND scenario = 'process_llm_query_direct'",
+            )
+            .bind(workflow_id)
+            .fetch_one(pool)
+            .await
+            .with_context(|| format!("count process llm_query direct calls for `{workflow_id}`"))?;
+            anyhow::ensure!(
+                direct_calls == 1,
+                "workflow `{workflow_id}` invoked the llm_query provider {direct_calls} times; completed-attempt replay must reuse the recorded attempt"
+            );
+        }
+    }
+    if selection.includes(WorkflowSegment::Two) {
+        let tool_batch_failover_calls: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM lash_e2e_provider_calls
+             WHERE workflow_id = 'e2e-tool-batch-failover' AND scenario = 'tool_batch'",
+        )
+        .fetch_one(pool)
+        .await
+        .context("count tool-batch failover provider calls")?;
+        anyhow::ensure!(
+            tool_batch_failover_calls == 1,
+            "expected one durable tool-batch failover provider completion, got {tool_batch_failover_calls}"
         );
     }
     let scenarios: Vec<String> = sqlx::query_scalar(
@@ -3175,18 +3520,24 @@ async fn assert_provider_calls(pool: &sqlx::PgPool) -> Result<()> {
     .fetch_all(pool)
     .await
     .context("list provider scenarios")?;
-    for expected in [
-        "async_completion",
-        "durable_input_request",
-        "kitchen_sink",
-        "parent_durable_input_after_child",
-        "process_llm_query",
-        "process_llm_query_direct",
-        "queued_wake",
-        "trigger_setup",
-        "signal_suspend",
-        "tool_batch",
-    ] {
+    let mut expected_scenarios = Vec::new();
+    if selection.includes(WorkflowSegment::One) {
+        expected_scenarios.extend([
+            "async_completion",
+            "durable_input_request",
+            "kitchen_sink",
+            "parent_durable_input_after_child",
+            "process_llm_query",
+            "process_llm_query_direct",
+            "queued_wake",
+            "trigger_setup",
+            "signal_suspend",
+        ]);
+    }
+    if selection.includes(WorkflowSegment::Two) {
+        expected_scenarios.push("tool_batch");
+    }
+    for expected in expected_scenarios {
         anyhow::ensure!(
             scenarios.iter().any(|scenario| scenario == expected),
             "provider scenario `{expected}` missing from {scenarios:?}"
@@ -3195,42 +3546,59 @@ async fn assert_provider_calls(pool: &sqlx::PgPool) -> Result<()> {
     Ok(())
 }
 
-async fn assert_tool_and_turn_telemetry(pool: &sqlx::PgPool) -> Result<()> {
-    for tool in [
-        "app_lookup",
-        "async_lookup",
-        "batch_side_effect",
-        "make_attachment",
-        "crash_once",
-        "durable_input_request.opened",
-    ] {
+async fn assert_tool_and_turn_telemetry(
+    pool: &sqlx::PgPool,
+    selection: SegmentSelection,
+) -> Result<()> {
+    let tools = match selection {
+        SegmentSelection::All => &[
+            "app_lookup",
+            "async_lookup",
+            "batch_side_effect",
+            "make_attachment",
+            "crash_once",
+            "durable_input_request.opened",
+        ][..],
+        SegmentSelection::One => &[
+            "app_lookup",
+            "async_lookup",
+            "make_attachment",
+            "crash_once",
+            "durable_input_request.opened",
+        ][..],
+        SegmentSelection::Two => &["batch_side_effect", "crash_once"][..],
+    };
+    for tool in tools {
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM lash_e2e_tool_events WHERE tool_name = $1")
-                .bind(tool)
+                .bind(*tool)
                 .fetch_one(pool)
                 .await
                 .with_context(|| format!("count tool events for `{tool}`"))?;
         anyhow::ensure!(count > 0, "missing tool telemetry for `{tool}`");
     }
-    let async_resolutions: Vec<String> = sqlx::query_scalar(
-        "SELECT result_json
-         FROM lash_e2e_tool_events
-         WHERE tool_name = 'async_lookup.resolve'",
-    )
-    .fetch_all(pool)
-    .await
-    .context("load async lookup resolution telemetry")?;
-    let accepted = async_resolutions
-        .iter()
-        .filter_map(|row| serde_json::from_str::<Value>(row).ok())
-        .any(|row| {
-            row.pointer("/outcome/status").and_then(Value::as_str) == Some("accepted")
-                && row.pointer("/result/value").and_then(Value::as_str) == Some("async:detached")
-        });
-    anyhow::ensure!(
-        accepted,
-        "async lookup did not record an accepted external resolution: {async_resolutions:?}"
-    );
+    if selection.includes(WorkflowSegment::One) {
+        let async_resolutions: Vec<String> = sqlx::query_scalar(
+            "SELECT result_json
+             FROM lash_e2e_tool_events
+             WHERE tool_name = 'async_lookup.resolve'",
+        )
+        .fetch_all(pool)
+        .await
+        .context("load async lookup resolution telemetry")?;
+        let accepted = async_resolutions
+            .iter()
+            .filter_map(|row| serde_json::from_str::<Value>(row).ok())
+            .any(|row| {
+                row.pointer("/outcome/status").and_then(Value::as_str) == Some("accepted")
+                    && row.pointer("/result/value").and_then(Value::as_str)
+                        == Some("async:detached")
+            });
+        anyhow::ensure!(
+            accepted,
+            "async lookup did not record an accepted external resolution: {async_resolutions:?}"
+        );
+    }
     let turn_events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM lash_e2e_turn_events")
         .fetch_one(pool)
         .await
@@ -3253,9 +3621,15 @@ async fn assert_tool_and_turn_telemetry(pool: &sqlx::PgPool) -> Result<()> {
     .fetch_one(pool)
     .await
     .context("count live replay checks")?;
+    let minimum_live_replay_checks = match selection {
+        SegmentSelection::All => 5,
+        SegmentSelection::One => 3,
+        SegmentSelection::Two => 2,
+    };
     anyhow::ensure!(
-        live_replay_checks >= 5,
-        "expected live replay checks for five workflow turns, got {live_replay_checks}"
+        live_replay_checks >= minimum_live_replay_checks,
+        "expected at least {minimum_live_replay_checks} live replay checks for segment {}, got {live_replay_checks}",
+        selection.label()
     );
     Ok(())
 }
@@ -3461,7 +3835,7 @@ async fn assert_reopened_session_agrees(
     Ok(())
 }
 
-async fn assert_traces(trace_dir: &Path) -> Result<()> {
+async fn assert_traces(trace_dir: &Path, selection: SegmentSelection) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
         let files = std::fs::read_dir(trace_dir)
@@ -3476,18 +3850,22 @@ async fn assert_traces(trace_dir: &Path) -> Result<()> {
                 combined.push_str(&std::fs::read_to_string(&file).unwrap_or_default());
                 combined.push('\n');
             }
-            for needle in [
-                "app_lookup",
-                "async_lookup",
-                "make_attachment",
-                "crash_once",
-                "parent",
-                "child",
-                "parent_wake",
-                "on_button",
-            ] {
+            let needles = match selection {
+                SegmentSelection::All | SegmentSelection::One => &[
+                    "app_lookup",
+                    "async_lookup",
+                    "make_attachment",
+                    "crash_once",
+                    "parent",
+                    "child",
+                    "parent_wake",
+                    "on_button",
+                ][..],
+                SegmentSelection::Two => &["batch_side_effect", "crash_once"][..],
+            };
+            for needle in needles {
                 anyhow::ensure!(
-                    combined.contains(needle),
+                    combined.contains(*needle),
                     "trace JSONL did not contain `{needle}`"
                 );
             }
