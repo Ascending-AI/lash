@@ -727,22 +727,27 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
         self.conn
             .call(move |connection| {
                 let mut statement = connection.prepare(
-                    "SELECT scope_id, replay_key, envelope_json, status, lease_expires_at_ms
+                    "SELECT scope_id, replay_key, envelope_json, status, outcome_json, error_json, lease_expires_at_ms
                      FROM runtime_effect_replay
                      WHERE group_key = ?1 AND settlement_seq IS NULL
                      ORDER BY replay_key",
                 )?;
                 let rows = statement
                     .query_map(params![group_key.as_str()], |row| {
+                        let state = effect_replay_driver::EffectRowState::from_columns(
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                        );
                         Ok(UnsettledGroupChild {
                             scope_id: row.get(0)?,
                             replay_key: row.get(1)?,
                             envelope_json: row.get(2)?,
-                            status: row.get(3)?,
+                            state,
                             lease_expires_at_ms: u64_from_sql(
                                 "RuntimeEffectReplay",
                                 "lease_expires_at_ms",
-                                row.get(4)?,
+                                row.get(6)?,
                             )?,
                         })
                     })?
@@ -773,6 +778,11 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
                          LIMIT 1 OFFSET ?2",
                         params![group_key.as_str(), offset as i64],
                         |row| {
+                            let state = effect_replay_driver::EffectRowState::from_columns(
+                                row.get(2)?,
+                                row.get(3)?,
+                                row.get(4)?,
+                            );
                             Ok(StoredGroupSettlement {
                                 sequence: u64_from_sql(
                                     "RuntimeEffectReplay",
@@ -780,9 +790,7 @@ impl EffectReplayPersistence for SqliteEffectReplayPersistence {
                                     row.get(0)?,
                                 )?,
                                 replay_key: row.get(1)?,
-                                status: row.get(2)?,
-                                outcome_json: row.get(3)?,
-                                error_json: row.get(4)?,
+                                state,
                             })
                         },
                     )
@@ -899,12 +907,15 @@ fn select_effect_row(
          WHERE scope_id = ?1 AND replay_key = ?2",
         params![scope_id, replay_key],
         |row| {
+            let state = effect_replay_driver::EffectRowState::from_columns(
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            );
             Ok(StoredEffectRow {
                 envelope_hash: row.get(0)?,
                 envelope_json: row.get(1)?,
-                status: row.get(2)?,
-                outcome_json: row.get(3)?,
-                error_json: row.get(4)?,
+                state,
                 lease_expires_at_ms: u64_from_sql(
                     "RuntimeEffectReplay",
                     "lease_expires_at_ms",

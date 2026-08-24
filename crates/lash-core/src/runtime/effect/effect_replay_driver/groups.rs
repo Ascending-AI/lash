@@ -619,41 +619,32 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
                     ),
                 )
             })?;
-        let outcome = match EffectRowStatus::parse(&stored.status) {
-            Some(EffectRowStatus::Completed) => {
-                let outcome_json = stored.outcome_json.ok_or_else(|| {
-                    vocabulary.error(
-                        EffectReplayFailure::CorruptRow,
-                        EffectRowDefect::MissingOutcome.message(),
-                    )
-                })?;
+        let outcome = match stored.state {
+            EffectRowState::Settled(EffectTerminal::Completed { outcome_json }) => {
                 Ok(serde_json::from_str::<RuntimeEffectOutcome>(&outcome_json)
                     .map_err(|err| vocabulary.decode_error(err))?)
             }
-            Some(EffectRowStatus::Failed) => {
-                let error_json = stored.error_json.ok_or_else(|| {
-                    vocabulary.error(
-                        EffectReplayFailure::CorruptRow,
-                        EffectRowDefect::MissingError.message(),
-                    )
-                })?;
-                Err(
-                    serde_json::from_str::<RuntimeEffectControllerError>(&error_json)
-                        .map_err(|err| vocabulary.decode_error(err))?,
-                )
+            EffectRowState::Settled(EffectTerminal::Failed { error_json }) => Err(
+                serde_json::from_str::<RuntimeEffectControllerError>(&error_json)
+                    .map_err(|err| vocabulary.decode_error(err))?,
+            ),
+            EffectRowState::Corrupt(defect) => {
+                return Err(vocabulary.error(EffectReplayFailure::CorruptRow, defect.message()));
             }
             // A rank is allocated in the same transaction that writes the
-            // terminal, so a ranked row is terminal by construction. Anything
-            // else is a corrupt journal and is refused rather than reported as
-            // some plausible outcome.
-            _ => {
+            // terminal, so an otherwise-valid in-progress row is corrupt in
+            // this group-specific context and is refused rather than reported
+            // as some plausible outcome.
+            EffectRowState::InProgress => {
                 return Err(vocabulary.error(
                     EffectReplayFailure::CorruptRow,
                     format!(
                         "child `{}` of durable effect group {group_key} holds settlement \
                          rank {} under status `{}`; a rank is allocated only with a \
                          terminal",
-                        stored.replay_key, stored.sequence, stored.status
+                        stored.replay_key,
+                        stored.sequence,
+                        EffectRowStatus::InProgress.column()
                     ),
                 ));
             }

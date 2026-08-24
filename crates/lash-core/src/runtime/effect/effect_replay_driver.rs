@@ -301,12 +301,8 @@ pub struct StoredEffectRow {
     pub envelope_hash: String,
     /// Recorded canonical envelope JSON.
     pub envelope_json: String,
-    /// Raw `status` column; an unrecognized value is a corrupt row.
-    pub status: String,
-    /// Recorded success outcome, present when `status` is `completed`.
-    pub outcome_json: Option<String>,
-    /// Recorded failure, present when `status` is `failed`.
-    pub error_json: Option<String>,
+    /// The status and payload columns, decoded once by the store.
+    pub state: EffectRowState,
     /// Lease expiry of the current claim, `0` once finalized.
     pub lease_expires_at_ms: u64,
     /// Recorded due time for a `Sleep` effect.
@@ -389,6 +385,15 @@ pub enum EffectRowDefect {
     MissingOutcome,
     /// `status` is `failed` but `error_json` is `NULL`.
     MissingError,
+    /// A known status carries a payload column it does not own.
+    UnexpectedPayloads {
+        /// The recognized status column.
+        status: EffectRowStatus,
+        /// Whether `outcome_json` was non-`NULL`.
+        outcome_json_present: bool,
+        /// Whether `error_json` was non-`NULL`.
+        error_json_present: bool,
+    },
     /// `status` holds a value no version of this runtime writes.
     UnknownStatus {
         /// The unrecognized column value.
@@ -409,6 +414,16 @@ impl EffectRowDefect {
                 "completed runtime effect row is missing outcome_json".to_string()
             }
             Self::MissingError => "failed runtime effect row is missing error_json".to_string(),
+            Self::UnexpectedPayloads {
+                status,
+                outcome_json_present,
+                error_json_present,
+            } => format!(
+                "runtime effect replay status `{}` contradicts its payload columns: \
+                 outcome_json present = {outcome_json_present}, error_json present = \
+                 {error_json_present}",
+                status.column()
+            ),
             Self::UnknownStatus { status } => {
                 format!("unknown runtime effect replay status `{status}`")
             }
@@ -452,6 +467,65 @@ pub enum EffectTerminal {
         /// Encoded [`RuntimeEffectControllerError`].
         error_json: String,
     },
+}
+
+/// A replay row's status and payload columns decoded at the store boundary.
+///
+/// `Corrupt` is a state rather than a conversion error so reads that promise
+/// to surface bad rows, notably the group drain, cannot accidentally filter
+/// corruption while collecting backend rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EffectRowState {
+    /// A lease is held and neither terminal payload exists.
+    InProgress,
+    /// Exactly one terminal payload agrees with the terminal status.
+    Settled(EffectTerminal),
+    /// The three columns do not describe a state any runtime writes.
+    Corrupt(EffectRowDefect),
+}
+
+impl EffectRowState {
+    /// Decode the persisted status and payload columns without discarding a
+    /// corrupt row.
+    pub fn from_columns(
+        status: String,
+        outcome_json: Option<String>,
+        error_json: Option<String>,
+    ) -> Self {
+        let Some(status) = EffectRowStatus::parse(&status) else {
+            return Self::Corrupt(EffectRowDefect::UnknownStatus { status });
+        };
+        match (status, outcome_json, error_json) {
+            (EffectRowStatus::InProgress, None, None) => Self::InProgress,
+            (EffectRowStatus::Completed, Some(outcome_json), None) => {
+                Self::Settled(EffectTerminal::Completed { outcome_json })
+            }
+            (EffectRowStatus::Failed, None, Some(error_json)) => {
+                Self::Settled(EffectTerminal::Failed { error_json })
+            }
+            (EffectRowStatus::Completed, None, _) => Self::Corrupt(EffectRowDefect::MissingOutcome),
+            (EffectRowStatus::Failed, _, None) => Self::Corrupt(EffectRowDefect::MissingError),
+            (status, outcome_json, error_json) => {
+                Self::Corrupt(EffectRowDefect::UnexpectedPayloads {
+                    status,
+                    outcome_json_present: outcome_json.is_some(),
+                    error_json_present: error_json.is_some(),
+                })
+            }
+        }
+    }
+
+    fn status_column(&self) -> &str {
+        match self {
+            Self::InProgress => EffectRowStatus::InProgress.column(),
+            Self::Settled(terminal) => terminal.status().column(),
+            Self::Corrupt(EffectRowDefect::MissingOutcome) => EffectRowStatus::Completed.column(),
+            Self::Corrupt(EffectRowDefect::MissingError) => EffectRowStatus::Failed.column(),
+            Self::Corrupt(EffectRowDefect::UnexpectedPayloads { status, .. }) => status.column(),
+            Self::Corrupt(EffectRowDefect::UnknownStatus { status }) => status,
+            Self::Corrupt(EffectRowDefect::VanishedUnderClaim) => "vanished",
+        }
+    }
 }
 
 impl EffectTerminal {
@@ -513,39 +587,31 @@ pub fn decide_effect_claim(
         });
     }
 
-    match EffectRowStatus::parse(&row.status) {
-        Some(EffectRowStatus::Completed) => {
-            let Some(outcome_json) = row.outcome_json.clone() else {
-                return EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
-                    defect: EffectRowDefect::MissingOutcome,
-                });
-            };
+    match &row.state {
+        EffectRowState::Settled(EffectTerminal::Completed { outcome_json }) => {
             EffectClaimDecision::Report(EffectClaimObservation::Completed {
-                outcome_json,
+                outcome_json: outcome_json.clone(),
                 due_at_ms: row.due_at_ms,
             })
         }
-        Some(EffectRowStatus::Failed) => {
-            let Some(error_json) = row.error_json.clone() else {
-                return EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
-                    defect: EffectRowDefect::MissingError,
-                });
-            };
-            EffectClaimDecision::Report(EffectClaimObservation::Failed { error_json })
+        EffectRowState::Settled(EffectTerminal::Failed { error_json }) => {
+            EffectClaimDecision::Report(EffectClaimObservation::Failed {
+                error_json: error_json.clone(),
+            })
         }
-        Some(EffectRowStatus::InProgress) if row.lease_expires_at_ms > now_ms => {
+        EffectRowState::InProgress if row.lease_expires_at_ms > now_ms => {
             EffectClaimDecision::Report(EffectClaimObservation::Busy {
                 retry_at_ms: row.lease_expires_at_ms,
             })
         }
-        Some(EffectRowStatus::InProgress) => {
+        EffectRowState::InProgress => {
             EffectClaimDecision::TakeOver(stamp(row.due_at_ms.or(fresh_due_at_ms)))
         }
-        None => EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
-            defect: EffectRowDefect::UnknownStatus {
-                status: row.status.clone(),
-            },
-        }),
+        EffectRowState::Corrupt(defect) => {
+            EffectClaimDecision::Report(EffectClaimObservation::CorruptRow {
+                defect: defect.clone(),
+            })
+        }
     }
 }
 
