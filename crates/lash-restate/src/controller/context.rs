@@ -21,19 +21,21 @@ use lash_core::{
 use lash_sansio::sync::MutexExt;
 use restate_sdk::context::{
     Context as RestateContext, ContextAwakeables, ContextClient, InvocationHandle, ObjectContext,
-    RequestTarget, RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+    RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, TerminalError};
 use restate_sdk::serde::Json;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
-    RestateTurnCancelGate, RestateTurnCancelRaceOutcome, RestateTurnCancelWake,
-    durable_wait_index_object_key, register_turn_cancel_gate, retire_turn_cancel_gate,
+    LashDurableWaitIndexClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
+    RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
+    RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
+    register_turn_cancel_gate, retire_turn_cancel_gate,
 };
 use crate::process::{
-    RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessWorkflowInput,
+    LashProcessWorkflowClient, RestateProcessAwaitRequest, RestateProcessCancelRequest,
+    RestateProcessWorkflowInput,
 };
 
 /// Fuse a Restate context future across both of its terminal poll shapes.
@@ -609,24 +611,14 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let workflow_key = registration.id.clone();
-                    let request: restate_sdk::context::Request<
-                        '_,
-                        Json<RestateProcessWorkflowInput>,
-                        Json<ProcessAwaitOutput>,
-                    > = ContextClient::request(
-                        self,
-                        RequestTarget::workflow(
-                            "LashProcessWorkflow",
-                            workflow_key.clone(),
-                            "run",
-                        ),
-                        Json(RestateProcessWorkflowInput {
+                    let request = self
+                        .workflow_client::<LashProcessWorkflowClient>(workflow_key.clone())
+                        .run(Json(RestateProcessWorkflowInput {
                             registration,
                             execution_context,
                             segment_ordinal: 0,
                             execution_id: None,
-                        }),
-                    );
+                        }));
                     let handle = request.send();
                     Box::pin(async move { handle.invocation_id().await })
                 }
@@ -639,19 +631,9 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let workflow_key = request.process_id.clone();
-                    let request: restate_sdk::context::Request<
-                        '_,
-                        Json<RestateProcessCancelRequest>,
-                        Json<()>,
-                    > = ContextClient::request(
-                        self,
-                        RequestTarget::workflow(
-                            "LashProcessWorkflow",
-                            workflow_key.clone(),
-                            "cancel",
-                        ),
-                        Json(request),
-                    );
+                    let request = self
+                        .workflow_client::<LashProcessWorkflowClient>(workflow_key.clone())
+                        .cancel(Json(request));
                     let call = request.call();
                     Box::pin(async move {
                         let Json(()) = call.await?;
@@ -668,19 +650,11 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     Box::pin(async move {
-                        let start: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateDurableWaitAwaitRequest>,
-                            Json<Resolution>,
-                        > = ContextClient::request(
-                            self,
-                            RequestTarget::workflow(
-                                "LashDurableWaitWorkflow",
+                        let start = self
+                            .workflow_client::<LashDurableWaitWorkflowClient>(
                                 request.address.workflow_key.clone(),
-                                "await_resolution",
-                            ),
-                            Json(request.clone()),
-                        );
+                            )
+                            .await_resolution(Json(request.clone()));
                         let call = start.call();
                         restate_sdk::select! {
                             result = call => {
@@ -689,23 +663,14 @@ macro_rules! impl_restate_controller_context {
                             },
                             on_cancel => {
                                 let address = request.address;
-                                let target = RequestTarget::object(
-                                    "LashDurableWaitIndex",
-                                    durable_wait_index_object_key(&address),
-                                    "resolve",
-                                );
-                                let resolve_request: restate_sdk::context::Request<
-                                    '_,
-                                    Json<RestateDurableWaitResolveRequest>,
-                                    Json<ResolveOutcome>,
-                                > = ContextClient::request(
-                                    self,
-                                    target,
-                                    Json(RestateDurableWaitResolveRequest {
+                                let resolve_request = self
+                                    .object_client::<LashDurableWaitIndexClient>(
+                                        durable_wait_index_object_key(&address),
+                                    )
+                                    .resolve(Json(RestateDurableWaitResolveRequest {
                                         address,
                                         resolution: Resolution::Cancelled,
-                                    }),
-                                );
+                                    }));
                                 let Json(outcome) = resolve_request.call().await?;
                                 Ok(match outcome {
                                     ResolveOutcome::AlreadyResolved { terminal } => terminal,
@@ -744,19 +709,11 @@ macro_rules! impl_restate_controller_context {
                         // Same journal geometry as process await: the guarded
                         // wait's CallCommand is emitted first, then the gate's
                         // awakeable, then the registration.
-                        let event: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateDurableWaitAwaitRequest>,
-                            Json<Resolution>,
-                        > = ContextClient::request(
-                            self,
-                            RequestTarget::workflow(
-                                "LashDurableWaitWorkflow",
+                        let event = self
+                            .workflow_client::<LashDurableWaitWorkflowClient>(
                                 event_address.workflow_key.clone(),
-                                "await_resolution",
-                            ),
-                            Json(request),
-                        );
+                            )
+                            .await_resolution(Json(request));
                         let event = event.call();
                         let (awakeable_id, awakeable) =
                             self.awakeable::<Json<RestateTurnCancelWake>>();
@@ -792,22 +749,14 @@ macro_rules! impl_restate_controller_context {
                                         // waiter's job, or the event workflow
                                         // stays parked with nobody left to
                                         // resolve it.
-                                        let resolve: restate_sdk::context::Request<
-                                            '_,
-                                            Json<RestateDurableWaitResolveRequest>,
-                                            Json<ResolveOutcome>,
-                                        > = ContextClient::request(
-                                            self,
-                                            RequestTarget::object(
-                                                "LashDurableWaitIndex",
+                                        let resolve = self
+                                            .object_client::<LashDurableWaitIndexClient>(
                                                 durable_wait_index_object_key(&event_address),
-                                                "resolve",
-                                            ),
-                                            Json(RestateDurableWaitResolveRequest {
+                                            )
+                                            .resolve(Json(RestateDurableWaitResolveRequest {
                                                 address: event_address,
                                                 resolution: Resolution::Cancelled,
-                                            }),
-                                        );
+                                            }));
                                         let Json(_) = resolve.call().await?;
                                         Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
                                     }
@@ -829,19 +778,9 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let request: restate_sdk::context::Request<
-                        '_,
-                        (),
-                        Json<Option<Resolution>>,
-                    > = ContextClient::request(
-                        self,
-                        RequestTarget::workflow(
-                            "LashDurableWaitWorkflow",
-                            address.workflow_key,
-                            "peek",
-                        ),
-                        (),
-                    );
+                    let request = self
+                        .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+                        .peek();
                     Box::pin(async move {
                         let Json(resolution) = request.call().await?;
                         Ok(resolution)
@@ -855,19 +794,9 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let request: restate_sdk::context::Request<
-                        '_,
-                        Json<RestateProcessAwaitRequest>,
-                        Json<ProcessAwaitOutput>,
-                    > = ContextClient::request(
-                        self,
-                        RequestTarget::workflow(
-                            "LashProcessWorkflow",
-                            process_id.clone(),
-                            "await_terminal",
-                        ),
-                        Json(RestateProcessAwaitRequest { process_id }),
-                    );
+                    let request = self
+                        .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
+                        .await_terminal(Json(RestateProcessAwaitRequest { process_id }));
                     let call = request.call();
                     Box::pin(async move {
                         let Json(output) = call.await?;
@@ -900,21 +829,11 @@ macro_rules! impl_restate_controller_context {
                         // Restate SDK 0.10. Construct this call first so a suspended
                         // pre-FIG-790 journal remains the exact prefix of every
                         // redrive after the cancellation adjudicator was added.
-                        let process: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateProcessAwaitRequest>,
-                            Json<ProcessAwaitOutput>,
-                        > = ContextClient::request(
-                            self,
-                            RequestTarget::workflow(
-                                "LashProcessWorkflow",
-                                process_id.clone(),
-                                "await_terminal",
-                            ),
-                            Json(RestateProcessAwaitRequest {
+                        let process = self
+                            .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
+                            .await_terminal(Json(RestateProcessAwaitRequest {
                                 process_id: process_id.clone(),
-                            }),
-                        );
+                            }));
                         let process = process.call();
                         let (awakeable_id, awakeable) =
                             self.awakeable::<Json<RestateTurnCancelWake>>();
@@ -997,16 +916,11 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     Box::pin(async move {
-                        let target = RequestTarget::object(
-                            "LashDurableWaitIndex",
-                            durable_wait_index_object_key(&request.address),
-                            "resolve",
-                        );
-                        let resolve: restate_sdk::context::Request<
-                            '_,
-                            Json<RestateDurableWaitResolveRequest>,
-                            Json<ResolveOutcome>,
-                        > = ContextClient::request(self, target, Json(request));
+                        let resolve = self
+                            .object_client::<LashDurableWaitIndexClient>(
+                                durable_wait_index_object_key(&request.address),
+                            )
+                            .resolve(Json(request));
                         let Json(outcome) = resolve.call().await?;
                         Ok(outcome)
                     })
@@ -1020,20 +934,12 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let handler = if revoke { "revoke_all" } else { "cancel_all" };
-                    // Zero-input handlers require an empty payload; `()`
-                    // serializes to empty bytes while `Json(())` would send a
-                    // JSON `null` body that Restate's input validation rejects.
-                    let request: restate_sdk::context::Request<'_, (), Json<()>> =
-                        ContextClient::request(
-                            self,
-                            RequestTarget::object(
-                                "LashDurableWaitIndex",
-                                session_id,
-                                handler,
-                            ),
-                            (),
-                        );
+                    let client = self.object_client::<LashDurableWaitIndexClient>(session_id);
+                    let request = if revoke {
+                        client.revoke_all()
+                    } else {
+                        client.cancel_all()
+                    };
                     let call = request.call();
                     Box::pin(async move {
                         let Json(()) = call.await?;
@@ -1048,16 +954,9 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let request: restate_sdk::context::Request<'_, Json<()>, Json<bool>> =
-                        ContextClient::request(
-                            self,
-                            RequestTarget::object(
-                                "LashDurableWaitIndex",
-                                session_id,
-                                "is_revoked",
-                            ),
-                            Json(()),
-                        );
+                    let request = self
+                        .object_client::<LashDurableWaitIndexClient>(session_id)
+                        .is_revoked(Json(()));
                     let call = request.call();
                     Box::pin(async move {
                         let Json(revoked) = call.await?;
