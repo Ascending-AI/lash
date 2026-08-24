@@ -7081,7 +7081,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedInputAccepted::applications", "lash_core::TurnEvent::QueuedInputAccepted::applications"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:346#lash_core::TurnEvent::QueuedInputAccepted { applications } => {"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:350#lash_core::TurnEvent::QueuedInputAccepted { applications } => {"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedMessagesCommitted"
@@ -7117,7 +7117,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted", "lash_core::TurnEvent::QueuedWorkStarted"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:199#lash_core::TurnEvent::QueuedWorkStarted {"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:203#lash_core::TurnEvent::QueuedWorkStarted {"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::batch_ids"
@@ -7126,7 +7126,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::batch_ids", "lash_core::TurnEvent::QueuedWorkStarted::batch_ids"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:201#batch_ids,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:205#batch_ids,"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::boundary"
@@ -7135,7 +7135,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::boundary", "lash_core::TurnEvent::QueuedWorkStarted::boundary"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:200#boundary,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:204#boundary,"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::causes"
@@ -7144,7 +7144,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::causes", "lash_core::TurnEvent::QueuedWorkStarted::causes"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:202#causes,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:206#causes,"
 
 [[api]]
 symbol = "lash::TurnEvent::ReasoningDelta"
@@ -12766,13 +12766,22 @@ usage = "examples/docs-snippets/src/streaming.rs:5#use lash::observe::{SessionOb
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::observe::SessionObservationEvent::new"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SessionObservationEvent::new"]
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: custom LiveReplayStore implementers reconstruct validated observation events from their persisted rows; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
 symbol = "lash::observe::SessionObservationEvent::cursor"
 kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::cursor"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:116#cursor,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:113#cursor,"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::payload"
@@ -12785,30 +12794,30 @@ usage = "examples/docs-snippets/src/streaming.rs:131#match &event.payload {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::replay_incarnation_id"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::replay_incarnation_id"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:113#replay_incarnation_id,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:153#lash_core::SessionObservationEvent::replay_incarnation_id(event.as_ref()).to_string();"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::revision"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::revision"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:115#revision,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:155#let revision = lash_core::SessionObservationEvent::revision(event.as_ref()).as_u64();"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::session_id"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::session_id"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:112#session_id,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:151#let session_id = lash_core::SessionObservationEvent::session_id(event.as_ref()).to_string();"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::turn_id"
@@ -12817,7 +12826,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::turn_id"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:114#turn_id,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:112#turn_id,"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload"
@@ -12940,7 +12949,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::QueueChanged::kind"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:140#lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:138#lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::TurnActivity"

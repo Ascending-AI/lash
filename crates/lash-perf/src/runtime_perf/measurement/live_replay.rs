@@ -57,7 +57,7 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     if first_event_identity.is_none() {
                         first_event_identity = Some((
                             event.cursor.clone(),
-                            event.replay_incarnation_id.clone(),
+                            event.replay_incarnation_id().to_string(),
                         ));
                     }
                 }
