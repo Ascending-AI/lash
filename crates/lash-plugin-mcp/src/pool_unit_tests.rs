@@ -412,6 +412,256 @@ async fn tools_list_changed_refreshes_the_live_catalog() {
     pool.shutdown_all().await;
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_tool_id() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let refresh_marker = scratch.path().join("refresh");
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": { "tools": { "listChanged": true } },
+            "serverInfo": { "name": "directory", "version": "1.0.0" }
+        }
+    });
+    let first_list = json!({
+        "jsonrpc": "2.0", "id": 1,
+        "result": { "tools": [
+            { "name": "get-user", "inputSchema": { "type": "object" } },
+            { "name": "get_user", "inputSchema": { "type": "object" } }
+        ] }
+    });
+    let refreshed_list = json!({
+        "jsonrpc": "2.0", "id": 2,
+        "result": { "tools": [
+            { "name": "get_user", "inputSchema": { "type": "object" } }
+        ] }
+    });
+    let notification = json!({
+        "jsonrpc": "2.0", "method": "notifications/tools/list_changed"
+    });
+    let survivor_call = json!({
+        "jsonrpc": "2.0", "id": 3,
+        "result": { "content": [{ "type": "text", "text": "underscore" }] }
+    });
+    let script = "\
+        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
+        read -r _; read -r _; printf '%s\\n' \"$FIRST_LIST\"; \
+        while [ ! -e \"$REFRESH_MARKER\" ]; do sleep 0.01; done; \
+        printf '%s\\n' \"$NOTIFICATION\"; \
+        read -r _; printf '%s\\n' \"$REFRESHED_LIST\"; \
+        read -r _; printf '%s\\n' \"$SURVIVOR_CALL\"; cat >/dev/null";
+    let pool = McpConnectionPool::connect(BTreeMap::from([(
+        "directory".to_string(),
+        McpServerConfig::Stdio {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            env: BTreeMap::from([
+                ("INITIALIZE".to_string(), initialize.to_string()),
+                ("FIRST_LIST".to_string(), first_list.to_string()),
+                ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
+                (
+                    "REFRESH_MARKER".to_string(),
+                    refresh_marker.display().to_string(),
+                ),
+                ("NOTIFICATION".to_string(), notification.to_string()),
+                ("SURVIVOR_CALL".to_string(), survivor_call.to_string()),
+            ]),
+            cwd: None,
+            startup_timeout_ms: 2_000,
+            call_policy: McpCallPolicy::default(),
+            binary_content_attachments: false,
+        },
+    )]))
+    .await
+    .expect("connect list-changing collision server");
+
+    let initial = pool.advertised_tools();
+    let dropped_id = initial
+        .iter()
+        .find(|definition| definition.name() == "mcp__directory__get_user")
+        .expect("hyphenated tool receives the base advertised name")
+        .manifest
+        .id
+        .clone();
+    let survivor_id = initial
+        .iter()
+        .find(|definition| definition.name() == "mcp__directory__get_user_2")
+        .expect("underscore tool receives the collision suffix")
+        .manifest
+        .id
+        .clone();
+    std::fs::write(&refresh_marker, "refresh").expect("release tools/list_changed notification");
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if pool.advertised_tools().len() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("tools/list_changed drops the hyphenated tool");
+
+    let deferred = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
+    let survivor_context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
+        "kind": "mcp",
+        "server": "directory",
+        "tool_id": survivor_id.to_string(),
+    }));
+    let survivor = deferred
+        .execute_by_id(&survivor_id, &json!({}), &survivor_context)
+        .await;
+    assert!(
+        survivor.is_success(),
+        "survivor grant must remain valid: {survivor:?}"
+    );
+    assert_eq!(survivor.value_for_projection(), json!("underscore"));
+
+    let dropped_context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
+        "kind": "mcp",
+        "server": "directory",
+        "tool_id": dropped_id.to_string(),
+    }));
+    let dropped = deferred
+        .execute_by_id(&dropped_id, &json!({}), &dropped_context)
+        .await;
+    assert!(!dropped.is_success(), "dropped tool id must be rejected");
+    let lash_core::ToolCallOutcome::Failure(failure) = &dropped.as_output().outcome else {
+        panic!("dropped tool must fail through the typed unknown-id path: {dropped:?}");
+    };
+    assert_eq!(failure.class, lash_core::ToolFailureClass::Execution);
+    assert_eq!(failure.code, "tool_error");
+    assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
+    assert!(failure.message.contains("Unknown MCP tool id"));
+
+    pool.shutdown_all().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn deferred_grant_follows_native_identity_when_a_collision_adds_a_display_suffix() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let refresh_marker = scratch.path().join("refresh");
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": { "tools": { "listChanged": true } },
+            "serverInfo": { "name": "directory", "version": "1.0.0" }
+        }
+    });
+    let first_list = json!({
+        "jsonrpc": "2.0", "id": 1,
+        "result": { "tools": [
+            { "name": "get_user", "inputSchema": { "type": "object" } }
+        ] }
+    });
+    let refreshed_list = json!({
+        "jsonrpc": "2.0", "id": 2,
+        "result": { "tools": [
+            { "name": "get-user", "inputSchema": { "type": "object" } },
+            { "name": "get_user", "inputSchema": { "type": "object" } }
+        ] }
+    });
+    let notification = json!({
+        "jsonrpc": "2.0", "method": "notifications/tools/list_changed"
+    });
+    let hyphen_call = json!({
+        "jsonrpc": "2.0", "id": 3,
+        "result": { "content": [{ "type": "text", "text": "hyphen" }] }
+    });
+    let underscore_call = json!({
+        "jsonrpc": "2.0", "id": 3,
+        "result": { "content": [{ "type": "text", "text": "underscore" }] }
+    });
+    let script = "\
+        read -r _; printf '%s\\n' \"$INITIALIZE\"; \
+        read -r _; read -r _; printf '%s\\n' \"$FIRST_LIST\"; \
+        while [ ! -e \"$REFRESH_MARKER\" ]; do sleep 0.01; done; \
+        printf '%s\\n' \"$NOTIFICATION\"; \
+        read -r _; printf '%s\\n' \"$REFRESHED_LIST\"; \
+        read -r call; \
+        case \"$call\" in *'\"name\":\"get_user\"'*) printf '%s\\n' \"$UNDERSCORE_CALL\";; \
+        *) printf '%s\\n' \"$HYPHEN_CALL\";; esac; cat >/dev/null";
+    let pool = McpConnectionPool::connect(BTreeMap::from([(
+        "directory".to_string(),
+        McpServerConfig::Stdio {
+            command: "sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            env: BTreeMap::from([
+                ("INITIALIZE".to_string(), initialize.to_string()),
+                ("FIRST_LIST".to_string(), first_list.to_string()),
+                ("REFRESHED_LIST".to_string(), refreshed_list.to_string()),
+                (
+                    "REFRESH_MARKER".to_string(),
+                    refresh_marker.display().to_string(),
+                ),
+                ("NOTIFICATION".to_string(), notification.to_string()),
+                ("HYPHEN_CALL".to_string(), hyphen_call.to_string()),
+                ("UNDERSCORE_CALL".to_string(), underscore_call.to_string()),
+            ]),
+            cwd: None,
+            startup_timeout_ms: 2_000,
+            call_policy: McpCallPolicy::default(),
+            binary_content_attachments: false,
+        },
+    )]))
+    .await
+    .expect("connect list-changing collision server");
+
+    let initial = pool.advertised_tools();
+    assert_eq!(initial.len(), 1);
+    assert_eq!(initial[0].name(), "mcp__directory__get_user");
+    let saved_id = initial[0].manifest.id.clone();
+    std::fs::write(&refresh_marker, "refresh").expect("release tools/list_changed notification");
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if pool.advertised_tools().len() == 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("tools/list_changed adds the colliding tool");
+    let suffixed_definition = pool
+        .advertised_tools()
+        .into_iter()
+        .find(|definition| definition.name() == "mcp__directory__get_user_2")
+        .expect("the original native tool receives the collision suffix");
+
+    let deferred = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
+    let context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
+        "kind": "mcp",
+        "server": "directory",
+        "tool_id": saved_id.to_string(),
+    }));
+    let result = deferred
+        .execute_by_id(&saved_id, &json!({}), &context)
+        .await;
+    assert!(
+        result.is_success(),
+        "saved deferred grant must validate: {result:?}"
+    );
+    assert_eq!(
+        result.value_for_projection(),
+        json!("underscore"),
+        "saved grant must still dispatch the original native tool"
+    );
+    assert_eq!(
+        suffixed_definition.manifest.id, saved_id,
+        "the display suffix must not change the saved native identity"
+    );
+
+    pool.shutdown_all().await;
+}
+
 #[tokio::test]
 async fn attach_registers_an_outage_and_retries_like_initial_connect() {
     let pool = Arc::new(McpConnectionPool::empty());

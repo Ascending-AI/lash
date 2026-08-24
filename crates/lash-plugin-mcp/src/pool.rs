@@ -409,6 +409,25 @@ impl McpConnectionPool {
             .collect()
     }
 
+    /// Advertised tools belonging to the exact configured server name.
+    ///
+    /// This preserves the pool's explicit server/tool relation for host views;
+    /// callers never need to reconstruct it from normalized display names.
+    pub fn advertised_tools_for_server(&self, server_name: &str) -> Vec<ToolDefinition> {
+        let guard = self.entries.read_recover();
+        guard
+            .get(server_name)
+            .map(|entry| {
+                entry
+                    .imported_tools
+                    .read_recover()
+                    .values()
+                    .map(|tool| tool.definition.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Route a prefixed tool call (`mcp__<server>__<tool>`) to the appropriate
     /// server and translate its result back to `ToolOutcome`.
     pub async fn call_tool(
@@ -1038,6 +1057,7 @@ fn import_tools(
             .unwrap_or_else(|| json!({}));
         let (prefixed, lashlang_binding) =
             naming::build_prefixed_name(server_name, &original_name, &mut used_names);
+        let tool_id = naming::durable_tool_id(server_name, &original_name);
 
         let description = if description.is_empty() {
             format!("MCP tool from server `{server_name}`")
@@ -1050,7 +1070,7 @@ fn import_tools(
             ImportedTool {
                 original_name,
                 definition: ToolDefinition::raw(
-                    format!("mcp:{server_name}/{prefixed}"),
+                    tool_id,
                     prefixed,
                     description,
                     input_schema,

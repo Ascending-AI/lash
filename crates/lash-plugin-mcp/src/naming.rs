@@ -1,11 +1,23 @@
-//! Tool name prefixing helpers. Moved verbatim from `crates/lash/src/mcp.rs` so the
+//! MCP tool naming and identity helpers. The advertised
 //! `mcp__<server>__<tool>` naming scheme keeps producing identical names
 //! (avoids breaking config files / saved trajectories that reference tools
-//! by their full prefixed name).
+//! by their full prefixed name), while durable ids use raw server/native names
+//! and never depend on display-name collision suffixes.
 
 use std::collections::BTreeSet;
 
 use lash_tool_support::ToolBinding;
+
+/// Build an unambiguous durable id from the configured server name and the
+/// native tool name. Byte-length framing keeps arbitrary delimiters in either
+/// component from aliasing another server/tool pair.
+pub(crate) fn durable_tool_id(server_name: &str, native_tool_name: &str) -> String {
+    format!(
+        "mcp:{}:{server_name}/{}:{native_tool_name}",
+        server_name.len(),
+        native_tool_name.len()
+    )
+}
 
 /// Normalise a server name or raw MCP tool name to lowercase ASCII
 /// alphanumeric and underscore. Collapses runs of non-alphanumeric characters
@@ -77,6 +89,15 @@ pub fn build_prefixed_name(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durable_tool_id_length_frames_raw_server_and_native_names() {
+        assert_eq!(
+            durable_tool_id("My Server", "get/user:one"),
+            "mcp:9:My Server/12:get/user:one"
+        );
+        assert_ne!(durable_tool_id("a/b", "c"), durable_tool_id("a", "b/c"));
+    }
 
     #[test]
     fn normalize_identifier_lowercases_and_dedups_underscores() {

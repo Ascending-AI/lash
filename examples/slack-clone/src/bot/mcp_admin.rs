@@ -18,11 +18,10 @@
 //! * an operator page needs both halves of "is this integration healthy" — the
 //!   connection status from [`McpPluginFactory::server_statuses`] and the tools
 //!   it actually advertises, which come from the pool
-//!   ([`McpConnectionPool::advertised_tools`]);
+//!   ([`McpConnectionPool::advertised_tools_for_server`]);
 //! * publishing a workspace root is a host fact the servers have to be told
 //!   about, which is [`McpPluginFactory::notify_roots_changed`].
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, Request, State};
@@ -67,7 +66,7 @@ impl McpAdmin {
 
 #[derive(Debug, Deserialize)]
 struct AttachRequest {
-    /// MCP server name; also the `mcp__<name>__<tool>` prefix its tools take.
+    /// MCP server name; its normalized form becomes the advertised tool prefix.
     name: String,
     /// Streamable-HTTP endpoint of the server.
     url: String,
@@ -95,11 +94,7 @@ struct ServerView {
 }
 
 impl ServerView {
-    fn new(status: McpServerStatus, tools_by_server: &BTreeMap<String, Vec<String>>) -> Self {
-        let tools = tools_by_server
-            .get(&status.server_name)
-            .cloned()
-            .unwrap_or_default();
+    fn new(status: McpServerStatus, tools: Vec<String>) -> Self {
         Self {
             name: status.server_name,
             connected: status.connected,
@@ -201,22 +196,18 @@ async fn publish_root(
 
 fn server_views(admin: &McpAdmin) -> Vec<ServerView> {
     let pool: &Arc<McpConnectionPool> = admin.factory.pool();
-    let mut tools_by_server: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for tool in pool.advertised_tools() {
-        let name = tool.manifest.name.clone();
-        if let Some(server) = name
-            .strip_prefix("mcp__")
-            .and_then(|rest| rest.split_once("__"))
-            .map(|(server, _)| server.to_string())
-        {
-            tools_by_server.entry(server).or_default().push(name);
-        }
-    }
     admin
         .factory
         .server_statuses()
         .into_iter()
-        .map(|status| ServerView::new(status, &tools_by_server))
+        .map(|status| {
+            let tools = pool
+                .advertised_tools_for_server(&status.server_name)
+                .into_iter()
+                .map(|tool| tool.manifest.name)
+                .collect();
+            ServerView::new(status, tools)
+        })
         .collect()
 }
 

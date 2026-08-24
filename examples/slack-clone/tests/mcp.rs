@@ -1355,6 +1355,58 @@ async fn the_operator_api_attaches_lists_and_detaches_an_integration() {
 }
 
 #[tokio::test]
+async fn the_operator_api_lists_tools_for_a_non_normalized_server_name() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
+    let (url, _server) = http_mcp_server("integration-token").await;
+    let script = Script::new([Step::Text("unused")]);
+    let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
+    let admin_url = serve_admin(&runtime).await;
+    let client = reqwest::Client::new();
+
+    let attached: Value = client
+        .post(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .json(&json!({
+            "name": "My Server",
+            "url": url,
+            "token": "integration-token",
+        }))
+        .send()
+        .await
+        .expect("attach server with a non-normalized configured name")
+        .json()
+        .await
+        .expect("attach response body");
+    assert_eq!(attached["tool_count"], 5);
+    assert_eq!(
+        attached["tools"].as_array().map(Vec::len),
+        Some(5),
+        "operator view must join tools through the configured server identity: {attached}"
+    );
+
+    let listed: Value = client
+        .get(format!("{admin_url}{}", mcp_admin::SERVERS_PATH))
+        .bearer_auth(ADMIN_TOKEN)
+        .send()
+        .await
+        .expect("list servers")
+        .json()
+        .await
+        .expect("list response body");
+    assert_eq!(listed["servers"][0]["name"], "My Server");
+    assert_eq!(
+        listed["servers"][0]["tools"].as_array().map(Vec::len),
+        Some(5),
+        "listed server must retain the same explicit tool relation: {listed}"
+    );
+
+    slack_clone::bot::shutdown_core(&runtime.core)
+        .await
+        .expect("shut down bot core");
+}
+
+#[tokio::test]
 async fn an_invalid_server_name_is_the_operators_error_not_a_gateway_failure() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
