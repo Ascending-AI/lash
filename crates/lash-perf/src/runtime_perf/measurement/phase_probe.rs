@@ -142,6 +142,21 @@ pub(crate) async fn run_once(
     chat_turns: usize,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
+    let before_scheduler = RuntimeSchedulerSample::capture();
+    let result = Box::pin(run_once_inner(scenario, chat_turns, high_traffic)).await;
+    let after_scheduler = RuntimeSchedulerSample::capture();
+    let mut result = result?;
+    result
+        .metric_samples
+        .extend(before_scheduler.window_metric_samples(&after_scheduler));
+    Ok(result)
+}
+
+async fn run_once_inner(
+    scenario: RuntimePerfScenario,
+    chat_turns: usize,
+    high_traffic: &HighTrafficConfig,
+) -> anyhow::Result<RuntimePerfRunResult> {
     if scenario.is_high_traffic() {
         let database_url = scenario
             .uses_postgres()
@@ -646,8 +661,10 @@ pub(crate) async fn run_once(
     let after_export_memory = process_memory_sample();
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
     let last_turn_memory = turns.last().map(|turn| &turn.memory);
-    extra_counters.extend(runtime.store_metrics().call_counters());
-    if let Some(commit) = runtime.store_metrics().commit_measurements().last() {
+    let store_metrics = runtime.store_metrics();
+    extra_counters.extend(store_metrics.call_counters());
+    let metric_samples = store_metrics.observed_latency_samples();
+    if let Some(commit) = store_metrics.commit_measurements().last() {
         extra_counters.insert("durable_commit.logical_bytes".to_string(), commit.total_bytes);
         extra_counters.insert(
             "durable_commit.checkpoint_bytes".to_string(),
@@ -681,6 +698,7 @@ pub(crate) async fn run_once(
         session_nodes: state.session_graph.nodes.len(),
         active_path_messages: state.read_view().messages().len(),
         extra_counters,
+        metric_samples,
         metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,
@@ -773,6 +791,7 @@ fn skipped_runtime_perf_result(
         session_nodes: 0,
         active_path_messages: 0,
         extra_counters,
+        metric_samples: BTreeMap::new(),
         metric_samples_ms: BTreeMap::new(),
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: None,

@@ -103,9 +103,9 @@ struct Args {
     #[arg(long)]
     runtime_perf_enforce_inventory: bool,
 
-    /// Append this run's per-scenario median wall clock to an append-only
-    /// duration history and print the trend table. Advisory in every context:
-    /// drift is warned about, never enforced (FIG-1385).
+    /// Append this run's per-scenario wall-clock and whole-window duration
+    /// medians to a history and print the trend table. Advisory in every
+    /// context: drift is warned about, never enforced (FIG-1385).
     #[arg(long, value_name = "HISTORY.jsonl")]
     runtime_perf_duration_history: Option<std::path::PathBuf>,
 

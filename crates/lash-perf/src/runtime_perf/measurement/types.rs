@@ -90,6 +90,7 @@ pub(crate) struct RuntimePerfRunResult {
     pub(crate) session_nodes: usize,
     pub(crate) active_path_messages: usize,
     pub(crate) extra_counters: BTreeMap<String, u64>,
+    pub(crate) metric_samples: BTreeMap<String, Vec<f64>>,
     pub(crate) metric_samples_ms: BTreeMap<String, Vec<f64>>,
     pub(crate) memory: RuntimePerfMemoryRunResult,
     pub(crate) allocations: RuntimePerfAllocationRunResult,
@@ -255,6 +256,7 @@ pub(crate) struct RuntimePerfScenarioSummary {
     pub(crate) sample_session_nodes: usize,
     pub(crate) sample_active_path_messages: usize,
     pub(crate) sample_extra_counters: BTreeMap<String, u64>,
+    pub(crate) metric_summary: BTreeMap<String, RuntimePerfMetricSummary>,
     pub(crate) metric_summary_ms: BTreeMap<String, RuntimePerfMetricSummary>,
 }
 
