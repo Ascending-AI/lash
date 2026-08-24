@@ -222,10 +222,10 @@ impl Default for VmHeapContinuation {
 mod continuation_serde {
     use super::*;
     use crate::HeapId;
+    use crate::runtime::CANONICAL_NAN_BITS;
     use crate::runtime::heap::{UrlObject, UrlSearchParamsObject};
 
     const NUMBER_WIRE_VERSION: u32 = 1;
-    const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
     #[derive(Serialize, Deserialize)]
     #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
@@ -408,6 +408,7 @@ mod continuation_serde {
             if !names.insert(key.clone()) {
                 return Err("continuation record keys must be unique");
             }
+            crate::runtime::access::ensure_no_prototype_chain_wire_key(&key)?;
             record.insert(key, value_from_wire(value)?);
         }
         Ok(record)

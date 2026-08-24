@@ -185,6 +185,8 @@ pub enum ContinuationError {
         location: String,
         variant: &'static str,
     },
+    #[error("heapless snapshot contains a heap reference at `{location}`")]
+    HeaplessSnapshotContainsReference { location: String },
     #[error(
         "continuation {location} instruction pointer {instruction_pointer} is outside {owner} code range {range_start}..{range_end}"
     )]

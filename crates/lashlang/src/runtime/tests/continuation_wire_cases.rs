@@ -24,6 +24,44 @@
 const AUTHORED_CONTINUATION: &str = r#"{"format_version":8,"reference_semantics":false,"instruction_pointer":3,"active_function":null,"operand_stack":[{"kind":"ref","value":1}],"last_value":{"kind":"unset"},"slots":[{"kind":"set","value":{"kind":"ref","value":1}}],"projected_slots":[false],"globals":{"kind":"record","value":[["total",{"kind":"number","value":{"version":1,"bits":4613937818241073152}}]]},"iterator_stack":[],"frame_stack":[],"handler_stack":[],"finally_stack":[],"occurrence_counters":{},"mode":"Process","profile":null,"pending_error_span":null,"instructions_executed":3,"active_execution_elapsed":{"secs":0,"nanos":0},"heap":{"next_id":2,"allocation_counter":1,"live_logical_bytes":153,"size_schedule_version":2,"objects":[{"id":1,"object":{"kind":"list","items":[{"kind":"number","value":{"version":1,"bits":4607182418800017408}},{"kind":"bool","value":true}]}}]}}"#;
 
 #[test]
+fn snapshot_and_continuation_codecs_share_the_prototype_chain_key_guard() {
+    let hostile_record = [("__proto__".to_string(), Value::Null)]
+        .into_iter()
+        .collect::<Record>();
+    let expected =
+        "record key `__proto__` names the prototype chain, which this value model does not have";
+
+    let snapshot = Snapshot::new(
+        [(
+            "payload".to_string(),
+            Value::Record(Arc::new(hostile_record)),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let snapshot_bytes = snapshot
+        .to_canonical_bytes()
+        .expect("encode hostile snapshot wire");
+    assert_eq!(
+        Snapshot::from_canonical_bytes(&snapshot_bytes),
+        Err(SnapshotDecodeError::InvalidEncoding(expected.to_string()))
+    );
+
+    let mut continuation_wire: serde_json::Value =
+        serde_json::from_str(AUTHORED_CONTINUATION).expect("authored continuation JSON");
+    continuation_wire["globals"] = serde_json::json!({
+        "kind": "record",
+        "value": [["__proto__", {"kind": "null"}]],
+    });
+    let continuation_error = serde_json::from_value::<VmContinuation>(continuation_wire)
+        .expect_err("prototype-chain record key must not decode in a continuation");
+    assert!(
+        continuation_error.to_string().contains(expected),
+        "both codecs must report the shared guard message: {continuation_error}"
+    );
+}
+
+#[test]
 fn authored_continuation_fixture_decodes_and_re_encodes_exactly() {
     let continuation: VmContinuation =
         serde_json::from_str(AUTHORED_CONTINUATION).expect("authored wire should decode");

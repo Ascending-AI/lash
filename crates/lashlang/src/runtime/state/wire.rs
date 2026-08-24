@@ -138,7 +138,10 @@ impl CanonicalHeapObject {
                 fields
                     .into_iter()
                     .map(|field| {
-                        ensure_no_prototype_chain_wire_key(&field.name)?;
+                        crate::runtime::access::ensure_no_prototype_chain_wire_key(&field.name)
+                            .map_err(|reason| {
+                                SnapshotDecodeError::InvalidEncoding(reason.to_string())
+                            })?;
                         field.value.into_runtime().map(|value| (field.name, value))
                     })
                     .collect::<Result<_, _>>()?,
@@ -233,10 +236,58 @@ impl CanonicalHeapObject {
 }
 
 impl CanonicalValue {
+    pub(super) fn ensure_heapless(&self, location: &str) -> Result<(), SnapshotDecodeError> {
+        match self {
+            Self::Ref { .. } => {
+                return Err(SnapshotDecodeError::HeaplessSnapshotContainsReference {
+                    location: location.to_string(),
+                });
+            }
+            Self::Tuple { items } | Self::List { items } => {
+                for (index, value) in items.iter().enumerate() {
+                    value.ensure_heapless(&format!("{location}[{index}]"))?;
+                }
+            }
+            Self::Record { fields } => {
+                for field in fields {
+                    field
+                        .value
+                        .ensure_heapless(&child_location(location, &field.name))?;
+                }
+            }
+            Self::Null {}
+            | Self::Undefined {}
+            | Self::Bool { .. }
+            | Self::Number { .. }
+            | Self::String { .. }
+            | Self::Image { .. }
+            | Self::Resource { .. }
+            | Self::Projected { .. } => {}
+        }
+        Ok(())
+    }
+
+    pub(super) fn from_heapless_runtime(
+        value: &Value,
+        location: &str,
+        depth: usize,
+    ) -> Result<Self, ContinuationError> {
+        Self::from_runtime_with_references(value, location, depth, false)
+    }
+
     pub(super) fn from_runtime(
         value: &Value,
         location: &str,
         depth: usize,
+    ) -> Result<Self, ContinuationError> {
+        Self::from_runtime_with_references(value, location, depth, true)
+    }
+
+    fn from_runtime_with_references(
+        value: &Value,
+        location: &str,
+        depth: usize,
+        references_allowed: bool,
     ) -> Result<Self, ContinuationError> {
         if depth > MAX_SNAPSHOT_VALUE_DEPTH {
             return Err(ContinuationError::UnserializableValue {
@@ -260,12 +311,27 @@ impl CanonicalValue {
             Value::Resource(value) => Self::Resource {
                 value: value.clone(),
             },
-            Value::Ref(value) => Self::Ref { value: *value },
+            Value::Ref(value) if references_allowed => Self::Ref { value: *value },
+            Value::Ref(_) => {
+                return Err(ContinuationError::HeaplessSnapshotContainsReference {
+                    location: location.to_string(),
+                });
+            }
             Value::Tuple(values) => Self::Tuple {
-                items: canonical_items(values, location, depth)?,
+                items: canonical_items_with_references(
+                    values,
+                    location,
+                    depth,
+                    references_allowed,
+                )?,
             },
             Value::List(values) => Self::List {
-                items: canonical_items(values, location, depth)?,
+                items: canonical_items_with_references(
+                    values,
+                    location,
+                    depth,
+                    references_allowed,
+                )?,
             },
             Value::Record(record) => {
                 let mut fields = record.iter().collect::<Vec<_>>();
@@ -277,7 +343,12 @@ impl CanonicalValue {
                             let location = child_location(location, name);
                             Ok(CanonicalBinding {
                                 name: name.to_string(),
-                                value: Self::from_runtime(value, &location, depth + 1)?,
+                                value: Self::from_runtime_with_references(
+                                    value,
+                                    &location,
+                                    depth + 1,
+                                    references_allowed,
+                                )?,
                             })
                         })
                         .collect::<Result<_, ContinuationError>>()?,
@@ -330,7 +401,10 @@ impl CanonicalValue {
                 fields
                     .into_iter()
                     .map(|field| {
-                        ensure_no_prototype_chain_wire_key(&field.name)?;
+                        crate::runtime::access::ensure_no_prototype_chain_wire_key(&field.name)
+                            .map_err(|reason| {
+                                SnapshotDecodeError::InvalidEncoding(reason.to_string())
+                            })?;
                         field.value.into_runtime().map(|value| (field.name, value))
                     })
                     .collect::<Result<_, _>>()?,
@@ -354,11 +428,25 @@ fn canonical_items(
     location: &str,
     depth: usize,
 ) -> Result<Vec<CanonicalValue>, ContinuationError> {
+    canonical_items_with_references(values, location, depth, true)
+}
+
+fn canonical_items_with_references(
+    values: &[Value],
+    location: &str,
+    depth: usize,
+    references_allowed: bool,
+) -> Result<Vec<CanonicalValue>, ContinuationError> {
     values
         .iter()
         .enumerate()
         .map(|(index, value)| {
-            CanonicalValue::from_runtime(value, &format!("{location}[{index}]"), depth + 1)
+            CanonicalValue::from_runtime_with_references(
+                value,
+                &format!("{location}[{index}]"),
+                depth + 1,
+                references_allowed,
+            )
         })
         .collect()
 }
@@ -455,21 +543,4 @@ fn is_path_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some('_' | 'a'..='z' | 'A'..='Z'))
         && chars.all(|character| matches!(character, '_' | 'a'..='z' | 'A'..='Z' | '0'..='9'))
-}
-
-/// The value-entry guard on the third way a record can arrive from outside:
-/// decoded wire bytes.
-///
-/// Nothing this runtime encodes can carry a prototype-chain data key any more —
-/// `JSON.parse` and every host result refuse one — so a wire that does is
-/// forged or from before the guard, and restoring it would recreate exactly the
-/// stranded state the guard exists to prevent: a key `Object.keys` lists and
-/// nothing can read or serialize.
-fn ensure_no_prototype_chain_wire_key(name: &str) -> Result<(), SnapshotDecodeError> {
-    if crate::runtime::access::is_prototype_chain_key(name) {
-        return Err(SnapshotDecodeError::InvalidEncoding(format!(
-            "record key `{name}` names the prototype chain, which this value model does not have"
-        )));
-    }
-    Ok(())
 }

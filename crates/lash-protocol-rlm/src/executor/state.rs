@@ -69,7 +69,10 @@ fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
         SnapshotDecodeError::InvalidEncoding(details) => {
             RlmSnapshotError::FormatMismatch { details }
         }
-        error @ SnapshotDecodeError::VersionMismatch { .. } => RlmSnapshotError::Lashlang(error),
+        error @ (SnapshotDecodeError::VersionMismatch { .. }
+        | SnapshotDecodeError::HeaplessSnapshotContainsReference { .. }) => {
+            RlmSnapshotError::Lashlang(error)
+        }
     })
 }
 

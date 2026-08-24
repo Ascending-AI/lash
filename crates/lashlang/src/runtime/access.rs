@@ -167,14 +167,34 @@ pub(crate) fn read_javascript_index_direct(
 /// prototype and `o[k] = v` changes what the object inherits — or a named
 /// rejection. It rejects.
 pub(crate) fn is_prototype_chain_key(key: &str) -> bool {
-    matches!(
-        key,
-        "__proto__"
-            | "__defineGetter__"
-            | "__defineSetter__"
-            | "__lookupGetter__"
-            | "__lookupSetter__"
-    )
+    ensure_no_prototype_chain_wire_key(key).is_err()
+}
+
+/// Refuses a prototype-chain data key while decoding persisted value wires.
+///
+/// Nothing this runtime encodes can carry one of these keys any more —
+/// `JSON.parse` and every host result refuse them — so a wire that does is
+/// forged or predates the guard. Restoring it would recreate a stranded key
+/// that `Object.keys` lists but nothing can read or serialize.
+pub(crate) fn ensure_no_prototype_chain_wire_key(name: &str) -> Result<(), &'static str> {
+    match name {
+        "__proto__" => Err(
+            "record key `__proto__` names the prototype chain, which this value model does not have",
+        ),
+        "__defineGetter__" => Err(
+            "record key `__defineGetter__` names the prototype chain, which this value model does not have",
+        ),
+        "__defineSetter__" => Err(
+            "record key `__defineSetter__` names the prototype chain, which this value model does not have",
+        ),
+        "__lookupGetter__" => Err(
+            "record key `__lookupGetter__` names the prototype chain, which this value model does not have",
+        ),
+        "__lookupSetter__" => Err(
+            "record key `__lookupSetter__` names the prototype chain, which this value model does not have",
+        ),
+        _ => Ok(()),
+    }
 }
 
 pub(crate) fn prototype_chain_key_error(key: &str) -> Option<RuntimeError> {
