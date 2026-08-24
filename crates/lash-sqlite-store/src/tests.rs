@@ -465,10 +465,9 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
         .expect("register");
     let handover = |segment_ordinal| PersistedSegmentHandover {
         segment_ordinal,
-        program_hash: "program-v1".to_string(),
         handover: lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
-            program_hash: Some("program-v1".to_string()),
+            program_hash: "program-v1".to_string(),
             engine_state: vec![segment_ordinal as u8],
         },
     };
@@ -512,10 +511,9 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
             "segment-terminal",
             PersistedSegmentHandover {
                 segment_ordinal: 1,
-                program_hash: "program-v1".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
-                    program_hash: Some("program-v1".to_string()),
+                    program_hash: "program-v1".to_string(),
                     engine_state: vec![7],
                 },
             },

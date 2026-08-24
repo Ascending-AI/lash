@@ -90,21 +90,6 @@ pub(crate) fn missing_segment_is_superseded(
     latest.is_some_and(|handover| handover.segment_ordinal > requested_ordinal)
 }
 
-pub(crate) fn validate_segment_program_hash(
-    process_id: &str,
-    persisted: lash_core::PersistedSegmentHandover,
-) -> Result<lash_core::SegmentHandover, RuntimeError> {
-    if persisted.handover.program_hash.as_deref() != Some(persisted.program_hash.as_str()) {
-        return Err(RuntimeError::new(
-            lash_core::RuntimeErrorCode::RestateSegmentProgramHashMismatch,
-            format!(
-                "process `{process_id}` segment {} handover program identity is inconsistent",
-                persisted.segment_ordinal
-            ),
-        ));
-    }
-    Ok(persisted.handover)
-}
 pub(crate) fn restate_process_terminal_await_key(
     process_id: &str,
 ) -> Result<AwaitEventKey, RuntimeError> {

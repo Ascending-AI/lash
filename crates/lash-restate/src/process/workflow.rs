@@ -28,7 +28,7 @@ use super::{
     process_segment_workflow_key, resolve_process_cancel_signal, resolve_process_terminal_promise,
     restate_now_ms, restate_process_terminal_await_key, restate_process_terminal_output,
     retryable_registry_error, segment_execution_authority, terminal_completion_workflow_key,
-    validate_segment_program_hash, workflow_key_authority,
+    workflow_key_authority,
 };
 use crate::controller::{RestateEffectControllerOptions, RestateRuntimeEffectController};
 use crate::ingress::RestateIngressClient;
@@ -558,32 +558,7 @@ where
                     input.segment_ordinal
                 ))));
             };
-            match validate_segment_program_hash(&process_id, persisted) {
-                Ok(handover) => Some(handover),
-                Err(err) => {
-                    let output = ProcessAwaitOutput::Failure {
-                        class: lash_core::ToolFailureClass::Execution,
-                        code: err.code.to_string(),
-                        message: err.message.clone(),
-                        raw: None,
-                        control: None,
-                    };
-                    let output = self
-                        .complete_with_stored_outcome(&process_id, output)
-                        .await
-                        .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
-                    let request = ctx
-                        .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
-                        .complete_terminal(Json(RestateProcessCompleteRequest {
-                            process_id: process_id.clone(),
-                            output: output.clone(),
-                        }));
-                    request.call().await?;
-                    return Ok(Json(RestateProcessWorkflowOutput::Terminal {
-                        output: Box::new(output),
-                    }));
-                }
-            }
+            Some(persisted.handover)
         };
         if input.segment_ordinal == 0 && input.execution_id.is_some() {
             tracing::warn!(
@@ -680,11 +655,6 @@ where
                         &process_id,
                         lash_core::PersistedSegmentHandover {
                             segment_ordinal: next_segment_ordinal,
-                            program_hash: handover.program_hash.clone().ok_or_else(|| {
-                                HandlerError::from(TerminalError::new(format!(
-                                    "process `{process_id}` segment handover omitted its program identity"
-                                )))
-                            })?,
                             handover,
                         },
                     )

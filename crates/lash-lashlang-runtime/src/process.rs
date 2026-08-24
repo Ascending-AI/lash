@@ -43,11 +43,11 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 
 /// Version of the durable Lashlang segment-handover envelope.
 ///
-/// v3 embeds the VM continuation format and Lashlang snapshot format the same
-/// build carries; a segment parked by another version is refused rather than
-/// decoded (ADR 0055). Re-exported by the facade's `formats` manifest so a
-/// host can read it before wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 3;
+/// v4 requires the program identity on the engine-owned handover and removes
+/// the duplicate persisted-envelope copy. A segment parked by another version
+/// is refused rather than decoded (ADR 0055). Re-exported by the facade's
+/// `formats` manifest so a host can read it before wiring a store.
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 4;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -123,12 +123,10 @@ pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
 }
 
 fn validate_lashlang_program_hash(
-    persisted: Option<&str>,
+    persisted: &str,
     current: &str,
 ) -> Result<(), Box<lash_core::ProcessAwaitOutput>> {
-    if let Some(persisted) = persisted
-        && persisted != current
-    {
+    if persisted != current {
         return Err(Box::new(process_lashlang_failure(
             LashlangProcessFailureCode::RestateSegmentProgramHashMismatch,
             format!(
@@ -150,7 +148,7 @@ pub async fn run_lashlang_process(
     let is_initial_segment = handover.is_none();
     let persisted_program_hash = handover
         .as_ref()
-        .and_then(|handover| handover.program_hash.clone());
+        .map(|handover| handover.program_hash.clone());
     let segment_controller = context.scoped_effect_controller();
     let phase_probe = context.turn_phase_probe();
     let input = match LashlangProcessInput::from_payload(payload) {
@@ -271,8 +269,9 @@ pub async fn run_lashlang_process(
         }
     };
     let current_program_hash = lashlang_program_hash(&input);
-    if let Err(output) =
-        validate_lashlang_program_hash(persisted_program_hash.as_deref(), &current_program_hash)
+    if let Some(persisted_program_hash) = persisted_program_hash
+        && let Err(output) =
+            validate_lashlang_program_hash(&persisted_program_hash, &current_program_hash)
     {
         return Ok((*output).into());
     }
@@ -499,7 +498,7 @@ async fn execute_lashlang(
                                 return lash_core::ProcessRunOutcome::SegmentBoundary(
                                     lash_core::SegmentHandover {
                                         reason,
-                                        program_hash: Some(program_hash.clone()),
+                                        program_hash: program_hash.clone(),
                                         engine_state,
                                     },
                                 );

@@ -26,10 +26,9 @@ pub async fn process_continuation_store(
         .expect("register continuation owner");
     let handover = PersistedSegmentHandover {
         segment_ordinal: 1,
-        program_hash: "program-v1".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
-            program_hash: Some("program-v1".to_string()),
+            program_hash: "program-v1".to_string(),
             engine_state: vec![1, 2, 3],
         },
     };
@@ -93,10 +92,9 @@ pub async fn process_continuation_store(
         .expect("register prunable continuation owner");
     let pruned_handover = PersistedSegmentHandover {
         segment_ordinal: 1,
-        program_hash: "pruned-program-v1".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
-            program_hash: Some("pruned-program-v1".to_string()),
+            program_hash: "pruned-program-v1".to_string(),
             engine_state: vec![8, 1, 1],
         },
     };

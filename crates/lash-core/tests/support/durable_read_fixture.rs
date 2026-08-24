@@ -1391,10 +1391,9 @@ fn fixture_wait_state() -> WaitState {
 fn fixture_handover() -> PersistedSegmentHandover {
     PersistedSegmentHandover {
         segment_ordinal: 1,
-        program_hash: "durable-read-program-v1".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
-            program_hash: Some("durable-read-program-v1".to_string()),
+            program_hash: "durable-read-program-v1".to_string(),
             engine_state: vec![8, 8, 7],
         },
     }

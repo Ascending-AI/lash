@@ -141,7 +141,6 @@ pub enum RuntimeErrorCode {
     RestateProcessAwaitAfterTurnCancel,
     RestateProcessTurnCancelContextMissing,
     RestateProcessTerminalEncode,
-    RestateSegmentProgramHashMismatch,
     RestateTurnTerminalAttach,
     /// A bounded Restate terminal attachment elapsed while the durable wait
     /// remained live. Re-attaching the same address is explicitly safe.
@@ -352,7 +351,6 @@ impl RuntimeErrorCode {
                 "restate_process_turn_cancel_context_missing"
             }
             Self::RestateProcessTerminalEncode => "restate_process_terminal_encode",
-            Self::RestateSegmentProgramHashMismatch => "restate_segment_program_hash_mismatch",
             Self::RestateTurnTerminalAttach => "restate_turn_terminal_attach",
             Self::RestateTurnTerminalAttachCeilingElapsed => {
                 "restate_turn_terminal_attach_ceiling_elapsed"
@@ -550,7 +548,6 @@ impl RuntimeErrorCode {
                 | Self::RestateProcessAwaitAfterTurnCancel
                 | Self::RestateProcessTurnCancelContextMissing
                 | Self::RestateProcessTerminalEncode
-                | Self::RestateSegmentProgramHashMismatch
                 | Self::RestateTurnTerminalDecode
                 | Self::RestateTurnTerminalInvalidResolution
                 | Self::RestateTurnCancelScopeMismatch
@@ -706,7 +703,6 @@ impl RuntimeErrorCode {
                 Self::RestateProcessTurnCancelContextMissing
             }
             "restate_process_terminal_encode" => Self::RestateProcessTerminalEncode,
-            "restate_segment_program_hash_mismatch" => Self::RestateSegmentProgramHashMismatch,
             "restate_turn_terminal_attach" => Self::RestateTurnTerminalAttach,
             "restate_turn_terminal_attach_ceiling_elapsed" => {
                 Self::RestateTurnTerminalAttachCeilingElapsed
@@ -944,7 +940,6 @@ mod tests {
         for code in [
             "runtime_effect_envelope_canonical_hash_invariant",
             "runtime_effect_local_executor_mismatch",
-            "restate_segment_program_hash_mismatch",
         ] {
             assert!(
                 !RuntimeErrorCode::from_wire_code(code).is_replay_mismatch(),
@@ -1063,7 +1058,6 @@ mod tests {
             | RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
             | RuntimeErrorCode::RestateProcessTurnCancelContextMissing
             | RuntimeErrorCode::RestateProcessTerminalEncode
-            | RuntimeErrorCode::RestateSegmentProgramHashMismatch
             | RuntimeErrorCode::RestateTurnTerminalDecode
             | RuntimeErrorCode::RestateTurnTerminalInvalidResolution
             | RuntimeErrorCode::RestateTurnCancelScopeMismatch
@@ -1231,7 +1225,6 @@ mod tests {
             RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
             RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
             RuntimeErrorCode::RestateProcessTerminalEncode,
-            RuntimeErrorCode::RestateSegmentProgramHashMismatch,
             RuntimeErrorCode::RestateTurnTerminalAttach,
             RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed,
             RuntimeErrorCode::RestateTurnTerminalDecode,
