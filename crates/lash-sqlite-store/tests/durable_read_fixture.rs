@@ -103,7 +103,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 38"),
+        message.contains("supports schema version 39"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -113,7 +113,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sqlite_prior_component_encoding_fixture_is_refused_at_hydration() {
+async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     let temp = tempfile::tempdir().expect("SQLite refusal fixture tempdir");
     let database = temp.path().join("durable-core.db");
     std::fs::copy(
@@ -122,10 +122,19 @@ async fn sqlite_prior_component_encoding_fixture_is_refused_at_hydration() {
     )
     .expect("copy committed SQLite component-version refusal fixture");
     assert_eq!(user_version(&database), 38);
-    let store = Store::open(&database)
-        .await
-        .expect("open SQLite component-version refusal fixture");
-    fixture::assert_prior_component_encoding_is_refused(&store).await;
+    let open_error = match Store::open(&database).await {
+        Err(error) => error,
+        Ok(_) => panic!("the v38 fixture must be rejected at the schema boundary"),
+    };
+    let message = open_error.to_string();
+    assert!(
+        message.contains("supports schema version 39"),
+        "open refusal must name the current schema boundary: {message}"
+    );
+    assert!(
+        message.contains("reports version 38"),
+        "open refusal must name the stale v38 fixture: {message}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

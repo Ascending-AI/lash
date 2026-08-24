@@ -19,11 +19,9 @@ pub(crate) enum StoreBacking {
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
 /// This is the *only* schema the store supports. Older durable-core databases
-/// must normally be deleted before opening with this binary. The sole in-place
-/// exception is 37 -> 38: [`ensure_schema`] creates and transactionally backfills
-/// the exact checkpoint-component edge projection before advancing
-/// `PRAGMA user_version`. Lash's broader durable contract still lives one level
-/// up in per-record `schema_version` stamps, not in compatibility reads.
+/// must be deleted before opening with this binary. Lash's broader durable
+/// contract still lives one level up in per-record `schema_version` stamps,
+/// not in compatibility reads.
 /// Each `checkpoint_blob_refs` row is owned by the session whose head or anchor
 /// owns the checkpoint root named by `checkpoint_ref`. Owner-scoped session
 /// delete or process prune deletes an unreferenced root and cascades its edges
@@ -71,7 +69,12 @@ CREATE INDEX IF NOT EXISTS idx_checkpoint_blob_refs_blob_ref
     ON checkpoint_blob_refs(blob_ref, checkpoint_ref);
 
 CREATE TABLE IF NOT EXISTS deleted_sessions (
-    session_id TEXT PRIMARY KEY
+    session_id        TEXT PRIMARY KEY,
+    created_at_ms     INTEGER NOT NULL,
+    last_commit_at_ms INTEGER,
+    head_revision     INTEGER NOT NULL,
+    relation_kind     TEXT NOT NULL,
+    parent_session_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS graph_nodes (
@@ -119,6 +122,8 @@ CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id                       TEXT PRIMARY KEY,
+    created_at_ms                    INTEGER NOT NULL DEFAULT 0,
+    last_commit_at_ms                INTEGER,
     relation_kind                    TEXT NOT NULL,
     observer_intent_depth            INTEGER NOT NULL,
     parent_session_id                TEXT,
@@ -405,6 +410,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// every manifest reachable from a session head or node anchor and inserting
 /// its exact component edges in the same transaction that stamps version 38.
 /// Catalogs below 37 remain reject-and-recreate boundaries.
+/// Version 39 adds core-owned creation and last-commit timestamps to session
+/// catalog rows and preserves their enumeration projection on permanent
+/// deletion tombstones. Older stores cannot reconstruct an honest creation
+/// time and are rejected under the existing recreate-store policy.
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
@@ -417,7 +426,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// `idx_pending_turn_input_order`) are added under exactly this carve-out. It
 /// covers index-only additions and nothing else: any table, column, or
 /// semantic change bumps.
-pub(crate) const SCHEMA_VERSION: i32 = 38;
+pub(crate) const SCHEMA_VERSION: i32 = 39;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -901,12 +910,6 @@ fn prepare_versioned_schema<'connection>(
         tx.execute_batch(schema)?;
         return Ok(tx);
     }
-    if database_kind == "session" && user_version == 37 && schema_version == 38 {
-        tx.execute_batch(schema)?;
-        backfill_checkpoint_blob_refs(&tx)?;
-        tx.pragma_update(None, "user_version", schema_version)?;
-        return Ok(tx);
-    }
     if user_version == 0 && !has_user_schema_objects(&tx)? {
         tx.execute_batch(schema)?;
         tx.pragma_update(None, "user_version", schema_version)?;
@@ -920,48 +923,6 @@ fn prepare_versioned_schema<'connection>(
             user_version,
         )),
     ))
-}
-
-/// Populate the version-38 exact-edge projection from every pre-existing live
-/// checkpoint root. Only the manifest is decoded: component codec compatibility
-/// remains a hydration concern, while even an opaque component still has an
-/// exact content-addressed edge that reclaim must preserve.
-fn backfill_checkpoint_blob_refs(tx: &Transaction<'_>) -> rusqlite::Result<()> {
-    let checkpoint_refs = {
-        let mut statement = tx.prepare(
-            "SELECT checkpoint_ref FROM session_head WHERE checkpoint_ref IS NOT NULL
-             UNION
-             SELECT checkpoint_ref FROM node_anchors
-             ORDER BY checkpoint_ref",
-        )?;
-        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
-    for checkpoint_ref in checkpoint_refs {
-        let bytes = tx
-            .query_row(
-                "SELECT content FROM blobs WHERE hash = ?1",
-                params![checkpoint_ref],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .optional()?
-            .ok_or_else(|| {
-                sqlite_conversion_error(StoreError::StoredDataCorrupt {
-                    record_kind: "SessionCheckpoint",
-                    message: format!("rooted checkpoint manifest `{checkpoint_ref}` is missing"),
-                })
-            })?;
-        let content = decode_artifact_blob(&bytes).map_err(sqlite_conversion_error)?;
-        let manifest = decode_checkpoint(&content).map_err(sqlite_conversion_error)?;
-        for descriptor in manifest.components.values() {
-            tx.execute(
-                "INSERT OR IGNORE INTO checkpoint_blob_refs (checkpoint_ref, blob_ref)
-                 VALUES (?1, ?2)",
-                params![checkpoint_ref, descriptor.blob_ref.as_str()],
-            )?;
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<bool> {

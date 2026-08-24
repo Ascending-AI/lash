@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 25;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 26;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -43,6 +43,7 @@ const TRIGGER_REGISTER_OPERATION: &str = "durable-read-trigger-register";
 const QUEUE_SOURCE_KEY: &str = "durable-read-queue-source";
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
+#[allow(dead_code)]
 pub async fn assert_prior_component_encoding_is_refused(store: &dyn RuntimePersistence) {
     let error = store
         .load_session()

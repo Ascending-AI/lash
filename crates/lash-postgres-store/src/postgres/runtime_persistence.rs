@@ -648,6 +648,7 @@ impl SessionCommitStore for PostgresSessionStore {
                         &mut tx,
                         &direct_meta,
                         crate::session_meta::SessionMetaWrite::Insert,
+                        now,
                     )
                     .await?;
                     if let Some(completion) = replay.release_session_execution_lease() {
@@ -668,6 +669,7 @@ impl SessionCommitStore for PostgresSessionStore {
             &mut tx,
             &direct_meta,
             crate::session_meta::SessionMetaWrite::Insert,
+            now,
         )
         .await?;
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
@@ -928,6 +930,12 @@ impl SessionCommitStore for PostgresSessionStore {
             .unwrap_or(plan.actual_head_revision());
             return Err(plan.head_publication_conflict(actual_now));
         }
+        sqlx::query("UPDATE lash_session_meta SET last_commit_at_ms = $2 WHERE session_id = $1")
+            .bind(&commit.session_id)
+            .bind(i64::try_from(now).unwrap_or(i64::MAX))
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         if plan.head_changed()
             && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
         {
@@ -1088,12 +1096,14 @@ impl SessionCommitStore for PostgresSessionStore {
             session_id: session_id.to_string(),
             relation: binding.relation.clone(),
         };
+        let created_at_ms = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         let inserted = crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
+            created_at_ms,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -1106,12 +1116,14 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session_id(&meta.session_id)?;
+        let created_at_ms = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
         crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,
             crate::session_meta::SessionMetaWrite::Replace,
+            created_at_ms,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)

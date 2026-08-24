@@ -4,7 +4,7 @@
 
 
 -- Dumped from database version 16.15
--- Dumped by pg_dump version 16.15
+-- Dumped by pg_dump version 17.11
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -118,7 +118,12 @@ CREATE TABLE lash_durable_read_fixture.lash_checkpoint_blob_refs (
 --
 
 CREATE TABLE lash_durable_read_fixture.lash_deleted_sessions (
-    session_id text NOT NULL
+    session_id text NOT NULL,
+    created_at_ms bigint,
+    last_commit_at_ms bigint,
+    head_revision bigint,
+    relation_kind text,
+    parent_session_id text
 );
 
 
@@ -506,6 +511,8 @@ CREATE TABLE lash_durable_read_fixture.lash_session_execution_leases (
 
 CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     session_id text NOT NULL,
+    created_at_ms bigint,
+    last_commit_at_ms bigint,
     relation_kind text NOT NULL,
     observer_intent_depth bigint NOT NULL,
     parent_session_id text,
@@ -795,7 +802,7 @@ INSERT INTO lash_durable_read_fixture.lash_checkpoint_blob_refs VALUES ('5cae1f5
 -- Data for Name: lash_deleted_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-read-deleted-session');
+INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-read-deleted-session', 1700000000000, NULL, 0, 'root', NULL);
 
 
 --
@@ -808,9 +815,9 @@ INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-rea
 -- Data for Name: lash_graph_nodes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 1, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', NULL, 0, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":1,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"initial-frame","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 2, 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', 1, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":1,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6","role":"User","parts":[{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 3, 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9', 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 2, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":1,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 1, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', NULL, 0, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"initial-frame","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 2, 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', 1, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6","role":"User","parts":[{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 3, 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9', 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 2, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
 
 
 --
@@ -939,7 +946,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 57);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 58);
 
 
 --
@@ -953,7 +960,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 'root', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 1700000000000, 1700000000000, 'root', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 
 --

@@ -543,6 +543,18 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
             },
         ))
     }
+
+    async fn list_sessions(
+        &self,
+        filter: &lash_core::SessionListFilter,
+    ) -> Result<Vec<lash_core::SessionSummary>, StoreError> {
+        let Some(inner) = &self.inner else {
+            return Err(StoreError::UnsupportedStoreOperation {
+                operation: "list_sessions",
+            });
+        };
+        SessionStoreFactory::list_sessions(inner.as_ref(), filter).await
+    }
 }
 
 #[cfg(test)]

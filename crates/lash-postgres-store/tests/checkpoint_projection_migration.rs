@@ -54,7 +54,7 @@ async fn postgres_56_to_57_backfill_preserves_legacy_fork_components_when_new_si
         },
     )
     .await
-    .expect("migrate seeded Postgres component 56 to 57");
+    .expect("migrate seeded Postgres component 56 to 58");
     let foreign_key_actions = sqlx::query_as::<_, (String, String)>(
         "SELECT conname, confdeltype::TEXT
          FROM pg_catalog.pg_constraint
@@ -90,7 +90,7 @@ async fn postgres_56_to_57_backfill_preserves_legacy_fork_components_when_new_si
         .await
         .expect("read Postgres backfilled edge"),
         1,
-        "the legacy rooted manifest must be projected before component 57 is visible"
+        "the legacy rooted manifest must be projected before component 58 is visible"
     );
 
     let factory = Arc::new(migrated.session_store_factory());

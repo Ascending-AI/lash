@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 57);
+    assert_eq!(PostgresStorage::schema_version(), 58);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -333,7 +333,11 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
     let dump = String::from_utf8(output.stdout).expect("pg_dump output is UTF-8");
     let mut lines = dump
         .lines()
-        .filter(|line| !line.starts_with("\\restrict ") && !line.starts_with("\\unrestrict "))
+        .filter(|line| {
+            !line.starts_with("\\restrict ")
+                && !line.starts_with("\\unrestrict ")
+                && *line != "SET transaction_timeout = 0;"
+        })
         .collect::<Vec<_>>();
     while lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();

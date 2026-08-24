@@ -228,6 +228,7 @@ pub(super) async fn fork_points_in_catalog(
 pub(super) async fn fork_at_in_catalog(
     root: &Path,
     request: &lash_core::ForkSessionRequest,
+    created_at_ms: u64,
 ) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
     let conn = open_factory_catalog(root).await?;
     let request = request.clone();
@@ -450,6 +451,7 @@ pub(super) async fn fork_at_in_catalog(
                 tx,
                 &session_meta,
                 crate::session_meta::SessionMetaWrite::Insert,
+                created_at_ms,
             )?;
             Ok(lash_core::ForkSessionReceipt {
                 session_id: request.session_id,

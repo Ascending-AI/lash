@@ -870,7 +870,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::validate_process_wake_source"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1575#.validate_process_wake_source()"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1587#.validate_process_wake_source()"
 
 [[api]]
 symbol = "lash::persistence::QueuedWorkStore::enqueue_queued_work_with_outcome"
@@ -879,7 +879,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkStore::enqueue_queued_work_with_outcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1584#async fn enqueue_queued_work_with_outcome("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1596#async fn enqueue_queued_work_with_outcome("
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES"
@@ -952,7 +952,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2022#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2034#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"
@@ -961,7 +961,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2022#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2034#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 
 [[api]]
 symbol = "lash::persistence::StoreError::checked_monotonic_increment"
@@ -979,7 +979,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::raw_session_owned_artifact_refs_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2867#async fn raw_session_owned_artifact_refs_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2879#async fn raw_session_owned_artifact_refs_for_testing("
 
 [[api]]
 symbol = "lash::persistence::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"
@@ -988,7 +988,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2848#async fn seed_session_trigger_manifest_ref_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2860#async fn seed_session_trigger_manifest_ref_for_testing("
 
 [[api]]
 symbol = "lash::plugins::PluginSpec::orchestrating_tools"
@@ -2652,6 +2652,26 @@ usage = "examples/agent-workbench/src/restate_cron.rs:66#.session_was_deleted(se
 assertion = "examples/agent-workbench/src/restate_cron_tests.rs:1096#\"decision_basis\": \"deleted_session_tombstone\","
 
 [[api]]
+symbol = "lash::LashCore::sessions"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCore::sessions"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:478#assert_eq!(core.sessions().await?.len(), 2);"
+assertion = "examples/docs-snippets/src/persistence.rs:478#assert_eq!(core.sessions().await?.len(), 2);"
+
+[[api]]
+symbol = "lash::LashCore::sessions_filtered"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCore::sessions_filtered"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:480#core.sessions_filtered(SessionListFilter {"
+assertion = "examples/docs-snippets/src/persistence.rs:480#core.sessions_filtered(SessionListFilter {"
+
+[[api]]
 symbol = "lash::LashCore::shutdown"
 kind = "function"
 availability = "default+all-features"
@@ -3906,7 +3926,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::enqueue_seq"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1359#enqueue_seq: row.enqueue_seq,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1394#enqueue_seq: row.enqueue_seq,"
 
 [[api]]
 symbol = "lash::PendingTurnInput::enqueued_at_ms"
@@ -3915,7 +3935,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::enqueued_at_ms"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1363#enqueued_at_ms: row.enqueued_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1398#enqueued_at_ms: row.enqueued_at_ms,"
 
 [[api]]
 symbol = "lash::PendingTurnInput::ingress"
@@ -3924,7 +3944,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::ingress"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1361#ingress: store_decode_json(&row.ingress_json, \"turn-input ingress\")?,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1396#ingress: store_decode_json(&row.ingress_json, \"turn-input ingress\")?,"
 
 [[api]]
 symbol = "lash::PendingTurnInput::input"
@@ -3933,7 +3953,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::input"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1364#input: store_decode_json(&row.input_json, \"turn input\")?,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1399#input: store_decode_json(&row.input_json, \"turn input\")?,"
 
 [[api]]
 symbol = "lash::PendingTurnInput::input_id"
@@ -3942,7 +3962,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::input_id"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1357#input_id: row.input_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1392#input_id: row.input_id,"
 
 [[api]]
 symbol = "lash::PendingTurnInput::session_id"
@@ -3951,7 +3971,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::session_id"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1358#session_id: row.session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1393#session_id: row.session_id,"
 
 [[api]]
 symbol = "lash::PendingTurnInput::source_key"
@@ -3960,7 +3980,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::source_key"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1360#source_key: row.source_key,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1395#source_key: row.source_key,"
 
 [[api]]
 symbol = "lash::PendingTurnInput::state"
@@ -3969,7 +3989,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::state"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1362#state: row.state,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1397#state: row.state,"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome"
@@ -3998,7 +4018,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome::AlreadyCancelled::0", "lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled::0"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1455#lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled(input),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1490#lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled(input),"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::AlreadyClaimed"
@@ -4017,7 +4037,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome::AlreadyClaimed::claim", "lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed::claim"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1463#claim: pending_turn_input_claim_diagnostics_from_row(&row),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1498#claim: pending_turn_input_claim_diagnostics_from_row(&row),"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::AlreadyClaimed::input"
@@ -4045,7 +4065,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome::AlreadyCompleted::0", "lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted::0"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1458#lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1493#lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input),"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::Cancelled"
@@ -4064,7 +4084,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::PendingTurnInputCancelOutcome::Cancelled::0", "lash_core::PendingTurnInputCancelOutcome::Cancelled::0"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1501#Ok(lash_core::PendingTurnInputCancelOutcome::Cancelled(input))"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1536#Ok(lash_core::PendingTurnInputCancelOutcome::Cancelled(input))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelOutcome::NotFound"
@@ -4110,7 +4130,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::outcome"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2627#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2639#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelReceipt::target"
@@ -4119,7 +4139,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::target"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2627#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2639#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget"
@@ -4138,7 +4158,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::InputId"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1400#lash_core::PendingTurnInputCancelTarget::InputId(input_id) => sqlx::query(&format!("
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1435#lash_core::PendingTurnInputCancelTarget::InputId(input_id) => sqlx::query(&format!("
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::InputId::0"
@@ -4147,7 +4167,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::InputId::0"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1400#lash_core::PendingTurnInputCancelTarget::InputId(input_id) => sqlx::query(&format!("
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1435#lash_core::PendingTurnInputCancelTarget::InputId(input_id) => sqlx::query(&format!("
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::SourceKey"
@@ -4156,7 +4176,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::SourceKey"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1413#lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => sqlx::query(&format!("
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1448#lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => sqlx::query(&format!("
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::SourceKey::0"
@@ -4165,7 +4185,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::SourceKey::0"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1413#lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => sqlx::query(&format!("
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1448#lash_core::PendingTurnInputCancelTarget::SourceKey(source_key) => sqlx::query(&format!("
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::input_id"
@@ -4212,7 +4232,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2645#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2657#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes"
@@ -4231,7 +4251,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2670#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2682#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
 
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes::outcomes"
@@ -5522,6 +5542,76 @@ usage = "examples/agent-workbench/src/main_sections/app_state.rs:1293#source: la
 assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1300#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
+symbol = "lash::SessionListFilter"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionListFilter", "lash_core::SessionListFilter"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:446#let child_filter_json = serde_json::to_value::<SessionListFilter>(child_filter.clone())?;"
+assertion = "examples/docs-snippets/src/persistence.rs:447#assert_eq!(child_filter_json[\"relation\"], \"child\");"
+
+[[api]]
+symbol = "lash::SessionListFilter::deleted"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionListFilter::deleted", "lash_core::SessionListFilter::deleted"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:444#deleted: Some(false),"
+assertion = "examples/docs-snippets/src/persistence.rs:448#assert_eq!(child_filter_json[\"deleted\"], false);"
+
+[[api]]
+symbol = "lash::SessionListFilter::relation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionListFilter::relation", "lash_core::SessionListFilter::relation"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:443#relation: Some(SessionRelationKind::Child),"
+assertion = "examples/docs-snippets/src/persistence.rs:447#assert_eq!(child_filter_json[\"relation\"], \"child\");"
+
+[[api]]
+symbol = "lash::SessionRelationKind"
+kind = "enum"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionRelationKind", "lash_core::SessionRelationKind"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:438#assert_eq!(root_summary.relation, SessionRelationKind::Root);"
+assertion = "examples/docs-snippets/src/persistence.rs:438#assert_eq!(root_summary.relation, SessionRelationKind::Root);"
+
+[[api]]
+symbol = "lash::SessionRelationKind::Child"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionRelationKind::Child", "lash_core::SessionRelationKind::Child"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:451#assert_eq!(children[0].relation, SessionRelationKind::Child);"
+assertion = "examples/docs-snippets/src/persistence.rs:451#assert_eq!(children[0].relation, SessionRelationKind::Child);"
+
+[[api]]
+symbol = "lash::SessionRelationKind::Fork"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionRelationKind::Fork", "lash_core::SessionRelationKind::Fork"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:493#assert_eq!(decoded_fork, SessionRelationKind::Fork);"
+assertion = "examples/docs-snippets/src/persistence.rs:493#assert_eq!(decoded_fork, SessionRelationKind::Fork);"
+
+[[api]]
+symbol = "lash::SessionRelationKind::Root"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionRelationKind::Root", "lash_core::SessionRelationKind::Root"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:438#assert_eq!(root_summary.relation, SessionRelationKind::Root);"
+assertion = "examples/docs-snippets/src/persistence.rs:438#assert_eq!(root_summary.relation, SessionRelationKind::Root);"
+
+[[api]]
 symbol = "lash::SessionSpec"
 kind = "struct"
 availability = "default+all-features"
@@ -5694,6 +5784,86 @@ aliases = ["lash::prelude::SessionStartPoint::Snapshot::snapshot", "lash_core::S
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-standard-plugins/src/rolling_history.rs:256#snapshot: Box::new(snapshot.to_snapshot()),"
+
+[[api]]
+symbol = "lash::SessionSummary"
+kind = "struct"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary", "lash_core::SessionSummary"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:434#let root_json = serde_json::to_value::<SessionSummary>(root_summary.clone())?;"
+assertion = "examples/docs-snippets/src/persistence.rs:435#assert_eq!(root_json[\"session_id\"], \"catalog-root\");"
+
+[[api]]
+symbol = "lash::SessionSummary::created_at_ms"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary::created_at_ms", "lash_core::SessionSummary::created_at_ms"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:427#(pair[0].created_at_ms, pair[0].session_id.as_str())"
+assertion = "examples/docs-snippets/src/persistence.rs:426#assert!(summaries.windows(2).all(|pair| {"
+
+[[api]]
+symbol = "lash::SessionSummary::deleted"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary::deleted", "lash_core::SessionSummary::deleted"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:477#assert!(deleted[0].deleted);"
+assertion = "examples/docs-snippets/src/persistence.rs:477#assert!(deleted[0].deleted);"
+
+[[api]]
+symbol = "lash::SessionSummary::head_revision"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary::head_revision", "lash_core::SessionSummary::head_revision"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:436#assert_eq!(root_summary.head_revision, 0);"
+assertion = "examples/docs-snippets/src/persistence.rs:436#assert_eq!(root_summary.head_revision, 0);"
+
+[[api]]
+symbol = "lash::SessionSummary::last_commit_at_ms"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary::last_commit_at_ms", "lash_core::SessionSummary::last_commit_at_ms"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:437#assert_eq!(root_summary.last_commit_at_ms, None);"
+assertion = "examples/docs-snippets/src/persistence.rs:437#assert_eq!(root_summary.last_commit_at_ms, None);"
+
+[[api]]
+symbol = "lash::SessionSummary::parent_session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary::parent_session_id", "lash_core::SessionSummary::parent_session_id"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:453#children[0].parent_session_id.as_deref(),"
+assertion = "examples/docs-snippets/src/persistence.rs:454#Some(\"catalog-root\")"
+
+[[api]]
+symbol = "lash::SessionSummary::relation"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary::relation", "lash_core::SessionSummary::relation"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:438#assert_eq!(root_summary.relation, SessionRelationKind::Root);"
+assertion = "examples/docs-snippets/src/persistence.rs:438#assert_eq!(root_summary.relation, SessionRelationKind::Root);"
+
+[[api]]
+symbol = "lash::SessionSummary::session_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::SessionSummary::session_id", "lash_core::SessionSummary::session_id"]
+area = "sessions-turns"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:432#.find(|summary| summary.session_id == \"catalog-root\")"
+assertion = "examples/docs-snippets/src/persistence.rs:433#.expect(\"root session is listed\");"
 
 [[api]]
 symbol = "lash::SessionTriggerAdmin"
@@ -13589,7 +13759,7 @@ availability = "default+all-features"
 aliases = ["lash_core::DeliveryPolicy::from_wire_str"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1144#DeliveryPolicy::from_wire_str(row.get::<String, _>(\"delivery_policy\").as_str())"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1179#DeliveryPolicy::from_wire_str(row.get::<String, _>(\"delivery_policy\").as_str())"
 
 [[api]]
 symbol = "lash::persistence::FileAttachmentStore"
@@ -13645,7 +13815,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::config"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:176#config,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:178#config,"
 
 [[api]]
 symbol = "lash::persistence::ForkPoint::node_id"
@@ -13654,7 +13824,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:173#node_id: node_id.to_string(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:175#node_id: node_id.to_string(),"
 
 [[api]]
 symbol = "lash::persistence::ForkPoint::pinned"
@@ -13663,7 +13833,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::pinned"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:177#pinned: true,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:179#pinned: true,"
 
 [[api]]
 symbol = "lash::persistence::ForkPoint::source_session_id"
@@ -13672,7 +13842,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::source_session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:175#source_session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:177#source_session_id,"
 
 [[api]]
 symbol = "lash::persistence::ForkSessionRequest"
@@ -13690,7 +13860,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionRequest::node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:313#crate::support::retained_checkpoint_tx(&mut tx, &request.node_id)"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:315#crate::support::retained_checkpoint_tx(&mut tx, &request.node_id)"
 
 [[api]]
 symbol = "lash::persistence::ForkSessionRequest::policy"
@@ -13699,7 +13869,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionRequest::policy"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:436#let config = lash_core::PersistedSessionConfig::from(&request.policy);"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:438#let config = lash_core::PersistedSessionConfig::from(&request.policy);"
 
 [[api]]
 symbol = "lash::persistence::ForkSessionRequest::relation"
@@ -13718,7 +13888,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionRequest::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:318#let session_ids = vec![request.session_id.clone(), source_session_id.clone()];"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:320#let session_ids = vec![request.session_id.clone(), source_session_id.clone()];"
 
 [[api]]
 symbol = "lash::persistence::ForkSessionReceipt"
@@ -13736,7 +13906,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:489#node_id: request.node_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:493#node_id: request.node_id.clone(),"
 
 [[api]]
 symbol = "lash::persistence::ForkSessionReceipt::session_id"
@@ -13745,7 +13915,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:488#session_id: request.session_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:492#session_id: request.session_id.clone(),"
 
 [[api]]
 symbol = "lash::persistence::ForkSessionReceipt::source_session_id"
@@ -13754,7 +13924,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::source_session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:490#source_session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:494#source_session_id,"
 
 [[api]]
 symbol = "lash::persistence::GcReport"
@@ -13790,7 +13960,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GcReport::root_count"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3036#root_count,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3048#root_count,"
 
 [[api]]
 symbol = "lash::persistence::CheckpointComponentDescriptor"
@@ -14576,7 +14746,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputClaimDiagnostics::claim_fencing_token"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1442#claim_fencing_token: row.claim_fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1477#claim_fencing_token: row.claim_fencing_token,"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputClaimDiagnostics::claim_id"
@@ -14585,7 +14755,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputClaimDiagnostics::claim_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1436#claim_id: row.claim_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1471#claim_id: row.claim_id.clone(),"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputClaimDiagnostics::claim_owner"
@@ -14594,7 +14764,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputClaimDiagnostics::claim_owner"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1437#claim_owner: row.claim_owner.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1472#claim_owner: row.claim_owner.clone(),"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputClaimDiagnostics::claim_session_lease_generation"
@@ -14612,7 +14782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputClaimDiagnostics::state"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1435#state: row.state,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1470#state: row.state,"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft"
@@ -14630,7 +14800,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::ingress"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2463#let state = match draft.ingress {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2475#let state = match draft.ingress {"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input"
@@ -14639,7 +14809,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::input"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2470#let input_json = encode_json(&draft.input)?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2482#let input_json = encode_json(&draft.input)?;"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input_id"
@@ -14666,7 +14836,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2443#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2455#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::source_key"
@@ -14675,7 +14845,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::source_key"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2458#draft.source_key.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2470#draft.source_key.as_deref(),"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::submitted_content_matches"
@@ -14684,7 +14854,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::submitted_content_matches"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2497#if !draft.submitted_content_matches(&input).map_err(|err| {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2509#if !draft.submitted_content_matches(&input).map_err(|err| {"
 
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::with_input_id"
@@ -15823,7 +15993,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeCommit::usage_deltas"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:830#for entry in &commit.usage_deltas {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:832#for entry in &commit.usage_deltas {"
 
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::validate_append_node_ids_unique"
@@ -16535,7 +16705,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAdmission::Created"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1101#lash_core::SessionAdmission::Created"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1111#lash_core::SessionAdmission::Created"
 
 [[api]]
 symbol = "lash::persistence::SessionAdmission::Rebound"
@@ -16544,7 +16714,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAdmission::Rebound"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1103#lash_core::SessionAdmission::Rebound"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1113#lash_core::SessionAdmission::Rebound"
 
 [[api]]
 symbol = "lash::persistence::SessionAttachmentStore"
@@ -18294,6 +18464,15 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store implementers may override the notification fast-path query; bundled hosts use repository factories."
 
 [[api]]
+symbol = "lash::persistence::SessionStoreFactory::list_sessions"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SessionStoreFactory::list_sessions"]
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/store.rs:556#SessionStoreFactory::list_sessions(inner.as_ref(), filter).await"
+
+[[api]]
 symbol = "lash::persistence::SessionStoreFactory::open_existing_store"
 kind = "function"
 availability = "default+all-features"
@@ -20023,7 +20202,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::applications"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3493#applications: Vec::new(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3505#applications: Vec::new(),"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::inputs"
@@ -20032,7 +20211,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3492#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3504#inputs,"
 
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
@@ -20041,7 +20220,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::mode"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2718#let restored_state = match claim.mode {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2730#let restored_state = match claim.mode {"
 
 [[api]]
 symbol = "lash::persistence::TurnInputCompletion"
@@ -20320,7 +20499,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputState::Accepted"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1433#(row.claim_token.is_some() || matches!(row.state, lash_core::TurnInputState::Accepted)).then("
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1468#(row.claim_token.is_some() || matches!(row.state, lash_core::TurnInputState::Accepted)).then("
 
 [[api]]
 symbol = "lash::persistence::TurnInputState::Cancelled"
@@ -20329,7 +20508,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputState::Cancelled"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1454#lash_core::TurnInputState::Cancelled => Ok("
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1489#lash_core::TurnInputState::Cancelled => Ok("
 
 [[api]]
 symbol = "lash::persistence::TurnInputState::Completed"
@@ -20338,7 +20517,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputState::Completed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1457#lash_core::TurnInputState::Completed => Ok("
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1492#lash_core::TurnInputState::Completed => Ok("
 
 [[api]]
 symbol = "lash::persistence::TurnInputState::DeferredNextTurn"
@@ -20367,7 +20546,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputState::as_str"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1496#.bind(lash_core::TurnInputState::Cancelled.as_str())"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1531#.bind(lash_core::TurnInputState::Cancelled.as_str())"
 
 [[api]]
 symbol = "lash::persistence::TurnInputState::from_wire_str"
@@ -20376,7 +20555,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputState::from_wire_str"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1318#let state = lash_core::TurnInputState::from_wire_str(row.get::<String, _>(\"state\").as_str())"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1353#let state = lash_core::TurnInputState::from_wire_str(row.get::<String, _>(\"state\").as_str())"
 
 [[api]]
 symbol = "lash::persistence::TurnInputState::is_next_turn_pending"
@@ -70580,7 +70759,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1868#lash_core::TurnInputClaimMode::ActiveTurn {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1880#lash_core::TurnInputClaimMode::ActiveTurn {"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::ActiveTurn"
@@ -70588,7 +70767,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1868#lash_core::TurnInputClaimMode::ActiveTurn {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1880#lash_core::TurnInputClaimMode::ActiveTurn {"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::ActiveTurn::checkpoint"
@@ -70604,7 +70783,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1869#turn_id: turn_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1881#turn_id: turn_id.clone(),"
 
 [[api]]
 symbol = "lash_core::TurnInputClaimMode::NextTurn"
@@ -70612,7 +70791,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2709#lash_core::TurnInputClaimMode::NextTurn,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2721#lash_core::TurnInputClaimMode::NextTurn,"
 
 [[api]]
 symbol = "lash_core::TurnMachine"
@@ -79202,7 +79381,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:539#lash_core::store_backend_support::decode_append_request_identity("
+usage = "crates/lash-sqlite-store/src/persistence.rs:540#lash_core::store_backend_support::decode_append_request_identity("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec"
@@ -79226,7 +79405,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:50#let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:51#let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::decode"
@@ -79234,7 +79413,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:273#let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:275#let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::write_index"
@@ -79242,7 +79421,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:144#SessionMetaCodec::write_index("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:146#SessionMetaCodec::write_index("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::read_index"
@@ -79250,7 +79429,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:210#let depth = SessionMetaCodec::read_index("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:212#let depth = SessionMetaCodec::read_index("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::corrupt"
@@ -79258,7 +79437,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:245#SessionMetaCodec::corrupt("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:247#SessionMetaCodec::corrupt("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaWrite"
@@ -79274,7 +79453,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:52#SessionMetaWrite::Insert => {"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:53#SessionMetaWrite::Insert => {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaWrite::Replace"
@@ -79282,7 +79461,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:64#SessionMetaWrite::Replace => {"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:65#SessionMetaWrite::Replace => {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation"
@@ -79386,7 +79565,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1390#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1402#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::executor_id"
@@ -79394,7 +79573,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1375#.zip(lease.executor_id.clone())"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1387#.zip(lease.executor_id.clone())"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::lease_token"
@@ -79402,7 +79581,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1318#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1330#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::owner"
@@ -79410,7 +79589,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1296#owner: &owner,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1304#owner: &owner,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::session_id"
@@ -79418,7 +79597,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1295#session_id: &session_id,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1303#session_id: &session_id,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts"
@@ -79426,7 +79605,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3857#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3869#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::executor_id"
@@ -79434,7 +79613,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3859#executor_id: current.executor_id.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3871#executor_id: current.executor_id.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::expires_at_epoch_ms"
@@ -79442,7 +79621,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3862#expires_at_epoch_ms: current.expires_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3874#expires_at_epoch_ms: current.expires_at_ms,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::fencing_token"
@@ -79450,7 +79629,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3861#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3873#fencing_token: current.fencing_token,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
@@ -79458,7 +79637,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3860#lease_token: current.lease_token.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3872#lease_token: current.lease_token.as_deref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::owner"
@@ -79466,7 +79645,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3858#owner: current.owner.as_ref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3870#owner: current.owner.as_ref(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts"
@@ -79474,7 +79653,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1452#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1464#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::current_executor_id"
@@ -79522,7 +79701,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1452#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1464#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::minimum_expires_at_epoch_ms"
@@ -79562,7 +79741,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1448#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1460#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::ExecutionFence"
@@ -79578,7 +79757,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1528#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1540#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal"
@@ -79586,7 +79765,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1448#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1460#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::RenewalInstall"
@@ -79602,7 +79781,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2456#lash_core::store_backend_support::derive_pending_turn_input_id("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2468#lash_core::store_backend_support::derive_pending_turn_input_id("
 
 [[api]]
 symbol = "lash_core::store_backend_support::admitted_min_boundary_sql"
@@ -79610,7 +79789,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3063#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3075#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
 
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_abandon_restore_claim_id"
@@ -79618,7 +79797,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2192#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2204#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
 
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_claim_data"
@@ -79626,7 +79805,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1699#data: lash_core::store_backend_support::queued_work_claim_data("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1711#data: lash_core::store_backend_support::queued_work_claim_data("
 
 [[api]]
 symbol = "lash_core::store_backend_support::session_command_batch_completion_key"
@@ -79634,7 +79813,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1046#lash_core::store_backend_support::session_command_batch_completion_key("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1054#lash_core::store_backend_support::session_command_batch_completion_key("
 
 [[api]]
 symbol = "lash_core::store_backend_support::require_current_session_execution_lease"
@@ -79642,7 +79821,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3854#lash_core::store_backend_support::require_current_session_execution_lease("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3866#lash_core::store_backend_support::require_current_session_execution_lease("
 
 [[api]]
 symbol = "lash_core::store_backend_support::trace_session_execution_lease_refusal"
@@ -79650,7 +79829,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1447#lash_core::store_backend_support::trace_session_execution_lease_refusal("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1459#lash_core::store_backend_support::trace_session_execution_lease_refusal("
 
 [[api]]
 symbol = "lash_core::tool_dispatch::context::ToolTriggerEffectOutcome"
@@ -93363,7 +93542,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:4123#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
+usage = "crates/lash-sqlite-store/src/persistence.rs:4131#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
 
 [[api]]
 symbol = "lash::EmptyQueuedDrainReason"
@@ -93577,7 +93756,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1713#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1721#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
 reason = "Internal seam: this is the contract every durable backend returns from an automatic claim, so its consumers are the backends themselves rather than an example."
 
 [[api]]
@@ -93587,7 +93766,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1816#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1828#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend reports the rows it claimed through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -93597,7 +93776,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1816#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1828#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend carries the claim it took in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -93607,7 +93786,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1715#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1727#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend names why it claimed nothing through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -93617,7 +93796,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1715#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1727#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend carries the refusal it computed in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -93924,7 +94103,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2909#lash_core::MaintenanceFailure::failed("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2921#lash_core::MaintenanceFailure::failed("
 reason = "FIG-1505: the Postgres vacuum reports the rows its first delete already committed when the second fails, which is the constructor's whole purpose; the consumer is a backend crate rather than an example."
 
 [[api]]
@@ -93962,7 +94141,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceResult"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:3180#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:3188#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
 reason = "FIG-1505: every store backend spells the maintenance levers' return type with this alias; the consumers are backend crates rather than examples. Host-facing projection: `lash::persistence::MaintenanceResult`."
 
 [[api]]

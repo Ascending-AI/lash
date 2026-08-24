@@ -265,6 +265,7 @@ impl Store {
 
     pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session(&meta.session_id)?;
+        let created_at_ms = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
@@ -273,6 +274,7 @@ impl Store {
                         tx,
                         &meta,
                         crate::session_meta::SessionMetaWrite::Replace,
+                        created_at_ms,
                     )?;
                     Ok(())
                 })();

@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 57
+version 58
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -67,6 +67,11 @@ table lash_checkpoint_blob_refs
   foreign-key (blob_ref) references lash_blobs (hash) on delete no action
   foreign-key (checkpoint_ref) references lash_blobs (hash) on delete cascade
 table lash_deleted_sessions
+  column created_at_ms bigint nullable
+  column head_revision bigint nullable
+  column last_commit_at_ms bigint nullable
+  column parent_session_id text nullable
+  column relation_kind text nullable
   column session_id text not-null
   primary-key (session_id)
 table lash_fork_lineage
@@ -288,6 +293,8 @@ table lash_session_meta
   column caused_by_subscription_incarnation text nullable
   column caused_by_subscription_revision text nullable
   column caused_by_turn_id text nullable
+  column created_at_ms bigint nullable
+  column last_commit_at_ms bigint nullable
   column observer_inheritance_kind text nullable
   column observer_intent_depth bigint not-null
   column parent_session_id text nullable

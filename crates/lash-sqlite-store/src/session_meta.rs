@@ -46,6 +46,7 @@ pub(crate) fn write_session_meta(
     conn: &Connection,
     meta: &SessionMeta,
     mode: SessionMetaWrite,
+    created_at_ms: u64,
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = match mode {
@@ -57,9 +58,9 @@ pub(crate) fn write_session_meta(
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind)
+              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19)"
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, NULL)"
         }
         SessionMetaWrite::Replace => {
             "INSERT INTO session_meta
@@ -69,9 +70,9 @@ pub(crate) fn write_session_meta(
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, observer_inheritance_kind)
+              source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19)
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, NULL)
              ON CONFLICT(session_id) DO UPDATE SET
                relation_kind = excluded.relation_kind,
                observer_intent_depth = excluded.observer_intent_depth,
@@ -116,6 +117,7 @@ pub(crate) fn write_session_meta(
                 stored.source_session_id,
                 stored.source_node_id,
                 stored.observer_inheritance_kind,
+                crate::clamp_epoch_ms(created_at_ms),
             ],
         )
         .map_err(sqlite_error)?;

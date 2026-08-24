@@ -76,7 +76,8 @@ const POST_FLOOR_TABLES: [&str; 5] = [
 /// post-floor `introduced_relations` that are not
 /// themselves post-floor tables and do not belong to one, which is what
 /// `scripts/check_version_bump_fixtures.py` proves.
-const POST_FLOOR_INDEXES: [&str; 7] = [
+const POST_FLOOR_INDEXES: [&str; 8] = [
+    "idx_lash_session_meta_catalog",
     "idx_lash_sessions_checkpoint_ref",
     "idx_lash_node_anchors_checkpoint_ref",
     "idx_lash_queued_work_session_command_order",
@@ -88,20 +89,28 @@ const POST_FLOOR_INDEXES: [&str; 7] = [
 /// Columns those generations added to tables the floor catalog already had, so
 /// dropping the post-floor tables does not take them with it either (54: the two
 /// effect-group columns on the effect-replay table; 56: the occurrence
-/// eligibility arm). Without this axis the
+/// eligibility arm; 58: the session-enumeration metadata). Without this axis the
 /// "published floor catalog" the fixture reconstructs is a floor catalog with
 /// current-generation columns bolted on, and the refusal it proves is not the
 /// one a genuinely older store gets. The set is exactly the floor migration's
 /// `source_missing_columns`, which `scripts/check_version_bump_fixtures.py`
 /// proves.
-const POST_FLOOR_COLUMNS: [(&str, &str); 3] = [
+const POST_FLOOR_COLUMNS: [(&str, &str); 10] = [
     ("lash_runtime_effect_replay", "group_key"),
     ("lash_runtime_effect_replay", "settlement_seq"),
     ("lash_trigger_occurrences", "reclaimable_at_ms"),
+    ("lash_session_meta", "created_at_ms"),
+    ("lash_session_meta", "last_commit_at_ms"),
+    ("lash_deleted_sessions", "created_at_ms"),
+    ("lash_deleted_sessions", "last_commit_at_ms"),
+    ("lash_deleted_sessions", "head_revision"),
+    ("lash_deleted_sessions", "relation_kind"),
+    ("lash_deleted_sessions", "parent_session_id"),
 ];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 16] = [
+const POST_FLOOR_ARTIFACTS: [&str; 17] = [
+    "idx_lash_session_meta_catalog",
     "lash_checkpoint_blob_refs",
     "idx_lash_checkpoint_blob_refs_blob_ref",
     "idx_lash_sessions_checkpoint_ref",
@@ -120,15 +129,10 @@ const POST_FLOOR_ARTIFACTS: [&str; 16] = [
     "uq_lash_runtime_effect_replay_group_seq",
 ];
 /// What the newest generation alone introduced — the `introduced_relations` of
-/// the migration out of the immediate predecessor version. The divergent fixture
-/// records that predecessor over the *current* catalog, so these are exactly the
-/// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 4] = [
-    "lash_checkpoint_blob_refs",
-    "idx_lash_checkpoint_blob_refs_blob_ref",
-    "idx_lash_sessions_checkpoint_ref",
-    "idx_lash_node_anchors_checkpoint_ref",
-];
+/// the migration out of the immediate predecessor version. The catalog index
+/// makes a current schema stamped 57 distinguishable from the published 57
+/// source shape before any migration DDL runs.
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_session_meta_catalog"];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.

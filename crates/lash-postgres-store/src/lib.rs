@@ -60,11 +60,11 @@ use lash_core::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimePersistence,
     ScopedEffectController, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionMeta, SessionNodeRecord,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, StoreMaintenance, TokenLedgerEntry,
-    TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
-    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
-    facade_support::registry_transitions,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
+    SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory,
+    SessionSummary, StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
+    facade_support::ProcessStartPlan, facade_support::ProcessTransition,
+    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
 use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
@@ -210,7 +210,11 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 57 adds the indexed checkpoint-manifest component-edge projection and
 // root indexes used by exact-edge session-owner blob reclaim. Stores at 50
 // through 56 take a creation-only migration at open.
-const SCHEMA_VERSION: i32 = 57;
+// Version 58 adds core-owned session creation and last-commit timestamps and
+// preserves their enumeration projection on permanent deletion tombstones.
+// Creation-only migrations retain older stores with nullable catalog columns;
+// enumeration reports zero for legacy rows whose creation time is unknowable.
+const SCHEMA_VERSION: i32 = 58;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -470,7 +474,7 @@ impl PostgresStorage {
     ///
     /// The component schema is normally a reject-and-recreate boundary. This
     /// build has explicit exceptions: Lash-managed `Enforce` mode can apply
-    /// creation-only migrations from published component-50 through -56 shapes
+    /// creation-only migrations from published component-50 through -57 shapes
     /// to the current generation after an exact source-shape preflight. An older
     /// stamp over newer artifacts is ledger/schema divergence and is refused
     /// with an inspect-and-recreate remedy; other mismatches are rejected at
@@ -764,6 +768,8 @@ mod schema;
 mod schema_shape;
 #[path = "postgres/session_blob_reclaim.rs"]
 mod session_blob_reclaim;
+#[path = "postgres/session_catalog.rs"]
+mod session_catalog;
 #[path = "postgres/session_factory.rs"]
 mod session_factory;
 #[path = "postgres/session_meta.rs"]

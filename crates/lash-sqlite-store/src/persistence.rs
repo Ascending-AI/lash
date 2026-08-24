@@ -496,6 +496,7 @@ impl SessionCommitStore for Store {
                             relation: lash_core::SessionRelation::Root,
                         },
                         crate::session_meta::SessionMetaWrite::Insert,
+                        now,
                     )?;
                     planner.validate_node_derivation()?;
                     {
@@ -858,6 +859,11 @@ impl SessionCommitStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
+                    tx.execute(
+                        "UPDATE session_meta SET last_commit_at_ms = ?2 WHERE session_id = ?1",
+                        params![commit.session_id, crate::clamp_epoch_ms(now)],
+                    )
+                    .map_err(sqlite_error)?;
                     if plan.head_changed()
                         && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
                     {
@@ -1159,6 +1165,7 @@ impl SessionCommitStore for Store {
         binding.validate()?;
         self.bind_session(&binding.session_id)?;
         let session_id = binding.session_id.clone();
+        let created_at_ms = self.clock.timestamp_ms();
         let meta = SessionMeta {
             session_id: session_id.clone(),
             relation: binding.relation.clone(),
@@ -1171,6 +1178,7 @@ impl SessionCommitStore for Store {
                         tx,
                         &meta,
                         crate::session_meta::SessionMetaWrite::Insert,
+                        created_at_ms,
                     )?;
                     Ok(if inserted {
                         lash_core::SessionAdmission::Created
