@@ -10,6 +10,7 @@ mod reasoning;
 mod responses;
 mod responses_output_evidence;
 mod responses_shared;
+mod responses_stream_event;
 pub mod schema;
 mod support;
 #[cfg(feature = "testing")]

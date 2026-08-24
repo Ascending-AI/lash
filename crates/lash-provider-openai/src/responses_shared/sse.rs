@@ -1,6 +1,7 @@
 //! Responses SSE event folding and buffered payload parsing.
 
 use super::*;
+use crate::responses_stream_event::{ResponsesStreamEvent, ResponsesStreamEventClass};
 
 /// Drive one SSE event into `state`, optionally emitting finalized parts.
 pub fn process_sse_event(
@@ -18,8 +19,8 @@ pub fn process_sse_event(
             .with_raw(raw)
             .retryable(false)
     })?;
-    let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
-    if event_type == "error" {
+    let event_name = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if event_name == "error" {
         let retryable = event
             .get("error")
             .map(responses_error_is_retryable)
@@ -39,18 +40,15 @@ pub fn process_sse_event(
             .with_raw(event.to_string());
         return Err(classify_openai_error(&event, failure));
     }
+    let event_type = ResponsesStreamEvent::parse(event_name);
 
     let output_index = event
         .get("output_index")
         .and_then(Value::as_u64)
         .map(|value| value as usize);
 
-    let terminal_event = matches!(
-        event_type,
-        "response.completed" | "response.incomplete" | "response.done" | "response.failed"
-    );
     if let Some(response) = event.get("response") {
-        state.capture_execution_evidence(response, terminal_event)?;
+        state.capture_execution_evidence(response, event_type.is_terminal())?;
     }
 
     if let Some(resp) = event.get("response") {
@@ -61,120 +59,135 @@ pub fn process_sse_event(
         merge_usage(&mut state.usage, &usage_from_response_value(&event));
     }
 
-    if crate::responses_output_evidence::handle_evidence_only_event(event_type, &event, state) {
-        return Ok(());
-    }
-    match event_type {
-        "response.output_item.added" => {
-            if let Some(item) = event.get("item") {
-                state.streamed_item_content_received |=
-                    crate::responses_output_evidence::output_item_has_output_evidence(item);
-                match item.get("type").and_then(|v| v.as_str()) {
-                    Some("message") => state.begin_message(Some(item), output_index),
-                    Some("function_call") => {
-                        let _ = state.update_tool_call_from_item(item, output_index);
-                    }
-                    Some("reasoning") => state.begin_reasoning_part(output_index),
-                    Some(_) => state.streamed_item_content_received = true,
-                    None => {}
-                }
-            }
+    match event_type.handling_class() {
+        ResponsesStreamEventClass::EvidenceOnly | ResponsesStreamEventClass::Lifecycle => {
+            crate::responses_output_evidence::handle_output_evidence_event(
+                event_type, &event, state,
+            );
         }
-        "response.reasoning_summary_part.added" => state.begin_reasoning_part(output_index),
-        "response.reasoning_summary_text.delta" => {
-            if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
-                state.push_reasoning_delta(delta, output_index);
-            }
-        }
-        "response.reasoning_summary_text.done" => {
-            // The `text` field is the full text for the current part; reconcile
-            // by appending the missing suffix if our accumulator lags behind.
-            if let Some(text) = event.get("text").and_then(|v| v.as_str())
-                && let Some(index) = state.current_reasoning_part
-                && let Some(LlmOutputPart::Reasoning { text: existing, .. }) =
-                    state.parts.get(index)
-            {
-                let existing = existing.clone();
-                if text != existing
-                    && let Some(suffix) = text.strip_prefix(existing.as_str())
-                {
-                    state.push_reasoning_delta(suffix, output_index);
-                }
-            }
-        }
-        "response.reasoning_summary_part.done" => state.finish_reasoning_part(),
-        "response.output_text.delta" => {
-            if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
-                state.push_text_delta(delta, output_index);
-            }
-        }
-        "response.output_text.done" => {
-            if let Some(text) = event.get("text").and_then(|v| v.as_str()) {
-                state.reconcile_text_event(text, output_index);
-            }
-        }
-        "response.function_call_arguments.delta" => {
-            if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
-                state.push_tool_call_delta(
-                    output_index,
-                    event.get("item_id").and_then(|v| v.as_str()),
-                    delta,
-                );
-            }
-        }
-        "response.function_call_arguments.done" => {
-            if let Some(arguments) = event.get("arguments").and_then(|v| v.as_str()) {
-                state.set_tool_call_arguments(
-                    output_index,
-                    event.get("item_id").and_then(|v| v.as_str()),
-                    arguments,
-                );
-            }
-            state.streamed_item_content_received |= event
-                .get("name")
-                .and_then(Value::as_str)
-                .is_some_and(|name| !name.is_empty());
-        }
-        "response.output_item.done" => {
-            if let Some(item) = event.get("item") {
-                match item.get("type").and_then(|v| v.as_str()) {
-                    Some("message") => {
-                        let part = state.finish_message(Some(item), output_index);
-                        if let (Some(parts), Some(part)) = (emitted_parts, part) {
-                            parts.push(part);
+        ResponsesStreamEventClass::Structural => {
+            crate::responses_output_evidence::handle_output_evidence_event(
+                event_type, &event, state,
+            );
+            match event_type {
+                ResponsesStreamEvent::ResponseOutputItemAdded => {
+                    if let Some(item) = event.get("item") {
+                        state.streamed_item_content_received |=
+                            crate::responses_output_evidence::output_item_has_output_evidence(item);
+                        match item.get("type").and_then(|v| v.as_str()) {
+                            Some("message") => state.begin_message(Some(item), output_index),
+                            Some("function_call") => {
+                                let _ = state.update_tool_call_from_item(item, output_index);
+                            }
+                            Some("reasoning") => state.begin_reasoning_part(output_index),
+                            Some(_) => state.streamed_item_content_received = true,
+                            None => {}
                         }
                     }
-                    Some("reasoning") => {
-                        state.finish_reasoning_part();
-                        let part = state.finalize_reasoning_item(item, output_index);
-                        if let (Some(parts), Some(part)) = (emitted_parts, part) {
-                            parts.push(part);
-                        }
-                    }
-                    Some("function_call") => {
-                        let part = state.finish_tool_call(item, output_index);
-                        if let (Some(parts), Some(part)) = (emitted_parts, part) {
-                            parts.push(part);
-                        }
-                    }
-                    Some(_) => state.streamed_item_content_received = true,
-                    None => {}
                 }
+                ResponsesStreamEvent::ResponseReasoningSummaryPartAdded => {
+                    state.begin_reasoning_part(output_index)
+                }
+                ResponsesStreamEvent::ResponseReasoningSummaryTextDelta => {
+                    if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
+                        state.push_reasoning_delta(delta, output_index);
+                    }
+                }
+                ResponsesStreamEvent::ResponseReasoningSummaryTextDone => {
+                    // The `text` field is the full text for the current part; reconcile
+                    // by appending the missing suffix if our accumulator lags behind.
+                    if let Some(text) = event.get("text").and_then(|v| v.as_str())
+                        && let Some(index) = state.current_reasoning_part
+                        && let Some(LlmOutputPart::Reasoning { text: existing, .. }) =
+                            state.parts.get(index)
+                    {
+                        let existing = existing.clone();
+                        if text != existing
+                            && let Some(suffix) = text.strip_prefix(existing.as_str())
+                        {
+                            state.push_reasoning_delta(suffix, output_index);
+                        }
+                    }
+                }
+                ResponsesStreamEvent::ResponseReasoningSummaryPartDone => {
+                    state.finish_reasoning_part()
+                }
+                ResponsesStreamEvent::ResponseOutputTextDelta => {
+                    if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
+                        state.push_text_delta(delta, output_index);
+                    }
+                }
+                ResponsesStreamEvent::ResponseOutputTextDone => {
+                    if let Some(text) = event.get("text").and_then(|v| v.as_str()) {
+                        state.reconcile_text_event(text, output_index);
+                    }
+                }
+                ResponsesStreamEvent::ResponseFunctionCallArgumentsDelta => {
+                    if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
+                        state.push_tool_call_delta(
+                            output_index,
+                            event.get("item_id").and_then(|v| v.as_str()),
+                            delta,
+                        );
+                    }
+                }
+                ResponsesStreamEvent::ResponseFunctionCallArgumentsDone => {
+                    if let Some(arguments) = event.get("arguments").and_then(|v| v.as_str()) {
+                        state.set_tool_call_arguments(
+                            output_index,
+                            event.get("item_id").and_then(|v| v.as_str()),
+                            arguments,
+                        );
+                    }
+                    state.streamed_item_content_received |= event
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| !name.is_empty());
+                }
+                ResponsesStreamEvent::ResponseOutputItemDone => {
+                    if let Some(item) = event.get("item") {
+                        match item.get("type").and_then(|v| v.as_str()) {
+                            Some("message") => {
+                                let part = state.finish_message(Some(item), output_index);
+                                if let (Some(parts), Some(part)) = (emitted_parts, part) {
+                                    parts.push(part);
+                                }
+                            }
+                            Some("reasoning") => {
+                                state.finish_reasoning_part();
+                                let part = state.finalize_reasoning_item(item, output_index);
+                                if let (Some(parts), Some(part)) = (emitted_parts, part) {
+                                    parts.push(part);
+                                }
+                            }
+                            Some("function_call") => {
+                                let part = state.finish_tool_call(item, output_index);
+                                if let (Some(parts), Some(part)) = (emitted_parts, part) {
+                                    parts.push(part);
+                                }
+                            }
+                            Some(_) => state.streamed_item_content_received = true,
+                            None => {}
+                        }
+                    }
+                }
+                _ => unreachable!("non-structural event classified as structural"),
             }
         }
-        "response.completed" | "response.incomplete" | "response.done" => {
+        ResponsesStreamEventClass::Terminal => {
             state.terminal_event_seen = true;
+            if event_type == ResponsesStreamEvent::ResponseFailed {
+                return Err(crate::responses_output_evidence::response_failed_error(
+                    provider, &event,
+                ));
+            }
             if let Some(resp_value) = event.get("response") {
                 state.merge_final_response(resp_value);
             }
         }
-        "response.failed" => {
-            state.terminal_event_seen = true;
-            return Err(crate::responses_output_evidence::response_failed_error(
-                provider, &event,
-            ));
+        ResponsesStreamEventClass::Unknown => {
+            state.unrecognized_event_observed = true;
         }
-        _ => state.unrecognized_event_observed = true,
     }
     Ok(())
 }
