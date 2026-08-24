@@ -150,9 +150,6 @@ fn probe_snapshot_version(data: &[u8]) -> Result<u32, RlmSnapshotError> {
 }
 
 fn root_map_order(location: &str) -> CanonicalMapOrder {
-    if is_root_json_location(location) {
-        return CanonicalMapOrder::Sorted;
-    }
     match location {
         "root" => CanonicalMapOrder::Declared(ROOT_FIELDS),
         "root.globals" | "root.deferred_resolutions.resolutions" => CanonicalMapOrder::Sorted,
@@ -162,6 +159,7 @@ fn root_map_order(location: &str) -> CanonicalMapOrder {
         }
         _ if is_global_location(location) => CanonicalMapOrder::Declared(PERSISTED_VALUE_FIELDS),
         _ if is_resolution_location(location) => CanonicalMapOrder::Declared(RESOLUTION_FIELDS),
+        _ if is_root_json_location(location) => CanonicalMapOrder::Sorted,
         _ if location.ends_with(".definition") => CanonicalMapOrder::Fields(TOOL_DEFINITION_FIELDS),
         _ if location.ends_with(".input_schema") || location.ends_with(".output_schema") => {
             CanonicalMapOrder::Fields(SCHEMA_CONTRACT_FIELDS)
@@ -210,8 +208,11 @@ fn root_map_required(location: &str) -> bool {
 }
 
 fn is_resolution_location(location: &str) -> bool {
-    location.starts_with("root.deferred_resolutions.resolutions[")
-        && !location["root.deferred_resolutions.resolutions".len()..].contains("].")
+    location
+        .strip_prefix("root.deferred_resolutions.resolutions.")
+        .is_some_and(|suffix| !suffix.contains('.'))
+        || (location.starts_with("root.deferred_resolutions.resolutions[")
+            && !location["root.deferred_resolutions.resolutions".len()..].contains("]."))
 }
 
 fn is_global_location(location: &str) -> bool {
