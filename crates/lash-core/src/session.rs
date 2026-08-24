@@ -1,4 +1,5 @@
 use lash_sansio::sync::MutexExt;
+use sha2::Digest as _;
 use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;
@@ -23,6 +24,7 @@ struct ToolCatalogCacheKey {
     context_overlay_revision: u64,
     tool_generation: u64,
     plugin_revision: u64,
+    authority_fingerprint: [u8; 32],
 }
 
 #[derive(Debug, Default)]
@@ -127,7 +129,7 @@ pub struct Session {
     context_tools: Vec<Arc<dyn ToolProvider>>,
     tool_registry: Arc<crate::ToolRegistry>,
     context_prompt_contributions: Vec<PromptContribution>,
-    tool_catalog_cache: Arc<std::sync::Mutex<Vec<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
+    tool_catalog_cache: Arc<std::sync::Mutex<Option<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
     composition_tool_fingerprint_cache: CompositionToolFingerprintCache,
     /// Memoizes the rendered system prompt across turns. Most consecutive
     /// turns reuse the same template + context overlay, so the cache hits
@@ -151,7 +153,7 @@ impl Session {
             context_tools: Vec::new(),
             tool_registry,
             context_prompt_contributions: Vec::new(),
-            tool_catalog_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
+            tool_catalog_cache: Arc::new(std::sync::Mutex::new(None)),
             composition_tool_fingerprint_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
             prompt_cache: Arc::new(lash_sansio::PromptCache::new()),
             composition_trace_fingerprint: Arc::new(std::sync::Mutex::new(None)),
@@ -245,7 +247,7 @@ impl Session {
         self.context_tools = tool_providers;
         self.tool_registry = registry;
         self.context_prompt_contributions = prompt_contributions;
-        self.tool_catalog_cache.lock_recover().clear();
+        *self.tool_catalog_cache.lock_recover() = None;
         Ok(())
     }
 
@@ -267,6 +269,7 @@ impl Session {
             context_overlay_revision: self.context_overlay_revision,
             tool_generation: self.tool_registry.generation(),
             plugin_revision: self.plugins().snapshot_revision_fingerprint(),
+            authority_fingerprint: tool_catalog_authority_fingerprint(self.plugins().tool_access()),
         }
     }
 
@@ -310,11 +313,13 @@ impl Session {
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
         let key = self.tool_catalog_cache_key();
         let mut cache = self.tool_catalog_cache.lock_recover();
-        if let Some((_, entry)) = cache.iter().find(|(entry_key, _)| *entry_key == key) {
+        if let Some((entry_key, entry)) = cache.as_ref()
+            && *entry_key == key
+        {
             return Ok(entry.clone());
         }
         let entry = self.build_tool_catalog_entry(session_id)?;
-        cache.push((key, entry.clone()));
+        *cache = Some((key, entry.clone()));
         Ok(entry)
     }
 
@@ -432,7 +437,7 @@ impl Session {
     }
 
     pub fn invalidate_runtime_caches(&self) {
-        self.tool_catalog_cache.lock_recover().clear();
+        *self.tool_catalog_cache.lock_recover() = None;
         self.prompt_cache.clear();
     }
 
@@ -444,7 +449,44 @@ impl Session {
             .compose_session_catalog(self.include_base_tools, self.context_tools.clone())
             .map(Arc::new)
             .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
-        self.tool_catalog_cache.lock_recover().clear();
+        *self.tool_catalog_cache.lock_recover() = None;
         Ok(())
+    }
+}
+
+fn tool_catalog_authority_fingerprint(tool_access: &crate::SessionToolAccess) -> [u8; 32] {
+    let encoded = serde_json::to_vec(tool_access)
+        .expect("SessionToolAccess is composed entirely of serializable authority values");
+    sha2::Sha256::digest(encoded).into()
+}
+
+#[cfg(test)]
+mod tool_catalog_cache_tests {
+    use super::*;
+
+    #[test]
+    fn authority_fingerprint_covers_hidden_tools_and_explicit_definitions() {
+        let base = crate::SessionToolAccess::default();
+        let mut hidden = base.clone();
+        hidden.hidden_tools.insert("hidden".to_string());
+        let explicit = crate::SessionToolAccess {
+            tools: vec![crate::ToolDefinition::raw(
+                "tool:explicit",
+                "explicit",
+                "authority-defined tool",
+                crate::ToolDefinition::default_input_schema(),
+                serde_json::json!({ "type": "string" }),
+            )],
+            ..crate::SessionToolAccess::default()
+        };
+
+        assert_ne!(
+            tool_catalog_authority_fingerprint(&base),
+            tool_catalog_authority_fingerprint(&hidden)
+        );
+        assert_ne!(
+            tool_catalog_authority_fingerprint(&base),
+            tool_catalog_authority_fingerprint(&explicit)
+        );
     }
 }

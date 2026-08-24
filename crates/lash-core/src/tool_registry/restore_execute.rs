@@ -12,20 +12,6 @@ impl ToolRegistry {
             .flatten()
     }
 
-    /// Try to rebind an orphaned entry to a source that now resolves the same
-    /// tool id. Returns the live manifest on success; the advertised name may
-    /// differ from the persisted manifest because names are model-facing
-    /// aliases, not authority identity.
-    fn try_rebind_orphan(&self, tool_id: &ToolId) -> Option<ToolManifest> {
-        self.refresh_sources().ok()?;
-        self.state
-            .read_recover()
-            .surface
-            .get(tool_id)
-            .filter(|entry| !entry.is_orphaned())
-            .map(ToolRegistryEntry::view_manifest)
-    }
-
     /// Resolve the source for a registry entry, distinguishing "unknown tool"
     /// from "known but orphaned" so callers can fail with a precise error.
     fn resolve_execution_source(
@@ -162,121 +148,19 @@ impl ToolProvider for ToolRegistry {
     }
 
     fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        let known = {
-            let state = self
-                .state
-                .read_recover();
-            state
-                .surface
-                .get_by_name(name)
-                .map(|(id, entry)| (id.clone(), entry.is_orphaned(), entry.view_manifest()))
-        };
-        match known {
-            Some((_, false, manifest)) => return Some(manifest),
-            Some((tool_id, true, off_manifest)) => {
-                return Some(self.try_rebind_orphan(&tool_id).unwrap_or(off_manifest));
-            }
-            None => {}
-        }
-
-        let sources = self
-            .sources
+        self.state
             .read_recover()
-            .iter()
-            .map(|(source_id, source)| (source_id.clone(), Arc::clone(source)))
-            .collect::<Vec<_>>();
-        for (source_id, source) in sources {
-            let Some(manifest) = source.resolve_manifest(name) else {
-                continue;
-            };
-            let manifest = manifest_with_compact_contract(source.as_ref(), manifest);
-            let mut state = self
-                .state
-                .write_recover();
-            if let Some(existing) = state.surface.get(&manifest.id) {
-                return (existing.binding.source_key() == Some(&source_id))
-                    .then(|| existing.view_manifest());
-            }
-            if let Some((_, existing)) = state.surface.get_by_name(&manifest.name) {
-                return (existing.binding.source_key() == Some(&source_id))
-                    .then(|| existing.view_manifest());
-            }
-            if state
-                .surface
-                .insert(bound_tool_entry(
-                    manifest.clone(),
-                    source_id,
-                    source.registration_kind(),
-                    &self.hidden_tool_names,
-                ))
-                .is_err()
-            {
-                return None;
-            }
-            state.generation += 1;
-            state.surface.debug_assert_invariant();
-            return Some(manifest);
-        }
-        None
+            .surface
+            .get_by_name(name)
+            .map(|(_, entry)| entry.view_manifest())
     }
 
     fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        let known = {
-            let state = self
-                .state
-                .read_recover();
-            state
-                .surface
-                .get(id)
-                .map(|entry| (entry.is_orphaned(), entry.view_manifest()))
-        };
-        match known {
-            Some((false, manifest)) => return Some(manifest),
-            Some((true, off_manifest)) => {
-                return Some(self.try_rebind_orphan(id).unwrap_or(off_manifest));
-            }
-            None => {}
-        }
-
-        let sources = self
-            .sources
+        self.state
             .read_recover()
-            .iter()
-            .map(|(source_id, source)| (source_id.clone(), Arc::clone(source)))
-            .collect::<Vec<_>>();
-        for (source_id, source) in sources {
-            let Some(mut manifest) = source.resolve_manifest_by_id(id) else {
-                continue;
-            };
-            manifest = manifest_with_compact_contract(source.as_ref(), manifest);
-            let mut state = self
-                .state
-                .write_recover();
-            if let Some(existing) = state.surface.get(&manifest.id) {
-                return (existing.binding.source_key() == Some(&source_id))
-                    .then(|| existing.view_manifest());
-            }
-            if let Some((_, existing)) = state.surface.get_by_name(&manifest.name) {
-                return (existing.binding.source_key() == Some(&source_id))
-                    .then(|| existing.view_manifest());
-            }
-            if state
-                .surface
-                .insert(bound_tool_entry(
-                    manifest.clone(),
-                    source_id,
-                    source.registration_kind(),
-                    &self.hidden_tool_names,
-                ))
-                .is_err()
-            {
-                return None;
-            }
-            state.generation += 1;
-            state.surface.debug_assert_invariant();
-            return Some(manifest);
-        }
-        None
+            .surface
+            .get(id)
+            .map(ToolRegistryEntry::view_manifest)
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {

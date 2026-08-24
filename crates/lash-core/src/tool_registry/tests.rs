@@ -83,6 +83,15 @@ mod tests {
         crate::ToolId::from(format!("tool:{name}"))
     }
 
+    fn host_only_snapshot(generation: u64) -> ToolState {
+        let mut tools = BTreeMap::new();
+        tools.insert(
+            tool_id("host_only"),
+            ToolStateEntry::new(test_tool("host_only", "host-only").manifest()),
+        );
+        ToolState::new(generation, tools)
+    }
+
     fn manifests(definitions: Vec<ToolDefinition>) -> Vec<ToolManifest> {
         definitions
             .into_iter()
@@ -405,20 +414,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lazy_leaf_resolution_cannot_smuggle_an_orchestrating_registration() {
+    async fn unadvertised_leaf_cannot_smuggle_an_orchestrating_registration() {
         let registry = ToolRegistry::from_tool_provider(Arc::new(LazyLeafBatchTool))
-            .expect("lazy leaf source");
+            .expect("unadvertised leaf source");
+        let generation = registry.generation();
         assert!(
-            registry.resolve_manifest("batch").is_some(),
-            "the leaf is learned through the lazy path"
+            registry.resolve_manifest("batch").is_none(),
+            "dispatch lookup cannot admit an unadvertised leaf"
         );
+        assert_eq!(registry.generation(), generation);
         assert!(!registry.is_orchestrating_tool(&tool_id("batch")));
 
         registry
             .upsert_source(Arc::new(OrchestratingToolSource::new(
                 test_batch_orchestrating_tool(),
             )))
-            .expect("the live typed registration supersedes stale snapshot lane state");
+            .expect("the advertised typed registration establishes the live lane");
         assert!(
             registry.is_orchestrating_tool(&tool_id("batch")),
             "only the live typed source can establish the orchestrating lane"
@@ -429,7 +440,7 @@ mod tests {
             .await;
         assert!(
             !leaf_route.is_success(),
-            "the earlier lazy leaf body cannot execute after the typed source wins"
+            "the unadvertised leaf body cannot execute after the typed source is admitted"
         );
         assert!(
             format!("{leaf_route:?}")
@@ -1374,7 +1385,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unknown_manifest_exact_resolves_and_routes_to_owner() {
+    async fn dispatch_manifest_lookup_does_not_mutate_registry_generation() {
+        let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
+        registry
+            .upsert_source(Arc::new(ExactResolvingSource {
+                manifest_resolutions: Arc::new(AtomicUsize::new(0)),
+                contract_resolutions: Arc::new(AtomicUsize::new(0)),
+                executions: Arc::new(AtomicUsize::new(0)),
+                observed_execution_bindings: None,
+            }))
+            .expect("source registered");
+        let generation_before_dispatch = registry.generation();
+
+        let args = json!({});
+        let result = registry
+            .execute(crate::ToolCall {
+                name: "host_only",
+                args: &args,
+                context: &test_attempt_context(),
+            })
+            .await;
+
+        assert!(!result.is_success());
+        assert_eq!(
+            registry.generation(),
+            generation_before_dispatch,
+            "dispatch-path manifest lookup must not mutate registry state"
+        );
+    }
+
+    #[tokio::test]
+    async fn unadmitted_exact_manifest_is_not_dispatchable() {
         let manifest_resolutions = Arc::new(AtomicUsize::new(0));
         let contract_resolutions = Arc::new(AtomicUsize::new(0));
         let executions = Arc::new(AtomicUsize::new(0));
@@ -1392,14 +1433,14 @@ mod tests {
             registry
                 .resolve_manifest("host_only")
                 .map(|manifest| manifest.name),
-            Some("host_only".to_string())
+            None
         );
-        assert_eq!(manifest_resolutions.load(Ordering::SeqCst), 1);
+        assert_eq!(manifest_resolutions.load(Ordering::SeqCst), 0);
 
         let contract = registry.resolve_contract("host_only");
-        assert!(contract.is_some());
-        assert_eq!(manifest_resolutions.load(Ordering::SeqCst), 1);
-        assert_eq!(contract_resolutions.load(Ordering::SeqCst), 1);
+        assert!(contract.is_none());
+        assert_eq!(manifest_resolutions.load(Ordering::SeqCst), 0);
+        assert_eq!(contract_resolutions.load(Ordering::SeqCst), 0);
 
         let context = test_attempt_context();
         let args = json!({});
@@ -1410,9 +1451,8 @@ mod tests {
                 context: &context,
             })
             .await;
-        assert!(result.is_success());
-        assert_eq!(result.value_for_projection(), json!("host_only"));
-        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert!(!result.is_success());
+        assert_eq!(executions.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
@@ -1597,7 +1637,7 @@ mod tests {
     }
 
     #[test]
-    fn lazy_resolution_by_id_returns_existing_manifest_when_resolved_id_is_occupied() {
+    fn unadmitted_alias_lookup_does_not_fall_through_to_source() {
         struct IdOccupiedProvider;
 
         #[async_trait::async_trait]
@@ -1631,13 +1671,18 @@ mod tests {
         let registry =
             ToolRegistry::from_tool_provider(Arc::new(IdOccupiedProvider)).expect("registry");
 
-        let manifest = registry
-            .resolve_manifest_by_id(&tool_id("alias"))
-            .expect("occupied id resolves to the manifest already bound to this source");
-
-        assert_eq!(manifest.id, tool_id("occupied"));
-        assert_eq!(manifest.name, "occupied");
-        assert_eq!(manifest.description, "advertised manifest");
+        assert!(
+            registry
+                .resolve_manifest_by_id(&tool_id("alias"))
+                .is_none()
+        );
+        assert_eq!(
+            registry
+                .resolve_manifest_by_id(&tool_id("occupied"))
+                .expect("advertised id remains indexed")
+                .description,
+            "advertised manifest"
+        );
     }
 
     #[test]
@@ -1927,42 +1972,29 @@ mod tests {
         assert!(!entry.is_member(), "membership remains attached to the id");
     }
 
-    #[tokio::test]
-    async fn orphan_rebinds_lazily_via_resolve_manifest() {
-        // `NamedExactSource` advertises nothing, so reconcile-on-upsert cannot
-        // rebind; only the lazy `resolve_manifest` path can.
-        let source_registry = ToolRegistry::empty();
-        source_registry
-            .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-            .expect("source registered");
-        assert!(source_registry.resolve_manifest("host_only").is_some());
-        let snapshot = source_registry.export_state();
-
+    #[test]
+    fn orphan_rebinds_at_explicit_source_admission() {
+        let snapshot = host_only_snapshot(1);
         let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
         let report = target.restore_state(snapshot).expect("restore");
         assert_eq!(report.orphaned, vec![tool_id("host_only")]);
 
         target
             .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-            .expect("source returns");
+            .expect("source admission re-derives the surface");
         let manifest = target
             .resolve_manifest("host_only")
-            .expect("resolves after the source returned");
+            .expect("admitted source rebound the persisted id");
         assert_eq!(manifest.name, "host_only");
         let entry = target.export_state();
         let entry = entry.get(&tool_id("host_only")).expect("entry kept");
-        assert!(!entry.is_orphaned(), "lazy rebind clears the orphan flag");
+        assert!(!entry.is_orphaned(), "source admission clears the orphan flag");
         assert!(entry.is_member(), "the rebound tool is a catalog member");
     }
 
     #[test]
     fn restore_binds_snapshot_id_from_source_that_advertises_nothing() {
-        let source_registry = ToolRegistry::empty();
-        source_registry
-            .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-            .expect("source registered");
-        assert!(source_registry.resolve_manifest("host_only").is_some());
-        let snapshot = source_registry.export_state();
+        let snapshot = host_only_snapshot(1);
 
         let target = ToolRegistry::empty();
         target
@@ -1980,13 +2012,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hidden_lazy_resolved_tool_is_not_executable_by_id() {
+    async fn hidden_snapshot_tool_is_denied_after_explicit_source_admission() {
         let target = ToolRegistry::empty_with_hidden_tools(
             ["host_only".to_string()].into_iter().collect(),
         );
         target
             .upsert_source(Arc::new(NamedExactSource { id: "exact-a" }))
-            .expect("lazy source registered");
+            .expect("exact source registered");
+        target
+            .restore_state(host_only_snapshot(1))
+            .expect("snapshot id admitted from the exact source");
 
         let result = target
             .execute_by_id(
@@ -1996,12 +2031,12 @@ mod tests {
             )
             .await;
 
-        assert!(!result.is_success(), "hidden lazy id must not execute");
+        assert!(!result.is_success(), "hidden admitted id must not execute");
         assert!(
             !target
                 .export_state()
                 .get(&tool_id("host_only"))
-                .expect("lazy tool recorded")
+                .expect("admitted tool recorded")
                 .is_member()
         );
     }

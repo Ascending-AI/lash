@@ -301,6 +301,9 @@ impl ToolRegistry {
     }
 
     pub(crate) fn refresh_sources(&self) -> Result<u64, ReconfigureError> {
+        // This is the explicit admission seam for live surface changes. Source
+        // advertisements are enumerated and reconciled here; dispatch lookup
+        // only reads the admitted surface.
         let sources = self
             .sources
             .read_recover()
