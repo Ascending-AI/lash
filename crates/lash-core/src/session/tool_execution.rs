@@ -289,6 +289,8 @@ fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
         identity.string(tool_id.as_str());
         identity.bytes(&crate::identity_json::payload_leaf(args));
         identity.optional(execution_grant.as_deref(), |identity, grant| {
+            // This exhaustive destructure is the guard: adding a grant field must fail
+            // compilation here until its batch-identity inclusion is ruled in or out.
             let crate::ToolExecutionGrant {
                 manifest,
                 contract: _,
@@ -1039,7 +1041,7 @@ impl RuntimeExecutionContext<'_> {
         parent_invocation: Option<crate::RuntimeInvocation>,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     ) -> CompletedProtocolToolCall {
-        let name = grant.manifest.name.clone();
+        let name = grant.manifest().name.clone();
         let _ = self
             .dispatch
             .event_tx

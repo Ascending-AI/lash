@@ -208,7 +208,8 @@ impl lash_core::ToolProvider for FrameStateDeferredTools {
         args: &serde_json::Value,
         context: &lash_core::AttemptContext<'_>,
     ) -> lash_core::ToolOutcome {
-        self.execute_by_id(&grant.manifest.id, args, context).await
+        self.execute_by_id(&grant.manifest().id, args, context)
+            .await
     }
 }
 

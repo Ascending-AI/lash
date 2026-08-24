@@ -13,7 +13,7 @@ pub(crate) fn resolve_retry_policy(
     execution_grant: Option<&crate::ToolExecutionGrant>,
 ) -> ToolRetryPolicy {
     execution_grant
-        .map(|grant| grant.manifest.retry_policy)
+        .map(|grant| grant.manifest().retry_policy)
         .or_else(|| {
             super::preparation::resolve_callable_manifest_by_id(context, tool_id)
                 .map(|manifest| manifest.retry_policy)
@@ -65,7 +65,7 @@ pub(crate) async fn execute_once<'run>(
     // provider's prepared call carries: the grant is the authority that
     // admitted the call, so it is the producer the attachment policy judges.
     let producer_name = match grant {
-        Some(grant) => grant.manifest.name.as_str(),
+        Some(grant) => grant.manifest().name.as_str(),
         None => prepared.tool_name.as_str(),
     };
     normalize_attempt_result_attachments(context, producer_name, &mut attempt_result).await;

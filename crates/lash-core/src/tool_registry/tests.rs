@@ -1496,10 +1496,10 @@ mod tests {
             .prepare_granted_tool_call(
                 &grant,
                 crate::ToolPrepareCall {
-                    tool_id: grant.manifest.id.clone(),
+                    tool_id: grant.manifest().id.clone(),
                     pending: crate::sansio::PendingToolCall {
                         call_id: "grant-call".to_string(),
-                        tool_name: grant.manifest.name.clone(),
+                        tool_name: grant.manifest().name.clone(),
                         args: json!({}),
                         replay: None,
                     },
@@ -1508,7 +1508,7 @@ mod tests {
             )
             .await
             .expect("grant prepare");
-        assert_eq!(prepared.tool_id, grant.manifest.id);
+        assert_eq!(prepared.tool_id, grant.manifest().id);
 
         let context = crate::testing::mock_attempt_context_from(
             &test_tool_context().with_tool_execution_binding(grant.execution_binding.clone()),

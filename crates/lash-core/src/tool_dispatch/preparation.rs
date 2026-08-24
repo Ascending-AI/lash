@@ -115,11 +115,11 @@ pub(crate) async fn prepare_granted_tool_call_with_context(
     mut pending: crate::sansio::PendingToolCall,
     tool_call_id: Option<String>,
 ) -> ToolPreparationOutcome {
-    pending.tool_name = grant.manifest.name.clone();
+    pending.tool_name = grant.manifest().name.clone();
     prepare_authorized_tool_call_with_context(
         context,
-        grant.manifest.clone(),
-        Arc::new((*grant.contract).clone()),
+        grant.manifest().clone(),
+        Arc::new(grant.contract().clone()),
         pending,
         tool_call_id,
         Some(grant),

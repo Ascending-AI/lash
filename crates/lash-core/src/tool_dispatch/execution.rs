@@ -52,7 +52,7 @@ impl<'grant> AttemptAuthority<'grant> {
     pub(super) fn manifest(&self) -> &ToolManifest {
         match self {
             Self::Catalog(manifest) => manifest,
-            Self::Granted(grant) => &grant.manifest,
+            Self::Granted(grant) => grant.manifest(),
         }
     }
 
@@ -75,7 +75,7 @@ impl<'grant> AttemptAuthority<'grant> {
         let Self::Granted(grant) = self else {
             return Ok(());
         };
-        if prepared.tool_id == grant.manifest.id {
+        if prepared.tool_id == grant.manifest().id {
             return Ok(());
         }
         Err(runtime_failure(
@@ -83,7 +83,8 @@ impl<'grant> AttemptAuthority<'grant> {
             "granted_tool_id_mismatch",
             format!(
                 "Prepared granted tool id `{}` does not match grant id `{}`",
-                prepared.tool_id, grant.manifest.id
+                prepared.tool_id,
+                grant.manifest().id
             ),
         ))
     }

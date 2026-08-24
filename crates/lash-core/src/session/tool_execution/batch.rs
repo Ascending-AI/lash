@@ -317,7 +317,7 @@ impl RuntimeExecutionContext<'_> {
             let preparation = if let Some(grant) = call.execution_grant.as_deref().cloned() {
                 let pending = crate::sansio::PendingToolCall {
                     call_id: call.id.clone(),
-                    tool_name: grant.manifest.name.clone(),
+                    tool_name: grant.manifest().name.clone(),
                     args: call.args,
                     replay: None,
                 };
