@@ -5669,11 +5669,11 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
 
 #[async_trait::async_trait]
 impl lash_core::QueuedWorkStore for CommitRetryStore {
-    async fn enqueue_queued_work(
+    async fn enqueue_queued_work_with_outcome(
         &self,
         batch: lash_core::runtime::QueuedWorkBatchDraft,
-    ) -> Result<lash_core::runtime::QueuedWorkBatch, lash_core::StoreError> {
-        self.inner.enqueue_queued_work(batch).await
+    ) -> Result<lash_core::runtime::QueuedWorkEnqueueOutcome, lash_core::StoreError> {
+        self.inner.enqueue_queued_work_with_outcome(batch).await
     }
 
     async fn claim_leading_ready_session_command(

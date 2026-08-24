@@ -250,37 +250,6 @@ async fn enqueue_queued_work_with_outcome_tx(
     } else {
         None
     };
-    if let Some(source_key) = batch.source_key.as_deref() {
-        let existing_id: Option<String> = sqlx::query_scalar(
-            "SELECT batch_id FROM lash_queued_work_batches
-             WHERE session_id = $1 AND source_key = $2",
-        )
-        .bind(&batch.session_id)
-        .bind(source_key)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if let Some(batch_id) = existing_id {
-            let existing = load_queued_batch(tx, &batch_id).await?.ok_or_else(|| {
-                StoreError::Backend("queued work source row disappeared".to_string())
-            })?;
-            return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
-        }
-    }
-    let allocation_floor = allocation_floor
-        .map(|value| u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
-        .transpose()?;
-    if let (Some(wake_source), Some(allocation_floor)) =
-        (batch.process_wake_source.as_ref(), allocation_floor)
-        && wake_source.sequence <= allocation_floor
-    {
-        return Err(StoreError::ProcessWakeSequenceRewound {
-            session_id: batch.session_id.clone(),
-            process_id: wake_source.process_id.clone(),
-            sequence: wake_source.sequence,
-            allocation_floor,
-        });
-    }
     let enqueue_seq: i64 = sqlx::query_scalar(
         "SELECT nextval(pg_get_serial_sequence(
             'lash_queued_work_batches',
@@ -297,12 +266,14 @@ async fn enqueue_queued_work_with_outcome_tx(
         now,
         Some(enqueue_seq_u64),
     );
-    sqlx::query(
+    let inserted_id: Option<String> = sqlx::query_scalar(
         "INSERT INTO lash_queued_work_batches (
             enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
             authority_json, merge_key, available_at_ms, enqueued_at_ms
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (session_id, source_key) DO NOTHING
+         RETURNING batch_id",
     )
     .bind(enqueue_seq)
     .bind(&batch_id)
@@ -314,9 +285,45 @@ async fn enqueue_queued_work_with_outcome_tx(
     .bind(&batch.merge_key)
     .bind(sql_available_at_ms)
     .bind(now as i64)
-    .execute(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
+    let Some(inserted_id) = inserted_id else {
+        let source_key = batch.source_key.as_deref().ok_or_else(|| {
+            StoreError::Backend("queued work insert without source key was ignored".to_string())
+        })?;
+        let existing_id: Option<String> = sqlx::query_scalar(
+            "SELECT batch_id FROM lash_queued_work_batches
+             WHERE session_id = $1 AND source_key = $2",
+        )
+        .bind(&batch.session_id)
+        .bind(source_key)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        let existing_id = existing_id.ok_or_else(|| {
+            StoreError::Backend("queued work conflict row disappeared".to_string())
+        })?;
+        let existing = load_queued_batch(tx, &existing_id)
+            .await?
+            .ok_or_else(|| StoreError::Backend("queued work source row disappeared".to_string()))?;
+        return Ok(QueuedWorkEnqueueOutcome::Existing(existing));
+    };
+    debug_assert_eq!(inserted_id, batch_id);
+    let allocation_floor = allocation_floor
+        .map(|value| u64_from_sql("WakeAllocationFloor", "allocation_floor", value))
+        .transpose()?;
+    if let (Some(wake_source), Some(allocation_floor)) =
+        (batch.process_wake_source.as_ref(), allocation_floor)
+        && wake_source.sequence <= allocation_floor
+    {
+        return Err(StoreError::ProcessWakeSequenceRewound {
+            session_id: batch.session_id.clone(),
+            process_id: wake_source.process_id.clone(),
+            sequence: wake_source.sequence,
+            allocation_floor,
+        });
+    }
     for (index, payload) in batch.payloads.iter().enumerate() {
         let item_id = format!("{batch_id}:item:{index}");
         sqlx::query(
