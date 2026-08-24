@@ -184,13 +184,22 @@ swc_ecma_parser = { version = "=44.0.0", default-features = false, features = ["
 lto = "thin"
 strip = true
 
-# Third-party dependencies build optimized in debug builds; first-party workspace
-# crates stay at opt-level 0 so local iteration keeps its fast rebuild and its
-# debuggability. Test suites that spend their time inside dependency code
-# (SQLite, serde, regex, the async runtime) pay dependency compilation once
-# and read back the difference on every subsequent test run.
-[profile.dev.package."*"]
-opt-level = 2
+# File and line information keeps panic backtraces useful without paying for
+# full local-variable DWARF across the workspace. The test profile inherits
+# this setting. For a one-off full-debug build, set
+# `CARGO_PROFILE_DEV_DEBUG=full` (or `CARGO_PROFILE_TEST_DEBUG=full` for tests).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package]
+# These crates execute inside the proc-macro host while the workspace compiles.
+proc-macro2 = { opt-level = 2 }
+quote = { opt-level = 2 }
+syn = { opt-level = 2 }
+
+# Snapshot formatting and diffing are test hot paths.
+insta = { opt-level = 3 }
+similar = { opt-level = 3 }
 
 # `lash-regress` is maintained third-party code whose upstream test suite
 # participates in workspace gates. Preserve dependency-like optimization for
