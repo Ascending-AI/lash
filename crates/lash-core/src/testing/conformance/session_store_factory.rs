@@ -64,6 +64,111 @@ pub async fn session_store_factory<F>(
     session_store_factory_delete_fences_stale_handles(make()).await;
 }
 
+/// Hold a backend to the read-only session-view contract.
+///
+/// The factory must expose committed history, tree, and usage while another
+/// handle owns the live execution lease. Reading must leave that writer's
+/// authority intact, and deleting the session must produce the same absent
+/// read disposition as the ordinary live-open surface.
+pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionStoreFactory>) {
+    const SESSION_ID: &str = "read-only-session-view";
+    let request = session_store_request(
+        SESSION_ID,
+        "read-only-session-model",
+        crate::SessionRelation::Root,
+    );
+    assert!(
+        factory
+            .read_session(SESSION_ID)
+            .await
+            .expect("read a missing session")
+            .is_none(),
+        "a missing session has no read view"
+    );
+
+    let writer = factory
+        .create_store(&request)
+        .await
+        .expect("create read-session writer");
+    let mut state = crate::RuntimeSessionState {
+        session_id: SESSION_ID.to_string(),
+        token_usage: crate::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 7,
+            ..Default::default()
+        },
+        ..crate::RuntimeSessionState::new(request.policy.clone())
+    };
+    state.append_active_conversation_messages(&[crate::Message {
+        id: "read-only-session-message".to_string(),
+        role: crate::MessageRole::User,
+        parts: vec![crate::Part::text(
+            "read-only-session-message.p0".to_string(),
+            "committed before inspection".to_string(),
+            None,
+        )]
+        .into(),
+        origin: None,
+    }]);
+    writer
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit readable session state");
+
+    let owner = crate::LeaseOwnerIdentity::opaque(
+        "read-only-session-writer",
+        "read-only-session-writer:incarnation",
+    );
+    let held = writer
+        .try_claim_session_execution_lease(SESSION_ID, &owner, "live-writer", 60_000)
+        .await
+        .expect("claim live writer lease")
+        .acquired()
+        .expect("live writer owns the session");
+
+    let view = factory
+        .read_session(SESSION_ID)
+        .await
+        .expect("read alongside live writer")
+        .expect("committed session has a read view");
+    assert_eq!(view.session_id(), SESSION_ID);
+    assert_eq!(view.messages().len(), 1, "history is projected");
+    assert_eq!(view.message_tree().len(), 1, "tree is projected");
+    assert_eq!(
+        view.token_usage(),
+        &crate::TokenUsage {
+            input_tokens: 11,
+            output_tokens: 7,
+            ..Default::default()
+        },
+        "usage is projected"
+    );
+
+    let renewed = writer
+        .renew_session_execution_lease(&held.fence(), 60_000)
+        .await
+        .expect("reader leaves writer authority usable");
+    assert_eq!(renewed.lease_token, held.lease_token);
+    assert_eq!(renewed.fencing_token, held.fencing_token);
+    writer
+        .release_session_execution_lease(&renewed.completion())
+        .await
+        .expect("release live writer after inspection");
+
+    factory
+        .delete_session(SESSION_ID)
+        .await
+        .expect("delete read-session fixture");
+    assert!(
+        factory
+            .read_session(SESSION_ID)
+            .await
+            .expect("read deleted session disposition")
+            .is_none(),
+        "a deleted session is absent from both live-open and read-only surfaces"
+    );
+}
+
 /// Assert that the first admission through a fresh session handle creates the
 /// session's durable metadata.
 ///

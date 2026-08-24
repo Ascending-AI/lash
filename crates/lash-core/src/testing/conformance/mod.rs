@@ -210,6 +210,12 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_session_read_view_conformance() {
+        session_store_factory_read_session(Arc::new(crate::InMemorySessionStoreFactory::new()))
+            .await;
+    }
+
+    #[tokio::test]
     async fn in_memory_leafless_session_ignores_populated_sibling_catalog() {
         let factory = crate::InMemorySessionStoreFactory::new();
         let leafless_request = session_store_request(

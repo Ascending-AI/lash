@@ -28,6 +28,7 @@ fn model_selection_requires_model_and_variant_together() {
     t.compile_fail("tests/ui/attempt_context_has_no_trigger_commands.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_process_event_commands.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_child_trace_emission.rs");
+    t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_announcement_requires_a_replay_key.rs");
     t.pass("tests/ui/facade_boundary_types_are_public.rs");

@@ -42,6 +42,10 @@ pub(crate) use session_manager::{
     stage_token_ledger_shared,
 };
 mod session_ops;
+mod session_store_factory_types;
+pub use session_store_factory_types::{
+    ForkPoint, ForkSessionReceipt, ForkSessionRequest, SessionStoreCreateRequest,
+};
 pub(crate) mod state;
 #[cfg(test)]
 pub(crate) mod tests;
@@ -1391,57 +1395,6 @@ enum RuntimeStreamEvent {
     Turn(TurnActivity),
 }
 
-#[derive(Clone)]
-pub struct SessionStoreCreateRequest {
-    pub session_id: String,
-    pub relation: SessionRelation,
-    pub policy: SessionPolicy,
-}
-
-impl SessionStoreCreateRequest {
-    /// Exposes the parent session ID to session-store factories for child and fork relations,
-    /// returning `None` for a root session.
-    pub fn parent_session_id(&self) -> Option<&str> {
-        self.relation.parent_session_id()
-    }
-}
-
-/// A durable turn boundary whose continuation checkpoint is currently retained.
-///
-/// Past turn boundaries are not retained by default. A point remains available
-/// while explicitly pinned or while it is the leaf of at least one live
-/// session head.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ForkPoint {
-    pub node_id: String,
-    pub checkpoint_ref: crate::BlobRef,
-    /// Provenance of the node, which may name a session that has since been
-    /// deleted and is not required to remain readable for a fork.
-    pub source_session_id: String,
-    /// Provider and model captured by the nearest retained frame boundary.
-    pub config: crate::PersistedSessionConfig,
-    pub pinned: bool,
-}
-
-/// Create a new session head at retained history without writing graph nodes.
-#[derive(Clone, Debug)]
-pub struct ForkSessionRequest {
-    pub session_id: String,
-    pub node_id: String,
-    pub relation: SessionRelation,
-    pub policy: SessionPolicy,
-}
-
-/// Durable identity returned after a zero-node fork.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ForkSessionReceipt {
-    pub session_id: String,
-    pub node_id: String,
-    /// Session that originally wrote `node_id`. This is process-observer
-    /// provenance, not a required source-session argument to the fork.
-    pub source_session_id: String,
-}
-
 #[async_trait::async_trait]
 pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     async fn create_store(
@@ -1454,6 +1407,28 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         _request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
         Ok(None)
+    }
+
+    /// Read one settled session without acquiring its execution lease or
+    /// exposing a persistence capability that can mutate it.
+    ///
+    /// The returned value is the same canonical [`crate::SessionReadView`]
+    /// used by a live session. Implementations must not create, admit, bind,
+    /// migrate, claim, renew, release, or otherwise write while answering this
+    /// call. Factories without a read-only backend seam fail explicitly rather
+    /// than falling back to [`Self::open_existing_store`].
+    ///
+    /// # Integrator class
+    ///
+    /// Store and durable-substrate implementors provide this capability for
+    /// inspection hosts that must coexist with a live writer.
+    async fn read_session(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<crate::SessionReadView>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "read_session",
+        })
     }
 
     /// Cheap durable read used to reject an idle queued-work notification

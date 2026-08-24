@@ -2574,6 +2574,17 @@ usage = "examples/agent-workbench/src/main_sections/tests.rs:433#.processes()"
 reason = "The recorded fluent call executes in the example, but its former assertion anchor observes an unrelated callback or match guard. Add an assertion on this call's result or externally meaningful outcome before restoring used-asserted."
 
 [[api]]
+symbol = "lash::LashCore::read_session"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::LashCore::read_session"]
+area = "observation-admin"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/fig1922_read_session.rs:5#core.read_session(session_id).await"
+assertion = "examples/docs-snippets/src/fig1922_read_session.rs:80#assert_eq!(view.session_id(), SESSION_ID);"
+reason = "The executable docs example reads committed state without opening a live session and asserts the returned canonical session identity, history, and tree."
+
+[[api]]
 symbol = "lash::LashCore::resume"
 kind = "function"
 availability = "default+all-features"
@@ -18290,6 +18301,15 @@ aliases = ["lash_core::SessionStoreFactory::open_existing_store"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
+
+[[api]]
+symbol = "lash::persistence::SessionStoreFactory::read_session"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::SessionStoreFactory::read_session"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: custom durable store implementers provide the fail-closed read-only projection used by LashCore::read_session; bundled examples use repository factories."
 
 [[api]]
 symbol = "lash::persistence::SessionStoreFactory::pin"
@@ -56345,6 +56365,14 @@ disposition = "unused-add"
 reason = "Add lash::testing::conformance::session_store_factory_delete_fences_stale_handles to the agent-service persistence setup example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::testing::conformance::session_store_factory_read_session"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete host class: conformance-suite embedders (ADR 0051). The SQLite and in-memory backends run this contract to prove a read view coexists with a live writer and preserves its lease authority."
+
+[[api]]
 symbol = "lash::testing::conformance::signed_counter_write_domain_conformance"
 kind = "function"
 availability = "all-features"
@@ -67186,7 +67214,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:619#.retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))"
+usage = "crates/lash/src/core.rs:640#.retire_effect_journal(lash_core::EffectJournalRetirement::session(&session_id))"
 
 [[api]]
 symbol = "lash_core::ExecRequest"
@@ -67576,7 +67604,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:430#lash_core::ObserverInheritance::All,"
+usage = "crates/lash/src/core.rs:451#lash_core::ObserverInheritance::All,"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::All"
@@ -67584,7 +67612,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:430#lash_core::ObserverInheritance::All,"
+usage = "crates/lash/src/core.rs:451#lash_core::ObserverInheritance::All,"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::None"
@@ -67592,7 +67620,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:455#(lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),"
+usage = "crates/lash/src/core.rs:476#(lash_core::ObserverInheritance::None, _) | (_, None) => Vec::new(),"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::Only"
@@ -67600,7 +67628,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:462#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
+usage = "crates/lash/src/core.rs:483#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
 
 [[api]]
 symbol = "lash_core::ObserverInheritance::Only::0"
@@ -67608,7 +67636,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:462#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
+usage = "crates/lash/src/core.rs:483#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
 
 [[api]]
 symbol = "lash_core::Part"
@@ -71300,7 +71328,7 @@ kind = "constant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:997#.unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);"
+usage = "crates/lash/src/core.rs:1018#.unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);"
 
 [[api]]
 symbol = "lash_core::facade_support::EffectId"
@@ -73084,7 +73112,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:534#match scoped_effect_controller.execution_scope() {"
+usage = "crates/lash/src/core.rs:555#match scoped_effect_controller.execution_scope() {"
 
 [[api]]
 symbol = "lash_core::facade_support::SelectedQueuedWorkBatchSatisfaction"
@@ -73999,7 +74027,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1047#Arc::new(facade_support::SingleProviderResolver::new(provider));"
+usage = "crates/lash/src/core.rs:1068#Arc::new(facade_support::SingleProviderResolver::new(provider));"
 
 [[api]]
 symbol = "lash_core::facade_support::SingleProviderResolver::new"
@@ -74007,7 +74035,7 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1047#Arc::new(facade_support::SingleProviderResolver::new(provider));"
+usage = "crates/lash/src/core.rs:1068#Arc::new(facade_support::SingleProviderResolver::new(provider));"
 
 [[api]]
 symbol = "lash::plugins::SessionReadyContext"
@@ -74665,7 +74693,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/core.rs:1079#lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;"
+usage = "crates/lash/src/core.rs:1100#lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;"
 
 [[api]]
 symbol = "lash_core::facade_support::build_tool_catalog"
@@ -93720,7 +93748,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:528#Err(lash_core::MaintenanceFailure::failed_before_any_work("
+usage = "crates/lash-perf/src/runtime_perf/store.rs:540#Err(lash_core::MaintenanceFailure::failed_before_any_work("
 reason = "FIG-1505: `lash-perf`'s artifact store reports its unsupported session deletion through this type rather than an empty report, so the consumer is another workspace crate rather than an example. Host-facing projection: `lash::persistence::MaintenanceFailure`."
 
 [[api]]
@@ -93769,7 +93797,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed_before_any_work"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/store.rs:528#Err(lash_core::MaintenanceFailure::failed_before_any_work("
+usage = "crates/lash-perf/src/runtime_perf/store.rs:540#Err(lash_core::MaintenanceFailure::failed_before_any_work("
 reason = "FIG-1505: every backend that stops before reclaiming anything constructs its failure through this; the consumers are backend crates rather than examples."
 
 [[api]]

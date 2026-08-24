@@ -637,6 +637,34 @@ impl SqliteSessionStoreFactory {
     pub fn catalog_path(&self) -> PathBuf {
         self.root.join(DURABLE_CORE_DB_FILE)
     }
+
+    /// Open and project one committed session through SQLite's read-only mode.
+    ///
+    /// The raw SQLite handle stays private so callers receive only the
+    /// canonical [`lash_core::SessionReadView`], which has no mutating store
+    /// operations. This path does not mutate durable session, lease, claim, or
+    /// graph state. SQLite may materialize its `-wal` and `-shm` wal-index
+    /// sidecars while reading a cold WAL catalog. Consequently a catalog on
+    /// read-only media is inspectable only when the required sidecars already
+    /// exist; otherwise the SQLite failure surfaces as
+    /// [`lash_core::StoreError::Backend`]. `immutable=1` is deliberately not
+    /// used because another process may still hold a writer.
+    pub async fn open_read_only(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
+        lash_core::store::validate_session_id(session_id)?;
+        let path = self.catalog_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let store = Store::open_bound_readonly(&path, session_id)
+            .await
+            .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+        Ok(lash_core::store::load_persisted_session_state(&store)
+            .await?
+            .map(|state| state.read_view()))
+    }
 }
 
 #[async_trait::async_trait]
@@ -722,6 +750,13 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             return Ok(None);
         }
         Ok(Some(store as Arc<dyn RuntimePersistence>))
+    }
+
+    async fn read_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
+        self.open_read_only(session_id).await
     }
 
     async fn has_claimable_queued_work(

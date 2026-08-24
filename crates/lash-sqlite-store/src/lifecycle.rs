@@ -161,9 +161,8 @@ impl Store {
         })
     }
 
-    /// Open the local database read-only. Used by export/resume call sites that
-    /// must never mutate the source.
-    pub async fn open_readonly(path: &Path) -> tokio_rusqlite::Result<Self> {
+    /// Open the local database read-only for internal read projections.
+    pub(crate) async fn open_readonly(path: &Path) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_readonly(path).await?;
         Ok(Self {
             conn,
@@ -178,6 +177,18 @@ impl Store {
             #[cfg(test)]
             checkpoint_write_transaction_count: AtomicUsize::new(0),
         })
+    }
+
+    pub(crate) async fn open_bound_readonly(
+        path: &Path,
+        session_id: &str,
+    ) -> tokio_rusqlite::Result<Self> {
+        let store = Self::open_readonly(path).await?;
+        store
+            .session_id
+            .set(session_id.to_string())
+            .expect("new read-only SQLite store binding is unset");
+        Ok(store)
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {

@@ -153,6 +153,19 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
+    async fn read_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::SessionReadView>, crate::StoreError> {
+        let store = self.stores.lock_recover().get(session_id).cloned();
+        let Some(store) = store else {
+            return Ok(None);
+        };
+        Ok(crate::store::load_persisted_session_state(store.as_ref())
+            .await?
+            .map(|state| state.read_view()))
+    }
+
     async fn has_claimable_queued_work(
         &self,
         request: &SessionStoreCreateRequest,
