@@ -46,7 +46,7 @@ use restate_sdk::prelude::Endpoint;
 use restate_sdk::serde::Json;
 use restate_sdk::service::Discoverable;
 use serde::{Serialize, de::DeserializeOwned};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -4021,6 +4021,235 @@ async fn fig1631_turn_cancelled_sleep_leaves_gate_retirement_to_the_index() {
     assert_eq!(
         restate_output_json::<String>(&cancelled).as_deref(),
         Some("runtime_effect_sleep_cancelled")
+    );
+}
+
+fn fig1943_put_varint(buf: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        buf.push(((value as u8) & 0x7f) | 0x80);
+        value >>= 7;
+    }
+    buf.push(value as u8);
+}
+
+fn fig1943_put_len_field(buf: &mut Vec<u8>, field: u64, value: &[u8]) {
+    fig1943_put_varint(buf, (field << 3) | 2);
+    fig1943_put_varint(buf, value.len() as u64);
+    buf.extend_from_slice(value);
+}
+
+fn fig1943_encode_message(message_type: u16, payload: &[u8]) -> Bytes {
+    let header = ((message_type as u64) << 48) | payload.len() as u64;
+    let mut encoded = Vec::with_capacity(8 + payload.len());
+    encoded.extend_from_slice(&header.to_be_bytes());
+    encoded.extend_from_slice(payload);
+    Bytes::from(encoded)
+}
+
+fn fig1943_invocation_with_state<T: Serialize>(
+    object_key: &str,
+    input: &T,
+    state: &BTreeMap<String, Vec<u8>>,
+) -> Bytes {
+    let mut start = Vec::new();
+    fig1943_put_len_field(&mut start, 1, object_key.as_bytes());
+    fig1943_put_len_field(&mut start, 2, object_key.as_bytes());
+    fig1943_put_varint(&mut start, 3 << 3);
+    fig1943_put_varint(&mut start, 1);
+    for (key, value) in state {
+        let mut entry = Vec::new();
+        fig1943_put_len_field(&mut entry, 1, key.as_bytes());
+        fig1943_put_len_field(&mut entry, 2, value);
+        fig1943_put_len_field(&mut start, 4, &entry);
+    }
+    fig1943_put_len_field(&mut start, 6, object_key.as_bytes());
+
+    let input = serde_json::to_vec(input).expect("serialize FIG-1943 handler input");
+    let mut input_value = Vec::new();
+    fig1943_put_len_field(&mut input_value, 1, &input);
+    let mut input_command = Vec::new();
+    fig1943_put_len_field(&mut input_command, 14, &input_value);
+
+    let start = fig1943_encode_message(0x0000, &start);
+    let input = fig1943_encode_message(0x0400, &input_command);
+    let mut body = Vec::with_capacity(start.len() + input.len());
+    body.extend_from_slice(&start);
+    body.extend_from_slice(&input);
+    Bytes::from(body)
+}
+
+fn fig1943_decode_varint(input: &[u8], cursor: &mut usize) -> Option<u64> {
+    let mut value = 0_u64;
+    let mut shift = 0;
+    loop {
+        let byte = *input.get(*cursor)?;
+        *cursor += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
+        }
+    }
+}
+
+fn fig1943_len_field(input: &[u8], target: u64) -> Option<&[u8]> {
+    let mut cursor = 0;
+    while cursor < input.len() {
+        let key = fig1943_decode_varint(input, &mut cursor)?;
+        match key & 7 {
+            0 => {
+                let _ = fig1943_decode_varint(input, &mut cursor)?;
+            }
+            2 => {
+                let len = usize::try_from(fig1943_decode_varint(input, &mut cursor)?).ok()?;
+                let end = cursor.checked_add(len)?;
+                let value = input.get(cursor..end)?;
+                if key >> 3 == target {
+                    return Some(value);
+                }
+                cursor = end;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn fig1943_apply_state_commands(state: &mut BTreeMap<String, Vec<u8>>, output: &[u8]) {
+    let mut cursor = 0;
+    while cursor < output.len() {
+        let header = u64::from_be_bytes(
+            output[cursor..cursor + 8]
+                .try_into()
+                .expect("FIG-1943 Restate frame header"),
+        );
+        let message_type = (header >> 48) as u16;
+        let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF)
+            .expect("FIG-1943 Restate frame payload length");
+        let frame_end = cursor + 8 + payload_len;
+        let payload = &output[cursor + 8..frame_end];
+        match message_type {
+            0x0403 => {
+                let key = String::from_utf8(
+                    fig1943_len_field(payload, 1)
+                        .expect("FIG-1943 set-state key")
+                        .to_vec(),
+                )
+                .expect("FIG-1943 UTF-8 state key");
+                let value = fig1943_len_field(
+                    fig1943_len_field(payload, 3).expect("FIG-1943 set-state value wrapper"),
+                    1,
+                )
+                .expect("FIG-1943 set-state value")
+                .to_vec();
+                state.insert(key, value);
+            }
+            0x0404 => {
+                let key = String::from_utf8(
+                    fig1943_len_field(payload, 1)
+                        .expect("FIG-1943 clear-state key")
+                        .to_vec(),
+                )
+                .expect("FIG-1943 UTF-8 state key");
+                state.remove(&key);
+            }
+            0x0405 => state.clear(),
+            _ => {}
+        }
+        cursor = frame_end;
+    }
+}
+
+#[tokio::test]
+async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitIndexImpl.serve())
+        .build();
+    let object_key = "fig1943-session";
+    let address = RestateDurableWaitAddress {
+        workflow_key: "fig1943-tool-wait".to_string(),
+        session_id: Some(object_key.to_string()),
+        classification: RestateDurableWaitClassification::DurableWait,
+    };
+    let mut state = BTreeMap::new();
+
+    let registered = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "register",
+        fig1943_invocation_with_state(
+            object_key,
+            &RestateDurableWaitIndexRequest {
+                address: address.clone(),
+            },
+            &state,
+        ),
+    )
+    .await
+    .expect("register the FIG-1943 wait");
+    assert_eq!(
+        restate_output_json::<RestateDurableWaitRegistration>(&registered),
+        Some(RestateDurableWaitRegistration::Registered)
+    );
+    fig1943_apply_state_commands(&mut state, &registered);
+
+    let terminal = Resolution::Ok(serde_json::json!({ "tool_result": "complete" }));
+    let resolved = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "resolve",
+        fig1943_invocation_with_state(
+            object_key,
+            &RestateDurableWaitResolveRequest {
+                address: address.clone(),
+                resolution: terminal.clone(),
+            },
+            &state,
+        ),
+        vec![serde_json::to_value(ResolveOutcome::Accepted).expect("serialize accepted verdict")],
+    )
+    .await
+    .expect("resolve the FIG-1943 wait with a value");
+    assert_eq!(
+        restate_output_json::<ResolveOutcome>(&resolved),
+        Some(ResolveOutcome::Accepted)
+    );
+    fig1943_apply_state_commands(&mut state, &resolved);
+
+    let cancelled = invoke_endpoint_body_with_json_call_responses(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "cancel_all",
+        fig1943_invocation_with_state(object_key, &(), &state),
+        vec![
+            serde_json::to_value(ResolveOutcome::AlreadyResolved {
+                terminal: terminal.clone(),
+            })
+            .expect("serialize already-resolved verdict"),
+        ],
+    )
+    .await
+    .expect("cancel all FIG-1943 session waits");
+    fig1943_apply_state_commands(&mut state, &cancelled);
+
+    let reregistered = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "register",
+        fig1943_invocation_with_state(
+            object_key,
+            &RestateDurableWaitIndexRequest { address },
+            &state,
+        ),
+    )
+    .await
+    .expect("re-register the already-resolved FIG-1943 wait");
+    assert_eq!(
+        restate_output_json::<RestateDurableWaitRegistration>(&reregistered),
+        Some(RestateDurableWaitRegistration::Resolved(terminal))
     );
 }
 

@@ -553,18 +553,37 @@ async fn load_indexed_waits(
 async fn resolve_indexed_waits(
     ctx: &ObjectContext<'_>,
     waits: Vec<RestateDurableWaitAddress>,
+    mirror_outcomes: bool,
 ) -> HandlerResult<()> {
     for address in waits {
         let workflow_key = address.workflow_key.clone();
+        let resolution = Resolution::Cancelled;
         let resolve = ctx
             .workflow_client::<LashDurableWaitWorkflowClient>(workflow_key)
             .resolve(Json(RestateDurableWaitResolveRequest {
-                address,
-                resolution: Resolution::Cancelled,
+                address: address.clone(),
+                resolution: resolution.clone(),
             }));
-        let _ = resolve.call().await?;
+        let Json(outcome) = resolve.call().await?;
+        if mirror_outcomes {
+            mirror_resolve_outcome(ctx, &address, resolution, &outcome);
+        }
     }
     Ok(())
+}
+
+fn mirror_resolve_outcome(
+    ctx: &ObjectContext<'_>,
+    address: &RestateDurableWaitAddress,
+    accepted_terminal: Resolution,
+    outcome: &ResolveOutcome,
+) {
+    let terminal = match outcome {
+        ResolveOutcome::AlreadyResolved { terminal } => terminal.clone(),
+        ResolveOutcome::Accepted => accepted_terminal,
+        ResolveOutcome::UnknownOrRevoked => return,
+    };
+    ctx.set(&durable_wait_index_resolution_key(address), Json(terminal));
 }
 
 pub(crate) fn split_cancellable_waits(
@@ -689,12 +708,10 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             .workflow_client::<LashDurableWaitWorkflowClient>(request.address.workflow_key.clone())
             .resolve(Json(request.clone()));
         let Json(outcome) = resolve.call().await?;
-        let terminal = match &outcome {
-            ResolveOutcome::AlreadyResolved { terminal } => terminal.clone(),
-            ResolveOutcome::Accepted => resolution,
-            ResolveOutcome::UnknownOrRevoked => return Ok(Json(outcome)),
-        };
-        ctx.set(&resolution_key, Json(terminal.clone()));
+        mirror_resolve_outcome(&ctx, &request.address, resolution, &outcome);
+        if outcome == ResolveOutcome::UnknownOrRevoked {
+            return Ok(Json(outcome));
+        }
         let mut retained = Vec::with_capacity(metadata.awakeables.len());
         for entry in std::mem::take(&mut metadata.awakeables) {
             if entry.address == request.address {
@@ -713,12 +730,8 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         let (waits, _controls) = split_cancellable_waits(load_indexed_waits(&ctx).await?);
         for address in &waits {
             ctx.clear(&durable_wait_index_state_key(address));
-            ctx.set(
-                &durable_wait_index_resolution_key(address),
-                Json(Resolution::Cancelled),
-            );
         }
-        resolve_indexed_waits(&ctx, waits).await?;
+        resolve_indexed_waits(&ctx, waits, true).await?;
         Ok(Json(()))
     }
 
@@ -736,7 +749,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         for entry in awakeables {
             revoke_durable_wait_awakeable(&ctx, &entry);
         }
-        resolve_indexed_waits(&ctx, waits).await?;
+        resolve_indexed_waits(&ctx, waits, false).await?;
         Ok(Json(()))
     }
 }
