@@ -218,7 +218,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // input outcomes.
 // Version 60 adds the nullable independently readable session-state generation
 // beside durable session binding metadata. NULL is the version-zero legacy map.
-const SCHEMA_VERSION: i32 = 60;
+// Version 61 removes the graph-node sequence column. Per-session generation is
+// the sole durable graph ordering authority. Older stores are rejected and
+// recreated; there is no migration for the removed column.
+const SCHEMA_VERSION: i32 = 61;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -477,12 +480,11 @@ impl PostgresStorage {
     /// `lash_schema_versions`.
     ///
     /// The component schema is normally a reject-and-recreate boundary. This
-    /// build has explicit exceptions: Lash-managed `Enforce` mode can apply
-    /// creation-only migrations from published component-50 through -57 shapes
-    /// to the current generation after an exact source-shape preflight. An older
-    /// stamp over newer artifacts is ledger/schema divergence and is refused
-    /// with an inspect-and-recreate remedy; other mismatches are rejected at
-    /// open.
+    /// Component 61 is a hard cutover for every published older graph shape:
+    /// the removed graph-node sequence column is refused before any historical
+    /// creation-only migration DDL can run. Component 60 also has no applicable
+    /// migration. An older stamp over incompatible artifacts is refused with an
+    /// inspect-and-recreate remedy; other mismatches are rejected at open.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }

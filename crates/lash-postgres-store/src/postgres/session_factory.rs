@@ -824,7 +824,7 @@ pub(crate) async fn delete_session_tx(
                SELECT 1 FROM lash_node_anchors AS anchor
                WHERE anchor.node_id = g.node_id
            )
-         ORDER BY g.seq DESC",
+         ORDER BY g.generation DESC",
     )
     .bind(session_id)
     .fetch_all(&mut **tx)
@@ -1018,7 +1018,7 @@ pub(crate) async fn delete_process_sessions_tx(
                    SELECT 1 FROM lash_node_anchors AS anchor
                    WHERE anchor.node_id = graph.node_id
                )
-             ORDER BY graph.seq DESC",
+             ORDER BY graph.session_id, graph.generation DESC",
             )
             .bind(session_ids)
             .fetch_all(&mut **tx)

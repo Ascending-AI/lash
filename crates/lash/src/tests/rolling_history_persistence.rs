@@ -35,7 +35,7 @@ fn rolling_history_provider(responses: Vec<LlmResponse>) -> ProviderHandle {
         .into_handle()
 }
 
-fn sqlite_head_and_max_seq(
+fn sqlite_head_and_max_generation(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session_id: &str,
 ) -> (String, i64) {
@@ -48,15 +48,15 @@ fn sqlite_head_and_max_seq(
             |row| row.get::<_, String>(0),
         )
         .expect("read durable session leaf");
-    let max_seq = conn
+    let max_generation = conn
         .query_row(
-            "SELECT MAX(seq) FROM graph_nodes WHERE session_id = ?1",
+            "SELECT MAX(generation) FROM graph_nodes WHERE session_id = ?1",
             [session_id],
             |row| row.get::<_, Option<i64>>(0),
         )
-        .expect("read durable graph sequence")
+        .expect("read durable graph generation")
         .expect("committed graph nodes");
-    (leaf, max_seq)
+    (leaf, max_generation)
 }
 
 fn sqlite_messages(
@@ -68,7 +68,7 @@ fn sqlite_messages(
     let mut stmt = conn
         .prepare(
             "SELECT node_id, parent_node_id, node_json FROM graph_nodes
-             WHERE session_id = ?1 ORDER BY seq ASC",
+             WHERE session_id = ?1 ORDER BY generation ASC",
         )
         .expect("prepare graph-node read");
     stmt.query_map([session_id], |row| {
@@ -118,8 +118,8 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
         .turn_id("rolling-history-first")
         .run()
         .await?;
-    let (durable_leaf_before_threshold, max_seq_before_threshold) =
-        sqlite_head_and_max_seq(store_factory.as_ref(), session_id);
+    let (durable_leaf_before_threshold, max_generation_before_threshold) =
+        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
 
     session
         .turn(TurnInput::text("threshold request"))
@@ -132,15 +132,15 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
     let first_threshold_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
-             WHERE session_id = ?1 AND seq > ?2 ORDER BY seq ASC LIMIT 1",
-            rusqlite::params![session_id, max_seq_before_threshold],
+             WHERE session_id = ?1 AND generation > ?2 ORDER BY generation ASC LIMIT 1",
+            rusqlite::params![session_id, max_generation_before_threshold],
             |row| row.get::<_, String>(0),
         )
         .expect("read threshold commit ancestry");
     let threshold_node_count = conn
         .query_row(
-            "SELECT COUNT(*) FROM graph_nodes WHERE session_id = ?1 AND seq > ?2",
-            rusqlite::params![session_id, max_seq_before_threshold],
+            "SELECT COUNT(*) FROM graph_nodes WHERE session_id = ?1 AND generation > ?2",
+            rusqlite::params![session_id, max_generation_before_threshold],
             |row| row.get::<_, i64>(0),
         )
         .expect("count threshold commit nodes");
@@ -164,8 +164,8 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
             .await?,
         "rolling-history compaction should open a summary frame after the threshold turn commits"
     );
-    let (post_compaction_leaf, post_compaction_max_seq) =
-        sqlite_head_and_max_seq(store_factory.as_ref(), session_id);
+    let (post_compaction_leaf, post_compaction_max_generation) =
+        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
     core.flush_trace_sink()?;
 
     let trace = std::fs::read_to_string(trace_path).expect("read rolling-history trace");
@@ -245,8 +245,8 @@ async fn rolling_history_threshold_turn_commits_from_durable_leaf_and_unblocks_c
     let reopened_first_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
-             WHERE session_id = ?1 AND seq > ?2 ORDER BY seq ASC LIMIT 1",
-            rusqlite::params![session_id, post_compaction_max_seq],
+             WHERE session_id = ?1 AND generation > ?2 ORDER BY generation ASC LIMIT 1",
+            rusqlite::params![session_id, post_compaction_max_generation],
             |row| row.get::<_, String>(0),
         )
         .expect("read post-reopen ancestry");
@@ -455,8 +455,8 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
         .run()
         .await?;
     assert_eq!(primed.final_value(), Some(&serde_json::json!("primed")));
-    let (durable_leaf_before_switch, max_seq_before_switch) =
-        sqlite_head_and_max_seq(store_factory.as_ref(), session_id);
+    let (durable_leaf_before_switch, max_generation_before_switch) =
+        sqlite_head_and_max_generation(store_factory.as_ref(), session_id);
 
     let continued = session
         .turn(TurnInput::text("cross the threshold and continue"))
@@ -473,8 +473,8 @@ async fn rolling_history_threshold_continue_as_extends_the_pre_switch_durable_le
     let first_switch_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
-             WHERE session_id = ?1 AND seq > ?2 ORDER BY seq ASC LIMIT 1",
-            rusqlite::params![session_id, max_seq_before_switch],
+             WHERE session_id = ?1 AND generation > ?2 ORDER BY generation ASC LIMIT 1",
+            rusqlite::params![session_id, max_generation_before_switch],
             |row| row.get::<_, String>(0),
         )
         .expect("read threshold continue_as ancestry");

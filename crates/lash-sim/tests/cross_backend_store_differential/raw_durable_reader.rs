@@ -200,10 +200,10 @@ impl RawDurableReader {
                 );
                 let checkpoint = read_postgres_checkpoint_observation(pool, checkpoint_ref).await;
                 let rows: Vec<(i64, String, Option<String>, String)> = sqlx::query_as(
-                    "SELECT seq, node_id, parent_node_id, node_json
+                    "SELECT generation, node_id, parent_node_id, node_json
                      FROM lash_graph_nodes
                      WHERE session_id = $1 AND tombstoned = FALSE
-                     ORDER BY seq ASC",
+                     ORDER BY generation ASC",
                 )
                 .bind(session_id)
                 .fetch_all(pool)
@@ -213,11 +213,13 @@ impl RawDurableReader {
                     .into_iter()
                     .enumerate()
                     .map(
-                        |(ordinal, (_seq, node_id, parent_node_id, node_json))| DurableNode {
-                            ordinal,
-                            node_id,
-                            parent_node_id,
-                            bytes: normalized_sql_node_json(&node_json),
+                        |(ordinal, (_generation, node_id, parent_node_id, node_json))| {
+                            DurableNode {
+                                ordinal,
+                                node_id,
+                                parent_node_id,
+                                bytes: normalized_sql_node_json(&node_json),
+                            }
                         },
                     )
                     .collect();

@@ -1418,7 +1418,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/conformance.rs:1531#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1529#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]

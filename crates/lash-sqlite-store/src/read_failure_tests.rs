@@ -144,8 +144,8 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 
     raw.execute(
         "INSERT INTO graph_nodes
-         (seq, session_id, node_id, parent_node_id, generation, frame_node_id, node_json, tombstoned)
-         VALUES (1, 'corrupt', 'node', NULL, 0, 'node', '{', 0)",
+         (session_id, node_id, parent_node_id, generation, frame_node_id, node_json, tombstoned)
+         VALUES ('corrupt', 'node', NULL, 0, 'node', '{', 0)",
         [],
     )
     .expect("insert malformed graph node");

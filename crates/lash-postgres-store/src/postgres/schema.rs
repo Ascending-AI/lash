@@ -226,6 +226,11 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
     predicate: "(group_key is not null) and (settlement_seq is not null)",
 }];
 
+/// Columns whose presence makes every older component shape a hard-cutover
+/// refusal. All published pre-61 graph catalogs expose this sequence column;
+/// no creation-only migration may silently carry it into component 61.
+const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "seq")];
+
 /// Explicit, creation-only migrations into the current component generation.
 ///
 /// The version-bump recreation harness
@@ -243,9 +248,23 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    // Component 61 removes graph-node `seq` and its index. The global retired-
+    // column preflight below refuses every published pre-61 graph shape before
+    // any migration DDL runs. A component-60 store also necessarily carries the
+    // index, so this immediate declaration classifies both retired artifacts.
+    // It is refusal-only: it never runs DDL or advances the stamp.
+    SchemaMigration {
+        from: 60,
+        to: 61,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &["idx_lash_graph_nodes_seq"],
+        statements: &[],
+    },
     SchemaMigration {
         from: 59,
-        to: 60,
+        to: 61,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
@@ -257,7 +276,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // second queue read.
     SchemaMigration {
         from: 58,
-        to: 60,
+        to: 61,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
@@ -277,7 +296,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // the documented legacy sentinel values.
     SchemaMigration {
         from: 57,
-        to: 60,
+        to: 61,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -306,7 +325,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // arm an indexed NOT EXISTS predicate.
     SchemaMigration {
         from: 56,
-        to: 60,
+        to: 61,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -342,7 +361,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // occurrence reclaim eligibility from 56 and checkpoint edges from 57.
     SchemaMigration {
         from: 55,
-        to: 60,
+        to: 61,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -385,7 +404,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // source shape a 54 store must present is the current one.
     SchemaMigration {
         from: 54,
-        to: 60,
+        to: 61,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -429,7 +448,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 60,
+        to: 61,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -486,7 +505,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 52,
-        to: 60,
+        to: 61,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -547,7 +566,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 51,
-        to: 60,
+        to: 61,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_runtime_effect_group",
@@ -613,7 +632,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 60,
+        to: 61,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
@@ -911,7 +930,7 @@ async fn apply_schema_migration(
     else {
         return Ok(SchemaMigrationOutcome::NotApplicable);
     };
-    let artifacts = sqlx::query_scalar::<_, String>(
+    let mut artifacts = sqlx::query_scalar::<_, String>(
         r#"SELECT pg_catalog.format('%I.%I', namespace.nspname, class.relname)
            FROM pg_catalog.pg_class AS class
            JOIN pg_catalog.pg_namespace AS namespace
@@ -924,8 +943,48 @@ async fn apply_schema_migration(
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
+    let retired_columns = sqlx::query_scalar::<_, String>(
+        r#"SELECT pg_catalog.format(
+                    '%I.%I.%I', column_info.table_schema,
+                    column_info.table_name, column_info.column_name
+                )
+             FROM information_schema.columns AS column_info
+            WHERE column_info.table_schema = ANY(pg_catalog.current_schemas(true))
+              AND (column_info.table_name, column_info.column_name) IN (
+                    SELECT retired.table_name, retired.column_name
+                      FROM unnest($1::TEXT[], $2::TEXT[])
+                           AS retired(table_name, column_name)
+                  )
+            ORDER BY column_info.table_schema, column_info.table_name,
+                     column_info.column_name"#,
+    )
+    .bind(
+        RETIRED_HARD_CUTOVER_COLUMNS
+            .iter()
+            .map(|(table, _)| *table)
+            .collect::<Vec<_>>(),
+    )
+    .bind(
+        RETIRED_HARD_CUTOVER_COLUMNS
+            .iter()
+            .map(|(_, column)| *column)
+            .collect::<Vec<_>>(),
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    artifacts.extend(retired_columns);
+    artifacts.sort();
+    artifacts.dedup();
     if !artifacts.is_empty() {
         return Ok(SchemaMigrationOutcome::Divergent { artifacts });
+    }
+    // A zero-statement immediate-predecessor declaration represents a hard
+    // cutover, not an empty migration. It exists so an old relation can produce
+    // a precise divergence refusal above; without that witness the ordinary
+    // reject-and-recreate mismatch below is still the only valid outcome.
+    if migration.from == SCHEMA_VERSION - 1 && migration.statements.is_empty() {
+        return Ok(SchemaMigrationOutcome::NotApplicable);
     }
     if !apply {
         return Ok(SchemaMigrationOutcome::NotApplicable);
@@ -1146,8 +1205,9 @@ fn schema_migration_divergence_error(found: i32, artifacts: &[String]) -> StoreE
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` has version {found}, expected \
          {SCHEMA_VERSION}, but the live schema contains schema artifacts newer than the recorded \
-         version: {}. Lash will not guess whether this is a partial migration, version-ledger \
-         rollback, or other corruption. Stop the deployment, inspect and recreate the whole Lash \
+         version or explicitly retired by the current hard cutover: {}. Lash will not guess \
+         whether this is a partial migration, version-ledger rollback, old graph shape, or other \
+         corruption. Stop the deployment, inspect and recreate the whole Lash \
          trust domain before retrying; see docs/persistence.html#delete-sessions.",
         artifacts.join(", ")
     ))
@@ -1333,11 +1393,10 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is normally a reject-and-recreate boundary. This build has \
-         explicit Lash-managed migrations from the published component-50, component-51, \
-         component-52, component-53, component-54, component-55, component-56, component-57, component-58, and component-59 shapes to 60; they run only under \
-         SchemaCheck::Enforce \
-         after an exact \
-         source-shape preflight. This mismatch \
+         creation-only migration declarations from component-50 through component-59 to 61, but \
+         component 61 is a hard cutover for every published older graph shape: the removed \
+         sequence column is refused before any migration DDL can run. Component 60 has no \
+         applicable migration. This mismatch \
          has no applicable migration. Drain affected sessions and recreate the whole Lash trust \
          domain with this version: provision \
          the database from this build's schema.sql artifact, and reset the tombstones, await-event \
@@ -1352,7 +1411,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn immediate_predecessor_migration_has_a_relation_divergence_witness() {
+    fn immediate_predecessor_is_a_refusal_only_hard_cutover() {
         let predecessor = SCHEMA_MIGRATIONS
             .iter()
             .find(|migration| migration.from == SCHEMA_VERSION - 1)
@@ -1362,9 +1421,13 @@ mod tests {
             !predecessor.introduced_relations.is_empty(),
             "rewinding only the component stamp must leave a relation that the migration preflight can classify as divergence"
         );
+        assert!(
+            predecessor.statements.is_empty(),
+            "the immediate predecessor must never run migration DDL"
+        );
     }
 
-    /// The declared 53 -> 60 migration, which every case below perturbs.
+    /// The declared 53 -> 61 migration, which every case below perturbs.
     fn migration() -> &'static SchemaMigration {
         SCHEMA_MIGRATIONS
             .iter()
@@ -1403,7 +1466,7 @@ mod tests {
     fn report(findings: Vec<SchemaFinding>) -> SchemaReport {
         SchemaReport {
             schema: Some("public".to_string()),
-            expected_version: 60,
+            expected_version: 61,
             found_version: Some(53),
             findings,
         }
@@ -1414,7 +1477,7 @@ mod tests {
     fn published_53_findings() -> Vec<SchemaFinding> {
         vec![
             SchemaFinding::VersionMismatch {
-                expected: 60,
+                expected: 61,
                 found: Some(53),
             },
             SchemaFinding::MissingTable {

@@ -510,7 +510,6 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                 conn.execute_batch(
                     "ALTER TABLE graph_nodes RENAME TO graph_nodes_valid;
                      CREATE TABLE graph_nodes (
-                         seq INTEGER PRIMARY KEY,
                          session_id TEXT NOT NULL,
                          node_id TEXT NOT NULL,
                          parent_node_id TEXT,
@@ -521,7 +520,6 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
                      );
                      INSERT INTO graph_nodes SELECT * FROM graph_nodes_valid;
                      DROP TABLE graph_nodes_valid;
-                     CREATE INDEX idx_graph_nodes_session_seq ON graph_nodes(session_id, seq);
                      CREATE INDEX idx_graph_nodes_parent ON graph_nodes(parent_node_id);",
                 )
                 .expect("remove SQLite graph-node uniqueness for corruption injection");
