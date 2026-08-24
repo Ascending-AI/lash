@@ -29,7 +29,10 @@ pub(super) async fn claim_pending_wake_deliveries(
                WHERE earlier.state <> 'enqueued'
                  AND NOT (
                      earlier.state = 'discarded'
-                     AND earlier.discard_reason = 'sequence_rewound'
+                     AND (
+                         earlier.discard_reason IS NULL
+                         OR earlier.discard_reason = ANY($3::TEXT[])
+                     )
                  )
                  AND earlier.target_session_id = candidate.target_session_id
                  AND earlier.process_id = candidate.process_id
@@ -44,6 +47,7 @@ pub(super) async fn claim_pending_wake_deliveries(
     )
     .bind(limit as i64)
     .bind(now)
+    .bind(lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)
     .fetch_all(&mut *tx)
     .await
     .map_err(plugin_sqlx_error)?;

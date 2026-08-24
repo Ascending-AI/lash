@@ -42,6 +42,17 @@ pub use support::TestProcessRegistryWriteExt;
 use support::{ExecutionWritePause, process_lease_expired, validate_in_memory_execution_authority};
 use types::{ManagedLeaseMap, ManagedProcessRecord};
 pub use types::{RawProcessRegistryStateForTesting, TestLocalProcessRegistry};
+
+#[async_trait::async_trait]
+impl crate::testing::conformance::WakeDeliveryOrderingGroupFaultInjector
+    for TestLocalProcessRegistry
+{
+    async fn discard_without_reason(&self, delivery_id: &str) {
+        self.discard_wake_without_reason_for_testing(delivery_id)
+            .await;
+    }
+}
+
 impl TestLocalProcessRegistry {
     async fn append_managed_event(
         &self,
@@ -1161,8 +1172,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
                 !deliveries.values().any(|earlier| {
                     earlier.state != super::WakeDeliveryState::Enqueued
                         && !(earlier.state == super::WakeDeliveryState::Discarded
-                            && earlier.discard_reason
-                                == Some(super::WakeDiscardReason::SequenceRewound))
+                            && earlier
+                                .discard_reason
+                                .is_none_or(|reason| !reason.blocks_ordering_group()))
                         && earlier.wake.target_session_id == candidate.wake.target_session_id
                         && earlier.wake.process_id == candidate.wake.process_id
                         && earlier.wake.sequence < candidate.wake.sequence

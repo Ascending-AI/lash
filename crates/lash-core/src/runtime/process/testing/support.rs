@@ -135,6 +135,24 @@ impl TestLocalProcessRegistry {
         self
     }
 
+    /// Forces an otherwise-invalid discarded wake without a reason so shared conformance can
+    /// verify how every registry treats legacy or corrupt nullable rows.
+    pub(super) async fn discard_wake_without_reason_for_testing(&self, delivery_id: &str) {
+        let _transaction = self.transaction.lock().await;
+        let mut deliveries = self.wake_deliveries.lock().await;
+        let delivery = deliveries
+            .get_mut(delivery_id)
+            .expect("force reasonless discard for an existing wake delivery");
+        assert_eq!(
+            delivery.state,
+            super::super::WakeDeliveryState::Enqueuing,
+            "reasonless discard injection requires an enqueuing wake delivery"
+        );
+        delivery.state = super::super::WakeDeliveryState::Discarded;
+        delivery.claim_token = None;
+        delivery.discard_reason = None;
+    }
+
     #[doc(hidden)]
     pub fn pause_next_execution_write_after_validation(&self) -> ExecutionWritePauseHandle {
         let pause = ExecutionWritePause::new();
