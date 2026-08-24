@@ -1245,7 +1245,15 @@ jobs:
     # PR this spends the longest job on the board building a cache no other
     # workflow can read. The same is true of a merge-queue entry's
     # `gh-readonly-queue/...` ref, and there it would also be the longest job
-    # gating queue throughput. Cache warming belongs on main.
+    # gating queue throughput. Cache warming belongs on main. Pushes whose
+    # dependency-graph inputs are unchanged skip the warm build after diffing
+    # the complete pushed range; workflow dispatches and ambiguous histories
+    # fail open so the cache can always be recovered manually. A floating
+    # `stable` toolchain release is not itself a repository change, so it
+    # re-warms only on the next inspected-path push or manual dispatch. Skipped
+    # pushes can also leave sccache's workspace release objects stale, so a
+    # manual release may need to recompile changed workspace crates. Those
+    # trade-offs are accepted because releases are rare and manually dispatched.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     # The one job in this workflow that must not inherit the workflow-level
@@ -1274,14 +1282,71 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
+      - name: Detect release cache inputs
+        id: detect
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          FORCE_PUSH: ${{ github.event.forced }}
+        run: |
+          set -euo pipefail
+
+          run_build() {
+            echo "run=true" >> "${GITHUB_OUTPUT}"
+            echo "Running Linux release-cache warm build: $1"
+            exit 0
+          }
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            run_build "workflow_dispatch always warms the cache."
+          fi
+
+          if [[ "${FORCE_PUSH}" == "true" ]]; then
+            run_build "the push rewrote history; failing open."
+          fi
+
+          if [[ "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            run_build "the push has no prior ref (initial/orphan history); failing open."
+          fi
+
+          if ! git fetch --no-tags --prune --depth=1 origin "${BEFORE_SHA}"; then
+            run_build "the pushed-range base fetch failed; failing open."
+          fi
+
+          if ! git rev-parse --verify "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
+            run_build "the pushed-range base is unavailable after fetch; failing open."
+          fi
+
+          if ! diff_output=$(git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}"); then
+            run_build "the input diff failed; failing open."
+          fi
+
+          changed_paths=()
+          if [[ -n "${diff_output}" ]]; then
+            mapfile -t changed_paths <<< "${diff_output}"
+          fi
+          for path in "${changed_paths[@]}"; do
+            case "${path}" in
+              Cargo.lock | Cargo.toml | */Cargo.toml | rust-toolchain | rust-toolchain.toml | .cargo/* | .github/actions/* | .github/workflows/ci.yml)
+                run_build "cache input '${path}' changed in the pushed range ${BEFORE_SHA}..${GITHUB_SHA}."
+                ;;
+            esac
+          done
+
+          echo "run=false" >> "${GITHUB_OUTPUT}"
+          echo "Skipping Linux release-cache warm build: no cache-input paths changed in the pushed range ${BEFORE_SHA}..${GITHUB_SHA}."
+          echo "Inspected: Cargo.lock; Cargo.toml and */Cargo.toml; rust-toolchain and rust-toolchain.toml; .cargo/**; .github/actions/**; .github/workflows/ci.yml."
+
       - name: Reclaim runner disk
+        if: steps.detect.outputs.run == 'true'
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
+        if: steps.detect.outputs.run == 'true'
         uses: ./.github/actions/rust-toolchain
 
 
       - name: Restore cargo cache
+        if: steps.detect.outputs.run == 'true'
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
@@ -1290,18 +1355,21 @@ jobs:
           shared-key: linux-release
 
       - name: Install protoc
+        if: steps.detect.outputs.run == 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       - name: Setup sccache
+        if: steps.detect.outputs.run == 'true'
         uses: ./.github/actions/setup-sccache
 
       - name: Build release workspace
+        if: steps.detect.outputs.run == 'true'
         run: cargo build --locked --release --workspace
 
       - name: Report sccache stats
-        if: always()
+        if: always() && steps.detect.outputs.run == 'true'
         run: sccache --show-stats
 
   functional-e2e:
