@@ -6,7 +6,7 @@ use lashlang::{
 
 use crate::{EditableProcessField, NodeData, RenderErrorResponse};
 
-use super::{parse_assignment_target_fragment, parse_name_source, workflow_node_id};
+use super::{parse_assignment_target_fragment, workflow_node_id};
 
 pub(super) fn process_from_data(
     id: &str,
@@ -15,21 +15,24 @@ pub(super) fn process_from_data(
 ) -> Result<WorkflowProcess, RenderErrorResponse> {
     let mut process = baseline.unwrap_or_else(|| WorkflowProcess {
         id: workflow_node_id(id),
-        name: data.name.clone().unwrap_or_else(|| data.title.clone()),
-        display_name: data.title.clone(),
-        description: data.description.clone(),
-        name_source: parse_name_source(&data.name_source),
+        name: data
+            .process_name
+            .clone()
+            .unwrap_or_else(|| data.name.title().to_string()),
+        display_name: data.name.title().to_string(),
+        description: data.name.description().map(str::to_string),
+        name_source: data.name.name_source(),
         params: Vec::new(),
         signals: Vec::new(),
         return_ty: None,
         body: WorkflowSubgraph::default(),
     });
     let process_id = process.id.to_string();
-    let name = data.name.as_ref().unwrap_or(&data.title);
+    let name = data.process_name.as_deref().unwrap_or(data.name.title());
     process.name = editable_identifier(&process_id, "name", name)?;
-    process.display_name = data.title.clone();
-    process.description = data.description.clone();
-    process.name_source = parse_name_source(&data.name_source);
+    process.display_name = data.name.title().to_string();
+    process.description = data.name.description().map(str::to_string);
+    process.name_source = data.name.name_source();
     process.params = data
         .params
         .iter()

@@ -3,16 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use lashlang::{
     Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
     WorkflowEdgeKind, WorkflowEffectKind, WorkflowGraph, WorkflowListComprehensionClause,
-    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSubgraph,
-    WorkflowTerminalKind, canonical_assign_target_source, canonical_expression_source,
-    format_type_expr, parse_expression,
+    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, WorkflowTerminalKind,
+    canonical_assign_target_source, canonical_expression_source, format_type_expr,
+    parse_expression,
 };
 use serde_json::json;
 
 use crate::{
     ChildGroup, EdgeData, EditableComprehensionClause, EditableValue, ExpectedArgumentType,
-    FlowEdge, FlowNode, GraphRoots, NodeData, RenderErrorResponse, TypeDiagnostic, TypedVariable,
-    ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
+    FlowEdge, FlowNode, GraphRoots, NodeData, NodeName, RenderErrorResponse, TypeDiagnostic,
+    TypedVariable, ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
 };
 
 mod process;
@@ -70,16 +70,18 @@ pub(crate) fn document_from_graph(
             data: NodeData {
                 kind: "process".to_string(),
                 subkind: None,
-                title: process.display_name.clone(),
-                name: Some(process.name.clone()),
+                name: NodeName::projected(
+                    process.name_source,
+                    process.display_name.clone(),
+                    process.description.clone(),
+                ),
+                process_name: Some(process.name.clone()),
                 params: process.params.iter().map(editable_process_param).collect(),
                 signals: process
                     .signals
                     .iter()
                     .map(editable_process_signal)
                     .collect(),
-                description: process.description.clone(),
-                name_source: name_source(process.name_source),
                 operation: None,
                 effect: None,
                 terminal_kind: None,
@@ -438,12 +440,14 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>) -> NodeData {
     NodeData {
         kind: node_kind(node).to_string(),
         subkind: node_subkind(node).map(str::to_string),
-        title: node.name.clone(),
-        name: None,
+        name: NodeName::projected(
+            node.name_source,
+            node.name.clone(),
+            node.description.clone(),
+        ),
+        process_name: None,
         params: Vec::new(),
         signals: Vec::new(),
-        description: node.description.clone(),
-        name_source: name_source(node.name_source),
         operation,
         effect,
         terminal_kind: terminal_kind(node).map(str::to_string),
@@ -851,9 +855,9 @@ fn node_from_flow_data(id: &str, data: &NodeData) -> Result<WorkflowNode, Render
     };
     Ok(WorkflowNode {
         id: workflow_node_id(id),
-        name: data.title.clone(),
-        description: data.description.clone(),
-        name_source: parse_name_source(&data.name_source),
+        name: data.name.title().to_string(),
+        description: data.name.description().map(str::to_string),
+        name_source: data.name.name_source(),
         kind,
         available_variables: Vec::new(),
         type_facets: None,
@@ -1111,9 +1115,9 @@ fn apply_editable_data(
     data: &NodeData,
 ) -> Result<(), RenderErrorResponse> {
     let node_id = node.id.to_string();
-    node.name = data.title.clone();
-    node.description = data.description.clone();
-    node.name_source = parse_name_source(&data.name_source);
+    node.name = data.name.title().to_string();
+    node.description = data.name.description().map(str::to_string);
+    node.name_source = data.name.name_source();
     if let WorkflowNodeKind::Opaque { source } = &mut node.kind
         && let Some(updated) = &data.source
     {
@@ -1456,22 +1460,6 @@ fn terminal_kind(node: &WorkflowNode) -> Option<&'static str> {
     }
 }
 
-fn name_source(source: WorkflowNodeNameSource) -> String {
-    match source {
-        WorkflowNodeNameSource::Label => "label",
-        WorkflowNodeNameSource::Derived => "derived",
-    }
-    .to_string()
-}
-
-fn parse_name_source(source: &str) -> WorkflowNodeNameSource {
-    if source == "label" {
-        WorkflowNodeNameSource::Label
-    } else {
-        WorkflowNodeNameSource::Derived
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1515,7 +1503,7 @@ finish [state, introduced]
         }
         assert!(!document.nodes.iter().any(|node| node.node_type == "opaque"));
         assert!(document.nodes.iter().any(|node| {
-            node.data.title == "while"
+            node.data.name.title() == "while"
                 && node.data.condition.as_deref() == Some("(state.count < 2)")
                 && node.data.children.iter().any(|child| child.slot == "body")
         }));

@@ -1344,6 +1344,30 @@ mod tests {
     }
 
     #[test]
+    fn disabled_label_annotation_in_main_reports_the_annotation_span() {
+        let source = "count = 1\n@label(title: \"Finish up\") finish count\n";
+        let err = LinkedModule::link(
+            crate::parse(source).expect("parse annotated main"),
+            full_host_environment(),
+        )
+        .expect_err("default surface should reject label annotations");
+
+        let LinkError::FeatureDisabled {
+            feature: "label annotations",
+            span,
+        } = err
+        else {
+            panic!("unexpected link error: {err:?}");
+        };
+        let span = span.expect("annotated statement span");
+        assert!(
+            source[span.start..span.end].starts_with("@label(title: \"Finish up\")"),
+            "reported span covers `{}`",
+            &source[span.start..span.end]
+        );
+    }
+
+    #[test]
     fn label_annotation_text_inside_strings_does_not_require_feature() {
         let linked = LinkedModule::link(
             crate::parse(r####"finish r"""@label(title: "Plain text")""""####)

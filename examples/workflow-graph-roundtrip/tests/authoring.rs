@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use workflow_graph_roundtrip::{
-    AppState, EditableValue, FlowNode, NodeData, RunEvent, RunStatus, RunTiming,
+    AppState, EditableValue, FlowNode, NodeData, NodeName, RunEvent, RunStatus, RunTiming,
     SaveWorkflowResponse, WorkflowDocument,
 };
 
@@ -225,6 +225,135 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
     server.abort();
 }
 
+/// Renaming a node is an authoring act: the new title has to come back out of
+/// the save path, and the only thing that decides whether it does is the tag
+/// the client sends with it.
+#[tokio::test]
+async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection() {
+    let state = AppState::with_run_timing(RunTiming {
+        sleep_cap: Duration::from_millis(2),
+        signal_delay: Duration::from_millis(2),
+    })
+    .expect("default workflow");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("test listener address");
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
+    let client = reqwest::Client::new();
+    let base = format!("http://{addr}");
+
+    let mut document = select_workflow(&client, &base, "blank").await;
+    let terminal = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+        .expect("blank terminal");
+    assert_eq!(
+        terminal.data.name,
+        NodeName::Derived {
+            title: "finish".to_string()
+        }
+    );
+    terminal.data.name = NodeName::Authored {
+        title: "Hand back the result".to_string(),
+        description: Some("What the operator sees when the run ends".to_string()),
+    };
+
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&document)
+        .send()
+        .await
+        .expect("save renamed terminal");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
+
+    assert!(
+        saved.document.source.contains(
+            "@label(title: \"Hand back the result\", description: \"What the operator sees when the run ends\")"
+        ),
+        "authored title missing from rendered source: {}",
+        saved.document.source
+    );
+    let saved_terminal = saved
+        .document
+        .nodes
+        .iter()
+        .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+        .expect("renamed terminal reprojected");
+    assert_eq!(
+        saved_terminal.data.name,
+        NodeName::Authored {
+            title: "Hand back the result".to_string(),
+            description: Some("What the operator sees when the run ends".to_string()),
+        }
+    );
+
+    // The control: the same title tagged as derived is a rendering, so it is
+    // recomputed rather than written into the source.
+    let mut document = saved.document;
+    document
+        .nodes
+        .iter_mut()
+        .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+        .expect("renamed terminal")
+        .data
+        .name = NodeName::Derived {
+        title: "Hand back the result".to_string(),
+    };
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&document)
+        .send()
+        .await
+        .expect("save derived terminal");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let saved: SaveWorkflowResponse = response.json().await.expect("saved workflow");
+    assert!(!saved.document.source.contains("@label"));
+    assert_eq!(
+        saved
+            .document
+            .nodes
+            .iter()
+            .find(|node| node.data.terminal_kind.as_deref() == Some("finish"))
+            .expect("terminal reprojected")
+            .data
+            .name,
+        NodeName::Derived {
+            title: "finish".to_string()
+        }
+    );
+
+    // A payload that carries a title without saying where the name came from
+    // is refused outright: the host has no tolerant fallback to guess with.
+    let mut untagged = serde_json::to_value(&saved.document).expect("saved document JSON");
+    let node = untagged["nodes"]
+        .as_array_mut()
+        .expect("document nodes")
+        .iter_mut()
+        .find(|node| node["data"]["terminalKind"] == "finish")
+        .expect("terminal node JSON");
+    node["data"]["title"] = Value::String("Hand back the result".to_string());
+    node["data"]
+        .as_object_mut()
+        .expect("node data object")
+        .remove("nameSource");
+    let response = client
+        .post(format!("{base}/workflow"))
+        .json(&untagged)
+        .send()
+        .await
+        .expect("post untagged title");
+    assert!(
+        response.status().is_client_error(),
+        "untagged title was accepted with {}",
+        response.status()
+    );
+
+    server.abort();
+}
+
 async fn select_workflow(client: &reqwest::Client, base: &str, id: &str) -> WorkflowDocument {
     let response = client
         .post(format!("{base}/workflow/select"))
@@ -261,12 +390,12 @@ fn catalog_node(entry: &Value, id: &str) -> FlowNode {
         data: NodeData {
             kind: kind.to_string(),
             subkind: text("subkind").map(str::to_string),
-            title: text("label").expect("catalog label").to_string(),
-            name: None,
+            name: NodeName::Derived {
+                title: text("label").expect("catalog label").to_string(),
+            },
+            process_name: None,
             params: Vec::new(),
             signals: Vec::new(),
-            description: None,
-            name_source: "derived".to_string(),
             operation: None,
             effect: None,
             terminal_kind: None,

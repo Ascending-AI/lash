@@ -34,7 +34,7 @@ pub use catalog::{SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
     ChildGroup, DisplayDelta, DisplayState, EdgeData, EditableComprehensionClause,
     EditableProcessField, EditableValue, ExpectedArgumentType, FlowEdge, FlowNode, GraphRoots,
-    NodeData, OperationCatalogEntry, OperationField, ProjectWorkflowRequest,
+    NodeData, NodeName, OperationCatalogEntry, OperationField, ProjectWorkflowRequest,
     ProjectWorkflowResponse, RenderErrorResponse, RunEvent, RunStatus, SaveWorkflowResponse,
     SourceProjectionErrorResponse, TypeDiagnostic, TypedVariable, ValidateRequest,
     ValidateResponse, ValidationKind, WorkflowDocument,
