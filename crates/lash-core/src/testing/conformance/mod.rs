@@ -610,6 +610,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_wake_delivery_ordering_group_conformance() {
+        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        wake_delivery_ordering_group_conformance(
+            Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+            registry as Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn in_memory_session_store_factory_satisfies_conformance() {
         let unbound = crate::InMemorySessionStore::default();
         crate::testing::conformance::session_store_factory(

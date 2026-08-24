@@ -35,6 +35,8 @@ mod pre_frame_key;
 mod session_delete_blob_reclaim;
 #[path = "conformance/trigger_occurrence_retention.rs"]
 mod trigger_occurrence_retention;
+#[path = "conformance/wake_delivery.rs"]
+mod wake_delivery;
 
 struct SqliteLineageConformanceInjector {
     path: PathBuf,
@@ -902,36 +904,6 @@ async fn sqlite_process_continuation_store_satisfies_conformance() {
     let registry = Arc::clone(&storage) as Arc<dyn lash_core::ProcessRegistry>;
     let store = storage as Arc<dyn lash_core::ProcessContinuationStore>;
     lash_core::testing::conformance::process_continuation_store(registry, store).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_wake_delivery_crash_matrix() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let process_registry_path = dir.path().join("processes.db");
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
-    let registry = Arc::new(
-        SqliteProcessRegistry::open_with_clock(
-            &process_registry_path,
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open process registry")
-        .with_wake_delivery_config(
-            lash_core::WakeDeliveryConfig::new(10_000)
-                .expect("valid test retention")
-                .with_enqueuing_stale_after_ms(25)
-                .expect("valid short stale-claim age"),
-        ),
-    ) as Arc<dyn ProcessRegistry>;
-    let factory = Arc::new(
-        SqliteSessionStoreFactory::new_with_process_registry(dir.path(), process_registry_path)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
-    ) as Arc<dyn SessionStoreFactory>;
-    Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
-        factory, registry, clock,
-    ))
-    .await;
 }
 
 #[tokio::test]

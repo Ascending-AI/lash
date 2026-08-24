@@ -190,16 +190,41 @@ pub enum WakeDiscardReason {
     SequenceRewound,
 }
 
+macro_rules! define_wake_discard_ordering_group_rule {
+    (
+        blocking: [$($blocking:ident),+ $(,)?],
+        non_blocking: [$($non_blocking:ident),+ $(,)?],
+    ) => {
+        /// Stable labels for discarded wakes that do not block later deliveries in their ordering
+        /// group. SQL-backed registries bind this list into their claim predicates.
+        pub const NON_BLOCKING_ORDERING_GROUP_LABELS: &'static [&'static str] =
+            &[$(Self::$non_blocking.as_str()),+];
+
+        /// Whether this discard reason blocks later deliveries in the same ordering group.
+        pub const fn blocks_ordering_group(self) -> bool {
+            match self {
+                $(Self::$blocking => true,)+
+                $(Self::$non_blocking => false,)+
+            }
+        }
+    };
+}
+
 impl WakeDiscardReason {
     /// Exposes the stable snake-case discard reason for process-store implementors and durable
     /// diagnostics.
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Expired => "expired",
             Self::TargetGone => "target_gone",
             Self::Retargeted => "retargeted",
             Self::SequenceRewound => "sequence_rewound",
         }
+    }
+
+    define_wake_discard_ordering_group_rule! {
+        blocking: [Expired, TargetGone, Retargeted],
+        non_blocking: [SequenceRewound],
     }
 }
 
@@ -217,6 +242,8 @@ pub struct WakeDelivery {
     pub first_attempt_ms: Option<u64>,
     pub next_attempt_at_ms: u64,
     pub expires_at_ms: u64,
+    /// A discarded delivery without a recorded reason is non-blocking: only a typed, exhaustively
+    /// classified reason can retain its ordering-group block.
     pub discard_reason: Option<WakeDiscardReason>,
 }
 
@@ -399,7 +426,7 @@ impl WakeDeliveryReport {
                 delivery.state == WakeDeliveryState::Discarded
                     && delivery
                         .discard_reason
-                        .is_some_and(|reason| reason != WakeDiscardReason::SequenceRewound)
+                        .is_some_and(WakeDiscardReason::blocks_ordering_group)
             }) {
                 let reason = delivery
                     .discard_reason

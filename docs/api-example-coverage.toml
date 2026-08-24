@@ -1348,12 +1348,38 @@ usage = "crates/lash-sqlite-store/tests/effect_group_conformance.rs:68#    lash_
 reason = "The durable effect-group contract is one matrix three hosts answer, so the suite has to live where all three can reach it; only test code calls it, which is what the `testing` feature exists for (FIG-1564)."
 
 [[api]]
+symbol = "lash::testing::conformance::WakeDeliveryOrderingGroupFaultInjector"
+kind = "trait"
+availability = "all-features"
+area = "processes"
+disposition = "internal-test-only"
+usage = "crates/lash-postgres-store/tests/conformance/wake_delivery.rs:8#impl lash_core::testing::conformance::WakeDeliveryOrderingGroupFaultInjector"
+reason = "FIG-2018: backend conformance adapters create the otherwise-invalid nullable discard row needed to prove identical ordering-group behavior; only test code implements this seam."
+
+[[api]]
+symbol = "lash::testing::conformance::WakeDeliveryOrderingGroupFaultInjector::discard_without_reason"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "FIG-2018: each backend test implements this raw-state operation solely for the shared nullable-discard conformance case; the checker cannot tie the method line through the multiline trait impl, so the owning trait carries the machine-checked test-only anchor."
+
+[[api]]
+symbol = "lash::testing::conformance::wake_delivery_ordering_group_conformance"
+kind = "function"
+availability = "all-features"
+area = "processes"
+disposition = "internal-test-only"
+usage = "crates/lash-postgres-store/tests/conformance/wake_delivery.rs:70#lash_core::testing::conformance::wake_delivery_ordering_group_conformance("
+reason = "FIG-2018: the shared three-case law is consumed only by the in-memory, SQLite, and Postgres test suites."
+
+[[api]]
 symbol = "lash::testing::conformance::process_registry_pagination"
 kind = "function"
 availability = "all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2122#lash_core::testing::conformance::process_registry_pagination(registry).await;"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2093#lash_core::testing::conformance::process_registry_pagination(registry).await;"
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -1407,7 +1433,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/conformance.rs:1557#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1529#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -1416,7 +1442,7 @@ kind = "enum"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:510#lash_core::testing::conformance::StoreRecoveryLeaseTiming::Realtime,"
+usage = "crates/lash-postgres-store/tests/conformance.rs:512#lash_core::testing::conformance::StoreRecoveryLeaseTiming::Realtime,"
 reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
 
 [[api]]
@@ -1442,7 +1468,7 @@ kind = "variant"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:510#lash_core::testing::conformance::StoreRecoveryLeaseTiming::Realtime,"
+usage = "crates/lash-postgres-store/tests/conformance.rs:512#lash_core::testing::conformance::StoreRecoveryLeaseTiming::Realtime,"
 reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
 
 [[api]]
@@ -1451,7 +1477,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/conformance.rs:1306#lash_core::testing::conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {"
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1278#lash_core::testing::conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {"
 reason = "Only store conformance tests consume this feature-gated timing selector; it makes claim-expiry laws deterministic without changing production lease behavior (FIG-1754)."
 
 [[api]]
@@ -56637,7 +56663,7 @@ kind = "trait"
 availability = "all-features"
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:135#impl lash_core::testing::conformance::TriggerOccurrenceRetentionFaultInjector"
+usage = "crates/lash-postgres-store/tests/conformance.rs:137#impl lash_core::testing::conformance::TriggerOccurrenceRetentionFaultInjector"
 reason = "Backend-only conformance fault injector for proving that trigger-occurrence delete failures remain typed failures with partial reports."
 
 [[api]]
@@ -71233,12 +71259,29 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
 
 [[api]]
+symbol = "lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS"
+kind = "assoc_const"
+availability = "default+all-features"
+area = "processes"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:50#.bind(lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)"
+reason = "FIG-2018: both SQL registries build their wake claim predicates from the labels generated by the exhaustive core classification."
+
+[[api]]
 symbol = "lash_core::WakeDiscardReason::as_str"
 kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts and process substrates (for example a non-Restate controller) implementing the runtime handoff contract."
+
+[[api]]
+symbol = "lash_core::WakeDiscardReason::blocks_ordering_group"
+kind = "function"
+availability = "default+all-features"
+area = "processes"
+disposition = "unused-justify"
+reason = "FIG-2018: this is the exhaustive classification contract custom process-store implementors use; the bundled in-memory registry and core report consume it inside its defining crate, while SQL stores bind the derived label list."
 
 [[api]]
 symbol = "lash_core::drive_with_event_pump"
@@ -76385,7 +76428,7 @@ kind = "constant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2470#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2441#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2). Renamed from NON_TERMINAL_PROCESS_STATUS_LABELS in FIG-1383: live is no longer the complement of terminal."
 
 [[api]]
@@ -76586,7 +76629,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:95#registry_transitions::WakeDeliveryRow {"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:99#registry_transitions::WakeDeliveryRow {"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::attempts"
@@ -76594,7 +76637,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:99#attempts: row.get(3),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:103#attempts: row.get(3),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::claim_token"
@@ -76602,7 +76645,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:98#claim_token: row.get(2),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:102#claim_token: row.get(2),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::delivery_id"
@@ -76610,7 +76653,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:96#delivery_id: row.get(0),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:100#delivery_id: row.get(0),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::delivery_json"
@@ -76618,7 +76661,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:104#delivery_json: row.get(8),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:108#delivery_json: row.get(8),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::discard_reason_label"
@@ -76626,7 +76669,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:103#discard_reason_label: row.get(7),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:107#discard_reason_label: row.get(7),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::expires_at_ms"
@@ -76634,7 +76677,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:102#expires_at_ms: row.get(6),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:106#expires_at_ms: row.get(6),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::first_attempt_ms"
@@ -76642,7 +76685,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:100#first_attempt_ms: row.get(4),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:104#first_attempt_ms: row.get(4),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::next_attempt_at_ms"
@@ -76650,7 +76693,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:101#next_attempt_at_ms: row.get(5),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:105#next_attempt_at_ms: row.get(5),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::WakeDeliveryRow::project"
@@ -76666,7 +76709,7 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:97#state_label: row.get(1),"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:101#state_label: row.get(1),"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::absent_process_error"
@@ -76746,7 +76789,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:88#.ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:92#.ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::wake_delivery_state_from_label"
@@ -76754,7 +76797,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:145#let state = registry_transitions::wake_delivery_state_from_label(delivery_id, &current)?;"
+usage = "crates/lash-postgres-store/src/postgres/wake_delivery.rs:149#let state = registry_transitions::wake_delivery_state_from_label(delivery_id, &current)?;"
 
 [[api]]
 symbol = "lash_core::facade_support::registry_transitions::wake_discard_reason_from_label"

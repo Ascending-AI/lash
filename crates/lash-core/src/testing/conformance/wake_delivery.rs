@@ -40,6 +40,123 @@ impl RecordingWakeTurnHandle {
     }
 }
 
+/// Backend-owned seam for creating a discarded wake with no recorded reason. Production APIs
+/// require a typed reason; conformance uses raw backend state to cover nullable durable rows.
+#[async_trait::async_trait]
+pub trait WakeDeliveryOrderingGroupFaultInjector: Send + Sync {
+    async fn discard_without_reason(&self, delivery_id: &str);
+}
+
+/// Proves that blocking, non-blocking, and reasonless discarded heads have the same ordering-group
+/// behavior on every process-registry backend.
+pub async fn wake_delivery_ordering_group_conformance(
+    registry: Arc<dyn crate::ProcessRegistry>,
+    injector: Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
+) {
+    ordering_group_discard_case(
+        &registry,
+        &injector,
+        "blocking",
+        Some(crate::WakeDiscardReason::Expired),
+        true,
+    )
+    .await;
+    ordering_group_discard_case(
+        &registry,
+        &injector,
+        "non-blocking",
+        Some(crate::WakeDiscardReason::SequenceRewound),
+        false,
+    )
+    .await;
+    ordering_group_discard_case(&registry, &injector, "reasonless", None, false).await;
+}
+
+async fn ordering_group_discard_case(
+    registry: &Arc<dyn crate::ProcessRegistry>,
+    injector: &Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
+    case: &str,
+    reason: Option<crate::WakeDiscardReason>,
+    blocks: bool,
+) {
+    let process_id = format!("wake-ordering-group-{case}");
+    let target_session_id = format!("wake-ordering-group-target-{case}");
+    registry
+        .register_process(
+            process_registry::registration(&process_id)
+                .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
+                .with_wake_session_id(Some(target_session_id)),
+        )
+        .await
+        .expect("register ordering-group conformance process");
+    let mut wakes = Vec::new();
+    for input in ["head", "tail"] {
+        wakes.push(
+            registry
+                .append_event(
+                    &process_id,
+                    crate::ProcessEventAppendRequest::new(
+                        "producer.wake",
+                        serde_json::json!({"wake_input": input}),
+                    ),
+                )
+                .await
+                .expect("append ordering-group conformance wake")
+                .wake_delivery
+                .expect("ordering-group conformance wake delivery"),
+        );
+    }
+    let head = registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .expect("claim ordering-group head")
+        .into_iter()
+        .next()
+        .expect("ordering-group head is claimable");
+    assert_eq!(head.delivery_id, wakes[0].wake_id);
+    match reason {
+        Some(reason) => assert_eq!(
+            registry
+                .discard_wake_delivery(
+                    &head.delivery_id,
+                    head.claim_token().expect("ordering-group head claim token"),
+                    reason,
+                )
+                .await
+                .expect("discard typed ordering-group head"),
+            crate::WakeDeliveryClaimOutcome::Applied
+        ),
+        None => {
+            injector.discard_without_reason(&head.delivery_id).await;
+        }
+    }
+
+    let claimed = registry
+        .claim_pending_wake_deliveries(1)
+        .await
+        .expect("scan behind discarded ordering-group head");
+    assert_eq!(
+        claimed.is_empty(),
+        blocks,
+        "{case} discard ordering-group classification disagreed"
+    );
+    if !blocks {
+        assert_eq!(claimed[0].delivery_id, wakes[1].wake_id);
+    }
+    let report = registry
+        .wake_delivery_report()
+        .await
+        .expect("report discarded ordering-group head");
+    assert_eq!(
+        report
+            .blocked_groups
+            .iter()
+            .any(|group| group.process_id == process_id),
+        blocks,
+        "{case} discard report classification disagreed"
+    );
+}
+
 /// Cross-backend wake-delivery crash contract.
 ///
 /// A process append owns the outbox insertion. Delivery may happen on a later

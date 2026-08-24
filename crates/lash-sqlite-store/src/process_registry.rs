@@ -1061,30 +1061,48 @@ impl ProcessRegistry for SqliteProcessRegistry {
                     )
                     .map_err(process_sqlite_error)?;
                     let ids = {
+                        let non_blocking_labels =
+                            lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS;
+                        let non_blocking_placeholders =
+                            std::iter::repeat_n("?", non_blocking_labels.len())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                        let claim_sql = format!(
+                            "SELECT candidate.delivery_id
+                             FROM process_wake_deliveries AS candidate
+                             WHERE candidate.state = 'pending'
+                               AND candidate.next_attempt_at_ms <= ?
+                               AND NOT EXISTS (
+                                   SELECT 1
+                                   FROM process_wake_deliveries AS earlier
+                                   WHERE earlier.state <> 'enqueued'
+                                     AND NOT (
+                                         earlier.state = 'discarded'
+                                         AND (
+                                             earlier.discard_reason IS NULL
+                                             OR earlier.discard_reason IN ({non_blocking_placeholders})
+                                         )
+                                     )
+                                     AND earlier.target_session_id = candidate.target_session_id
+                                     AND earlier.process_id = candidate.process_id
+                                     AND earlier.sequence < candidate.sequence
+                               )
+                             ORDER BY candidate.next_attempt_at_ms ASC,
+                                      candidate.target_session_id ASC,
+                                      candidate.process_id ASC,
+                                      candidate.sequence ASC
+                             LIMIT ?"
+                        );
                         let mut stmt = tx
-                            .prepare(
-                                "SELECT candidate.delivery_id
-                                 FROM process_wake_deliveries AS candidate
-                                 WHERE candidate.state = 'pending'
-                                   AND candidate.next_attempt_at_ms <= ?2
-                                   AND NOT EXISTS (
-                                       SELECT 1
-                                       FROM process_wake_deliveries AS earlier
-                                       WHERE earlier.state <> 'enqueued'
-                                         AND NOT (earlier.state = 'discarded' AND earlier.discard_reason = 'sequence_rewound')
-                                         AND earlier.target_session_id =
-                                             candidate.target_session_id
-                                         AND earlier.process_id = candidate.process_id
-                                         AND earlier.sequence < candidate.sequence
-                                   )
-                                 ORDER BY candidate.next_attempt_at_ms ASC,
-                                          candidate.target_session_id ASC,
-                                          candidate.process_id ASC,
-                                          candidate.sequence ASC
-                                 LIMIT ?1",
-                            )
+                            .prepare(&claim_sql)
                             .map_err(process_sqlite_error)?;
-                        stmt.query_map(params![limit as i64, now as i64], |row| {
+                        let values = std::iter::once(rusqlite::types::Value::Integer(now as i64))
+                            .chain(non_blocking_labels.iter().map(|label| {
+                                rusqlite::types::Value::Text((*label).to_string())
+                            }))
+                            .chain(std::iter::once(rusqlite::types::Value::Integer(limit as i64)))
+                            .collect::<Vec<_>>();
+                        stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             row.get::<_, String>(0)
                         })
                         .map_err(process_sqlite_error)?
