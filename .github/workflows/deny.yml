@@ -13,6 +13,11 @@ on:
       - Cargo.lock
       - deny.toml
       - .github/workflows/deny.yml
+  # Advisories are time-varying: a RUSTSEC entry published against an
+  # unchanged Cargo.lock would otherwise stay invisible until an unrelated
+  # dependency bump surfaces it as a surprise failure on that PR.
+  schedule:
+    - cron: "17 5 * * 1"
 
 permissions:
   contents: read

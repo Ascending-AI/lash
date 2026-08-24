@@ -2,8 +2,7 @@
 
 [advisories]
 version = 2
-# Current main carried RUSTSEC-2026-0258 (h2 0.4.15); Cargo.lock now moves to
-# current main carries h2 0.4.15 and the quick-xml advisories below; all are
+# Current main carries h2 0.4.15 and the quick-xml advisories below; all are
 # recorded until their owning upstream dependency permits a patched version.
 ignore = [
     { id = "RUSTSEC-2026-0258", reason = "h2 0.4.15 is selected by the current hyper graph; remove when the locked graph moves to the patched h2 version" },
