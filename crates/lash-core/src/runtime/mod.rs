@@ -407,8 +407,11 @@ pub struct TurnInput {
     /// Per-turn override for protocol-owned turn options.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
-    /// Optional externally-stable trace turn id. Normal runtime callers leave
-    /// this empty and the runtime generates one per outer turn.
+    /// Internal protocol transport carrier for the facade builder's turn ID.
+    ///
+    /// All non-advanced facade paths overwrite this field. Set
+    /// `TurnBuilder::turn_id` to control turn identity. Only low-level protocol
+    /// transport should read this field directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_turn_id: Option<String>,
     #[serde(skip)]
@@ -452,13 +455,6 @@ impl TurnInput {
     /// implementors while materializing protocol-specific session and turn state.
     pub fn with_protocol_turn_options(mut self, options: crate::ProtocolTurnOptions) -> Self {
         self.protocol_turn_options = Some(options);
-        self
-    }
-
-    /// Attaches host trace correlation to a turn for protocol and observation embedders without
-    /// changing durable turn identity.
-    pub fn with_trace_turn_id(mut self, trace_turn_id: impl Into<String>) -> Self {
-        self.trace_turn_id = Some(trace_turn_id.into());
         self
     }
 }

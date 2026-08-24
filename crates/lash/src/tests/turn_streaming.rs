@@ -1070,6 +1070,52 @@ async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
 }
 
 #[tokio::test]
+async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallback() -> Result<()> {
+    let recorder = Arc::new(RecordingInlineEffectController::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+            recorder.clone(),
+        )))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("turn-id-precedence").open().await?;
+
+    let builder_wins_scope = ScopedEffectController::borrowed(
+        recorder.as_ref(),
+        lash_core::ExecutionScope::runtime_operation("scope-operation"),
+    )?;
+    session
+        .turn(TurnInput::text("builder wins"))
+        .turn_id("builder-turn")
+        .advanced()
+        .run_with_scope(builder_wins_scope)
+        .await?;
+
+    let scope_fallback = ScopedEffectController::borrowed(
+        recorder.as_ref(),
+        lash_core::ExecutionScope::turn("turn-id-precedence", "fallback-turn"),
+    )?;
+    session
+        .turn(TurnInput::text("scope fallback"))
+        .advanced()
+        .run_with_scope(scope_fallback)
+        .await?;
+
+    let turn_ids = recorder
+        .invocations()
+        .into_iter()
+        .filter(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
+        .filter_map(|record| record.turn_id)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        turn_ids,
+        BTreeSet::from(["builder-turn".to_string(), "fallback-turn".to_string()])
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn explicit_effect_controller_creates_turn_scope_internally() -> Result<()> {
     let recorder = RecordingInlineEffectController::default();
     let core = standard_core();
@@ -4393,10 +4439,12 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
 async fn control_turn_accepts_prebuilt_turn_input() -> Result<()> {
     let core = standard_core();
     let session = core.session("raw-turn").open().await?;
-    let mut input = TurnInput::text("raw input");
-    input.trace_turn_id = Some("host-trace-id".to_string());
 
-    let result = session.turn(input).turn_id("host-trace-id").run().await?;
+    let result = session
+        .turn(TurnInput::text("raw input"))
+        .turn_id("host-trace-id")
+        .run()
+        .await?;
 
     assert_eq!(assistant_prose(&result.activities), "echo: raw input");
     Ok(())
@@ -7854,11 +7902,9 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
-    let mut input = TurnInput::text("switch frames");
-    input.trace_turn_id = Some(root_turn_id.to_string());
-
     let output = session
-        .turn(input)
+        .turn(TurnInput::text("switch frames"))
+        .turn_id(root_turn_id)
         .advanced()
         .run_with_scope(scoped_effect_controller)
         .await?;

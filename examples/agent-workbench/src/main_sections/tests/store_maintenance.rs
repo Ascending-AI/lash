@@ -396,10 +396,9 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
         },
         attachment_id: Some(referenced_id.to_string()),
     };
-    let mut input = restate::workbench_turn_input(&state, &request)
+    let input = restate::workbench_turn_input(&state, &request)
         .await
         .expect("build the attachment turn input");
-    input.trace_turn_id = Some(turn_id.clone());
     let session = state
         .core
         .session(session_id.clone())

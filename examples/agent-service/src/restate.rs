@@ -263,8 +263,7 @@ async fn run_restate_chat_turn_and_persist(
         Arc::clone(&turn_state),
     );
 
-    let mut input = TurnInput::text(request.text.clone());
-    input.trace_turn_id = Some(request.turn_id.clone());
+    let input = TurnInput::text(request.text.clone());
     let output = session
         .turn(input)
         .turn_id(request.turn_id.clone())

@@ -482,15 +482,7 @@ async fn run_once_inner(
             _ => None,
         };
 
-        let mut turn_input = TurnInput {
-            items: vec![InputItem::Text {
-                text: benchmark_prompt(scenario, turn_index),
-            }],
-            protocol_turn_options: None,
-            trace_turn_id: None,
-            protocol_extension: None,
-            turn_context: lash_core::TurnContext::default(),
-        };
+        let mut turn_input = TurnInput::text(benchmark_prompt(scenario, turn_index));
         if matches!(scenario, RuntimePerfScenario::RlmGlobals) {
             turn_input =
                 turn_input.rlm_project(rlm_perf_projected_bindings(scenario, turn_index)?)?;

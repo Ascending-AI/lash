@@ -2377,7 +2377,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::InputItem", "lash_core::InputItem"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Internal integrator seam: `lash_core::InputItem` is consumed inside the workspace at crates/lash-perf/src/runtime_perf/measurement/live_replay.rs::run_once_trace_jsonl#`items: vec![InputItem::Text {`. lash-perf is written against the core contract directly, so the core path is the seam it implements. Host-facing projection: `lash::InputItem`. Also retained for downstream host compatibility: the Figments `lash-runtime` app builds against the published lash-core crate directly."
+reason = "Internal integrator seam: `lash_core::InputItem` is consumed inside the workspace at crates/lash-standard-plugins/src/rolling_history.rs#`items: vec![InputItem::Text { text: prompt_text }],`. lash-standard-plugins is written against the core contract directly, so the core path is the seam it implements. Host-facing projection: `lash::InputItem`. Also retained for downstream host compatibility: the Figments `lash-runtime` app builds against the published lash-core crate directly."
 
 [[api]]
 symbol = "lash::InputItem::Attachment"
@@ -3454,8 +3454,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashSession::usage_report"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:284#assert!(before_restart.usage.usage.total_tokens >= call_total);"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:284#assert!(before_restart.usage.usage.total_tokens >= call_total);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:283#assert!(before_restart.usage.usage.total_tokens >= call_total);"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:283#assert!(before_restart.usage.usage.total_tokens >= call_total);"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -4196,7 +4196,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelTarget::input_id"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:1133#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
+usage = "examples/agent-workbench/src/restate.rs:1132#.map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id))"
 
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget::source_key"
@@ -7520,7 +7520,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnInput::trace_turn_id", "lash_core::TurnInput::trace_turn_id"]
 area = "observation-admin"
 disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
+reason = "Low-level protocol transport reads this internal carrier after the facade builder writes it; host callers control facade turn identity through TurnBuilder::turn_id instead of assigning this field directly."
 
 [[api]]
 symbol = "lash::TurnInput::turn_context"
@@ -7548,15 +7548,6 @@ aliases = ["lash::prelude::TurnInput::with_protocol_turn_options", "lash_core::T
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
-
-[[api]]
-symbol = "lash::TurnInput::with_trace_turn_id"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash::prelude::TurnInput::with_trace_turn_id", "lash_core::TurnInput::with_trace_turn_id"]
-area = "observation-admin"
-disposition = "unused-justify"
-reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
 
 [[api]]
 symbol = "lash::TurnInputAcceptanceReceipt"
@@ -9043,8 +9034,8 @@ availability = "default+all-features"
 aliases = ["lash_core::MediaType::as_str"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:266#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:266#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:265#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:265#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
 
 [[api]]
 symbol = "lash::attachments::MediaType::family"
@@ -9184,8 +9175,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource::Stored"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:269#source.stored_ref().map(|reference| &reference.id),"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:269#source.stored_ref().map(|reference| &reference.id),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:268#source.stored_ref().map(|reference| &reference.id),"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:268#source.stored_ref().map(|reference| &reference.id),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -9222,8 +9213,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource::media_type"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:266#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:266#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:265#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:265#assert_eq!(source.media_type().map(lash::attachments::MediaType::as_str), Some(\"image/png\"));"
 
 [[api]]
 symbol = "lash::direct::AttachmentSource::provider_file"
@@ -9251,8 +9242,8 @@ availability = "default+all-features"
 aliases = ["lash_core::AttachmentSource::stored_ref"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:269#source.stored_ref().map(|reference| &reference.id),"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:269#source.stored_ref().map(|reference| &reference.id),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:268#source.stored_ref().map(|reference| &reference.id),"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:268#source.stored_ref().map(|reference| &reference.id),"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -10204,7 +10195,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Text"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:542#parts: vec![LlmOutputPart::Text {"
+usage = "examples/agent-service/src/restate.rs:541#parts: vec![LlmOutputPart::Text {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -10214,7 +10205,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Text::response_meta"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:544#response_meta: None,"
+usage = "examples/agent-service/src/restate.rs:543#response_meta: None,"
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::Text::text"
@@ -10223,7 +10214,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart::Text::text"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:543#text: text.to_string(),"
+usage = "examples/agent-service/src/restate.rs:542#text: text.to_string(),"
 
 [[api]]
 symbol = "lash::direct::LlmOutputPart::ToolCall"
@@ -12139,7 +12130,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::reopen_preserving_history"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3562#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
+usage = "crates/lash/src/tests/turn_streaming.rs:3608#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
 reason = "Relocate: this all-features-only handle is implemented in lash_core::testing and exists solely so the importable replay law can distinguish preserved history from a fresh incarnation."
 
 [[api]]
@@ -12167,7 +12158,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3775#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
+usage = "crates/lash/src/tests/turn_streaming.rs:3821#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
 reason = "Relocate: this all-features-only method is implemented in lash_core::testing and consumed only to pin the distinct replay-visible and pre-notification cuts in the snapshot-subscribe conformance law."
 
 [[api]]
@@ -12942,7 +12933,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::TurnActivity::0"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:574#SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent("
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:566#SessionObservationEventPayload::TurnActivity(lash_core::TurnActivity::independent("
 
 [[api]]
 symbol = "lash::observe::SessionObservationStream"
@@ -13221,7 +13212,7 @@ aliases = ["lash_core::AttachmentReclamationPolicy", "lash_core::facade_support:
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:519#policy: lash::persistence::AttachmentReclamationPolicy,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:455#assert_eq!(protected.reclaimed_count, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:454#assert_eq!(protected.reclaimed_count, 0);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationPolicy::empty_root_set"
@@ -13231,7 +13222,7 @@ aliases = ["lash_core::AttachmentReclamationPolicy::empty_root_set", "lash_core:
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:506#empty_root_set: empty_roots,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:645#assert_eq!(refused.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:644#assert_eq!(refused.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationPolicy::grace_period_ms"
@@ -13241,7 +13232,7 @@ aliases = ["lash_core::AttachmentReclamationPolicy::grace_period_ms", "lash_core
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:505#grace_period_ms: retention_ms,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:455#assert_eq!(protected.reclaimed_count, 0);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:454#assert_eq!(protected.reclaimed_count, 0);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport"
@@ -13251,7 +13242,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:555#report: lash::persistence::AttachmentReclamationReport,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:479#assert_eq!(summary.scanned_blob_count, 2);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:478#assert_eq!(summary.scanned_blob_count, 2);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport::deleted_while_referenced"
@@ -13261,7 +13252,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport::deleted_whil
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:567#deleted_while_referenced: attachment_ids_to_strings(&report.deleted_while_referenced),"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:490#assert!(summary.deleted_while_referenced.is_empty(), \"{summary:?}\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:489#assert!(summary.deleted_while_referenced.is_empty(), \"{summary:?}\");"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport::failed_ids"
@@ -13271,7 +13262,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport::failed_ids"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:564#failed_ids: attachment_ids_to_strings(&report.failed_ids),"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:488#assert!(summary.failed_ids.is_empty(), \"{summary:?}\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:487#assert!(summary.failed_ids.is_empty(), \"{summary:?}\");"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport::reclaimed_count"
@@ -13281,7 +13272,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport::reclaimed_co
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:562#reclaimed_count: report.reclaimed_count,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:481#assert_eq!(summary.reclaimed_count, 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:480#assert_eq!(summary.reclaimed_count, 1);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport::root_enumeration_failure"
@@ -13291,7 +13282,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport::root_enumera
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:569#root_enumeration_failure: report.root_enumeration_failure,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:492#assert_eq!(summary.root_enumeration_failure, None);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:491#assert_eq!(summary.root_enumeration_failure, None);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport::scanned_blob_count"
@@ -13301,7 +13292,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport::scanned_blob
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:561#scanned_blob_count: report.scanned_blob_count,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:479#assert_eq!(summary.scanned_blob_count, 2);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:478#assert_eq!(summary.scanned_blob_count, 2);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentRootSet"
@@ -13311,7 +13302,7 @@ aliases = ["lash_core::AttachmentRootSet"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:517#root_set: &dyn lash::persistence::AttachmentRootSet,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:481#assert_eq!(summary.reclaimed_count, 1);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:480#assert_eq!(summary.reclaimed_count, 1);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentRootSet::has_live_attachment_ref"
@@ -13527,7 +13518,7 @@ aliases = ["lash_core::EmptyRootSetPolicy", "lash_core::facade_support::EmptyRoo
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:502#empty_roots: EmptyRootSetPolicy,"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:645#assert_eq!(refused.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:644#assert_eq!(refused.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::EmptyRootSetPolicy::AuthorizeDeleteAll"
@@ -18402,7 +18393,7 @@ aliases = ["lash_core::SessionStoreFactory"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:40#)) as Arc<dyn lash::persistence::SessionStoreFactory>;"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:323#assert_eq!(after_restart.usage, persisted_usage);"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:322#assert_eq!(after_restart.usage, persisted_usage);"
 
 [[api]]
 symbol = "lash::persistence::SessionStoreFactory::create_store"
@@ -31691,8 +31682,8 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::attachment_bytes"]
 area = "attachments"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:267#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:267#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:266#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:266#assert_eq!(requests[0].attachment_bytes(source), Some(png_bytes.as_slice()));"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::attachments"
@@ -31899,7 +31890,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:540#Ok(LlmResponse {"
+usage = "examples/agent-service/src/restate.rs:539#Ok(LlmResponse {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -31918,7 +31909,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::full_text"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:541#full_text: text.to_string(),"
+usage = "examples/agent-service/src/restate.rs:540#full_text: text.to_string(),"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::generation_disposition"
@@ -31945,7 +31936,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::parts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:542#parts: vec![LlmOutputPart::Text {"
+usage = "examples/agent-service/src/restate.rs:541#parts: vec![LlmOutputPart::Text {"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::provider_usage"
@@ -31972,7 +31963,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::response_metadata"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/restate.rs:546#response_metadata: Default::default(),"
+usage = "examples/agent-service/src/restate.rs:545#response_metadata: Default::default(),"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::terminal_diagnostic"
@@ -46208,7 +46199,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssembledTurn::children_usage", "lash_core::runtime::AssembledTurn::children_usage"]
 area = "observation-admin"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::children_usage` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and the remote-protocol crate -- this field is exercised in-repo at crates/lash/src/turn.rs::TurnReport::from_assembled#`children_usage: turn.children_usage,`, crates/lash/src/turn.rs::TurnReport::total_usage#`for entry in &self.children_usage {`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::children_usage` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and the remote-protocol crate -- this field is exercised in-repo at crates/lash/src/turn.rs::TurnReport::from_assembled#`children_usage,`, crates/lash/src/turn.rs::TurnReport::total_usage#`for entry in &self.children_usage {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::AssembledTurn::errors"
@@ -46226,7 +46217,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssembledTurn::execution", "lash_core::runtime::AssembledTurn::execution"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::execution` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and the remote-protocol crate -- this field is exercised in-repo at crates/lash/src/turn.rs::TurnReport::from_assembled#`execution: turn.execution,`, crates/lash/src/turn.rs::TurnReport::started_at#`std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.execution.started_at_ms)`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::execution` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and the remote-protocol crate -- this field is exercised in-repo at crates/lash/src/turn.rs::TurnReport::from_assembled#`execution,`, crates/lash/src/turn.rs::TurnReport::started_at#`std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.execution.started_at_ms)`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::AssembledTurn::llm_calls"
@@ -46235,7 +46226,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssembledTurn::llm_calls", "lash_core::runtime::AssembledTurn::llm_calls"]
 area = "protocol"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::llm_calls` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and facade agent-scenario tests -- this field is exercised in-repo at crates/lash/src/turn.rs::TurnReport::from_assembled#`llm_calls: turn.llm_calls,`, crates/lash/src/tests/core_session_builder/session_lifecycle.rs::turn_result_total_usage_sums_parent_and_children#`cache_write_input_tokens: 0,`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::runtime::AssembledTurn::llm_calls` directly; the gate reaches the same item a second time through `lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe`. Consumer class: the `lash` facade itself and facade agent-scenario tests -- this field is exercised in-repo at crates/lash/src/turn.rs::TurnReport::from_assembled#`llm_calls,`, crates/lash/src/tests/core_session_builder/session_lifecycle.rs::turn_result_total_usage_sums_parent_and_children#`cache_write_input_tokens: 0,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::runtime::AssembledTurn::outcome"
@@ -46461,8 +46452,8 @@ availability = "default+all-features"
 aliases = ["lash_core::Clock::timestamp_ms"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:256#(runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:256#(runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:255#(runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:255#(runtime_window_start_ms..=runtime_window_end_ms).contains(&latest_node_ms),"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -56268,7 +56259,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3563#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
+usage = "crates/lash/src/tests/turn_streaming.rs:3609#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
 reason = "Importable live-replay law exercised by the runtime's in-memory conformance test; only test code invokes it, which is the purpose of the `testing` feature."
 
 [[api]]
@@ -61296,7 +61287,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted"]
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:499#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:498#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -61335,8 +61326,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TraceEvent::LlmCallCompleted::usage"]
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:499#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
-assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:281#assert_eq!(call_usage.len(), 1);"
+usage = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:498#TraceEvent::LlmCallCompleted { usage, .. } => usage,"
+assertion = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs:280#assert_eq!(call_usage.len(), 1);"
 
 [[api]]
 symbol = "lash::tracing::TraceEvent::LlmCallFailed"
@@ -71263,7 +71254,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1329#) -> Result<lash_core::facade_support::AgentFrameRun> {"
+usage = "crates/lash/src/turn.rs:1317#) -> Result<lash_core::facade_support::AgentFrameRun> {"
 
 [[api]]
 symbol = "lash_core::facade_support::AgentFrameRun::acceptance"
@@ -73047,7 +73038,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:740#.queue_drain_scope(drain_id);"
+usage = "crates/lash/src/turn.rs:750#.queue_drain_scope(drain_id);"
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope"
@@ -74547,7 +74538,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1273#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
+usage = "crates/lash/src/turn.rs:1261#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnContextFacadeOps::replace_prompt_slot"
@@ -74571,7 +74562,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1223#) -> lash_core::facade_support::TurnOptions<'a> {"
+usage = "crates/lash/src/turn.rs:1211#) -> lash_core::facade_support::TurnOptions<'a> {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::new"
@@ -74579,7 +74570,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1224#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
+usage = "crates/lash/src/turn.rs:1212#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_events"
@@ -74587,7 +74578,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1226#opts = opts.with_events(events);"
+usage = "crates/lash/src/turn.rs:1214#opts = opts.with_events(events);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_local_cancel_origin_hint"
@@ -74603,7 +74594,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1228#opts.with_turn_events(turn_events)"
+usage = "crates/lash/src/turn.rs:1216#opts.with_turn_events(turn_events)"
 
 [[api]]
 symbol = "lash_core::facade_support::append_assistant_text_part"
@@ -81383,7 +81374,7 @@ availability = "default+all-features"
 aliases = ["lash::turn::SelectedQueuedTurnBuilder::effects"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:743#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:742#.effects(controller)"
 reason = "The Restate selected-drain workflow binds its durable effect controller before streaming; controller ownership is verified by the workflow integration tests rather than at this call site."
 
 [[api]]
@@ -81587,7 +81578,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:743#.effects(controller)"
+usage = "examples/agent-workbench/src/restate.rs:742#.effects(controller)"
 reason = "The Restate workbench selected drain uses the controller-scoped builder; its workflow outcome is checked by higher-level integration coverage."
 
 [[api]]
@@ -81628,7 +81619,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:744#.stream_to(&ui_events)"
+usage = "examples/agent-workbench/src/restate.rs:743#.stream_to(&ui_events)"
 reason = "The Restate workbench streams a controller-scoped selected drain into its UI sink; higher-level workflow tests validate the emitted reply."
 
 [[api]]
@@ -86074,7 +86065,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport::condemn_defe
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:566#condemn_deferred_ids: attachment_ids_to_strings(&report.condemn_deferred_ids),"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:489#assert!(summary.condemn_deferred_ids.is_empty(), \"{summary:?}\");"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:488#assert!(summary.condemn_deferred_ids.is_empty(), \"{summary:?}\");"
 
 [[api]]
 symbol = "lash::persistence::AttachmentReclamationReport::fence"
@@ -86084,7 +86075,7 @@ aliases = ["lash_core::facade_support::AttachmentReclamationReport::fence"]
 area = "attachments"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/admin.rs:568#fence: SweepFence::from(report.fence),"
-assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:486#assert_eq!(summary.fence, SweepFence::Fenced);"
+assertion = "examples/agent-workbench/src/main_sections/tests/store_maintenance.rs:485#assert_eq!(summary.fence, SweepFence::Fenced);"
 
 [[api]]
 symbol = "lash::persistence::AttachmentRootSet::arm_attachment_delete"
@@ -93649,7 +93640,7 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate.rs:997#.ran()"
+usage = "examples/agent-workbench/src/restate.rs:996#.ran()"
 reason = "Syntax-only evidence: the workbench drops the empty reason and forwards the turn it ran, and no executed assertion in the example observes the discarded arm. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]

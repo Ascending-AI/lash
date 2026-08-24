@@ -69,8 +69,8 @@ fn turn_input_round_trips_remote_safe_fields() {
     ])
     .with_protocol_turn_options(lash_core::ProtocolTurnOptions::from_payload(
         serde_json::json!({ "mode": "remote" }),
-    ))
-    .with_trace_turn_id("trace-1");
+    ));
+    input.trace_turn_id = Some("trace-1".to_string());
     input.turn_context.set_prompt_layer(prompt.clone());
 
     let remote = RemoteTurnInput::try_from(input).expect("remote conversion");
