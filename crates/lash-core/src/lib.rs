@@ -394,9 +394,13 @@ pub mod facade_support {
     pub use crate::runtime::TurnActivitySink;
     pub use crate::runtime::TurnAddress;
     pub use crate::runtime::TurnAttach;
+    pub use crate::runtime::TurnCancelAffectedInput;
+    pub use crate::runtime::TurnCancelDisposition;
+    pub use crate::runtime::TurnCancelInputOutcome;
     pub use crate::runtime::TurnCancelOutcome;
     pub use crate::runtime::TurnCancelReceipt;
     pub use crate::runtime::TurnCancelRequest;
+    pub use crate::runtime::TurnCancelRequestRecord;
     pub use crate::runtime::TurnCancellationEvidence;
     pub use crate::runtime::TurnExecutionMetrics;
     pub use crate::runtime::TurnInputAcceptanceReceipt;
@@ -1025,13 +1029,14 @@ pub use runtime::{
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
     SessionRelationKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
     SessionStoreFactory, SessionSummary, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
-    TurnActivity, TurnActivityId, TurnCancelOriginHint, TurnContext, TurnEvent, TurnInput,
-    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
-    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier,
+    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition,
+    TurnCancelInputOutcome, TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnEvent,
+    TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
+    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,
+    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
+    WakeDeliveryConfig, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

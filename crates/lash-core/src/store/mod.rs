@@ -979,6 +979,29 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
 /// completed atomically by [`SessionCommitStore::commit_runtime_state`].
 #[async_trait::async_trait]
 pub trait TurnInputStore: Send + Sync {
+    /// Persist the first cancellation request for one turn.
+    ///
+    /// Repeating the address returns the original request unchanged, making
+    /// its undelivered-input disposition first-writer-wins.
+    async fn record_turn_cancel_request(
+        &self,
+        request: crate::TurnCancelRequest,
+    ) -> Result<crate::TurnCancelRequestRecord, StoreError> {
+        Ok(crate::TurnCancelRequestRecord {
+            request,
+            outcome: None,
+        })
+    }
+
+    /// Read the durable cancellation request and any accumulated repair
+    /// outcome for one turn.
+    async fn turn_cancel_request(
+        &self,
+        _address: &crate::TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRequestRecord>, StoreError> {
+        Ok(None)
+    }
+
     /// Persist model-visible user input into the pending turn-input lifecycle.
     async fn enqueue_pending_turn_input(
         &self,
@@ -1085,8 +1108,8 @@ pub trait TurnInputStore: Send + Sync {
         Ok(())
     }
 
-    /// Re-defer every active-turn-scoped input whose pinned turn can no longer
-    /// commit, returning how many rows were repaired.
+    /// Apply the durable cancel disposition to every active-turn-scoped input
+    /// whose pinned turn can no longer commit, returning the affected payloads.
     ///
     /// An input routed into a running turn is persisted `pending_active` (or
     /// `accepted` once that turn claims it) and addressed only by the turn id it
@@ -1097,12 +1120,14 @@ pub trait TurnInputStore: Send + Sync {
     /// repair for that state, and [`OrphanedTurnInputScope`] carries the caller's
     /// proof that the pinned turns are gone.
     ///
-    /// Repaired rows become `deferred_next_turn` with `NextTurn` ingress and
-    /// cleared claim columns - byte-identical to the commit-time re-defer. A
-    /// repaired row is therefore a row that has not been delivered: exactly-once
-    /// delivery rests on the row's own state transition to a settled state,
-    /// which this repair never performs. Rows the scope does not cover are
-    /// untouched.
+    /// Under [`crate::TurnCancelDisposition::Defer`], repaired rows become
+    /// `deferred_next_turn` with `NextTurn` ingress and cleared claim columns -
+    /// byte-identical to the commit-time re-defer. They remain undelivered and
+    /// redeliverable. Under [`crate::TurnCancelDisposition::Drop`], repaired rows become
+    /// `cancelled`, which is the settled transition that makes a dropped input
+    /// un-redeliverable. Its payload stays in place for the durable outcome
+    /// record; ADR 0010 leaves vacuum as the sole reclamation path. Rows the
+    /// scope does not cover are untouched.
     ///
     /// Like every other sibling that rewrites claim columns, the repair
     /// re-validates `session_execution_lease` **inside its own transaction**.
@@ -1117,7 +1142,7 @@ pub trait TurnInputStore: Send + Sync {
         session_id: &str,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, StoreError>;
+    ) -> Result<crate::TurnCancelInputOutcome, StoreError>;
 }
 
 /// The caller's proof that a pinned turn can no longer commit, and therefore

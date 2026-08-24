@@ -193,6 +193,7 @@ pub struct InMemorySessionStore {
     wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
     pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
     pending_turn_input_next_seq: Mutex<u64>,
+    turn_cancel_requests: Mutex<HashMap<String, crate::TurnCancelRequestRecord>>,
     attachment_manifest:
         Mutex<HashMap<(String, crate::AttachmentId), crate::AttachmentManifestEntry>>,
     /// Per-digest attachment GC condemnation state, shared with every store the
@@ -320,6 +321,7 @@ impl InMemorySessionStore {
             wake_redelivery_fences: Mutex::new(HashMap::new()),
             pending_turn_inputs: Mutex::new(Vec::new()),
             pending_turn_input_next_seq: Mutex::new(0),
+            turn_cancel_requests: Mutex::new(HashMap::new()),
             attachment_manifest: Mutex::new(HashMap::new()),
             attachment_condemnations,
             #[cfg(test)]
@@ -1332,8 +1334,10 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .collect::<Result<Vec<_>, _>>()?;
             (queued, fences, next_seq, enqueued)
         };
-        let staged_pending_turn_inputs = {
+        let (staged_pending_turn_inputs, staged_turn_cancel_requests, turn_cancel_input_outcome) = {
             let mut pending = self.pending_turn_inputs.lock_recover().clone();
+            let mut requests = self.turn_cancel_requests.lock_recover().clone();
+            let mut outcome = crate::TurnCancelInputOutcome::default();
             for completed in &commit.completed_turn_input_claims {
                 for entry in pending.iter_mut() {
                     if turn_input_settlement_matches(entry, completed) {
@@ -1352,22 +1356,48 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                             .active_turn_id()
                             .is_some_and(|active| active == turn_id)
                     {
-                        entry.input.state = crate::TurnInputState::DeferredNextTurn;
-                        entry.input.ingress = crate::TurnInputIngress::NextTurn;
+                        let disposition = requests
+                            .get(turn_id)
+                            .map_or(crate::TurnCancelDisposition::Defer, |record| {
+                                record.request.undelivered
+                            });
+                        let affected = crate::TurnCancelAffectedInput {
+                            input_id: entry.input.input_id.clone(),
+                            payload: entry.input.input.clone(),
+                            disposition,
+                        };
+                        match disposition {
+                            crate::TurnCancelDisposition::Defer => {
+                                entry.input.state = crate::TurnInputState::DeferredNextTurn;
+                                entry.input.ingress = crate::TurnInputIngress::NextTurn;
+                            }
+                            crate::TurnCancelDisposition::Drop => {
+                                entry.input.state = crate::TurnInputState::Cancelled;
+                            }
+                        }
                         entry.claim_id = None;
                         entry.claim_token = None;
                         entry.claim_owner = None;
                         entry.claim_session_lease_generation = 0;
+                        if let Some(record) = requests.get_mut(turn_id) {
+                            record
+                                .outcome
+                                .get_or_insert_with(crate::TurnCancelInputOutcome::default)
+                                .affected_inputs
+                                .push(affected.clone());
+                        }
+                        outcome.affected_inputs.push(affected);
                     }
                 }
             }
-            pending
+            (pending, requests, outcome)
         };
 
         *self.queued_work.lock_recover() = staged_queued_work;
         *self.wake_redelivery_fences.lock_recover() = staged_wake_redelivery_fences;
         *self.queued_work_next_seq.lock_recover() = staged_queued_work_next_seq;
         *self.pending_turn_inputs.lock_recover() = staged_pending_turn_inputs;
+        *self.turn_cancel_requests.lock_recover() = staged_turn_cancel_requests;
         let mut global_graph = self.global_session_graph.lock_recover();
         global_graph.extend_node_records(commit.graph.nodes.iter().cloned());
         let leaf_node_id = commit.graph.leaf_node_id.clone();
@@ -1454,7 +1484,8 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 deleted: false,
             });
         *self.runtime_commit_count.lock_recover() += 1;
-        let result = plan.result(checkpoint_ref, manifest, staged_enqueued_queue_batches);
+        let mut result = plan.result(checkpoint_ref, manifest, staged_enqueued_queue_batches);
+        result.turn_cancel_input_outcome = turn_cancel_input_outcome;
         let receipt = plan.receipt_write(&result);
         let stored_receipt = RuntimeTurnCommitRecord {
             turn_commit_hash: receipt.turn_commit_hash.to_string(),

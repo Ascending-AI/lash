@@ -21,6 +21,38 @@ fn state_with_one_pending_node(session_id: &str) -> RuntimeSessionState {
 }
 
 #[tokio::test]
+async fn perf_factory_reopens_created_root_session_by_id() {
+    let factory = RuntimePerfStoreFactory::new(Arc::new(RuntimePerfStore::default()));
+    let request = SessionStoreCreateRequest {
+        session_id: "runtime-perf-turn_cancel_round_trip".to_string(),
+        relation: lash_core::SessionRelation::Root,
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+
+    factory
+        .create_store(&request)
+        .await
+        .expect("create benchmark root session store");
+
+    assert!(
+        factory
+            .open_existing_store_by_id(&request.session_id)
+            .await
+            .expect("reopen benchmark root session store")
+            .is_some(),
+        "turn cancellation must resolve the benchmark session through the decorated factory"
+    );
+    assert!(
+        factory
+            .open_existing_store_by_id("runtime-perf-never-created")
+            .await
+            .expect("look up an unknown benchmark session")
+            .is_none(),
+        "the perf decorator must not alias an unknown id to its root store"
+    );
+}
+
+#[tokio::test]
 async fn successful_commits_are_counted_after_the_inner_store_accepts_them() {
     let store = RuntimePerfStore::default();
     let commit =

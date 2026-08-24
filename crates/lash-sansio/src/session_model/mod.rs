@@ -548,6 +548,25 @@ pub enum TurnStop {
     },
 }
 
+/// What cancellation does with active-turn input the cancelled turn did not
+/// deliver.
+///
+/// `Defer` is the compatibility default for requests decoded from durable
+/// records written before this field existed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnCancelDisposition {
+    #[default]
+    Defer,
+    Drop,
+}
+
+impl TurnCancelDisposition {
+    pub(crate) fn is_defer(&self) -> bool {
+        *self == Self::Defer
+    }
+}
+
 /// Durable evidence that a turn was cancelled.
 ///
 /// Minted either from a host turn-cancel request, which supplies the
@@ -562,6 +581,9 @@ pub struct TurnCancellationEvidence {
     pub origin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Applied policy for active-turn input this turn did not deliver.
+    #[serde(default, skip_serializing_if = "TurnCancelDisposition::is_defer")]
+    pub undelivered: TurnCancelDisposition,
 }
 
 impl TurnCancellationEvidence {
@@ -572,6 +594,7 @@ impl TurnCancellationEvidence {
             request_id: format!("internal:{subject}"),
             origin: None,
             reason: None,
+            undelivered: TurnCancelDisposition::Defer,
         }
     }
 }

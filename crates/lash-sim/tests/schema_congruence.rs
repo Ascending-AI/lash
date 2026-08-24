@@ -105,6 +105,22 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("trigger_occurrences", "lash_trigger_occurrences"),
     pair("trigger_subscriptions", "lash_trigger_subscriptions"),
     TablePair {
+        sqlite_table: Some("turn_cancel_requests"),
+        postgres_table: Some("lash_turn_cancel_requests"),
+        parity: Parity::Divergent {
+            reason: "SQLite stores the typed cancel record as one JSON value while Postgres keeps request fields and ordered outcome arrays structural",
+            sqlite_only_columns: &["record_json"],
+            postgres_only_columns: &[
+                "affected_dispositions",
+                "affected_input_ids",
+                "disposition",
+                "origin",
+                "reason",
+                "request_id",
+            ],
+        },
+    },
+    TablePair {
         sqlite_table: Some("usage_deltas"),
         postgres_table: Some("lash_usage_deltas"),
         parity: Parity::Divergent {

@@ -80,6 +80,34 @@ fn find_pending_turn_input_index(
 
 #[async_trait::async_trait]
 impl crate::store::TurnInputStore for InMemorySessionStore {
+    async fn record_turn_cancel_request(
+        &self,
+        request: crate::TurnCancelRequest,
+    ) -> Result<crate::TurnCancelRequestRecord, crate::store::StoreError> {
+        self.ensure_session_not_deleted(&request.address.session_id)?;
+        let _transaction = self.write_transaction.lock_recover();
+        let mut requests = self.turn_cancel_requests.lock_recover();
+        Ok(requests
+            .entry(request.address.turn_id.clone())
+            .or_insert_with(|| crate::TurnCancelRequestRecord {
+                request,
+                outcome: None,
+            })
+            .clone())
+    }
+
+    async fn turn_cancel_request(
+        &self,
+        address: &crate::TurnAddress,
+    ) -> Result<Option<crate::TurnCancelRequestRecord>, crate::store::StoreError> {
+        self.ensure_session_not_deleted(&address.session_id)?;
+        Ok(self
+            .turn_cancel_requests
+            .lock_recover()
+            .get(&address.turn_id)
+            .cloned())
+    }
+
     async fn enqueue_pending_turn_input(
         &self,
         draft: crate::PendingTurnInputDraft,
@@ -330,14 +358,15 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         session_id: &str,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
         scope: crate::OrphanedTurnInputScope<'_>,
-    ) -> Result<usize, crate::store::StoreError> {
+    ) -> Result<crate::TurnCancelInputOutcome, crate::store::StoreError> {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         // Inside the write transaction, exactly like the claim path: a fence
         // validated outside it could be displaced before the repair writes.
         self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
         let mut pending = self.pending_turn_inputs.lock_recover();
-        let mut repaired = 0usize;
+        let mut requests = self.turn_cancel_requests.lock_recover();
+        let mut outcome = crate::TurnCancelInputOutcome::default();
         for entry in pending.iter_mut() {
             if entry.input.session_id != session_id
                 || !crate::store_backend_support::orphaned_active_turn_input_is_repairable(
@@ -351,11 +380,41 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             {
                 continue;
             }
-            entry.input.state = crate::TurnInputState::DeferredNextTurn;
-            entry.input.ingress = crate::TurnInputIngress::NextTurn;
+            let turn_id = entry
+                .input
+                .ingress
+                .active_turn_id()
+                .expect("repairable input is active-turn scoped")
+                .to_string();
+            let disposition = requests
+                .get(&turn_id)
+                .map_or(crate::TurnCancelDisposition::Defer, |record| {
+                    record.request.undelivered
+                });
+            let affected = crate::TurnCancelAffectedInput {
+                input_id: entry.input.input_id.clone(),
+                payload: entry.input.input.clone(),
+                disposition,
+            };
+            match disposition {
+                crate::TurnCancelDisposition::Defer => {
+                    entry.input.state = crate::TurnInputState::DeferredNextTurn;
+                    entry.input.ingress = crate::TurnInputIngress::NextTurn;
+                }
+                crate::TurnCancelDisposition::Drop => {
+                    entry.input.state = crate::TurnInputState::Cancelled;
+                }
+            }
             entry.clear_claim();
-            repaired += 1;
+            if let Some(record) = requests.get_mut(&turn_id) {
+                record
+                    .outcome
+                    .get_or_insert_with(crate::TurnCancelInputOutcome::default)
+                    .affected_inputs
+                    .push(affected.clone());
+            }
+            outcome.affected_inputs.push(affected);
         }
-        Ok(repaired)
+        Ok(outcome)
     }
 }

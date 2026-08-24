@@ -1,5 +1,19 @@
 use crate::*;
 
+impl PostgresSessionStoreFactory {
+    fn store_for(&self, session_id: String) -> PostgresSessionStore {
+        PostgresSessionStore {
+            pool: self.pool.clone(),
+            clock: Arc::clone(&self.clock),
+            session_id,
+            #[cfg(test)]
+            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            #[cfg(test)]
+            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn create_store(
@@ -7,15 +21,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
         lash_core::store::validate_session_id(&request.session_id)?;
-        let store = PostgresSessionStore {
-            pool: self.pool.clone(),
-            clock: Arc::clone(&self.clock),
-            session_id: request.session_id.clone(),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        };
+        let store = self.store_for(request.session_id.clone());
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
@@ -53,15 +59,24 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        let store = PostgresSessionStore {
-            pool: self.pool.clone(),
-            clock: Arc::clone(&self.clock),
-            session_id: request.session_id.clone(),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        };
+        let store = self.store_for(request.session_id.clone());
+        if store
+            .load_session_meta()
+            .await
+            .map_err(|err| err.to_string())?
+            .is_some()
+        {
+            Ok(Some(Arc::new(store)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        let store = self.store_for(session_id.to_string());
         if store
             .load_session_meta()
             .await
@@ -842,6 +857,7 @@ pub(crate) async fn delete_session_tx(
         "DELETE FROM lash_wake_redelivery_fences WHERE session_id = $1",
         "DELETE FROM lash_wake_allocation_floors WHERE target_session_id = $1",
         "DELETE FROM lash_pending_turn_inputs WHERE session_id = $1",
+        "DELETE FROM lash_turn_cancel_requests WHERE session_id = $1",
         "DELETE FROM lash_session_execution_leases WHERE session_id = $1",
         "DELETE FROM lash_usage_deltas WHERE session_id = $1",
         "DELETE FROM lash_runtime_turn_commits WHERE session_id = $1",
@@ -1064,6 +1080,11 @@ pub(crate) async fn delete_process_sessions_tx(
          ),
          deleted_pending_turn_inputs AS (
              DELETE FROM lash_pending_turn_inputs
+             WHERE session_id = ANY($1)
+             RETURNING session_id
+         ),
+         deleted_turn_cancel_requests AS (
+             DELETE FROM lash_turn_cancel_requests
              WHERE session_id = ANY($1)
              RETURNING session_id
          ),

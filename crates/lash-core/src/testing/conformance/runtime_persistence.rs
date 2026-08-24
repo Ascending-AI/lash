@@ -8523,7 +8523,8 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .await
         .expect("re-defer inputs pinned to the dead turn");
     assert_eq!(
-        repaired, 1,
+        repaired.len(),
+        1,
         "naming a dead turn must repair exactly the rows pinned to it"
     );
     let pending = store
@@ -8554,7 +8555,8 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 crate::OrphanedTurnInputScope::Turn(dead_turn_id)
             )
             .await
-            .expect("repeat the turn-scoped repair"),
+            .expect("repeat the turn-scoped repair")
+            .len(),
         0,
         "the repair is idempotent: a repaired row is no longer pinned to any turn"
     );
@@ -8596,7 +8598,8 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 },
             )
             .await
-            .expect("sweep while naming a turn the caller can still resume"),
+            .expect("sweep while naming a turn the caller can still resume")
+            .len(),
         0,
         "a row pinned to a resumable turn, or to one of its agent frames, must survive the sweep"
     );
@@ -8624,7 +8627,8 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 },
             )
             .await
-            .expect("sweep around the caller's own live claim"),
+            .expect("sweep around the caller's own live claim")
+            .len(),
         2,
         "the sweep repairs the unclaimed pinned rows and leaves the live claim alone"
     );
@@ -8708,7 +8712,8 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
                 crate::OrphanedTurnInputScope::Turn("fig1573-superseded-turn"),
             )
             .await
-            .expect("the live holder repairs the row the superseded caller could not"),
+            .expect("the live holder repairs the row the superseded caller could not")
+            .len(),
         1,
     );
     release_session_execution_lease_for_test(&store, &successor).await;

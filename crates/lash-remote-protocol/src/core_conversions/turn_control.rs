@@ -4,11 +4,16 @@ impl From<lash_core::facade_support::TurnCancellationEvidence> for RemoteTurnCan
             request_id,
             origin,
             reason,
+            undelivered,
         } = value;
         Self {
             request_id,
             origin,
             reason,
+            undelivered: match undelivered {
+                lash_core::facade_support::TurnCancelDisposition::Defer => RemoteTurnCancelDisposition::Defer,
+                lash_core::facade_support::TurnCancelDisposition::Drop => RemoteTurnCancelDisposition::Drop,
+            },
         }
     }
 }
@@ -19,11 +24,16 @@ impl From<RemoteTurnCancellationEvidence> for lash_core::facade_support::TurnCan
             request_id,
             origin,
             reason,
+            undelivered,
         } = value;
         Self {
             request_id,
             origin,
             reason,
+            undelivered: match undelivered {
+                RemoteTurnCancelDisposition::Defer => lash_core::facade_support::TurnCancelDisposition::Defer,
+                RemoteTurnCancelDisposition::Drop => lash_core::facade_support::TurnCancelDisposition::Drop,
+            },
         }
     }
 }
@@ -41,12 +51,17 @@ impl RemoteTurnCancelRequest {
             request_id,
             origin,
             reason,
+            undelivered,
         } = self;
         Ok(lash_core::facade_support::TurnCancelRequest {
             address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
             request_id,
             origin,
             reason,
+            undelivered: match undelivered {
+                RemoteTurnCancelDisposition::Defer => lash_core::facade_support::TurnCancelDisposition::Defer,
+                RemoteTurnCancelDisposition::Drop => lash_core::facade_support::TurnCancelDisposition::Drop,
+            },
         })
     }
 }
@@ -58,6 +73,7 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             request_id,
             origin,
             reason,
+            undelivered,
         } = value;
         Self {
             protocol_version: REMOTE_PROTOCOL_VERSION,
@@ -66,6 +82,10 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             request_id,
             origin,
             reason,
+            undelivered: match undelivered {
+                lash_core::facade_support::TurnCancelDisposition::Defer => RemoteTurnCancelDisposition::Defer,
+                lash_core::facade_support::TurnCancelDisposition::Drop => RemoteTurnCancelDisposition::Drop,
+            },
         }
     }
 }

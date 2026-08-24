@@ -1389,6 +1389,12 @@ pub struct TurnReport {
     /// Absent only for a store-less session, which cannot record an acceptance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance: Option<lash_core::runtime::TurnInputAcceptanceReceipt>,
+    /// Undelivered inputs affected by this turn's cancellation policy.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_core::TurnCancelInputOutcome::is_empty"
+    )]
+    pub cancel_input_outcome: lash_core::TurnCancelInputOutcome,
 }
 
 impl TurnReport {
@@ -1404,6 +1410,7 @@ impl TurnReport {
             execution: turn.execution,
             errors: turn.errors,
             acceptance: turn.turn_input_acceptance,
+            cancel_input_outcome: turn.turn_cancel_input_outcome,
         }
     }
 

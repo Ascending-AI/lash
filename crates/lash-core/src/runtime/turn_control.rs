@@ -88,7 +88,46 @@ impl TurnCancelOriginHint {
     }
 }
 
-pub use lash_sansio::TurnCancellationEvidence;
+pub use lash_sansio::{TurnCancelDisposition, TurnCancellationEvidence};
+
+/// One undelivered active-turn input affected by cancellation repair.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TurnCancelAffectedInput {
+    pub input_id: String,
+    pub payload: crate::TurnInput,
+    pub disposition: TurnCancelDisposition,
+}
+
+impl PartialEq for TurnCancelAffectedInput {
+    fn eq(&self, other: &Self) -> bool {
+        self.input_id == other.input_id
+            && self.disposition == other.disposition
+            && serde_json::to_value(&self.payload).ok() == serde_json::to_value(&other.payload).ok()
+    }
+}
+
+impl Eq for TurnCancelAffectedInput {}
+
+/// Durable outcome accumulated on a turn-cancel request.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnCancelInputOutcome {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affected_inputs: Vec<TurnCancelAffectedInput>,
+}
+
+impl TurnCancelInputOutcome {
+    /// Reports whether cancellation repair affected no active-turn input, so hosts can skip
+    /// restore, re-enqueue, or audit work without inspecting the payload list.
+    pub fn is_empty(&self) -> bool {
+        self.affected_inputs.is_empty()
+    }
+
+    /// Number of affected pending inputs.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.affected_inputs.len()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnCancelRequest {
@@ -99,6 +138,13 @@ pub struct TurnCancelRequest {
     pub origin: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Policy for active-turn input the cancelled turn did not deliver.
+    #[serde(default, skip_serializing_if = "turn_cancel_disposition_is_defer")]
+    pub undelivered: TurnCancelDisposition,
+}
+
+fn turn_cancel_disposition_is_defer(disposition: &TurnCancelDisposition) -> bool {
+    matches!(disposition, TurnCancelDisposition::Defer)
 }
 
 impl TurnCancelRequest {
@@ -112,11 +158,17 @@ impl TurnCancelRequest {
             request_id: request_id.into(),
             origin,
             reason: None,
+            undelivered: TurnCancelDisposition::Defer,
         }
     }
 
     pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
         self.reason = Some(reason.into());
+        self
+    }
+
+    pub fn undelivered(mut self, disposition: TurnCancelDisposition) -> Self {
+        self.undelivered = disposition;
         self
     }
 
@@ -136,8 +188,17 @@ impl TurnCancelRequest {
             request_id: self.request_id.clone(),
             origin: self.origin.clone(),
             reason: self.reason.clone(),
+            undelivered: self.undelivered,
         }
     }
+}
+
+/// Durable request and the input outcome accumulated by repair paths.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnCancelRequestRecord {
+    pub request: TurnCancelRequest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<TurnCancelInputOutcome>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,6 +214,9 @@ pub enum TurnCancelOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnCancelReceipt {
     pub outcome: TurnCancelOutcome,
+    /// Durable request and repair outcome when the driver has a session store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<TurnCancelRequestRecord>,
 }
 
 /// The published terminal of one foreground turn.
@@ -214,6 +278,7 @@ pub trait TurnAttach: Send + Sync {
 pub struct TurnWorkDriver {
     effect_host: Arc<dyn EffectHost>,
     attach: Option<Arc<dyn TurnAttach>>,
+    store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
 }
 
 impl TurnWorkDriver {
@@ -221,11 +286,20 @@ impl TurnWorkDriver {
         Self {
             effect_host,
             attach: None,
+            store_factory: None,
         }
     }
 
     pub fn with_attach(mut self, attach: Arc<dyn TurnAttach>) -> Self {
         self.attach = Some(attach);
+        self
+    }
+
+    pub fn with_session_store_factory(
+        mut self,
+        store_factory: Arc<dyn crate::SessionStoreFactory>,
+    ) -> Self {
+        self.store_factory = Some(store_factory);
         self
     }
 
@@ -243,11 +317,36 @@ impl TurnWorkDriver {
             Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
                 return Ok(TurnCancelReceipt {
                     outcome: TurnCancelOutcome::UnknownOrRevoked,
+                    record: None,
                 });
             }
             Err(err) => return Err(err),
         };
-        let evidence = request.evidence();
+        let record = if let Some(factory) = self.store_factory.as_ref() {
+            let store = factory
+                .open_existing_store_by_id(&request.address.session_id)
+                .await
+                .map_err(|err| RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err))?
+                .ok_or_else(|| {
+                    RuntimeError::new(
+                        crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                        format!("session `{}` does not exist", request.address.session_id),
+                    )
+                })?;
+            Some(
+                store
+                    .record_turn_cancel_request(request.clone())
+                    .await
+                    .map_err(|err| {
+                        RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                    })?,
+            )
+        } else {
+            None
+        };
+        let evidence = record
+            .as_ref()
+            .map_or_else(|| request.evidence(), |record| record.request.evidence());
         let resolution = gate_resolution(TurnGateTerminal::CancelRequested(evidence.clone()))?;
         let outcome = match self
             .effect_host
@@ -263,7 +362,21 @@ impl TurnWorkDriver {
             },
             ResolveOutcome::UnknownOrRevoked => Ok(TurnCancelOutcome::UnknownOrRevoked),
         }?;
-        Ok(TurnCancelReceipt { outcome })
+        let record = if let (Some(factory), Some(_)) = (self.store_factory.as_ref(), record) {
+            factory
+                .open_existing_store_by_id(&request.address.session_id)
+                .await
+                .map_err(|err| RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err))?
+                .expect("cancellation store existed")
+                .turn_cancel_request(&request.address)
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                })?
+        } else {
+            None
+        };
+        Ok(TurnCancelReceipt { outcome, record })
     }
 
     pub async fn await_terminal(
@@ -606,6 +719,23 @@ mod tests {
     fn request(address: TurnAddress, request_id: &str) -> TurnCancelRequest {
         TurnCancelRequest::new(address, request_id, Some("user".to_string()))
             .with_reason("stop button")
+    }
+
+    #[test]
+    fn legacy_cancel_request_without_disposition_defaults_to_defer() {
+        let decoded: TurnCancelRequest = serde_json::from_value(serde_json::json!({
+            "address": { "session_id": "legacy-session", "turn_id": "legacy-turn" },
+            "request_id": "legacy-request"
+        }))
+        .expect("decode a pre-disposition cancel request");
+        assert_eq!(decoded.undelivered, TurnCancelDisposition::Defer);
+        assert!(
+            serde_json::to_value(decoded)
+                .expect("encode defaulted request")
+                .get("undelivered")
+                .is_none(),
+            "the legacy Defer default stays sparse on the durable row"
+        );
     }
 
     #[tokio::test]

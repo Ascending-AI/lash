@@ -19,9 +19,11 @@ pub(crate) enum StoreBacking {
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
 /// This is the *only* schema the store supports. Older durable-core databases
-/// must be deleted before opening with this binary. Lash's broader durable
-/// contract still lives one level up in per-record `schema_version` stamps,
-/// not in compatibility reads.
+/// must normally be deleted before opening with this binary. The narrow in-place
+/// exception is 39 -> 40: [`ensure_schema`] creates the additive cancellation-
+/// request table before advancing `PRAGMA user_version`. Lash's broader durable
+/// contract still lives one level up in per-record `schema_version` stamps, not
+/// in compatibility reads.
 /// Each `checkpoint_blob_refs` row is owned by the session whose head or anchor
 /// owns the checkpoint root named by `checkpoint_ref`. Owner-scoped session
 /// delete or process prune deletes an unreferenced root and cascades its edges
@@ -182,6 +184,13 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     PRIMARY KEY (session_id, turn_id)
 );
 
+CREATE TABLE IF NOT EXISTS turn_cancel_requests (
+    session_id TEXT NOT NULL,
+    turn_id    TEXT NOT NULL,
+    record_json TEXT NOT NULL,
+    PRIMARY KEY (session_id, turn_id)
+);
+
 CREATE TABLE IF NOT EXISTS session_execution_leases (
     session_id               TEXT PRIMARY KEY,
     lease_owner_id           TEXT,
@@ -311,7 +320,8 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 
 /// Canonical schema version. There is no general migration chain — older
 /// databases must be deleted before opening except for the exact durable-core
-/// 37 -> 38 arming migration. See the [`SCHEMA`] doc comment for the rationale.
+/// 39 -> 40 additive migration. See the [`SCHEMA`] doc comment for the
+/// rationale.
 ///
 /// Bumped to 10 for the attachment three-layer cutover (ADR 0028): the
 /// `attachment_manifest` this schema gates carried, pre-cutover, committed refs
@@ -417,7 +427,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a version-38 file written by an older binary self-heals into the
+/// schema, so a version-40 file written by an older binary self-heals into the
 /// newer index set on first open, and a newer file stays readable by the older
 /// binary — the two are mutually compatible on the same path. Bumping instead
 /// would reject-and-recreate live stores for a change that costs nothing to
@@ -426,7 +436,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// `idx_pending_turn_input_order`) are added under exactly this carve-out. It
 /// covers index-only additions and nothing else: any table, column, or
 /// semantic change bumps.
-pub(crate) const SCHEMA_VERSION: i32 = 39;
+/// Version 40 persists per-turn cancellation requests and their undelivered
+/// input outcomes.
+pub(crate) const SCHEMA_VERSION: i32 = 40;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -908,6 +920,11 @@ fn prepare_versioned_schema<'connection>(
     let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if user_version == schema_version {
         tx.execute_batch(schema)?;
+        return Ok(tx);
+    }
+    if database_kind == "session" && user_version == 39 && schema_version == SCHEMA_VERSION {
+        tx.execute_batch(schema)?;
+        tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);
     }
     if user_version == 0 && !has_user_schema_objects(&tx)? {

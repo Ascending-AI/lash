@@ -54,6 +54,9 @@ pub use crate::turn::{
     SelectedQueuedWorkDrainOutcome, TurnActivityFanout, TurnBuilder, TurnOutput, TurnReport,
     TurnStream, message_role, message_text,
 };
+pub use lash_core::facade_support::{
+    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelRequestRecord,
+};
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, DrainMode,
@@ -515,8 +518,8 @@ pub mod remote {
     /// Foreground-turn cancellation request and receipt envelopes.
     pub mod turn_control {
         pub use lash_remote_protocol::turn_control::{
-            RemoteTurnCancelOutcome, RemoteTurnCancelReceipt, RemoteTurnCancelRequest,
-            RemoteTurnCancellationEvidence,
+            RemoteTurnCancelDisposition, RemoteTurnCancelOutcome, RemoteTurnCancelReceipt,
+            RemoteTurnCancelRequest, RemoteTurnCancellationEvidence,
         };
     }
 

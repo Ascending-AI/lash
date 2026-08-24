@@ -394,6 +394,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
 #[derive(Clone)]
 pub(crate) struct RuntimePerfStoreFactory {
     pub(crate) store: Arc<RuntimePerfStore>,
+    root_session_ids: Arc<Mutex<HashSet<String>>>,
     child_stores: Arc<Mutex<HashMap<String, Arc<RuntimePerfStore>>>>,
     inner: Option<Arc<dyn SessionStoreFactory>>,
     metrics: Arc<RuntimePerfStoreMetrics>,
@@ -404,6 +405,7 @@ impl RuntimePerfStoreFactory {
         let metrics = store.metrics();
         Self {
             store,
+            root_session_ids: Arc::new(Mutex::new(HashSet::new())),
             child_stores: Arc::new(Mutex::new(HashMap::new())),
             inner: None,
             metrics,
@@ -418,6 +420,7 @@ impl RuntimePerfStoreFactory {
                 Arc::clone(&metrics),
                 true,
             )),
+            root_session_ids: Arc::new(Mutex::new(HashSet::new())),
             child_stores: Arc::new(Mutex::new(HashMap::new())),
             inner: Some(inner),
             metrics,
@@ -474,6 +477,9 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
             )));
         }
         if request.parent_session_id().is_none() {
+            self.root_session_ids
+                .lock_recover()
+                .insert(request.session_id.clone());
             return Ok(Arc::clone(&self.store) as Arc<dyn RuntimePersistence>);
         }
         let mut stores = self.child_stores.lock_recover();
@@ -487,17 +493,42 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        let Some(inner) = &self.inner else {
-            return Ok(None);
-        };
-        let store = inner.open_existing_store(request).await?;
-        Ok(store.map(|store| {
-            Arc::new(RuntimePerfStore::wrap(
-                store,
-                Arc::clone(&self.metrics),
-                true,
-            )) as Arc<dyn RuntimePersistence>
-        }))
+        if let Some(inner) = &self.inner {
+            let store = inner.open_existing_store(request).await?;
+            return Ok(store.map(|store| {
+                Arc::new(RuntimePerfStore::wrap(
+                    store,
+                    Arc::clone(&self.metrics),
+                    true,
+                )) as Arc<dyn RuntimePersistence>
+            }));
+        }
+        self.open_existing_store_by_id(&request.session_id).await
+    }
+
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+        if let Some(inner) = &self.inner {
+            let store = inner.open_existing_store_by_id(session_id).await?;
+            return Ok(store.map(|store| {
+                Arc::new(RuntimePerfStore::wrap(
+                    store,
+                    Arc::clone(&self.metrics),
+                    true,
+                )) as Arc<dyn RuntimePersistence>
+            }));
+        }
+        if self.root_session_ids.lock_recover().contains(session_id) {
+            return Ok(Some(Arc::clone(&self.store) as Arc<dyn RuntimePersistence>));
+        }
+        Ok(self
+            .child_stores
+            .lock_recover()
+            .get(session_id)
+            .cloned()
+            .map(|store| store as Arc<dyn RuntimePersistence>))
     }
 
     async fn read_session(

@@ -551,6 +551,15 @@ pub struct RuntimeCommitReceipt {
     /// reconcile after the bounded live observation window has been lost.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub turn_input_applications: Vec<crate::TurnInputApplication>,
+    /// Undelivered active-turn inputs disposed by this commit.
+    ///
+    /// This is a store-derived result, not commit intent, and is deliberately
+    /// absent from `turn_commit_hash`.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::TurnCancelInputOutcome::is_empty"
+    )]
+    pub turn_cancel_input_outcome: crate::TurnCancelInputOutcome,
     /// Whether the store answered this attempt from an existing durable receipt.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
