@@ -98,15 +98,34 @@ pub use usage_activity::*;
 // outcome and no longer has an `in_progress` variant -- a turn report exists
 // only once the turn has a terminal outcome, so a version 43 peer emitting
 // that status must be refused rather than mapped onto a terminal one.
-// `RemoteTurnReport` has no probe-first decoder: exact-version negotiation in
-// `validate` refuses a version 43 report that decodes, and the removed status
-// value is refused by serde before that (FIG-1757).
-//
 // Bumped to 45: remote runtime effects carry an `accept_turn_input` kind for
 // the journaled turn-input acceptance. A version 44 peer rejects the new
 // variant outright, so the two sides must agree before it can appear on the
 // wire (FIG-1671).
 pub const REMOTE_PROTOCOL_VERSION: u32 = 45;
+
+pub(crate) fn decode_versioned_json<T>(
+    bytes: &[u8],
+    expected_version: u32,
+) -> Result<T, RemoteProtocolError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    #[derive(serde::Deserialize)]
+    struct VersionProbe {
+        protocol_version: u32,
+    }
+
+    let probe: VersionProbe =
+        serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)?;
+    if probe.protocol_version != expected_version {
+        return Err(RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: probe.protocol_version,
+            expected: expected_version,
+        });
+    }
+    serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)
+}
 
 pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
     if actual == REMOTE_PROTOCOL_VERSION {
@@ -127,3 +146,6 @@ pub use core_conversions::{RemoteTurnActivitySink, replay_collected_activities};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod versioned_decode_tests;

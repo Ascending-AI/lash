@@ -97,8 +97,14 @@ IDENTIFIER_RENAME_BASELINES = {
     # the baseline pins a STATE, not a transition, so a future change that
     # restores the guarded text to exactly these bytes would re-match and be
     # excused a second time.
+    # FIG-1964: the private VersionProbe decode carrier was hoisted from two
+    # per-message copies into one shared crate-private helper. The probe is a
+    # decode-only view of an existing sibling field; no serialized message
+    # carrier, field, tag, or byte changed and REMOTE_PROTOCOL_VERSION 45 is
+    # still the wire truth. Ruled on FIG-1964; the baseline pins this state --
+    # any further guarded-shape drift in lash-remote-protocol re-fails the gate.
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
-        "sha256:35bf1df42914317cac344d2c979fad7ba889e034abf8472f3c3f95ea5729d328"
+        "sha256:8ae2ee20e8e39f2c17b3ef1ee78d399ef75d2d588ed35f04cf40fc084ce528a2"
     ),
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
         "sha256:6b74366597e750eba28ae339771f9641f15bc78295cb3fcc00712d3e89899d02"

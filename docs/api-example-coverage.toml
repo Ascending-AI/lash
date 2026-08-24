@@ -33844,6 +33844,22 @@ assertion = "examples/docs-snippets/src/remote_protocol.rs:1219#assert!(message.
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`before_call_paths,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(after_call_paths, [\"knowledge.docs.lookup\"]);` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `message.contains(\"id cannot be empty\")` holds."
 
 [[api]]
+symbol = "lash::remote::RemoteProtocolError::MessageDecode"
+kind = "variant"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Protocol-integrator decode error; versioned remote-message decoders expose corrupt current-version JSON through this distinct failure instead of the activity-serialization error."
+
+[[api]]
+symbol = "lash::remote::RemoteProtocolError::MessageDecode::0"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Protocol-integrator decode detail; consumers may inspect the underlying JSON error when a current-version remote message is corrupt."
+
+[[api]]
 symbol = "lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion"
 kind = "variant"
 availability = "default+all-features"
@@ -36380,6 +36396,14 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "The current example use of lash::remote::observations::RemoteSessionObservationEvent is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::remote::observations::RemoteSessionObservationEvent::decode_json"
+kind = "function"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Protocol-integrator decode seam; the remote-protocol law exercises its typed version-first refusal directly, while facade examples consume already-decoded observation events."
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservationEvent::cursor"
@@ -43305,6 +43329,14 @@ availability = "default+all-features"
 area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::turn_result::RemoteTurnReport to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::turn_result::RemoteTurnReport::decode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Protocol-integrator decode seam; the remote-protocol law exercises its typed version-first refusal directly, while facade examples consume already-decoded turn reports."
 
 [[api]]
 symbol = "lash::remote::turn_result::RemoteTurnReport::activities"

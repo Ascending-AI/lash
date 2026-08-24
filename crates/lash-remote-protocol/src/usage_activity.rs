@@ -71,19 +71,7 @@ impl RemoteTurnActivity {
         bytes: &[u8],
         expected_version: u32,
     ) -> Result<Self, RemoteProtocolError> {
-        #[derive(Deserialize)]
-        struct VersionProbe {
-            protocol_version: u32,
-        }
-
-        let probe: VersionProbe = serde_json::from_slice(bytes)?;
-        if probe.protocol_version != expected_version {
-            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: probe.protocol_version,
-                expected: expected_version,
-            });
-        }
-        let activity: Self = serde_json::from_slice(bytes)?;
+        let activity: Self = crate::decode_versioned_json(bytes, expected_version)?;
         activity.validate()?;
         Ok(activity)
     }

@@ -25,11 +25,9 @@ fn remote_turn_status_no_longer_accepts_in_progress_on_the_wire() {
 }
 
 #[test]
-fn in_progress_turn_report_is_refused_by_the_decoder_not_by_version_negotiation() {
-    // Documents the actual refusal mechanism for a version 43 report.
-    // `RemoteTurnReport` has no probe-first decoder: the removed status value
-    // fails in serde, and only a report that decodes reaches the exact-version
-    // check in `validate`.
+fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode() {
+    // A version 43 report is refused before its removed status value reaches
+    // the current body decoder.
     let mut payload = serde_json::to_value(RemoteTurnReport {
         protocol_version: 43,
         session_id: "session".to_string(),
@@ -52,10 +50,9 @@ fn in_progress_turn_report_is_refused_by_the_decoder_not_by_version_negotiation(
     })
     .expect("serialize version 43 report");
 
-    let decoded = serde_json::from_value::<RemoteTurnReport>(payload.clone())
-        .expect("a version 43 report still decodes");
+    let wire = serde_json::to_vec(&payload).expect("serialize version 43 report");
     assert!(matches!(
-        decoded.validate(),
+        RemoteTurnReport::decode_json(&wire),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 43,
             expected: REMOTE_PROTOCOL_VERSION,
@@ -63,10 +60,12 @@ fn in_progress_turn_report_is_refused_by_the_decoder_not_by_version_negotiation(
     ));
 
     payload["status"] = serde_json::json!("in_progress");
-    let error = serde_json::from_value::<RemoteTurnReport>(payload)
-        .expect_err("in_progress must not decode into a version 44 report");
-    assert!(
-        error.to_string().contains("in_progress"),
-        "decoder must name the refused status: {error}"
-    );
+    let wire = serde_json::to_vec(&payload).expect("serialize version 43 report");
+    assert!(matches!(
+        RemoteTurnReport::decode_json(&wire),
+        Err(RemoteProtocolError::UnsupportedProtocolVersion {
+            actual: 43,
+            expected: REMOTE_PROTOCOL_VERSION,
+        })
+    ));
 }

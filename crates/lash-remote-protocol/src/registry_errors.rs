@@ -112,6 +112,8 @@ pub enum RemoteProtocolError {
     },
     #[error("failed to serialize remote activity: {0}")]
     ActivitySerialization(#[from] serde_json::Error),
+    #[error("failed to decode remote message: {0}")]
+    MessageDecode(#[source] serde_json::Error),
     #[error("failed to write remote activity: {0}")]
     ActivityWrite(String),
 }
