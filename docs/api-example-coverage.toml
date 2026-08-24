@@ -32734,7 +32734,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::unconfigured", "lash_core::provider::handle::ProviderHandle::unconfigured"]
 area = "plugins"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::provider::ProviderHandle::unconfigured` directly; the gate reaches the same item a second time through `lash_core::TurnContext::set_provider`. Consumer class: core runtime internals -- this function is exercised in-repo at crates/lash-core/src/provider/resolver.rs::ProviderBinding::default#`provider: ProviderHandle::unconfigured(),`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::provider::ProviderHandle::unconfigured` directly; the gate reaches the same item a second time through `lash_core::TurnContext::set_provider`. Consumer class: workspace tests -- this function is exercised in-repo at crates/lash/tests/tool_intent_ingress_observability.rs::test_core#`.provider(lash::provider::ProviderHandle::unconfigured())`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::with_clock"
@@ -77815,7 +77815,7 @@ kind = "field"
 availability = "default+all-features"
 area = "protocol"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::provider::handle::ProviderHandle::complete` hands `ProviderCompletionError` to hosts (provider and transport adapters). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/turn_driver/streaming.rs::record_clamped_output_token_cap#`match result {`, crates/lash-core/src/runtime/turn_driver/streaming.rs::RuntimeTurnDriver::run_llm_call#`code: Some(\"provider_binding_mismatch\".to_string()),`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::provider::handle::ProviderHandle::complete` hands `ProviderCompletionError` to hosts (provider and transport adapters). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/runtime/turn_driver/streaming.rs::record_clamped_output_token_cap#`match result {`, crates/lash-core/src/runtime/turn_driver/streaming.rs::RuntimeTurnDriver::run_llm_call#`error: e,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::CacheRetention"

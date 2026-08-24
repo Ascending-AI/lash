@@ -4,17 +4,7 @@ use super::ProviderHandle;
 
 #[derive(Clone, Debug)]
 pub struct ProviderBinding {
-    pub provider_id: String,
     pub provider: ProviderHandle,
-}
-
-impl Default for ProviderBinding {
-    fn default() -> Self {
-        Self {
-            provider_id: String::new(),
-            provider: ProviderHandle::unconfigured(),
-        }
-    }
 }
 
 impl ProviderBinding {
@@ -34,17 +24,11 @@ impl ProviderBinding {
                 actual: actual.to_string(),
             });
         }
-        Ok(Self {
-            provider_id: requested.to_string(),
-            provider,
-        })
+        Ok(Self { provider })
     }
 
     pub fn from_provider(provider: ProviderHandle) -> Self {
-        Self {
-            provider_id: provider.kind().to_string(),
-            provider,
-        }
+        Self { provider }
     }
 }
 
@@ -178,7 +162,6 @@ mod tests {
             .resolve_provider_binding("mock")
             .expect("registered provider resolves");
 
-        assert_eq!(resolved.provider_id, "mock");
         assert_eq!(resolved.provider.kind(), "mock");
     }
 

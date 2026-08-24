@@ -186,7 +186,7 @@ impl RuntimeSessionPolicy {
         policy: SessionPolicy,
         provider: ProviderHandle,
     ) -> Result<Self, ProviderResolutionError> {
-        let binding = ProviderBinding::new(policy.recorded_provider_id(), provider)?;
+        let binding = ProviderBinding::from_provider(provider);
         Ok(Self { policy, binding })
     }
 
