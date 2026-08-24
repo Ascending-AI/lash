@@ -119,7 +119,7 @@ pub async fn run(config: BotConfig) -> Result<()> {
     #[cfg(feature = "e2e")]
     if std::env::var("SLACK_CLONE_E2E_PROVIDER").as_deref() == Ok("scripted-v1") {
         runtime_config.lease_timings = Some(
-            lash::durability::LeaseTimings::from_ttl(Duration::from_secs(5))
+            lash::durability::LeaseTimings::from_ttl(Duration::from_secs(15))
                 .context("configure deterministic E2E lease timings")?,
         );
     }

@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 59
+version 60
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -300,6 +300,7 @@ table lash_session_meta
   column parent_session_id text nullable
   column relation_kind text not-null
   column session_id text not-null
+  column session_state_version integer nullable
   column source_node_id text nullable
   column source_session_id text nullable
   primary-key (session_id)

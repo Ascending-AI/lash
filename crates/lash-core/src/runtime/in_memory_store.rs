@@ -25,6 +25,7 @@ mod reads;
 mod receipts;
 mod session_binding;
 mod session_execution_lease;
+mod state_version;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(any(test, feature = "testing"))]
@@ -161,6 +162,9 @@ pub struct InMemorySessionStore {
     pub(crate) bound_session_id: Mutex<Option<String>>,
     pub(crate) session_head_meta: Mutex<Option<crate::SessionHeadMeta>>,
     pub(crate) session_meta: Mutex<Option<crate::SessionMeta>>,
+    /// Independently readable mutable-continuation generation beside binding metadata.
+    pub(crate) session_state_version: Mutex<Option<u32>>,
+    corrupt_session_payload_for_testing: std::sync::atomic::AtomicBool,
     pub(crate) session_graph: Mutex<crate::SessionGraph>,
     /// Shared leafless node catalog; never treated as a resident graph without a real leaf grafted
     /// first.
@@ -301,6 +305,8 @@ impl InMemorySessionStore {
             bound_session_id: Mutex::new(None),
             session_head_meta: Mutex::new(None),
             session_meta: Mutex::new(None),
+            session_state_version: Mutex::new(None),
+            corrupt_session_payload_for_testing: std::sync::atomic::AtomicBool::new(false),
             session_graph: Mutex::new(crate::SessionGraph::default()),
             global_session_graph,
             global_node_owners,
@@ -902,9 +908,29 @@ impl Default for InMemorySessionStore {
 
 #[async_trait::async_trait]
 impl crate::store::SessionCommitStore for InMemorySessionStore {
+    async fn read_session_state_version(&self) -> Result<u32, crate::StoreError> {
+        self.read_session_state_version_in_memory()
+    }
+
+    async fn admit_session_state(
+        &self,
+        lease: &crate::SessionExecutionLeaseAuthority,
+    ) -> Result<crate::store::SessionStateAdmission, crate::StoreError> {
+        self.admit_session_state_in_memory(lease)
+    }
+
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), crate::StoreError> {
+        self.stamp_session_state_version_and_corrupt_payload_in_memory(version);
+        Ok(())
+    }
+
     async fn load_session(
         &self,
     ) -> Result<Option<crate::store::PersistedSessionRead>, crate::store::StoreError> {
+        self.guard_session_payload_in_memory()?;
         #[cfg(test)]
         self.refuse_injected_counter_defect("session_head_revision")?;
         #[cfg(test)]
@@ -979,6 +1005,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
     async fn load_session_head_meta(
         &self,
     ) -> Result<Option<crate::SessionHeadMeta>, crate::StoreError> {
+        self.read_session_state_version().await?;
         #[cfg(test)]
         self.refuse_injected_counter_defect("session_head_revision")?;
         #[cfg(test)]
@@ -1530,46 +1557,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
         binding: &crate::SessionBinding,
     ) -> Result<crate::SessionAdmission, crate::StoreError> {
-        #[cfg(test)]
-        self.session_admission_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        binding.validate()?;
-        let _transaction = self.write_transaction.lock_recover();
-        if self
-            .deleted_session_ids
-            .lock_recover()
-            .contains(&binding.session_id)
-        {
-            return Err(crate::StoreError::SessionDeleted {
-                session_id: binding.session_id.clone(),
-            });
-        }
-        let mut bound = self.bound_session_id.lock_recover();
-        if let Some(existing) = bound.as_ref() {
-            if existing != &binding.session_id {
-                return Err(crate::StoreError::SessionBindingMismatch {
-                    bound_session_id: existing.clone(),
-                    attempted_session_id: binding.session_id.clone(),
-                });
-            }
-        } else {
-            *bound = Some(binding.session_id.clone());
-        }
-        let mut durable = self.session_meta.lock_recover();
-        if let Some(meta) = durable.as_ref() {
-            if meta.session_id != binding.session_id {
-                return Err(crate::StoreError::SessionBindingMismatch {
-                    bound_session_id: meta.session_id.clone(),
-                    attempted_session_id: binding.session_id.clone(),
-                });
-            }
-            return Ok(crate::SessionAdmission::Rebound);
-        }
-        *durable = Some(crate::SessionMeta {
-            session_id: binding.session_id.clone(),
-            relation: binding.relation.clone(),
-        });
-        Ok(crate::SessionAdmission::Created)
+        self.admit_and_bind_session_in_memory(binding)
     }
 
     async fn save_session_meta(

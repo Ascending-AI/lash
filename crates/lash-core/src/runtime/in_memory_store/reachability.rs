@@ -160,6 +160,7 @@ impl InMemorySessionStore {
         *self.session_graph.lock_recover() = crate::SessionGraph::default();
         *self.session_head_meta.lock_recover() = None;
         *self.session_meta.lock_recover() = None;
+        *self.session_state_version.lock_recover() = None;
         *self.checkpoint.lock_recover() = None;
         self.attachment_manifest.lock_recover().clear();
         self.usage_deltas.lock_recover().clear();

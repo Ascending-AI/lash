@@ -1,5 +1,24 @@
 use super::SessionExecutionLeaseCommitEvidence;
-use crate::{SessionExecutionLease, StoreError};
+use crate::{SessionExecutionLease, SessionExecutionLeaseAcquisition, StoreError};
+
+/// Report a successful claim, including the atomic displacement evidence when
+/// this claim took the lane over from a lapsed holder.
+pub(crate) fn trace_acquisition(acquisition: &SessionExecutionLeaseAcquisition) {
+    let lease = &acquisition.lease;
+    tracing::info!(
+        session_id = %lease.session_id,
+        owner_id = %lease.owner.owner_id,
+        incarnation_id = %lease.owner.incarnation_id,
+        executor_id = %lease.executor_id,
+        fencing_token = lease.fencing_token,
+        expires_at_epoch_ms = lease.expires_at_epoch_ms,
+        event = "session_execution_lease.acquired",
+        "acquired session execution lease"
+    );
+    if let Some(displaced) = acquisition.displaced.as_ref() {
+        trace_taken_over(lease, displaced);
+    }
+}
 
 pub(super) fn trace_commit_busy_advisory(session_id: &str, holder: &SessionExecutionLease) {
     let holder_owner_id_sha256 = crate::stable_hash::sha256_hex(holder.owner.owner_id.as_bytes());
@@ -25,7 +44,7 @@ pub(super) fn trace_commit_busy_advisory(session_id: &str, holder: &SessionExecu
 /// `displaced_*` fields are the lapsed holder this claim took the lane from. Both
 /// come from one atomic claim, so a log line here is true regardless of whether
 /// the displaced runner is still alive to notice.
-pub(super) fn trace_taken_over(
+fn trace_taken_over(
     lease: &SessionExecutionLease,
     displaced: &crate::store::SessionExecutionLeaseDisplacement,
 ) {

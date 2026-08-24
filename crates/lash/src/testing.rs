@@ -432,6 +432,23 @@ finish "registered"
         );
     }
 
+    async fn reopen_after_admission_contention(core: &LashCore) -> crate::LashSession {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                match core.session(SESSION_ID).open().await {
+                    Ok(session) => break session,
+                    Err(crate::EmbedError::Session(lash_core::SessionError::Store {
+                        source: lash_core::StoreError::Contended,
+                        ..
+                    })) => tokio::task::yield_now().await,
+                    Err(error) => panic!("reopen drained session: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("the background worker releases the admission lease promptly")
+    }
+
     fn inline_trigger_scope(
         scope_id: impl Into<String>,
     ) -> lash_core::ScopedEffectController<'static> {
@@ -549,6 +566,14 @@ finish "registered"
             &registry,
         )
         .await;
+        // Recover while the lane is idle, before the triggered worker can own
+        // it. Admission is lease-fenced, so opening only after the process has
+        // reached terminal can race the worker's final wake delivery commit.
+        let session = core
+            .session(SESSION_ID)
+            .open()
+            .await
+            .expect("reopen session before trigger delivery");
 
         let source_key = crate::triggers::empty_trigger_source_key("ui.button.pressed")
             .expect("button source key");
@@ -605,11 +630,6 @@ finish "registered"
             .find(|event| event.event_type == "process.wake")
             .expect("trigger-triggered process wake event")
             .sequence;
-        let session = core
-            .session(SESSION_ID)
-            .open()
-            .await
-            .expect("reopen session");
         let describe_process_messages = |read_view: &lash_core::SessionReadView| {
             read_view
                 .messages()
@@ -718,11 +738,7 @@ finish "registered"
         );
         drop(session);
 
-        let session = core
-            .session(SESSION_ID)
-            .open()
-            .await
-            .expect("reopen drained session");
+        let session = reopen_after_admission_contention(&core).await;
         assert!(
             session
                 .queued_work()

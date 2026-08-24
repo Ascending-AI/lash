@@ -332,16 +332,37 @@ impl AppState {
         session_id: &str,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
         let active = self.active_turns.for_session(session_id);
-        let session = self
-            .open_session(session_id)
+        let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
+        policy.session_id = Some(session_id.to_string());
+        policy.model = model_spec_from_selection(self.selected_model());
+        let store = self
+            .session_store_factory
+            .create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.to_string(),
+                relation: lash::persistence::SessionRelation::Root,
+                policy,
+            })
             .await
             .map_err(|error| {
-                self.session_admission_error(session_id, "api.turn.cancel", error)
+                self.session_admission_error(
+                    session_id,
+                    "api.turn.cancel",
+                    lash::EmbedError::Store(error),
+                )
+            })?;
+        store
+            .read_session_state_version()
+            .await
+            .map_err(|error| {
+                self.session_admission_error(
+                    session_id,
+                    "api.turn.cancel",
+                    lash::EmbedError::Store(error),
+                )
             })?;
         let mut receipts = Vec::with_capacity(active.len());
         let mut operation_ids = Vec::with_capacity(active.len());
-        for tracked_address in active {
-            let address = session.turn_address(&tracked_address.turn_id);
+        for address in active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
             operation_ids.push(format!("{}:{request_id}", address.turn_id));
             let driver = self.core.turn_work_driver();

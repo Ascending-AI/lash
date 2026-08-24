@@ -257,9 +257,32 @@ impl EmbeddedRuntimeBuilder {
             });
         }
         if let Some(store) = &self.store {
-            if let Some(mut state) = crate::store::load_persisted_session_state(store.as_ref())
+            let recovery_session_id = match self.session_id.clone() {
+                Some(session_id) => Some(session_id),
+                None => store
+                    .load_session_meta()
+                    .await
+                    .map_err(|err| {
+                        SessionError::Protocol(format!(
+                            "failed to resolve store binding for admission: {err}"
+                        ))
+                    })?
+                    .map(|meta| meta.session_id),
+            };
+            if let Some(recovery_session_id) = recovery_session_id
+                && let Some(mut state) = crate::store::load_persisted_session_admitted(
+                    store.as_ref(),
+                    &recovery_session_id,
+                    &self.runtime_lease_owner,
+                    &uuid::Uuid::new_v4().to_string(),
+                    self.core.control.lease_timings.ttl_ms(),
+                )
                 .await
-                .map_err(|err| SessionError::Protocol(format!("failed to load store: {err}")))?
+                .map_err(|source| SessionError::Store {
+                    context: "failed to admit and load store".to_string(),
+                    source,
+                })?
+                .map(|loaded| loaded.state)
             {
                 if let Some(session_id) = &self.session_id
                     && &state.session_id != session_id

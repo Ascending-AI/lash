@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 59);
+    assert_eq!(PostgresStorage::schema_version(), 60);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -313,7 +313,7 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
             "host",
             "--env",
             "PGCLIENTENCODING=UTF8",
-            "postgres:17-alpine",
+            "postgres:16-alpine",
             "pg_dump",
             "--format=plain",
             "--no-owner",
@@ -327,7 +327,7 @@ fn pg_dump(database_url: &str) -> Vec<u8> {
         .expect("run postgres:16 pg_dump fixture generator");
     assert!(
         output.status.success(),
-        "postgres:17 pg_dump failed: {}",
+        "postgres:16 pg_dump failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let dump = String::from_utf8(output.stdout).expect("pg_dump output is UTF-8");

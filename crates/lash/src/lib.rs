@@ -287,19 +287,20 @@ pub mod persistence {
         facade_support::SessionAttachmentStore, facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
-        BlobRef, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-        ExecutedCallOutcome, ExecutedCallRecord, GcReport, LeaseClaimNonce, LeaseOwnerIdentity,
-        MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
-        MaintenanceStop, MaintenanceSweep, PersistedSessionConfig, PersistedTurnState,
+        BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,
+        DurableScanPage, DurableSurface, ExecutedCallOutcome, ExecutedCallRecord, GcReport,
+        LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
+        MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+        OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
         ProtocolEvent, QueuedWorkStore, RuntimePersistence, ScanCoverage, SessionAdmission,
         SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
         SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
         SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionGraph,
         SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
-        SessionRelation, StoreBackend, StoreError, StoreMaintenance, StorePreflight,
-        StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId,
-        TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+        SessionRelation, SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance,
+        StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
+        StoreSchemaVerdict, TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
     };
     /// Committed session history flattened into presentation order, as returned
     /// by [`SessionReadView::chronological_projection`].

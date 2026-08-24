@@ -1424,6 +1424,12 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         Duration::from_secs(30),
     )
     .await;
+    wait_for_session_execution_lane_release(
+        &harness.state,
+        &harness.state.current_session_id(),
+        Duration::from_secs(30),
+    )
+    .await;
 
     let captured = requests.lock_recover().clone();
     assert_eq!(captured.len(), 3, "unexpected provider request sequence");
@@ -1657,9 +1663,8 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
          than the stock {default_ttl:?} default; takeover took {takeover_latency:?}",
         recovery_e2e_lease_timings().ttl(),
     );
-    assert_eq!(
-        session_lease_generation(&data_dir, backend, &session_id).await,
-        first_generation + 1,
+    assert!(
+        session_lease_generation(&data_dir, backend, &session_id).await > first_generation,
         "replacement must resume under a superseding session-lease generation"
     );
 
@@ -1950,7 +1955,10 @@ async fn wait_for_session_lease_generation(
 ) {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if session_lease_generation(data_dir, backend, session_id).await == expected {
+        // Admission and execution each take a lease-fenced continuation read. Both
+        // acquisitions may become visible before this poll observes the first one,
+        // and fencing generations are monotonic rather than gap-free.
+        if session_lease_generation(data_dir, backend, session_id).await >= expected {
             return;
         }
         assert!(
@@ -1958,5 +1966,28 @@ async fn wait_for_session_lease_generation(
             "replacement did not supersede the dead session-lease generation within {timeout:?}"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_session_execution_lane_release(
+    state: &AppState,
+    session_id: &str,
+    timeout: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let diagnostics = state
+            .core
+            .session_lease_diagnostics(session_id)
+            .await
+            .expect("read session execution lane while waiting for release");
+        if diagnostics.is_none_or(|diagnostics| diagnostics.holder.is_none()) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "settled ingress turn did not release its session execution lane within {timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

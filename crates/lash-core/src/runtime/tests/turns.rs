@@ -6563,18 +6563,14 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
     );
 }
 
-// Boundary: advisory-lease tests stay in `turns.rs` because they exercise live
+// Boundary: execution-lease tests stay in `turns.rs` because they exercise live
 // `LashRuntime` lease acquisition, public scheduling, turn phase probes, and
 // provider suspension. Runtime Scenarios own persistence-level head-CAS and
 // queue/input claim invariants; these tests own the facade scheduler response.
-/// A foreground turn proceeds while a foreign executor holds the session lane:
-/// the lane is advisory for a direct turn. Under ADR 0069 the turn still
-/// drives a durable acceptance, but a lane-less driver settles that row itself
-/// at the head commit CAS (ADR 0069 §5) rather than under a generation-fenced
-/// claim. Two settlement regimes, one authority — so a held lane costs the
-/// caller its claim, never its turn.
+/// A foreground turn is refused while a foreign executor holds the session
+/// lane, before provider work or durable input acceptance (ADR 0077).
 #[tokio::test]
-async fn foreground_turn_proceeds_when_advisory_session_lane_is_held() {
+async fn foreground_turn_is_refused_when_session_lane_is_held() {
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -6593,7 +6589,7 @@ async fn foreground_turn_proceeds_when_advisory_session_lane_is_held() {
         store.as_ref(),
         "root",
         &owner,
-        "foreground-turn-proceeds-when-advisory-session-lane-is-held-executor",
+        "foreground-turn-is-refused-when-session-lane-is-held-executor",
         60_000,
     )
     .await
@@ -6601,22 +6597,25 @@ async fn foreground_turn_proceeds_when_advisory_session_lane_is_held() {
     .acquired()
     .expect("session execution lease");
 
-    let assembled = runtime
+    let error = runtime
         .run_turn_assembled(
-            TurnInput::text("foreground may proceed"),
+            TurnInput::text("foreground must wait"),
             CancellationToken::new(),
-            named_turn_scope("root", "foreground-advisory-lane-turn"),
+            named_turn_scope("root", "foreground-busy-lane-turn"),
         )
         .await
-        .expect("an advisory lease holder must not select a durable error branch");
+        .expect_err("a foreign lease holder refuses the foreground turn");
 
-    assert_eq!(assembled.assistant_output.safe_text, "foreground proceeded");
+    assert_eq!(
+        error.code,
+        crate::RuntimeErrorCode::SessionExecutionLaneBusy
+    );
     assert!(
         crate::TurnInputStore::list_pending_turn_inputs(store.as_ref(), "root")
             .await
-            .expect("read pending turn inputs after the unclaimed drive")
+            .expect("read pending turn inputs after refusal")
             .is_empty(),
-        "an unclaimed settlement retires its own accepted row at the head CAS"
+        "lease refusal must precede durable input acceptance"
     );
     crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
         store.as_ref(),
@@ -7371,14 +7370,14 @@ async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtim
     );
 }
 
-// Regression (FIG-862): lease serialization is advisory; a foreground turn that
-// has not observed takeover may still publish its current-head tail afterward.
+// Regression (FIG-862): a foreground turn that has not observed takeover may
+// still publish its current-head tail afterward.
 // ManualClock advances store time only, while its sleep uses real Tokio time, so
 // the default 10s renewal never fires in this millisecond-scale test. The
 // observed-loss path is covered by
 // `renewal_failure_mid_turn_does_not_select_a_durable_branch`.
 #[tokio::test]
-async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit() {
+async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_final_commit() {
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn crate::Clock> = clock.clone();
     let store = Arc::new(RecordingStore::with_clock(store_clock));
@@ -7482,7 +7481,7 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
         store.as_ref(),
         "root",
         &successor_owner,
-        "advisory-lease-loss-does-not-stop-foreground-turn-before-final-commit-executor",
+        &successor_runtime.runtime_lease_executor_id,
         60_000,
     )
     .await
@@ -7497,7 +7496,7 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
     let assembled = turn
         .await
         .expect("foreground turn task")
-        .expect("advisory lease loss must not reject the turn");
+        .expect("unobserved lease loss must not reject the turn");
     assert_eq!(
         assembled.assistant_output.safe_text,
         "committed under head CAS"
@@ -7512,7 +7511,7 @@ async fn advisory_lease_loss_does_not_stop_foreground_turn_before_final_commit()
             "root",
             &successor_owner,
             &stolen.executor_id,
-            &crate::LeaseClaimNonce::for_testing("advisory-successor-reentry-token"),
+            &crate::LeaseClaimNonce::for_testing("successor-reentry-token"),
             60_000,
         )
         .await

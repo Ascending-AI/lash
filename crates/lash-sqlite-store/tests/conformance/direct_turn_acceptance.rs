@@ -71,10 +71,10 @@ async fn sqlite_unclaimed_turn_input_settlement_is_a_conditional_write() {
 }
 
 #[tokio::test]
-async fn sqlite_unclaimed_settlement_loser_yields_to_the_successor() {
-    let dir = tempfile::tempdir().expect("unclaimed settlement stand-down tempdir");
+async fn sqlite_busy_execution_lane_refuses_direct_turn_before_acceptance() {
+    let dir = tempfile::tempdir().expect("busy execution lane tempdir");
     Box::pin(
-        lash_core::testing::conformance::unclaimed_settlement_loser_yields_to_the_successor(
+        lash_core::testing::conformance::busy_execution_lane_refuses_direct_turn_before_acceptance(
             "sqlite",
             sqlite_direct_turn_store(&dir).await,
         ),

@@ -50,13 +50,25 @@ impl InlineQueuedWorkRunHandle {
                     error.to_string(),
                 ))
             })?;
-        let state = crate::session::load_state_from_store(&session_id, &policy, store.as_ref())
-            .await
-            .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
+        let state = match crate::session::load_state_from_store(
+            &session_id,
+            &policy,
+            store.as_ref(),
+            &self.config.session_execution_owner,
+            self.config.env.core.control.lease_timings.ttl_ms(),
+        )
+        .await
+        {
+            Ok(state) => state,
+            Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
+                return Ok(facade_support::QueuedWorkRunProgress::Blocked);
+            }
+            Err(error) => {
+                return Err(facade_support::QueuedWorkRunError::terminal(
+                    lash_core::PluginError::Session(error.to_string()),
+                ));
+            }
+        };
         let plugin_host = build_plugin_host(
             self.config.protocol_factory.as_ref(),
             self.config.plugin_factories.as_ref(),

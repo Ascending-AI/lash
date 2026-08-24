@@ -18,6 +18,31 @@ const RECOVERY_LEASE_TTL: Duration = Duration::from_millis(300);
 const RECOVERY_LEASE_RENEW_INTERVAL: Duration = Duration::from_millis(100);
 const RECOVERY_DEADLINE: Duration = Duration::from_secs(10);
 
+fn is_admission_contention(error: &lash::EmbedError) -> bool {
+    matches!(
+        error,
+        lash::EmbedError::Session(lash_core::SessionError::Store {
+            source: lash_core::StoreError::Contended,
+            ..
+        })
+    )
+}
+
+async fn open_session_after_admission(core: &lash::LashCore) -> Result<lash::LashSession> {
+    let deadline = tokio::time::Instant::now() + RECOVERY_DEADLINE;
+    loop {
+        match core.session(SESSION_ID).open().await {
+            Ok(session) => return Ok(session),
+            Err(err) if is_admission_contention(&err) && tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(err) => {
+                return Err(err).context("admit frame-crash recovery session before deadline");
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum KillPoint {
     AfterSwitchCommit,
@@ -100,7 +125,7 @@ async fn run(mode: &str) -> Result<()> {
         .lease_timings(lease_timings)
         .build(owner)
         .context("build frame-crash core")?;
-    let session = core.session(SESSION_ID).open().await?;
+    let session = open_session_after_admission(&core).await?;
 
     match mode {
         "commit" => {

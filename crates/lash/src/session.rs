@@ -196,7 +196,14 @@ impl SessionBuilder {
         &self,
         store: &dyn RuntimePersistence,
     ) -> Result<Option<lash_core::store::LoadedPersistedSession>> {
-        load_persisted_state(store).await
+        load_persisted_state_admitted(
+            store,
+            &self.session_id,
+            &self.core.session_execution_owner,
+            &uuid::Uuid::new_v4().to_string(),
+            self.core.env.core.control.lease_timings.ttl_ms(),
+        )
+        .await
     }
 
     async fn open_resolved(
@@ -310,12 +317,21 @@ pub(crate) async fn load_state_from_store(
     session_id: &str,
     policy: &SessionPolicy,
     store: &dyn RuntimePersistence,
+    owner: &lash_core::LeaseOwnerIdentity,
+    lease_ttl_ms: u64,
 ) -> Result<RuntimeSessionState> {
-    let loaded = load_persisted_state(store).await?.unwrap_or_else(|| {
-        lash_core::store::LoadedPersistedSession {
-            state: RuntimeSessionState::empty_for(session_id, policy.clone()),
-            config: lash_core::PersistedSessionConfig::new(policy.turn_budget),
-        }
+    let loaded = lash_core::store::load_persisted_session_admitted(
+        store,
+        session_id,
+        owner,
+        &uuid::Uuid::new_v4().to_string(),
+        lease_ttl_ms,
+    )
+    .await
+    .map_err(EmbedError::Store)?
+    .unwrap_or_else(|| lash_core::store::LoadedPersistedSession {
+        state: RuntimeSessionState::empty_for(session_id, policy.clone()),
+        config: lash_core::PersistedSessionConfig::new(policy.turn_budget),
     });
     let mut state = loaded.state;
     if state.session_id != session_id {
@@ -356,12 +372,25 @@ fn reconcile_loaded_state_policy(
     }
 }
 
-async fn load_persisted_state(
+async fn load_persisted_state_admitted(
     store: &dyn RuntimePersistence,
+    session_id: &str,
+    owner: &lash_core::LeaseOwnerIdentity,
+    executor_id: &str,
+    lease_ttl_ms: u64,
 ) -> Result<Option<lash_core::store::LoadedPersistedSession>> {
-    Ok(lash_core::store::load_persisted_session(store)
-        .await
-        .map_err(|err| SessionError::Protocol(format!("failed to load store: {err}")))?)
+    Ok(lash_core::store::load_persisted_session_admitted(
+        store,
+        session_id,
+        owner,
+        executor_id,
+        lease_ttl_ms,
+    )
+    .await
+    .map_err(|source| SessionError::Store {
+        context: "failed to admit and load store".to_string(),
+        source,
+    })?)
 }
 
 impl PromptLayerSink for SessionBuilder {
@@ -499,7 +528,10 @@ impl LashSession {
     ///
     /// Durable and store-less sessions use the same host-provided session id.
     pub fn turn_scope(&self, turn_id: impl Into<String>) -> lash_core::ExecutionScope {
-        self.runtime.observe().persisted_state.turn_scope(turn_id)
+        lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope(
+            &self.runtime.observe().persisted_state,
+            turn_id,
+        )
     }
 
     /// Build the cancellation and terminal-observation address for a turn.

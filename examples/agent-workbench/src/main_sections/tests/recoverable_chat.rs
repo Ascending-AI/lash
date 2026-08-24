@@ -2240,25 +2240,34 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .await
         .expect("/api/state must remain readable while the turn lease is held");
     assert_eq!(running.active_turns.len(), 1);
-    let in_flight = state
-        .core
-        .session(state.current_session_id())
-        .open()
+    let in_flight_store = state
+        .session_store_factory
+        .create_store(&lash::persistence::SessionStoreCreateRequest {
+            session_id: state.current_session_id(),
+            relation: lash::persistence::SessionRelation::Root,
+            policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
+        })
         .await
-        .expect("open in-flight session read");
+        .expect("open the in-flight session store");
+    let in_flight = lash::persistence::load_persisted_session_state(&*in_flight_store)
+        .await
+        .expect("read the admitted in-flight durable state");
     assert!(
-        in_flight.read_view().messages().iter().all(|message| {
-            !matches!(
-                message.origin.as_ref(),
-                Some(lash::messages::MessageOrigin::TurnInput {
-                    turn_id: committed_turn_id,
-                    ..
-                }) if committed_turn_id == &turn_id
-            )
-        }),
+        in_flight.as_ref().is_none_or(|state| state
+            .read_view()
+            .messages()
+            .iter()
+            .all(|message| {
+                !matches!(
+                    message.origin.as_ref(),
+                    Some(lash::messages::MessageOrigin::TurnInput {
+                        turn_id: committed_turn_id,
+                        ..
+                    }) if committed_turn_id == &turn_id
+                )
+            })),
         "the initial turn input is not committed while the first provider call is in flight"
     );
-    drop(in_flight);
 
     provider_release.notify_one();
     turn.await.expect("submitted turn task");
@@ -2463,12 +2472,7 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
     );
 }
 
-/// The duplicate agent reply FIG-984 removed was a property of how a turn
-/// *terminates*, not of which path ran it: `record_turn_output` is the same code
-/// for an interactive send and for a background wake. The test above pins the
-/// terminal-value regime, where the workbench owns the committed copy; this one
-/// pins the bare-prose regime, where the runtime already committed the reply as
-/// the turn's terminal message and the workbench must add nothing.
+/// Build the shared state used to prove bare-prose replies are not duplicated.
 pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_store(
     data_dir: &std::path::Path,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,

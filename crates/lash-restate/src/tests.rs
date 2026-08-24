@@ -9666,19 +9666,6 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
     let first_runs = context.runs();
     assert!(!first_runs.is_empty());
 
-    let blocking_owner =
-        lash_core::LeaseOwnerIdentity::opaque("replay-blocker", "replay-blocker:001");
-    let blocking_lease = lash_core::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        &*store,
-        session_id,
-        &blocking_owner,
-        "restate-handler-replay-retries-final-lash-commit-idempotently-executor",
-        60_000,
-    )
-    .await
-    .expect("claim replay-blocking advisory lease")
-    .acquired()
-    .expect("replay-blocking advisory lease");
     context.start_replay();
     let retry_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
@@ -9693,13 +9680,6 @@ async fn restate_handler_replay_retries_final_lash_commit_idempotently() {
     assert_eq!(first_turn.llm_calls.len(), 1);
     assert_eq!(replay_turn.llm_calls, first_turn.llm_calls);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
-    lash_core::SessionExecutionLeaseStore::release_session_execution_lease(
-        &*store,
-        &blocking_lease.completion(),
-    )
-    .await
-    .expect("release replay-blocking advisory lease");
-
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
     let rows: i64 = conn
@@ -13198,7 +13178,8 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let plugin = process_parent_intent_plugin(Arc::clone(&provider_calls));
     let probe_slot = lash_core::runtime::RuntimeTurnPhaseProbeSlot::default();
-    probe_slot.set_for_session(
+    lash_core::runtime::RuntimeTurnPhaseProbeSlot::set_for_session(
+        &probe_slot,
         "process-parent-law",
         Arc::new(PanicOnceAfterDurableProcessTerminal {
             crashes: AtomicUsize::new(0),

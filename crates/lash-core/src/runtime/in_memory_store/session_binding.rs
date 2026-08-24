@@ -35,6 +35,8 @@ impl InMemorySessionStore {
             session_id: commit.session_id.clone(),
             relation: crate::SessionRelation::Root,
         });
+        let mut version = self.session_state_version.lock_recover();
+        version.get_or_insert(crate::store::CURRENT_SESSION_STATE_VERSION);
         Ok(())
     }
 
@@ -72,6 +74,8 @@ impl InMemorySessionStore {
             });
         }
         *durable = Some(meta);
+        let mut version = self.session_state_version.lock_recover();
+        version.get_or_insert(crate::store::CURRENT_SESSION_STATE_VERSION);
         Ok(())
     }
 }

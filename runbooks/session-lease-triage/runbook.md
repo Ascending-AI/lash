@@ -159,16 +159,19 @@ the loser was alive, so the run silently substituted the easy case for the one u
 ## Phase 3 — Livelock: sustained misrouting, repeated rejections
 
 **Setup.** `04-commit-cas-livelock.jsonl`. Three rounds of the misconfiguration the docs
-name: two runtime opens are handed the same session under one explicit core worker identity.
-Their owner id and boot incarnation match, but their runtime-minted executor ids differ. The
-second claim is therefore Busy rather than reentry; `busy_advisory` records
-`outcome = proceeding_under_commit_cas`, the busy claimant remains lane-less without entering
-the durable queued-drain wait/give-up policy, both run a turn at once, and the head CAS alone
-selects the winner. Each round is a fresh pair, which is what a retry-on-conflict host does
-after losing.
+name, induced directly at the persistence seam. ADR 0077 state admission correctly refuses a
+second public turn while the execution lane is held, so a pair of public runtime opens can no
+longer manufacture the CAS-only shape. Instead, the fixture starts below turn admission: one
+writer holds a real lease fence, a peer observes that holder as Busy and publishes lane-less
+under the authoritative head CAS, then the holder submits the stale snapshot under its
+borrowed fence. `commit_busy_advisory` records
+`outcome = proceeding_under_commit_cas`; neither writer enters the durable queued-drain
+wait/give-up policy. Each round uses a fresh pair of commit operations, which is what a
+retry-on-conflict substrate does after losing.
 
 **Action.** Read `rounds_attempted`, `rounds_with_a_rejection`, the per-round records, every
-`busy_advisory`, the `busy_wait`/`busy_gave_up` counts, and every `commit_cas_rejected` event.
+`commit_busy_advisory`, the `busy_wait`/`busy_gave_up` counts, and every
+`commit_cas_rejected` event.
 
 **Expected observable evidence.** Every round has exactly one winner and one rejected
 commit, so `rounds_with_a_rejection` equals `rounds_attempted` and the rejection count is at
@@ -277,6 +280,9 @@ would the request it had accepted have been finished by its peer rather than los
 
 ## History
 
+- **FIG-1900**: Moved the Phase 3 collision fixture below public turn admission. ADR 0077
+  correctly refuses a new turn while the lane is held, while the persistence-seam fixture
+  continues to prove the authoritative CAS and borrowed-fence diagnostics directly.
 - **FIG-1671**: Added Phase 3b, extending the killed-worker recovery case to a turn that
   entered through `TurnBuilder::run`. Direct ingress accepts before it drives (ADR 0069), so
   the abandoned request is a pending input the ordinary queued drain recovers.

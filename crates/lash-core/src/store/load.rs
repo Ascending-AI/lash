@@ -48,6 +48,38 @@ pub async fn load_persisted_session(
     }))
 }
 
+/// Recover a session only after completing lease-fenced state admission.
+#[doc(hidden)]
+pub async fn load_persisted_session_admitted(
+    store: &(dyn RuntimePersistence + '_),
+    session_id: &str,
+    owner: &crate::LeaseOwnerIdentity,
+    executor_id: &str,
+    lease_ttl_ms: u64,
+) -> Result<Option<LoadedPersistedSession>, StoreError> {
+    let acquisition = store
+        .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
+        .await?
+        .acquisition()
+        .ok_or(StoreError::Contended)?;
+    crate::runtime::session_execution_lease::trace_acquisition(&acquisition);
+    let lease = acquisition.lease;
+    let fence = lease.fence();
+    let result = async {
+        store.admit_session_state(&fence).await?;
+        load_persisted_session(store).await
+    }
+    .await;
+    let release = store.release_session_execution_lease(&fence).await;
+    match result {
+        Err(error) => Err(error),
+        Ok(loaded) => {
+            release?;
+            Ok(loaded)
+        }
+    }
+}
+
 pub async fn load_persisted_session_state(
     store: &(dyn RuntimePersistence + '_),
 ) -> Result<Option<crate::RuntimeSessionState>, StoreError> {

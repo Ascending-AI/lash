@@ -535,6 +535,10 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
     let mut draft = crate::PendingTurnInputDraft::new(session_id, ingress, input);
     draft.source_key = source_key;
+    store
+        .read_session_state_version()
+        .await
+        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?;
     let enqueued = store
         .enqueue_pending_turn_input(draft)
         .await

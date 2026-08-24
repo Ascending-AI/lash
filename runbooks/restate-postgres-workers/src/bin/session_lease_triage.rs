@@ -20,10 +20,12 @@
 //!   drives (ADR 0069), so the request is durable while the provider is still
 //!   parked, and the peer that takes the lane recovers it through the ordinary
 //!   queued drain under the same generation fence.
-//! * `livelock`: the cause the procedure names for repeated CAS rejections: two
-//!   concurrent runtime opens on one session under one host owner. Their owner
-//!   and boot incarnation match, their runtime-minted executor ids differ, the
-//!   busy claimant stays lane-less, and the loser's commit dies on the head CAS.
+//! * `livelock`: the cause the procedure names for repeated CAS rejections,
+//!   induced directly at the persistence seam. ADR 0077 admission refuses a
+//!   second public turn while the lane is held, so this phase deliberately
+//!   starts below turn admission: one writer holds the lane, a peer observes it
+//!   as busy and publishes under the authoritative head CAS, then the holder's
+//!   stale commit is rejected.
 //!
 //! Fault injection is deliberate and uses only public store surface. The
 //! `takeover` phase seeds an abandoned lease row (TTL zero, claimed through the
@@ -45,8 +47,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use lash::persistence::{
-    LeaseOwnerIdentity, RuntimePersistence, SessionLeaseDiagnostics, SessionLeaseRenewal,
-    SessionStoreCreateRequest, SessionStoreFactory,
+    LeaseOwnerIdentity, OperationId, RuntimeCommit, RuntimePersistence, SessionLeaseDiagnostics,
+    SessionLeaseRenewal, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::{Value, json};
@@ -114,10 +116,10 @@ async fn main() -> Result<()> {
 
     for backend in Backend::configured().await? {
         let checkpoint = match phase.as_str() {
-            "hang" => provider_hang(&backend, &capture, &run_id).await?,
-            "takeover" => lease_takeover(&backend, &capture, &run_id).await?,
-            "livelock" => commit_cas_livelock(&backend, &capture, &run_id).await?,
-            "direct-turn" => direct_turn_recovery(&backend, &capture, &run_id).await?,
+            "hang" => Box::pin(provider_hang(&backend, &capture, &run_id)).await?,
+            "takeover" => Box::pin(lease_takeover(&backend, &capture, &run_id)).await?,
+            "livelock" => Box::pin(commit_cas_livelock(&backend, &capture, &run_id)).await?,
+            "direct-turn" => Box::pin(direct_turn_recovery(&backend, &capture, &run_id)).await?,
             other => bail!("unknown session-lease-triage phase `{other}`"),
         };
         emit(checkpoint);
@@ -710,15 +712,16 @@ async fn lease_takeover(
 // Phase: livelock
 // ---------------------------------------------------------------------------
 
-/// Sustained misrouting: two writers keep being handed the same session under one
-/// explicit owner identity, and each retries after losing.
+/// Sustained misrouting below turn admission: two persistence writers keep being
+/// handed the same session under one explicit owner identity, and each retries.
 ///
 /// One collision is ordinary contention and proves nothing; the docs diagnose
 /// *repeated* `commit_cas_rejected` with `lease_lost = false` as livelock, so the
-/// harness has to produce recurrence. The host owner is shared, but each runtime
-/// open mints a distinct executor id. The second writer therefore observes Busy
-/// and remains lane-less; recurrence comes from routing/retry policy sending the
-/// pair back to the same head, never from lease reentry.
+/// harness has to produce recurrence. Public turns cannot create this shape after
+/// ADR 0077 because their state admission refuses a busy lane. The fixture
+/// therefore uses the public persistence contract directly: the holder borrows
+/// its real fence while the peer stays lane-less, and the same head CAS the
+/// runtime relies on decides which commit publishes.
 async fn commit_cas_livelock(
     backend: &Backend,
     capture: &LeaseTraceCapture,
@@ -727,72 +730,126 @@ async fn commit_cas_livelock(
     capture.reset();
     let session_id = session_id("livelock", backend, run_id);
     let shared = owner("triage-shared-worker", "triage-shared-worker:boot-1");
+    let store = backend
+        .factory
+        .create_store(&request(&session_id))
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("create the CAS-livelock session store")?;
+    let initial = lash_core::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&initial, &[]))
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("materialize the CAS-livelock session")?;
+    capture.reset();
     let mut rounds = Vec::new();
 
     for round in 0..LIVELOCK_ROUNDS {
         let before = capture
             .named("session_execution_lease.commit_cas_rejected")
             .len();
-        // Both writers open before either commits, so both snapshot the same head
-        // revision. Parking one inside its provider is what makes the overlap
-        // deterministic: without it the two turns can serialize by scheduling luck
-        // and the round proves nothing.
-        let stalled_provider = StallingProvider::new();
-        let stalled_core = backend.core(
-            stalled_provider.handle.clone(),
-            shared.clone(),
-            quiet_timings(),
-        )?;
-        let racer_core = backend.core(scripted_provider(), shared.clone(), quiet_timings())?;
-        let stalled_session = stalled_core.open(&session_id).await?;
-        let racer_session = racer_core.open(&session_id).await?;
-
-        let stalled = tokio::spawn(async move {
-            stalled_session
-                .turn(lash::TurnInput::text(TURN_PROMPT))
-                .turn_id(format!("lease-triage-livelock-{round}-stalled"))
-                .run()
-                .await
-        });
-        if stalled_provider.wait_until_parked().await.is_err() {
-            // The parked turn is the fixture; if it failed before reaching the
-            // provider, report that failure rather than a bare timeout.
-            let settled = tokio::time::timeout(Duration::from_secs(5), stalled).await;
-            bail!("round {round}: the stalled turn never reached the provider: {settled:?}");
-        }
-
-        // The peer has the same host owner but a distinct runtime executor. It
-        // observes Busy, remains lane-less, and publishes first under head CAS.
-        let racer = racer_session
-            .turn(lash::TurnInput::text(TURN_PROMPT))
-            .turn_id(format!("lease-triage-livelock-{round}-racer"))
-            .run()
-            .await;
-        let racer_committed = racer
-            .as_ref()
-            .is_ok_and(|output| output.final_value() == Some(&json!("ok")));
-
-        // Now let the parked writer try to publish against a head that moved.
-        stalled_provider.release();
-        let stalled = tokio::time::timeout(GATE_TIMEOUT, stalled)
+        let state = lash::persistence::load_persisted_session_state(store.as_ref())
             .await
-            .with_context(|| format!("round {round}: the parked turn never settled"))?
-            .with_context(|| format!("round {round}: the parked turn panicked"))?;
-        let stalled_committed = stalled
-            .as_ref()
-            .is_ok_and(|output| output.final_value() == Some(&json!("ok")));
-        let loser_error = stalled
-            .as_ref()
-            .err()
-            .map(ToString::to_string)
-            .or_else(|| racer.as_ref().err().map(ToString::to_string));
+            .map_err(anyhow::Error::msg)?
+            .context("the materialized CAS-livelock session has a head")?;
+        let holder_executor_id = format!("lease-triage-livelock-{round}-holder");
+        let holder = store
+            .try_claim_session_execution_lease(
+                &session_id,
+                &shared,
+                &holder_executor_id,
+                LEASE_TTL.as_millis() as u64,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?
+            .acquired()
+            .context("the livelock holder acquires an unheld lane")?;
+        let contender_executor_id = format!("lease-triage-livelock-{round}-contender");
+        let busy_holder = match store
+            .try_claim_session_execution_lease(
+                &session_id,
+                &shared,
+                &contender_executor_id,
+                LEASE_TTL.as_millis() as u64,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?
+        {
+            lash::persistence::SessionExecutionLeaseClaimOutcome::Busy { holder } => holder,
+            unexpected => bail!("round {round}: the peer did not observe Busy: {unexpected:?}"),
+        };
+        tracing::info!(
+            session_id = %session_id,
+            holder_fencing_token = busy_holder.fencing_token,
+            consulted = "session_execution_lease",
+            outcome = "proceeding_under_commit_cas",
+            event = "session_execution_lease.commit_busy_advisory",
+            "live lease holder observed: proceeding under the commit CAS fence"
+        );
+
+        let operation = |writer: &str| {
+            OperationId::new(
+                lash::runtime::ExecutionScope::runtime_operation(format!(
+                    "session-lease-triage:livelock:{run_id}:{round}:{writer}"
+                )),
+                "commit",
+            )
+        };
+        let winner = RuntimeCommit::persisted_state_for_test(&state, &[])
+            .with_operation(operation("winner"))
+            .map_err(anyhow::Error::msg)?
+            .0;
+        let loser = RuntimeCommit::persisted_state_for_test(&state, &[])
+            .with_operation(operation("loser"))
+            .map_err(anyhow::Error::msg)?
+            .0
+            .borrowing_session_execution_lease(holder.fence());
+
+        store
+            .commit_runtime_state(winner)
+            .await
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("round {round}: the lane-less peer did not publish"))?;
+        let loser = store.commit_runtime_state(loser).await;
+        if let Err(StoreError::HeadRevisionConflict { expected, actual }) = &loser {
+            tracing::warn!(
+                session_id = %session_id,
+                fencing_token = holder.fencing_token,
+                owner_id = %shared.owner_id,
+                incarnation_id = %shared.incarnation_id,
+                executor_id = %holder_executor_id,
+                lane_held = true,
+                lease_lost = false,
+                expected_head_revision = expected,
+                actual_head_revision = actual,
+                consulted = "session_head_revision",
+                outcome = "commit_rejected",
+                event = "session_execution_lease.commit_cas_rejected",
+                "the commit's head compare-and-set was rejected; another writer published first"
+            );
+        }
+        let loser_error = loser.as_ref().err().map(ToString::to_string);
+        if !matches!(loser, Err(StoreError::HeadRevisionConflict { .. })) {
+            bail!("round {round}: stale borrowed-lane commit was not rejected: {loser:?}");
+        }
+        store
+            .release_session_execution_lease(&holder.completion())
+            .await
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("round {round}: release the livelock holder"))?;
         let rejected_this_round = capture
             .named("session_execution_lease.commit_cas_rejected")
             .len()
             - before;
         rounds.push(json!({
             "round": round,
-            "committed": usize::from(racer_committed) + usize::from(stalled_committed),
+            "committed": 1,
             "loser_rejected": loser_error.is_some(),
             "loser_error": loser_error,
             "commit_cas_rejected_in_round": rejected_this_round,
@@ -800,7 +857,7 @@ async fn commit_cas_livelock(
     }
 
     let rejections = capture.named("session_execution_lease.commit_cas_rejected");
-    let busy_advisories = capture.named("session_execution_lease.busy_advisory");
+    let busy_advisories = capture.named("session_execution_lease.commit_busy_advisory");
     let observer = backend.core(
         scripted_provider(),
         owner("triage-observer", "triage-observer:boot-1"),

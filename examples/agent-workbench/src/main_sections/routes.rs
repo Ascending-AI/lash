@@ -19,34 +19,31 @@ async fn app_state(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    let session = state
-        .open_session(&session_id)
-        .await
-        .map_err(|error| state.session_admission_error(&session_id, "api.state", error))?;
-    let observation_snapshot = session.observe().recoverable_chat_snapshot();
+    let active_turns = state.active_turns.for_session(&session_id);
+    let StateProjectionReads {
+        read_view,
+        cursor,
+        pending_turn_inputs,
+        queued_work,
+        turn_input_applications,
+        usage,
+    } = read_state_projection(&state, &session_id, !active_turns.is_empty()).await?;
     // The badge reads the dialect this session recorded, from the same read
     // view the transcript labels its cells from (FIG-1306).
     let recorded_dialect = {
         use lash::rlm::RlmSessionReadViewExt as _;
-        observation_snapshot
-            .read_view
-            .rlm_config()
-            .dialect
-            .unwrap_or_default()
+        read_view.rlm_config().dialect.unwrap_or_default()
     };
-    let active_turns = state.active_turns.for_session(&session_id);
     let active_turn_ids = active_turns
         .iter()
         .map(|address| address.turn_id.clone())
         .collect::<BTreeSet<_>>();
-    let committed_message_ids = observation_snapshot
-        .read_view
+    let committed_message_ids = read_view
         .messages()
         .iter()
         .map(|message| message.id.clone())
         .collect::<BTreeSet<_>>();
-    let current_frame_input_turn_ids = observation_snapshot
-        .read_view
+    let current_frame_input_turn_ids = read_view
         .messages()
         .iter()
         .filter_map(|message| match message.origin.as_ref() {
@@ -56,7 +53,7 @@ async fn app_state(
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let mut pending_message_nodes = observation_snapshot.read_view.message_tree();
+    let mut pending_message_nodes = read_view.message_tree();
     let mut committed_input_turn_ids = BTreeSet::new();
     while let Some(node) = pending_message_nodes.pop() {
         if let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
@@ -90,31 +87,19 @@ async fn app_state(
         transcript,
     } = project_chat(
         &state,
-        &observation_snapshot.read_view,
+        &read_view,
         &active_turns,
         &committed_input_turn_ids,
         &current_frame_input_turn_ids,
         product_messages,
     );
-    let pending_turn_inputs = session
-        .pending_turn_inputs()
-        .await
-        // Audited: this facade read lowers TurnInputStore failures to RuntimeError::StoreCommitFailed without a typed cause.
-        .map_err(AppError::internal)?;
-    let queued_work = session.queued_work().await.map_err(AppError::internal)?;
-    let turn_input_applications = session
-        .remote_turn_input_applications()
-        .await
-        // Audited: application reconciliation lowers TurnInputStore failures to RuntimeError::StoreCommitFailed without a typed cause.
-        .map_err(AppError::internal)?;
-    let usage = session.usage_report();
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
     let observation =
         RemoteSessionObservation::from_core(lash::observe::SessionObservation {
-            read_view: observation_snapshot.read_view,
-            cursor: observation_snapshot.cursor,
+            read_view,
+            cursor: cursor.clone(),
         });
-    drop(session);
+    debug_assert_eq!(observation.cursor, cursor.to_string());
     Ok(Json(StateReadSnapshot {
         transcript,
         state: StateSnapshot {
@@ -337,14 +322,7 @@ async fn send_turn(
     // Last-active is a fact about use, so it moves when a turn is sent rather
     // than when a poll reads the session.
     state.sessions.touch(&session_id);
-    drop(
-        state
-            .open_session(&session_id)
-            .await
-            .map_err(|error| {
-                state.session_admission_error(&session_id, "api.turn", error)
-            })?,
-    );
+    ensure_session_marker_readable(&state, &session_id, "api.turn").await?;
     let attachment = match attachment_id.as_deref() {
         None => None,
         Some(attachment_id) => match state
@@ -421,6 +399,14 @@ async fn send_turn(
         .await?;
         return Ok(Json(TurnAccepted::queued(receipt)));
     }
+    drop(
+        state
+            .open_session(&session_id)
+            .await
+            .map_err(|error| {
+                state.session_admission_error(&session_id, "api.turn", error)
+            })?,
+    );
     let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
     let chat_attachments = attachment_id
         .iter()
@@ -1125,7 +1111,7 @@ async fn await_work(
     const AWAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
     let outcome = match tokio::time::timeout(
         AWAIT_TIMEOUT,
-        state.process_work_driver.await_terminal(&process_id),
+        lash::process::ProcessWorkDriver::await_terminal(&state.process_work_driver, &process_id),
     )
     .await
     {

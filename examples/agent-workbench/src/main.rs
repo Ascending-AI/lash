@@ -95,6 +95,7 @@ include!("main_sections/stores.rs");
 include!("main_sections/state.rs");
 include!("main_sections/attachment_media.rs");
 include!("main_sections/chat_projection.rs");
+include!("main_sections/state_reads.rs");
 include!("main_sections/routes.rs");
 include!("main_sections/approval_routes.rs");
 include!("main_sections/session_routes.rs");

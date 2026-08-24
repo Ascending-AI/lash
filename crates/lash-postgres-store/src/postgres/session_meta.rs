@@ -52,27 +52,27 @@ pub(crate) async fn write_session_meta_tx(
     let sql = match mode {
         SessionMetaWrite::Insert => {
             "INSERT INTO lash_session_meta
-             (session_id, relation_kind, observer_intent_depth, parent_session_id,
+             (session_id, session_state_version, relation_kind, observer_intent_depth, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
               source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+             VALUES ($1, $21, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                      $14, $15, $16, $17, $18, $19, $20, NULL)
              ON CONFLICT (session_id) DO NOTHING"
         }
         SessionMetaWrite::Replace => {
             "INSERT INTO lash_session_meta
-             (session_id, relation_kind, observer_intent_depth, parent_session_id,
+             (session_id, session_state_version, relation_kind, observer_intent_depth, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
               source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+             VALUES ($1, $21, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                      $14, $15, $16, $17, $18, $19, $20, NULL)
              ON CONFLICT (session_id) DO UPDATE SET
                relation_kind = EXCLUDED.relation_kind,
@@ -116,6 +116,7 @@ pub(crate) async fn write_session_meta_tx(
         .bind(&stored.source_node_id)
         .bind(&stored.observer_inheritance_kind)
         .bind(i64::try_from(created_at_ms).unwrap_or(i64::MAX))
+        .bind(lash_core::store::CURRENT_SESSION_STATE_VERSION as i32)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

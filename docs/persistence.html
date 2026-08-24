@@ -62,13 +62,13 @@
         <strong>Start fresh when the version moves</strong>
         <p>This release uses these store schema versions:</p>
         <ul>
-          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">40</span></li>
+          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">41</span></li>
           <li>SQLite process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span></li>
           <li>SQLite effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span></li>
           <li>SQLite trigger version <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span></li>
-          <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">59</span></li>
+          <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">60</span></li>
         </ul>
-        <p>The current durable-core and Postgres generations persist each turn-cancel request with its Defer-or-Drop disposition and ordered affected-input outcome. SQLite durable-core <span data-format-version="SQLITE_SCHEMA_VERSION">40</span> and Postgres component <span data-format-version="POSTGRES_SCHEMA_VERSION">59</span> add the cancellation-request table; the immediately preceding SQLite and published Postgres generations migrate forward explicitly. The prior generation's read-only session-catalog metadata and the earlier indexed checkpoint-manifest component edges remain intact.</p>
+        <p>The current durable-core and Postgres generations add an independently readable <code>session_state_version</code> marker to session metadata. Recovery reads it under the session-execution lease before decoding mutable continuation payloads; an absent marker means version 0. The prior generation's durable cancellation-request disposition and affected-input outcome remain intact.</p>
         <ul>
           <li>Process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> retains pending process-parent teardown atomically.</li>
           <li>Effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span> persists versioned tool-intent carriers, typed execution outcomes, and the durable effect-group journal. SQLite reaches it by reject-and-recreate.</li>
@@ -78,8 +78,9 @@
           <li>Version 57 adds the exact blob-edge projection.</li>
           <li>Version 58 adds the session-enumeration catalog projection.</li>
           <li>Version 59 adds durable cancellation-request disposition and affected-input outcomes.</li>
+          <li>Version 60 adds the session-state admission marker.</li>
         </ul>
-        <p>All Postgres additions are creation-only, so the published component-50 through component-58 shapes upgrade before workers open. The trigger migration arms legacy zero-fan-out occurrences while live-fan-out rows use the normal terminal transition. The immediately preceding SQLite durable-core generation has an exact in-place migration to <span data-format-version="SQLITE_SCHEMA_VERSION">40</span> that creates the cancellation-request table before stamping the current generation.</p>
+        <p>All Postgres additions are creation-only, so the published component-50 through component-59 shapes upgrade before workers open. The trigger migration arms legacy zero-fan-out occurrences while live-fan-out rows use the normal terminal transition. SQLite durable-core generations 39 and 40 have exact in-place migrations to <span data-format-version="SQLITE_SCHEMA_VERSION">41</span>: both add the nullable marker, while 39 also creates the cancellation-request table.</p>
         <p>Earlier durable-core generations and SQLite trigger databases below version 6 remain reject-and-recreate boundaries. If target artifacts already exist over an older Postgres stamp, Lash refuses the divergent store before migration DDL. Inspection and recreation replace any guess at an intermediate state.</p>
         <p>Each exact version is pinned in its store crate. A refused open names the version found alongside the version expected. Each continuation anchor binds its node, checkpoint, and source session as one immutable snapshot. Persistent deployments must use fresh stores when no explicit migration exists; adopting a new version is forward-only (see <a href="./operations.html#version-bumps">bumping lash</a>).</p>
       </aside>

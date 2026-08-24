@@ -17,6 +17,7 @@ mod realization;
 mod runtime_commit;
 mod runtime_commit_plan;
 pub(crate) mod session_execution_lease;
+mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 mod turn_id;
@@ -38,8 +39,8 @@ pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{
-    LoadedPersistedSession, load_persisted_session, load_persisted_session_state,
-    refresh_persisted_session_state,
+    LoadedPersistedSession, load_persisted_session, load_persisted_session_admitted,
+    load_persisted_session_state, refresh_persisted_session_state,
 };
 pub use maintenance::{
     GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
@@ -70,6 +71,10 @@ pub use session_execution_lease::{
     LeaseClaimNonce, LeaseOwnerIdentity, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome,
     SessionExecutionLeaseDisplacement,
+};
+pub use state_version::{
+    CURRENT_SESSION_STATE_VERSION, OLDEST_SUPPORTED_SESSION_STATE_VERSION, SessionStateAdmission,
+    resolve_session_state_version,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use testing::append_request_commit_with_clock_for_testing;
@@ -882,6 +887,34 @@ impl Default for SessionHeadPayload {
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
+    /// Read the marker without guarded payload decode; absence means oldest supported.
+    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+        Ok(OLDEST_SUPPORTED_SESSION_STATE_VERSION)
+    }
+    /// Revalidate `lease`, then classify the independently read session-state marker.
+    async fn admit_session_state(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+    ) -> Result<SessionStateAdmission, StoreError> {
+        let version = self.read_session_state_version().await?;
+        Ok(SessionStateAdmission {
+            session_id: lease.session_id.clone(),
+            version,
+            lease_fencing_token: lease.fencing_token,
+        })
+    }
+
+    /// Conformance seam for a marker guarding bytes the current codec cannot read.
+    #[doc(hidden)]
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        _version: u32,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "stamp_session_state_version_and_corrupt_payload_for_testing",
+        })
+    }
+
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError>;
 
     /// Read the current session head without hydrating graph, checkpoint, or

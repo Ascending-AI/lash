@@ -2215,7 +2215,14 @@ async fn queued_worker_state_load_reconciles_live_policy_without_rewriting_histo
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
 
-    let state = crate::session::load_state_from_store(session_id, &policy, &store).await?;
+    let state = crate::session::load_state_from_store(
+        session_id,
+        &policy,
+        &store,
+        &lash_core::LeaseOwnerIdentity::opaque("queued-worker-test", "incarnation"),
+        60_000,
+    )
+    .await?;
     assert_eq!(state.policy.model, policy.model);
     assert_eq!(
         state

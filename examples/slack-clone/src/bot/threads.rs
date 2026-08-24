@@ -84,6 +84,8 @@ impl RootWaitObserver {
 /// Result of opening the deterministic child behind a Slack thread.
 pub enum ThreadSessionOpen {
     Ready(LashSession),
+    /// Another runtime owns the lane, so lease-fenced admission must retry.
+    AdmissionContended,
     /// Deterministic child ids are single-use; a deleted child stays retired.
     Retired,
     /// A root row exists and may still acquire an authoritative boundary.
@@ -117,19 +119,37 @@ pub async fn open_thread_session(
         .as_deref()
         .context("thread route has no thread_ts")?;
     let thread_id = thread_session_id(&record.channel_id, thread_ts);
-    let channel = open_channel_session(core, &record.channel_id).await?;
 
     let child_exists = core
         .session_exists(&thread_id)
         .await
         .context("check whether the thread child session exists")?;
-    if !child_exists {
+    let channel = if !child_exists {
         let started = tokio::time::Instant::now();
         let mut backoff = ROOT_ADMISSION_INITIAL_BACKOFF;
-        let fork_node = loop {
+        let (fork_node, channel) = loop {
+            let channel = match open_channel_session(core, &record.channel_id).await {
+                Ok(session) => session,
+                Err(error) if anyhow_session_admission_contended(&error) => {
+                    #[cfg(test)]
+                    root_wait.observe_missing_root();
+                    let elapsed = started.elapsed();
+                    if elapsed >= root_wait_budget {
+                        return Ok(ThreadSessionOpen::RootNotProcessed);
+                    }
+                    let remaining = root_wait_budget.saturating_sub(elapsed);
+                    let nap = backoff.min(remaining);
+                    #[cfg(test)]
+                    root_wait.observe_budget_spent(nap);
+                    tokio::time::sleep(nap).await;
+                    backoff = backoff.saturating_mul(2).min(ROOT_ADMISSION_MAX_BACKOFF);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let route = root_route(core, ledger, record, thread_ts).await?;
             if let RootRoute::Ready(fork_node) = route {
-                break fork_node;
+                break (fork_node, channel);
             }
             if matches!(route, RootRoute::PermanentlyUnavailable) {
                 return Ok(ThreadSessionOpen::RootNotAvailable);
@@ -168,10 +188,22 @@ pub async fn open_thread_session(
             }
             Err(error) => return Err(error).context("fork thread session"),
         }
-    }
+        channel
+    } else {
+        match open_channel_session(core, &record.channel_id).await {
+            Ok(session) => session,
+            Err(error) if anyhow_session_admission_contended(&error) => {
+                return Ok(ThreadSessionOpen::AdmissionContended);
+            }
+            Err(error) => return Err(error),
+        }
+    };
 
     let session = match core.session(&thread_id).open().await {
         Ok(session) => session,
+        Err(error) if session_admission_contended(&error) => {
+            return Ok(ThreadSessionOpen::AdmissionContended);
+        }
         Err(lash::EmbedError::Store(StoreError::SessionDeleted { .. })) => {
             return Ok(ThreadSessionOpen::Retired);
         }
@@ -179,6 +211,24 @@ pub async fn open_thread_session(
     };
     seed_thread_root_and_uncommitted_context(ledger, &channel, &session, record, thread_ts).await?;
     Ok(ThreadSessionOpen::Ready(session))
+}
+
+pub(crate) fn session_admission_contended(error: &lash::EmbedError) -> bool {
+    matches!(
+        error,
+        lash::EmbedError::Session(lash::SessionError::Store {
+            source: StoreError::Contended,
+            ..
+        }) | lash::EmbedError::Store(StoreError::Contended)
+    )
+}
+
+pub(crate) fn anyhow_session_admission_contended(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<lash::EmbedError>()
+            .is_some_and(session_admission_contended)
+    })
 }
 
 /// Resolve only durable evidence tied to the root itself.
@@ -204,9 +254,15 @@ async fn root_route(
         // the caller's handle: that handle was opened when this thread reply
         // started waiting, and its graph predates the root turn this repair is
         // about. A snapshot that old can never carry the boundary being derived.
-        let repair_view = open_channel_session(core, &record.channel_id)
-            .await
-            .context("open a current channel view for thread-root repair")?;
+        let repair_view = match open_channel_session(core, &record.channel_id).await {
+            Ok(session) => session,
+            Err(error) if anyhow_session_admission_contended(&error) => {
+                return Ok(RootRoute::Pending);
+            }
+            Err(error) => {
+                return Err(error).context("open a current channel view for thread-root repair");
+            }
+        };
         try_retain_applied_turn_boundary(core, ledger, &repair_view, &input_id)
             .await
             .context("re-derive committed thread-root boundary")?;

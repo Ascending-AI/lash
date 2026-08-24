@@ -1396,7 +1396,8 @@ async fn sqlite_cancelled_queued_append_publishes_usage_exactly_once() {
     lash_core::testing::conformance::append_usage_cancellation_publishes_exactly_once(
         store,
         move || {
-            let pause = injector.pause_after(SqliteFaultPoint::BeforeCommit, 1);
+            // Pause the graph append after lease-fenced admission's write transaction.
+            let pause = injector.pause_after(SqliteFaultPoint::BeforeCommit, 2);
             async move {
                 pause.wait_until_reached().await;
                 move || pause.release()

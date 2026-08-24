@@ -947,16 +947,42 @@ async fn async_main() -> Result<()> {
         .await
         .context("check whether failover owner is restarting")?;
         if recovering_failover_owner {
-            // Keep the crashed endpoint unavailable across Restate's first
-            // retries so the proxy deterministically hands ownership to the
-            // healthy peer. This also prevents a turn and its concurrent
-            // cancellation-gate observer from locking round-robin routing to
-            // the same restarted owner.
+            // Keep the crashed endpoint unavailable until the peer has taken
+            // the legally expired session lane and committed the workflow's
+            // terminal result. A fixed sleep either races Restate's retry or
+            // wastes the outer harness budget after takeover already won.
             tracing::warn!(
                 worker_id = %state.worker_id,
                 "delaying failover-owner endpoint restart for peer takeover"
             );
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            let deadline = Instant::now() + Duration::from_secs(90);
+            loop {
+                let peer_takeover_complete: bool = sqlx::query_scalar(
+                    "SELECT NOT EXISTS (
+                        SELECT 1
+                        FROM lash_e2e_failover_markers AS marker
+                        LEFT JOIN lash_e2e_terminal_results AS terminal
+                          ON terminal.workflow_id = marker.workflow_id
+                        WHERE marker.worker_id = $1
+                          AND terminal.workflow_id IS NULL
+                    )",
+                )
+                .bind(&state.worker_id)
+                .fetch_one(storage.pool())
+                .await
+                .context("wait for peer failover terminal result")?;
+                if peer_takeover_complete {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    tracing::warn!(
+                        worker_id = %state.worker_id,
+                        "peer takeover did not settle before the restart hold deadline"
+                    );
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
         }
     }
 
