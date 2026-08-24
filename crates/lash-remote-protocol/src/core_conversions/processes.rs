@@ -1487,12 +1487,12 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
         value.validate("RemoteObservedProcess")?;
         let RemoteObservedProcess {
             process_id,
-            graph_key,
-            kind,
+            graph_key: _,
+            kind: _,
             identity,
             lifecycle,
-            status_label,
-            terminal,
+            status_label: _,
+            terminal: _,
             disposition,
             error,
             created_at_ms,
@@ -1508,14 +1508,21 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             external_ref,
             wait,
             child_session_id,
-            label,
+            label: _,
         } = value;
+        let graph_key = format!("process:{process_id}");
+        let identity: lash_core::ProcessIdentity = identity.into();
+        let kind = identity.kind.clone();
+        let label = identity.label.clone().unwrap_or_else(|| kind.clone());
+        let lifecycle: lash_core::ProcessStatus = lifecycle.into();
+        let status_label = lifecycle.label().to_string();
+        let terminal = lifecycle.is_terminal();
         Ok(Self {
             process_id,
             graph_key,
             kind,
-            identity: identity.into(),
-            lifecycle: lifecycle.into(),
+            identity,
+            lifecycle,
             status_label,
             terminal,
             disposition: disposition.into(),
@@ -1569,11 +1576,18 @@ impl TryFrom<RemoteProcessWorkItem> for lash_core::facade_support::ObservedWorkI
         let RemoteProcessWorkItem {
             process,
             events,
-            kind,
-            label,
+            kind: _,
+            label: _,
         } = value;
+        let process: lash_core::facade_support::ObservedProcess = process.try_into()?;
+        let kind = process.identity.kind.clone();
+        let label = process
+            .identity
+            .label
+            .clone()
+            .unwrap_or_else(|| kind.clone());
         Ok(Self {
-            process: process.try_into()?,
+            process,
             events: events.into_iter().map(Into::into).collect(),
             kind,
             label,
