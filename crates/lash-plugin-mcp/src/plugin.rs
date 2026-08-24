@@ -445,6 +445,7 @@ mod tests {
         let defs = factory.pool().advertised_tools();
         assert_eq!(defs.len(), 1, "expected one imported tool, got {defs:?}");
         assert_eq!(defs[0].name(), "mcp__docs__search_docs");
+        assert_eq!(defs[0].manifest.id.as_str(), "mcp:4:docs/11:search-docs");
         #[cfg(feature = "lashlang")]
         {
             let binding =
