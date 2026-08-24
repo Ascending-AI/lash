@@ -1170,12 +1170,37 @@ fn checkpoint_redelivers_waiting_llm_from_state_only() {
             .len(),
         0
     );
+    assert!(encoded["state"]["WaitingLlm"].get("delivery").is_none());
 
     let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
         TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint);
     let effects = drain_effects(&mut restored);
     assert!(find_llm_call(&effects).is_some());
+}
+
+#[test]
+fn stale_response_does_not_cancel_checkpoint_redelivery() {
+    let config = test_config(Arc::new(ProseDriver));
+    let mut machine =
+        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+
+    let checkpoint = roundtrip_checkpoint(machine.checkpoint());
+    let mut restored =
+        TurnMachine::restore_from_checkpoint(test_config(Arc::new(ProseDriver)), checkpoint);
+    restored.handle_response(Response::LlmComplete {
+        id: EffectId(llm_id.0 + 1),
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+
+    let effects = drain_effects(&mut restored);
+    let redelivered_id = find_llm_call(&effects)
+        .expect("waiting LLM call should remain scheduled after a stale response")
+        .0;
+    assert_eq!(*redelivered_id, llm_id);
 }
 
 #[test]

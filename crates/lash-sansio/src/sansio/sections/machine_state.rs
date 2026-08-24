@@ -1,30 +1,47 @@
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum EffectDeliveryStatus {
+    #[default]
+    Pending,
+    Delivered,
+}
+
 #[derive(Debug, Serialize, serde::Deserialize)]
 enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
     PreparingProtocol,
     WaitingExecutionEnvironment {
         effect_id: EffectId,
         update_machine_config: bool,
+        #[serde(skip)]
+        delivery: EffectDeliveryStatus,
     },
     PrepareIteration,
     WaitingLlm {
         effect_id: EffectId,
         request: Arc<LlmRequest>,
         driver_state: Option<M::DriverState>,
+        #[serde(skip)]
+        delivery: EffectDeliveryStatus,
     },
     WaitingTools {
         effect_id: EffectId,
         calls: Vec<PendingToolCall>,
+        #[serde(skip)]
+        delivery: EffectDeliveryStatus,
     },
     WaitingExec {
         effect_id: EffectId,
         language: String,
         code: String,
         driver_state: M::DriverState,
+        #[serde(skip)]
+        delivery: EffectDeliveryStatus,
     },
     WaitingCheckpoint {
         effect_id: EffectId,
         checkpoint: CheckpointKind,
         on_empty: CheckpointResumeAction,
+        #[serde(skip)]
+        delivery: EffectDeliveryStatus,
     },
     Finished,
 }
@@ -56,43 +73,56 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
             Self::WaitingExecutionEnvironment {
                 effect_id,
                 update_machine_config,
+                delivery,
             } => Self::WaitingExecutionEnvironment {
                 effect_id: *effect_id,
                 update_machine_config: *update_machine_config,
+                delivery: *delivery,
             },
             Self::PrepareIteration => Self::PrepareIteration,
             Self::WaitingLlm {
                 effect_id,
                 request,
                 driver_state,
+                delivery,
             } => Self::WaitingLlm {
                 effect_id: *effect_id,
                 request: Arc::clone(request),
                 driver_state: driver_state.clone(),
+                delivery: *delivery,
             },
-            Self::WaitingTools { effect_id, calls } => Self::WaitingTools {
+            Self::WaitingTools {
+                effect_id,
+                calls,
+                delivery,
+            } => Self::WaitingTools {
                 effect_id: *effect_id,
                 calls: calls.clone(),
+                delivery: *delivery,
             },
             Self::WaitingExec {
                 effect_id,
                 language,
                 code,
                 driver_state,
+                delivery,
             } => Self::WaitingExec {
                 effect_id: *effect_id,
                 language: language.clone(),
                 code: code.clone(),
                 driver_state: driver_state.clone(),
+                delivery: *delivery,
             },
             Self::WaitingCheckpoint {
                 effect_id,
                 checkpoint,
                 on_empty,
+                delivery,
             } => Self::WaitingCheckpoint {
                 effect_id: *effect_id,
                 checkpoint: *checkpoint,
                 on_empty: on_empty.clone(),
+                delivery: *delivery,
             },
             Self::Finished => Self::Finished,
         }
@@ -100,55 +130,82 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
 }
 
 impl<M: TurnProtocol> MachineState<M> {
-    fn outstanding_effect_id(&self) -> Option<EffectId> {
+    fn schedule_outstanding_effect(&mut self) {
         match self {
-            Self::WaitingExecutionEnvironment { effect_id, .. }
-            | Self::WaitingLlm { effect_id, .. }
-            | Self::WaitingTools { effect_id, .. }
-            | Self::WaitingExec { effect_id, .. }
-            | Self::WaitingCheckpoint { effect_id, .. } => Some(*effect_id),
-            Self::PreparingProtocol | Self::PrepareIteration | Self::Finished => None,
+            Self::WaitingExecutionEnvironment { delivery, .. }
+            | Self::WaitingLlm { delivery, .. }
+            | Self::WaitingTools { delivery, .. }
+            | Self::WaitingExec { delivery, .. }
+            | Self::WaitingCheckpoint { delivery, .. } => {
+                *delivery = EffectDeliveryStatus::Pending;
+            }
+            Self::PreparingProtocol | Self::PrepareIteration | Self::Finished => {}
         }
     }
 
-    fn outstanding_effect(&self) -> Option<Effect<M>> {
+    fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
         match self {
             Self::WaitingExecutionEnvironment {
                 effect_id,
                 update_machine_config,
-            } => Some(Effect::SyncExecutionEnvironment {
-                id: *effect_id,
-                update_machine_config: *update_machine_config,
-            }),
+                delivery,
+            } if *delivery == EffectDeliveryStatus::Pending => {
+                *delivery = EffectDeliveryStatus::Delivered;
+                Some(Effect::SyncExecutionEnvironment {
+                    id: *effect_id,
+                    update_machine_config: *update_machine_config,
+                })
+            }
             Self::WaitingLlm {
-                effect_id, request, ..
-            } => Some(Effect::LlmCall {
-                id: *effect_id,
-                request: Arc::clone(request),
-            }),
-            Self::WaitingTools { effect_id, calls } => Some(Effect::ToolCalls {
-                id: *effect_id,
-                calls: calls.clone(),
-            }),
+                effect_id,
+                request,
+                delivery,
+                ..
+            } if *delivery == EffectDeliveryStatus::Pending => {
+                *delivery = EffectDeliveryStatus::Delivered;
+                Some(Effect::LlmCall {
+                    id: *effect_id,
+                    request: Arc::clone(request),
+                })
+            }
+            Self::WaitingTools {
+                effect_id,
+                calls,
+                delivery,
+            } if *delivery == EffectDeliveryStatus::Pending => {
+                *delivery = EffectDeliveryStatus::Delivered;
+                Some(Effect::ToolCalls {
+                    id: *effect_id,
+                    calls: calls.clone(),
+                })
+            }
             Self::WaitingExec {
                 effect_id,
                 language,
                 code,
+                delivery,
                 ..
-            } => Some(Effect::ExecCode {
-                id: *effect_id,
-                language: language.clone(),
-                code: code.clone(),
-            }),
+            } if *delivery == EffectDeliveryStatus::Pending => {
+                *delivery = EffectDeliveryStatus::Delivered;
+                Some(Effect::ExecCode {
+                    id: *effect_id,
+                    language: language.clone(),
+                    code: code.clone(),
+                })
+            }
             Self::WaitingCheckpoint {
                 effect_id,
                 checkpoint,
+                delivery,
                 ..
-            } => Some(Effect::Checkpoint {
-                id: *effect_id,
-                checkpoint: *checkpoint,
-            }),
-            Self::PreparingProtocol | Self::PrepareIteration | Self::Finished => None,
+            } if *delivery == EffectDeliveryStatus::Pending => {
+                *delivery = EffectDeliveryStatus::Delivered;
+                Some(Effect::Checkpoint {
+                    id: *effect_id,
+                    checkpoint: *checkpoint,
+                })
+            }
+            _ => None,
         }
     }
 }
@@ -157,8 +214,7 @@ impl<M: TurnProtocol> MachineState<M> {
 pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     config: TurnMachineConfig<M>,
     state: MachineState<M>,
-    pending_effects: VecDeque<Effect<M>>,
-    active_effect_redelivery: bool,
+    side_effect_outbox: VecDeque<Effect<M>>,
     next_effect_id: u64,
     next_synthetic_message_id: u64,
     messages: MessageSequence,

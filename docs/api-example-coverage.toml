@@ -66076,7 +66076,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TurnIssue::code", "lash_core::runtime::TurnIssue::code"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::turn::TurnIssue::code` directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::errors`. Consumer class: the runtime-agnostic sans-io layer and the `lash` facade itself -- this field is exercised in-repo at crates/lash-sansio/src/sansio/sections/turn_machine.rs::TurnMachine::start_exec, crates/lash-sansio/src/sansio/sections/turn_machine.rs::TurnMachine::start_exec#`code: code.clone(),`, and no example reaches it, which is what keeps the row unused."
+reason = "Facade contract surface, not a closure-only discovery: the owning type is a root export of the `lash` facade (crates/lash/src/lib.rs), so a host names `lash::turn::TurnIssue::code` directly; the gate reaches the same item a second time through `lash_core::runtime::AssembledTurn::errors`. Consumer class: the runtime-agnostic sans-io layer and the `lash` facade itself -- this field is exercised in-repo at crates/lash-sansio/src/sansio/sections/turn_machine.rs::TurnMachine::start_exec, crates/lash-sansio/src/sansio/sections/turn_machine.rs::TurnMachine::start_exec#`code,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash::turn::TurnIssue::kind"
