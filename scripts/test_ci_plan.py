@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
 """Unit tests for ci_plan.py."""
 
+from pathlib import Path
 import unittest
 
+import yaml
+
 import ci_plan
+
+
+CI_WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
+AGGREGATOR_ALLOWLIST = {"plan", "ci-conclusion", "linux-release-cache"}
+
+
+def unregistered_ci_jobs(workflow_source: str) -> set[str]:
+    workflow = yaml.safe_load(workflow_source)
+    jobs = workflow["jobs"]
+    aggregator_needs = jobs["ci-conclusion"]["needs"]
+    return set(jobs) - set(aggregator_needs) - AGGREGATOR_ALLOWLIST
 
 
 class ClassifyTests(unittest.TestCase):
@@ -139,6 +153,16 @@ class ConclusionTests(unittest.TestCase):
         needs = successful_needs()
         del needs["facade-only-examples"]
         self.assertTrue(ci_plan.evaluate_conclusion(needs))
+
+
+class WorkflowRegistrationTests(unittest.TestCase):
+    def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
+        self.assertEqual(set(), unregistered_ci_jobs(CI_WORKFLOW.read_text(encoding="utf-8")))
+
+    def test_rogue_job_is_caught(self) -> None:
+        workflow_copy = CI_WORKFLOW.read_text(encoding="utf-8").rstrip()
+        workflow_copy += "\n\n  rogue-job:\n    runs-on: ubuntu-latest\n"
+        self.assertEqual({"rogue-job"}, unregistered_ci_jobs(workflow_copy))
 
 
 if __name__ == "__main__":
