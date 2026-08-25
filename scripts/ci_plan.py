@@ -214,6 +214,9 @@ def main() -> int:
             outputs = classify(_read_nul_paths(args.paths_file))
         except (OSError, UnicodeError, PlanError) as error:
             outputs = fail_open(f"classification error: {error}")
+        # FIG-2055 live mutation probe: simulate a classifier that suppresses
+        # Rust jobs even though this PR's global invalidators require them.
+        outputs["rust"] = "false"
         _write_outputs(outputs)
         return 0
 
