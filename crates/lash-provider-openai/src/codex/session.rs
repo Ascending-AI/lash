@@ -23,6 +23,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use super::CodexProvider;
 use super::continuation::CodexContinuation;
 use super::credential::CodexCredential;
+use super::shared::ResponsesStreamState;
 
 pub(super) const SESSION_WEBSOCKET_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const SESSION_WEBSOCKET_FALLBACK_TTL: Duration = Duration::from_secs(60);
@@ -125,11 +126,60 @@ pub(super) struct CodexWebsocketLease {
     pub(super) credential_generation: u64,
 }
 
+/// Monotone attempt progress, ordered from no provider evidence to committed output.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) enum CodexAttemptProgress {
+    BeforeSend,
+    EventsSeen,
+    OutputStarted,
+}
+
 pub(super) struct CodexWebSocketAttemptError {
     pub(super) error: LlmTransportError,
-    pub(super) events_seen: bool,
-    pub(super) output_started: bool,
-    pub(super) stale_previous_response: bool,
+    progress: CodexAttemptProgress,
+}
+
+impl CodexWebSocketAttemptError {
+    pub(super) fn before_send(error: LlmTransportError) -> Self {
+        Self {
+            error,
+            progress: CodexAttemptProgress::BeforeSend,
+        }
+    }
+
+    pub(super) fn during_stream(
+        error: LlmTransportError,
+        events_seen: bool,
+        state: &ResponsesStreamState,
+    ) -> Self {
+        let progress = if state.output_started() {
+            CodexAttemptProgress::OutputStarted
+        } else if events_seen {
+            CodexAttemptProgress::EventsSeen
+        } else {
+            CodexAttemptProgress::BeforeSend
+        };
+        Self { error, progress }
+    }
+
+    pub(super) fn progress(&self) -> CodexAttemptProgress {
+        self.progress
+    }
+
+    pub(super) fn is_stale_previous_response(&self) -> bool {
+        let haystack = format!(
+            "{}\n{}\n{}",
+            self.error.message,
+            self.error
+                .raw
+                .as_deref()
+                .map(String::as_str)
+                .unwrap_or_default(),
+            self.error.code.as_deref().unwrap_or_default()
+        )
+        .to_ascii_lowercase();
+        haystack.contains("previous_response_id") || haystack.contains("previous response")
+    }
 }
 
 impl CodexProvider {
@@ -281,25 +331,19 @@ impl CodexProvider {
             self.websocket_url
                 .as_str()
                 .into_client_request()
-                .map_err(|error| CodexWebSocketAttemptError {
-                    error: LlmTransportError::new(format!(
+                .map_err(|error| {
+                    CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                         "Failed to build Codex WebSocket request: {error}"
-                    )),
-                    events_seen: false,
-                    output_started: false,
-                    stale_previous_response: false,
+                    )))
                 })?;
         let headers = ws_request.headers_mut();
         headers.insert(
             "Authorization",
             HeaderValue::from_str(&format!("Bearer {}", credential.access_token)).map_err(
-                |error| CodexWebSocketAttemptError {
-                    error: LlmTransportError::new(format!(
+                |error| {
+                    CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                         "Invalid Codex WebSocket authorization header: {error}"
-                    )),
-                    events_seen: false,
-                    output_started: false,
-                    stale_previous_response: false,
+                    )))
                 },
             )?,
         );
@@ -314,62 +358,43 @@ impl CodexProvider {
         headers.insert(
             "User-Agent",
             HeaderValue::from_str(&Self::codex_user_agent()).map_err(|error| {
-                CodexWebSocketAttemptError {
-                    error: LlmTransportError::new(format!(
-                        "Invalid Codex WebSocket user-agent header: {error}"
-                    )),
-                    events_seen: false,
-                    output_started: false,
-                    stale_previous_response: false,
-                }
+                CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                    "Invalid Codex WebSocket user-agent header: {error}"
+                )))
             })?,
         );
         let session_value = HeaderValue::from_str(&req.scope.session_id).map_err(|error| {
-            CodexWebSocketAttemptError {
-                error: LlmTransportError::new(format!(
-                    "Invalid Codex WebSocket session header: {error}"
-                )),
-                events_seen: false,
-                output_started: false,
-                stale_previous_response: false,
-            }
+            CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                "Invalid Codex WebSocket session header: {error}"
+            )))
         })?;
         let request_value = HeaderValue::from_str(&req.scope.request_id).map_err(|error| {
-            CodexWebSocketAttemptError {
-                error: LlmTransportError::new(format!(
-                    "Invalid Codex WebSocket request header: {error}"
-                )),
-                events_seen: false,
-                output_started: false,
-                stale_previous_response: false,
-            }
+            CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                "Invalid Codex WebSocket request header: {error}"
+            )))
         })?;
         headers.insert("session-id", session_value);
         headers.insert("x-client-request-id", request_value);
         if let Some(account_id) = credential.account_id.as_deref() {
             headers.insert(
                 "ChatGPT-Account-ID",
-                HeaderValue::from_str(account_id).map_err(|error| CodexWebSocketAttemptError {
-                    error: LlmTransportError::new(format!(
+                HeaderValue::from_str(account_id).map_err(|error| {
+                    CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                         "Invalid Codex WebSocket account header: {error}"
-                    )),
-                    events_seen: false,
-                    output_started: false,
-                    stale_previous_response: false,
+                    )))
                 })?,
             );
         }
 
         let connect = tokio::time::timeout(connect_timeout, connect_async(ws_request))
             .await
-            .map_err(|_| CodexWebSocketAttemptError {
-                error: LlmTransportError::new("Codex WebSocket connect timed out")
-                    .with_kind(ProviderFailureKind::Timeout)
-                    .retryable(true)
-                    .with_code("websocket_connect_timeout"),
-                events_seen: false,
-                output_started: false,
-                stale_previous_response: false,
+            .map_err(|_| {
+                CodexWebSocketAttemptError::before_send(
+                    LlmTransportError::new("Codex WebSocket connect timed out")
+                        .with_kind(ProviderFailureKind::Timeout)
+                        .retryable(true)
+                        .with_code("websocket_connect_timeout"),
+                )
             })?;
         connect.map(|(websocket, _)| websocket).map_err(|error| {
             let status = match &error {
@@ -385,12 +410,7 @@ impl CodexProvider {
             if let Some(status) = status {
                 transport_error = transport_error.with_status(status);
             }
-            CodexWebSocketAttemptError {
-                error: transport_error,
-                events_seen: false,
-                output_started: false,
-                stale_previous_response: false,
-            }
+            CodexWebSocketAttemptError::before_send(transport_error)
         })
     }
 
