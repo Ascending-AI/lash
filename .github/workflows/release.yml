@@ -74,15 +74,21 @@ jobs:
 
           sha = sys.argv[1]
           runs = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          # Push runs execute the lean CI profile (primary Postgres major
+          # only, no workers E2E); only a workflow_dispatch run executes the
+          # full profile, so it is the only run class that certifies a
+          # release.
           matching = [
               run
               for run in runs
               if run.get("headSha") == sha
-              and run.get("event") in ("push", "workflow_dispatch")
+              and run.get("event") == "workflow_dispatch"
           ]
           if not matching:
               raise SystemExit(
-                  f"release refused: no main CI run found for target {sha}"
+                  "release refused: no full-profile (workflow_dispatch) CI "
+                  f"run found for target {sha}; dispatch the CI workflow on "
+                  "main at that commit and rerun once it is green"
               )
           run = matching[0]
           if (
