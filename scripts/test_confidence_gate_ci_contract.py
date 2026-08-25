@@ -175,17 +175,42 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for problem in push_problems:
             self.assertIn("although plan.", problem)
 
-        # Workers E2E defers on the same events through step-level guards.
+        # Workers E2E runs only on the full profile (workflow_dispatch),
+        # through step-level guards; every other event gets an explain step.
         workers = workflow_job_block(workflow, "restate-postgres-workers")
+        self.assertIn("if: github.event_name != 'workflow_dispatch'", workers)
         self.assertIn(
-            "if: github.event_name == 'pull_request' "
-            "|| github.event_name == 'merge_group'",
+            "if: github.event_name == 'workflow_dispatch' "
+            "&& needs.plan.outputs.workers_e2e == 'true'",
             workers,
         )
         self.assertNotIn(
             "github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e",
             workflow,
         )
+        self.assertNotIn(
+            "github.event_name != 'merge_group' "
+            "&& needs.plan.outputs.workers_e2e",
+            workflow,
+        )
+
+        # Lean runs test only the primary Postgres major; the full profile
+        # restores the 14/18 catalog byte-identity bracket.
+        postgres = workflow_job_block(workflow, "postgres-store")
+        self.assertIn(
+            "postgres: ${{ fromJSON(github.event_name == 'workflow_dispatch'"
+            " && '[\"14\", \"16\", \"18\"]' || '[\"16\"]') }}",
+            postgres,
+        )
+
+        # The release gate is what makes the full profile mandatory: a release
+        # SHA is certified only by a green workflow_dispatch CI run.
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('run.get("event") == "workflow_dispatch"', release)
+        self.assertNotIn('("push", "workflow_dispatch")', release)
+        self.assertIn("no full-profile (workflow_dispatch) CI ", release)
 
     def assert_quarantine_fixture_invalid(
         self, payload: dict[str, object], message: str
@@ -717,7 +742,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             'requested="${REQUESTED_SHA:-origin/main}"',
             'git merge-base --is-ancestor "${sha}" origin/main',
             'gh run list --workflow ci.yml --commit "${sha}"',
-            'run.get("event") in ("push", "workflow_dispatch")',
+            'run.get("event") == "workflow_dispatch"',
             "run = matching[0]",
             'run.get("conclusion") != "success"',
             "release refused: target ",

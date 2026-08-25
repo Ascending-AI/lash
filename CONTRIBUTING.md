@@ -44,12 +44,13 @@ release cache` is deliberately **not** in that set: it warms a cache for
 release.yml and perf.yml on `main` and is skipped for pull requests and queue
 entries, where the cache it writes is scoped to a ref nothing else can read.
 
-The workers E2E checks are the one required family that does not *execute* on
-pull-request events: their jobs report success in seconds on a PR and run the
-full distributed E2E only in the merge queue (and on `main` pushes and manual
-dispatches). A green PR therefore does not prove workers E2E behavior — for
-changes touching the `lash-restate` geometry, run the local recipes above
-before relying on CI; the queue run at merge time is the execution witness.
+The workers E2E checks never *execute* on pull-request, merge-queue, or
+`main`-push events: their jobs report success in seconds and run the full
+distributed E2E only on full-profile (`workflow_dispatch`) runs, which the
+release gate requires on the release SHA. A green PR or push therefore does
+not prove workers E2E behavior — for changes touching the `lash-restate`
+geometry, run the local recipes above before relying on CI; the full-profile
+run before the next release is the execution witness.
 
 That set is enforced by the active `main merge queue` ruleset on the default
 branch: a merge-queue rule (ALLGREEN grouping, squash merges, up to five
@@ -174,9 +175,10 @@ merged product state lives on `main`.
 
 Merging to `main` does not release. A maintainer manually runs the GitHub
 `Release` workflow after selecting a green commit on `main`; leaving
-`release_sha` blank selects the current head. The workflow verifies main-branch
-CI, requires curated release notes, computes the next version, tags the exact
-commit, builds assets, and publishes.
+`release_sha` blank selects the current head. The workflow verifies a green
+full-profile CI run on that commit (dispatch `ci.yml` on it first), requires
+curated release notes, computes the next version, tags the exact commit,
+builds assets, and publishes.
 
 Never create release tags or publish crates and artifacts by hand. See
 `docs/PUBLISHING.md` for the complete release contract.

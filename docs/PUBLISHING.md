@@ -39,7 +39,12 @@ time (`scripts/release_version.py stamp`, `scripts/publish_workspace.py
    `Release` workflow. `release_sha` may name any commit on `main`; leaving it
    blank selects the current `main` head.
 3. The workflow proves that the selected commit is on `main` and has a
-   successful main CI run, then requires curated notes for the unreleased range.
+   successful full-profile CI run (a `workflow_dispatch` run of `ci.yml` on
+   that exact SHA — push runs execute the lean profile, which skips the
+   workers E2E suites and the Postgres catalog bracket, so they do not
+   certify a release), then requires curated notes for the unreleased range.
+   Dispatch CI on the candidate commit and wait for green before dispatching
+   `Release`.
    `scripts/release_version.py print-next` computes the next version from
    `[workspace.metadata.release].channel` and the existing `v*` tags.
 4. `release.yml` validates `cargo metadata --locked` and runs both full,
