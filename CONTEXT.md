@@ -99,6 +99,8 @@
 - **Deferred Tool Resolver**: RLM-only, host-provided resolution of a Lashlang call-path absent from the link-time Lashlang Host Environment into a Tool Grant, or a report that none is available. It resolves on demand only; it does not enumerate, advertise, or rank tools — discovery and prompt previews are separate host concerns. Avoid: Deferred Tool Source.
 - **Host Resource**: Family of host-provided Lashlang capabilities that expose typed operations to authored Lashlang code.
 - **Resource Operation**: Effectful Lashlang call against a Host Resource.
+- **Lashlang Execution Site**: Stable source-level identity for one effectful Lashlang node, derived from its content-addressed module, main-or-process entry, AST path, and node kind. The VM counts dynamic visits independently per site.
+- **Lashlang Call Site**: One Lashlang Execution Site plus its occurrence number. RLM resource operations use it to derive stable call and replay identity; it is not the identity rule for every effect family.
 - **Host Descriptor**: Pure, typed Lashlang value describing host-owned configuration or identity for later host interpretation. Avoid: Host Value, Opaque Host Descriptor.
 - **Trigger Source Descriptor**: Host Descriptor for a Trigger Source policy or configuration.
 - **Host Requirements**: Content-addressed description of the Lashlang Host Environment capabilities a linked Lashlang artifact requires. Avoid: Surface Requirements, Required Surface.
@@ -108,6 +110,7 @@
 - **Process Signal**: Named, typed message delivered to one specific Runtime Process. A process declares its signals and senders are validated against the declaration. Distinct from a Trigger Occurrence, which is a broadcast world occurrence routed by subscriptions.
 - **Durable Wait**: Scope-agnostic, one-shot durable promise that an execution scope — a turn or a Runtime Process — parks on and resumes by key. It is the single suspension primitive: a Process Signal wait and a foreground-turn detached tool completion are both Durable Waits. The Process Event log observes a process's waits but is not how they resolve. Avoid: AwaitEvent (wire encoding), Tool Callback.
 - **Runtime Control**: Control-flow or durable effect machinery that changes execution trajectory or routes replayable effects. Avoid using Control for ordinary facade handles or tool-context clients.
+- **Effect Group**: Host-owned durable set of independently settling runtime effects with one group key, journaled child membership, and replay-stable settlement ranks. A controller either supports the complete group surface or refuses it coherently; it never substitutes serial execution.
 - **Replay Key**: Stable identity for one logical runtime operation when execution is re-driven. Re-executing the same operation with the same Replay Key is replay, not a new operation.
 - **Idempotency Key**: Stable identity for one submitted request, occurrence, or pending-input revision at an ingress boundary. Re-submitting matching content with the same Idempotency Key collapses to the prior accepted request or occurrence; reusing it for changed submitted content is a conflict. Pending Turn Input calls this key `source_key`. Product edits create new Idempotency Keys.
 

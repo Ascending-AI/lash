@@ -282,6 +282,54 @@ core.triggers()
     .await?;</code></pre>
         </div>
 
+        <div class="section" id="replay-identity">
+          <div class="section-header">
+            <h2>Replay Identity</h2>
+            <p>RLM resource operations use the Lashlang execution site plus its dynamic occurrence, not source order alone, as the stable call identity that reaches tool-effect replay.</p>
+          </div>
+          <dl class="def-list">
+            <dt>Execution site</dt>
+            <dd>The compiler assigns each effectful node a stable <code>node_id</code> derived from the content-addressed module ref, the main-or-process execution entry, the AST path, and the node kind. The VM counts visits independently per <code>node_id</code>, starting at one, and persists those occurrence counters in <code>VmContinuation</code>, so a loop or resumed process reaches the same logical occurrence after replay.</dd>
+            <dt>Resource call id</dt>
+            <dd>A foreground resource call is keyed as <code>lashlang:{scope}:resource:{host_operation}:{node_id}:{occurrence}</code>; a durable-process call substitutes its <code>process_id</code> for the foreground scope. A batched resource-operation child appends <code>:child:{source_index}</code>, preserving distinct identity for repeated operations inside one aggregate.</dd>
+            <dt>Effect replay key</dt>
+            <dd>Tool dispatch carries that resource call id into each attempt. Under a parent runtime invocation the attempt replay key appends <code>{call_id}:attempt:{attempt}</code> to the parent's replay key; without a parent it is <code>tool:{call_id}:attempt:{attempt}</code>. Re-driving the same site occurrence therefore replays the same attempt, while the next occurrence is a new logical operation.</dd>
+          </dl>
+          <aside class="gotcha">
+            <strong>Identity is effect-family specific</strong>
+            <p>Call-site occurrence is the resource-operation rule, not a universal counter for every Lashlang effect. Foreground and process sleeps use a scoped sequence; process signal waits use a per-signal ordinal. Each family derives a stable Replay Key from the information its host path actually carries.</p>
+          </aside>
+        </div>
+
+        <div class="section" id="deliberate-refusals">
+          <div class="section-header">
+            <h2>Deliberate Refusals</h2>
+            <p>RLM fails closed where the current runtime cannot preserve exact language or replay semantics. These are unsupported rulings, not suggestions that the host may approximate.</p>
+          </div>
+          <div class="listing">
+            <div class="listing__row">
+              <div class="listing__label">deployment mutation</div>
+              <div class="listing__body"><p>A replaying deployment's code is immutable. Lash does not support in-place code mutation, Temporal-style version markers, or tolerance of a changed effect envelope; hosts pin and drain an old deployment or explicitly fork parked invocations. See <a href="../adr/0043-hosts-register-immutable-deployments.md">ADR 0043</a>.</p></div>
+            </div>
+            <div class="listing__row">
+              <div class="listing__label">typescript approximation</div>
+              <div class="listing__body"><p>The TypeScript dialect is an exact ECMA-262 subset. Syntax and standard-library behavior outside its executable inventory reject with stable <code>TS_*</code> diagnostics instead of running with a near-match; general async functions, mutable lexical captures, and mutually recursive declarations are among the named refusals. See <a href="../adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md">ADR 0062</a>.</p></div>
+            </div>
+            <div class="listing__row">
+              <div class="listing__label">durable value boundary</div>
+              <div class="listing__body"><p>Function values and JavaScript exotic objects cannot cross the Lashlang host boundary, except for the dialect's detached <code>Error</code> shape. Cyclic heap objects may exist during a cell but are refused when a host boundary or durable snapshot must encode them as a value tree. See <a href="../adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md#deviation-register">ADR 0062's deviation register</a>.</p></div>
+            </div>
+            <div class="listing__row">
+              <div class="listing__label">callback effects</div>
+              <div class="listing__body"><p>Built-in callbacks are synchronous VM callbacks and cannot suspend or perform effects; attempting one fails as <code>EffectInBuiltinCallback</code>. Keep host operations at cell top level or in a process body and pass their values into pure callbacks. See <a href="../adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md#deviation-register">ADR 0062</a>.</p></div>
+            </div>
+            <div class="listing__row">
+              <div class="listing__label">promise aggregates</div>
+              <div class="listing__body"><p>The current TypeScript RLM surface accepts <code>Promise.all</code> and <code>Promise.allSettled</code> only over array literals of top-level tool promises and resolved values. Nested aggregates, non-array iterables, process promises, and timer promises reject by name; <code>Promise.race</code> and <code>Promise.any</code> remain rejected in the current executable census. <a href="../adr/0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md">ADR 0065</a> defines the durable effect-group seam required for concurrent settlement: an unwired controller refuses the entire group surface with <code>EffectGroupUnsupported</code> rather than silently serializing it.</p></div>
+            </div>
+          </div>
+        </div>
+
         <div class="section" id="terminator-effects">
           <div class="section-header">
             <h2>Terminator Effects</h2>
