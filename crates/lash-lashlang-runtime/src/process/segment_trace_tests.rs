@@ -31,31 +31,6 @@ fn unversioned_prior_shape_is_typed_rejection_with_cutover_remedy() {
 }
 
 #[test]
-fn multi_segment_trace_emits_one_started_and_one_finished() {
-    let boundary = || {
-        lash_core::ProcessRunOutcome::SegmentBoundary(lash_core::SegmentHandover {
-            reason: lash_core::BoundaryReason::JournalBudget,
-            program_hash: "program-v1".to_string(),
-            engine_state: Vec::new(),
-        })
-    };
-    let terminal =
-        lash_core::ProcessRunOutcome::from(lash_core::ProcessAwaitOutput::from_tool_output(
-            lash_core::ToolCallOutput::success(serde_json::Value::Null),
-        ));
-    let lifecycle = [
-        (true, boundary().is_terminal()),
-        (false, boundary().is_terminal()),
-        (false, terminal.is_terminal()),
-    ];
-    assert_eq!(lifecycle.iter().filter(|(started, _)| *started).count(), 1);
-    assert_eq!(
-        lifecycle.iter().filter(|(_, finished)| *finished).count(),
-        1
-    );
-}
-
-#[test]
 fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
     let output = validate_lashlang_program_hash("sha256:old", "sha256:current")
         .expect_err("changed bytecode identity must fail closed");

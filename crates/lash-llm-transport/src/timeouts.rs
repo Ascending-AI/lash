@@ -59,24 +59,6 @@ mod tests {
         assert_eq!(timeout, Some(Duration::from_secs(300)));
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn run_with_timeout_returns_timeout_error() {
-        let result = run_with_timeout(
-            async {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                Ok::<_, LlmTransportError>(())
-            },
-            Some(Duration::from_millis(5)),
-            "request timed out",
-        )
-        .await;
-
-        let err = result.expect_err("expected timeout");
-        assert_eq!(err.message, "request timed out");
-        assert_eq!(err.code.as_deref(), Some("timeout"));
-        assert!(err.retryable);
-    }
-
     #[tokio::test]
     async fn run_with_timeout_allows_successful_completion() {
         let result = run_with_timeout(

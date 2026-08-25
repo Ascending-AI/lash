@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(text, r#"{"error":"rate limit"}"#);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn run_with_timeout_returns_timeout_error() {
         let result = run_with_timeout(
             async {
