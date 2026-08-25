@@ -106,7 +106,6 @@ impl Session {
         let request = ExecRequest {
             language: self.dialect.language_id().to_string(),
             code: code.to_string(),
-            accept_finish: true,
         };
         let dialect = self.dialect;
         let state = &mut self.state;

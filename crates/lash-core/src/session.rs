@@ -120,7 +120,6 @@ pub enum SessionError {
 pub struct ExecRequest {
     pub language: String,
     pub code: String,
-    pub accept_finish: bool,
 }
 
 pub struct Session {

@@ -68026,15 +68026,6 @@ disposition = "unused-justify"
 reason = "FIG-2092 integrator signature closure: this item is facade-nameable so a custom store, effect host, protocol, or process engine can implement the supported contract using lash-runtime alone."
 
 [[api]]
-symbol = "lash::plugins::ExecRequest::accept_finish"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::ExecRequest::accept_finish"]
-area = "sessions-turns"
-disposition = "unused-justify"
-reason = "FIG-2092 integrator signature closure: this item is facade-nameable so a custom store, effect host, protocol, or process engine can implement the supported contract using lash-runtime alone."
-
-[[api]]
 symbol = "lash::plugins::ExecRequest::code"
 kind = "field"
 availability = "default+all-features"
@@ -68092,7 +68083,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::degraded_bindings"]
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:584#degraded_bindings,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:583#degraded_bindings,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::duration_ms"
