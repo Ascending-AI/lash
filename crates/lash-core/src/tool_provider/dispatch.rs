@@ -8,11 +8,23 @@ pub struct ToolDispatchClient<'run> {
 }
 
 impl<'run> ToolDispatchClient<'run> {
+    /// Resolve the callable manifest for a tool name in the current runtime.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors inspect this manifest before composing nested tool
+    /// dispatch without reaching into the runtime registry.
     pub fn callable_tool_manifest(&self, name: &str) -> Option<ToolManifest> {
         let dispatch = self.context.runtime_dispatch.as_ref()?;
         crate::tool_dispatch::resolve_callable_manifest(dispatch, name)
     }
 
+    /// Dispatch a batch of nested tool invocations through the current runtime.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors use this capability to compose tools while retaining
+    /// runtime ownership of dispatch, attribution, and reply ordering.
     pub async fn batch(&self, calls: Vec<ToolInvocation>) -> Vec<ToolInvocationReply> {
         let Some(runtime) = self.context.runtime_execution_context.clone() else {
             return calls

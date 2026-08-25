@@ -132,9 +132,13 @@ mod tests {
         execution_write_authority: lash_core::ProcessExecutionWriteAuthority,
         cancel: CancellationToken,
     ) -> lash_core::ToolContext<'static> {
-        lash_core::testing::mock_tool_context()
-            .with_async_process(process_id, cancel)
-            .with_process_events_for_testing(process_id, registry, execution_write_authority)
+        let context = lash_core::testing::mock_tool_context().with_async_process(process_id, cancel);
+        lash_core::ToolContext::with_process_events_for_testing(
+            context,
+            process_id,
+            registry,
+            execution_write_authority,
+        )
     }
 
     #[derive(Clone, Default)]

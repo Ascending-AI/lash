@@ -58,7 +58,6 @@ use std::sync::Arc;
 use lash_core::llm::types::{AttachmentSource, LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::{
     facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalPayload,
-    facade_support::head_tail_truncate,
 };
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
 use lashlang::{Value as FlowValue, ValueProjectionContext};
@@ -523,7 +522,8 @@ fn message_text(
     attachments: &[RlmAttachmentRef],
     max_output_chars: usize,
 ) -> String {
-    let (preview, raw_len) = head_tail_truncate(content, max_output_chars);
+    let (preview, raw_len) =
+        lash_core::facade_support::head_tail_truncate(content, max_output_chars);
     let mut out = preview.to_string();
     if raw_len > max_output_chars {
         let _ = write!(

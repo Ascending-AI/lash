@@ -28,7 +28,7 @@ pub use process::{
     ExternalLaunchAudit, InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
 };
 pub use process_events::ToolProcessEventClient;
-pub use session::ToolSessionAdmin;
+pub use session::{ToolSessionAdmin, ToolSessionModel};
 pub use triggers::ToolTriggerClient;
 
 /// Integrator class 3 session reads available inside a recorded leaf attempt.

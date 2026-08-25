@@ -9,6 +9,12 @@ pub struct ToolDirectCompletionClient<'run> {
 }
 
 impl ToolDirectCompletionClient<'_> {
+    /// Run a direct completion attributed to the current tool invocation.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors use this capability for provider calls that must
+    /// retain the session and causal attribution supplied by the runtime.
     pub async fn complete(
         &self,
         mut request: crate::DirectRequest,

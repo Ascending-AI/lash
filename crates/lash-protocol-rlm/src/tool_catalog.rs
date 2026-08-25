@@ -15,6 +15,7 @@ pub(crate) fn rlm_tool_catalog(
     ctx: ToolCatalogContext,
     dialects: &RlmDialectRegistry,
 ) -> Result<ToolCatalogContribution, PluginError> {
+    let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
     validate_rlm_language_bindings(&ctx)?;
     validate_dialect_neutral_tool_prose(&ctx, dialects)?;
     Ok(ToolCatalogContribution::default())

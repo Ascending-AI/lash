@@ -445,8 +445,11 @@ mod tests {
                 ))
             }),
             Some(tool_call_id.to_string()),
-        )
-        .with_agent_frame_id_for_testing("frame-node/v2/test-lineage");
+        );
+        let context = lash_core::ToolContext::with_agent_frame_id_for_testing(
+            context,
+            "frame-node/v2/test-lineage",
+        );
         let context = lash_core::testing::mock_attempt_context_from(&context);
         provider
             .execute(lash_core::ToolCall {
