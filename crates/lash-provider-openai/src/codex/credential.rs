@@ -80,8 +80,47 @@ pub(super) fn credential_transport_error(error: CredentialError) -> LlmTransport
         CredentialErrorKind::Transient => "credential_refresh_transient",
         CredentialErrorKind::Other => "credential_refresh_failed",
     };
+    let retry_verdict = if error.retryable {
+        TransportRetryVerdict::RetryableTransient
+    } else {
+        TransportRetryVerdict::Forbidden
+    };
+    let failure_kind = if error.retryable {
+        ProviderFailureKind::Transport
+    } else {
+        ProviderFailureKind::Auth
+    };
     LlmTransportError::new(error.to_string())
-        .with_kind(ProviderFailureKind::Auth)
+        .with_kind(failure_kind)
         .with_code(code)
-        .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        .with_retry_verdict(retry_verdict)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codex::failure::CodexFailureClassifier;
+    use lash_core::provider::ProviderFailureClassifier;
+
+    #[test]
+    fn credential_failures_preserve_transient_and_permission_retry_verdicts() {
+        let transient = CodexFailureClassifier
+            .classify(credential_transport_error(CredentialError::transient()));
+        assert_eq!(transient.kind, ProviderFailureKind::Transport);
+        assert_eq!(
+            transient.code.as_deref(),
+            Some("credential_refresh_transient")
+        );
+        assert_eq!(
+            transient.retry_verdict,
+            TransportRetryVerdict::RetryableTransient
+        );
+
+        let permission = CodexFailureClassifier
+            .classify(credential_transport_error(CredentialError::invalid_grant()));
+        assert_eq!(permission.kind, ProviderFailureKind::Auth);
+        assert_eq!(permission.code.as_deref(), Some("credential_invalid_grant"));
+        assert_eq!(permission.retry_verdict, TransportRetryVerdict::Forbidden);
+        assert!(permission.message.contains("sign in again"));
+    }
 }

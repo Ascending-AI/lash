@@ -2088,6 +2088,8 @@ fn default_failure_classifier_preserves_explicit_non_retryability() {
 
 #[test]
 fn default_failure_classifier_makes_structured_validation_forbidden_without_scraping_echo() {
+    // Deliberately, the more-specific provider-kind semantics take precedence
+    // over an explicitly classified but conflicting transport verdict.
     let failure = DefaultProviderFailureClassifier.classify(
         ProviderFailure::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)

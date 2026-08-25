@@ -144,7 +144,9 @@ impl HttpTransportError {
                 .map(|(name, value)| (name.into(), value.into()))
                 .collect(),
         );
-        if let TransportRetryVerdict::RetryableThrottle { retry_after } = &mut self.retry_verdict {
+        if let TransportRetryVerdict::RetryableThrottle { retry_after } = &mut self.retry_verdict
+            && retry_after.is_none()
+        {
             *retry_after = retry_after_from_headers(&self.headers);
         }
         self
@@ -172,7 +174,7 @@ fn retry_verdict_for_status(
 ) -> TransportRetryVerdict {
     match status {
         429 => TransportRetryVerdict::RetryableThrottle { retry_after },
-        408 | 500..=599 => TransportRetryVerdict::RetryableTransient,
+        408 | 409 | 425 | 500 | 502 | 503 | 504 => TransportRetryVerdict::RetryableTransient,
         400 | 401 | 403 | 422 => TransportRetryVerdict::Forbidden,
         _ => TransportRetryVerdict::NotRetryable,
     }
@@ -197,8 +199,55 @@ pub fn retry_after_from_headers(headers: &[(String, String)]) -> Option<std::tim
 
 #[cfg(test)]
 mod tests {
-    use super::retry_after_from_headers;
+    use super::{
+        HttpTransportError, TransportRetryVerdict, retry_after_from_headers,
+        retry_verdict_for_status,
+    };
     use std::time::Duration;
+
+    #[test]
+    fn status_retry_verdicts_match_the_legacy_classifier_table() {
+        let cases = [
+            (408, TransportRetryVerdict::RetryableTransient),
+            (409, TransportRetryVerdict::RetryableTransient),
+            (425, TransportRetryVerdict::RetryableTransient),
+            (
+                429,
+                TransportRetryVerdict::RetryableThrottle { retry_after: None },
+            ),
+            (500, TransportRetryVerdict::RetryableTransient),
+            (501, TransportRetryVerdict::NotRetryable),
+            (502, TransportRetryVerdict::RetryableTransient),
+            (503, TransportRetryVerdict::RetryableTransient),
+            (504, TransportRetryVerdict::RetryableTransient),
+            (505, TransportRetryVerdict::NotRetryable),
+            (511, TransportRetryVerdict::NotRetryable),
+            (400, TransportRetryVerdict::Forbidden),
+            (401, TransportRetryVerdict::Forbidden),
+            (403, TransportRetryVerdict::Forbidden),
+            (422, TransportRetryVerdict::Forbidden),
+            (418, TransportRetryVerdict::NotRetryable),
+        ];
+
+        for (status, expected) in cases {
+            assert_eq!(
+                retry_verdict_for_status(status, None),
+                expected,
+                "unexpected retry verdict for HTTP {status}"
+            );
+        }
+    }
+
+    #[test]
+    fn header_enrichment_preserves_adapter_supplied_retry_after() {
+        let error = HttpTransportError::new("throttled")
+            .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
+                retry_after: Some(Duration::from_secs(7)),
+            })
+            .with_headers([("x-request-id", "request-1")]);
+
+        assert_eq!(error.retry_after(), Some(Duration::from_secs(7)));
+    }
 
     #[test]
     fn retry_after_accepts_http_dates_and_clamps_past_dates_to_zero() {
