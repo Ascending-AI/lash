@@ -61,7 +61,26 @@ def _is_global_invalidator(path: str) -> bool:
 def _is_docs_path(path: str) -> bool:
     name = PurePosixPath(path).name.lower()
     return (
-        path.startswith("docs/")
+        (
+            path.startswith("docs/")
+            and PurePosixPath(path).suffix.lower()
+            in {
+                ".css",
+                ".html",
+                ".ico",
+                ".js",
+                ".json",
+                ".md",
+                ".pagefind",
+                ".pf_fragment",
+                ".pf_index",
+                ".pf_meta",
+                ".png",
+                ".rst",
+                ".svg",
+                ".txt",
+            }
+        )
         or (path.startswith("runbooks/") and PurePosixPath(path).suffix.lower() in {".md", ".rst", ".txt"})
         or (name.startswith("readme") and PurePosixPath(name).suffix in {"", ".md", ".rst", ".txt"})
         or name in {"contributing.md", "context.md", "security.md", "license", "license.md"}
