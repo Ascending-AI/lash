@@ -13,8 +13,8 @@ use std::time::Duration;
 use super::trace_capture::{EventCapture, capturing};
 use crate::facade_support::ToolStateFacadeOps;
 use crate::runtime::session_execution_lease::{
-    SessionExecutionLeaseCommitEvidence, SessionExecutionLeaseGuard,
-    commit_runtime_state_with_fresh_session_execution_lease, trace_commit_cas_rejected,
+    SessionExecutionLeaseGuard, commit_runtime_state_with_fresh_session_execution_lease,
+    trace_commit_cas_rejected,
 };
 use crate::store::{RuntimeCommit, StoreError};
 use crate::{LeaseOwnerIdentity, LeaseTimings, SystemClock};
@@ -787,15 +787,4 @@ async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions()
         "this writer held the lane, so the generation is its own"
     );
     assert!(!rejected.field("fencing_token").is_empty());
-}
-
-#[test]
-fn probe_runtime_size() {
-    eprintln!(
-        "LashRuntime={} Guard={} Evidence={} Acquisition={}",
-        std::mem::size_of::<crate::runtime::LashRuntime>(),
-        std::mem::size_of::<SessionExecutionLeaseGuard>(),
-        std::mem::size_of::<SessionExecutionLeaseCommitEvidence>(),
-        std::mem::size_of::<crate::store::SessionExecutionLeaseAcquisition>(),
-    );
 }
