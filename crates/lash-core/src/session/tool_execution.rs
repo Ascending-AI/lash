@@ -434,6 +434,10 @@ pub struct ToolBatchReplies {
     pub settlement_order: Vec<usize>,
 }
 
+pub(crate) fn tool_activity_id(call_id: &str) -> TurnActivityId {
+    TurnActivityId::new(format!("tool:{call_id}"))
+}
+
 impl ToolBatchReplies {
     /// Replies whose invocations settled in the order they were issued.
     pub fn settled_in_input_order(replies: Vec<ToolInvocationReply>) -> Self {
@@ -549,12 +553,11 @@ impl RuntimeExecutionContext<'_> {
 
     pub(crate) async fn complete_tool_call(
         &self,
-        _index: usize,
         call_id: String,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
-        tool_correlation_id: TurnActivityId,
     ) -> CompletedProtocolToolCall {
+        let tool_correlation_id = tool_activity_id(&call_id);
         self.dispatch
             .recorded_intent_outcomes
             .record(&outcome.intent_outcomes);
@@ -823,10 +826,10 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         tool_id: crate::ToolId,
         args: serde_json::Value,
-        index: usize,
+        _index: usize,
     ) -> ToolInvocationReply {
         let executed = self
-            .execute_tool_call_by_id(call_id, tool_id, args, index, None, None, None)
+            .execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, None)
             .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
@@ -857,31 +860,26 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         tool_id: crate::ToolId,
         args: serde_json::Value,
-        index: usize,
+        _index: usize,
         trace_hook: crate::ToolChildExecutionTraceHook,
     ) -> ToolInvocationReply {
         let executed = self
-            .execute_tool_call_by_id(call_id, tool_id, args, index, None, None, Some(trace_hook))
+            .execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, Some(trace_hook))
             .await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "tool execution carries explicit runtime call metadata"
-    )]
     async fn execute_tool_call(
         &self,
         call_id: String,
         authorization: ToolCallAuthorization,
         args: serde_json::Value,
-        index: usize,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         parent_invocation: Option<crate::RuntimeInvocation>,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     ) -> CompletedProtocolToolCall {
-        let tool_correlation_id = TurnActivityId::new(format!("tool:{call_id}"));
+        let tool_correlation_id = tool_activity_id(&call_id);
         let Some(name) = authorization.tool_name(self.dispatch.as_ref()) else {
             let tool_id = authorization.tool_id();
             let outcome = ToolDispatchOutcome {
@@ -900,9 +898,7 @@ impl RuntimeExecutionContext<'_> {
                 intents: crate::ToolIntents::default(),
                 intent_outcomes: Vec::new(),
             };
-            return self
-                .complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
-                .await;
+            return self.complete_tool_call(call_id, replay, outcome).await;
         };
         self.emit_tool_call_started(&call_id, &name, args.clone(), tool_correlation_id.clone())
             .await;
@@ -1001,8 +997,7 @@ impl RuntimeExecutionContext<'_> {
         };
         outcome.record.call_id = Some(call_id.clone());
 
-        self.complete_tool_call(index, call_id, replay, outcome, tool_correlation_id)
-            .await
+        self.complete_tool_call(call_id, replay, outcome).await
     }
 
     #[expect(
@@ -1014,7 +1009,7 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         tool_id: crate::ToolId,
         args: serde_json::Value,
-        index: usize,
+        _index: usize,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         parent_invocation: Option<crate::RuntimeInvocation>,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
@@ -1023,7 +1018,6 @@ impl RuntimeExecutionContext<'_> {
             call_id,
             ToolCallAuthorization::Catalog(tool_id),
             args,
-            index,
             replay,
             parent_invocation,
             child_execution_trace_hook,
@@ -1038,14 +1032,13 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         grant: crate::ToolExecutionGrant,
         args: serde_json::Value,
-        index: usize,
+        _index: usize,
     ) -> ToolInvocationReply {
         let executed = self
             .execute_tool_call(
                 call_id,
                 ToolCallAuthorization::Granted(Box::new(grant)),
                 args,
-                index,
                 None,
                 None,
                 None,
@@ -1062,7 +1055,7 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         grant: crate::ToolExecutionGrant,
         args: serde_json::Value,
-        index: usize,
+        _index: usize,
         trace_hook: crate::ToolChildExecutionTraceHook,
     ) -> ToolInvocationReply {
         let executed = self
@@ -1070,7 +1063,6 @@ impl RuntimeExecutionContext<'_> {
                 call_id,
                 ToolCallAuthorization::Granted(Box::new(grant)),
                 args,
-                index,
                 None,
                 None,
                 Some(trace_hook),

@@ -16,6 +16,7 @@ mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
 pub(crate) use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
+pub(crate) use tool_execution::tool_activity_id;
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{ToolBatchReplies, ToolInvocation, ToolInvocationReply};
 

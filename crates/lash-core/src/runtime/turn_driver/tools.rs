@@ -48,13 +48,7 @@ impl RuntimeTurnDriver<'_> {
                 }
                 crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
                     let completed = prepare_context
-                        .complete_tool_call(
-                            index,
-                            call_id.clone(),
-                            replay,
-                            *outcome,
-                            crate::TurnActivityId::new(format!("tool:{call_id}")),
-                        )
+                        .complete_tool_call(call_id.clone(), replay, *outcome)
                         .await
                         .completed;
                     results[index] = Some(completed);
@@ -129,18 +123,12 @@ impl RuntimeTurnDriver<'_> {
                             )
                             .await;
                         let completed = prepare_context
-                            .complete_tool_call(
-                                source_index,
-                                call_id.clone(),
-                                replay,
-                                dispatch_outcome,
-                                crate::TurnActivityId::new(format!("tool:{call_id}")),
-                            )
+                            .complete_tool_call(call_id.clone(), replay, dispatch_outcome)
                             .await
                             .completed;
                         send_turn_activity(
                             event_tx,
-                            crate::TurnActivityId::new(format!("tool:{call_id}")),
+                            crate::session::tool_activity_id(&call_id),
                             crate::TurnEvent::ToolCallCompleted {
                                 call_id: Some(call_id.clone()),
                                 name: completed.tool_name.clone(),
