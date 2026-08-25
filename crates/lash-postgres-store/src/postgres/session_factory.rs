@@ -456,7 +456,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: request.session_id.clone(),
                 config,
-                current_frame_node_id: Some(current_frame_node_id),
+                current_frame_node_id: Some(
+                    serde_json::from_value(serde_json::Value::String(current_frame_node_id))
+                        .expect("a persisted frame node id is a transparent string"),
+                ),
             },
             0,
             Some(checkpoint_ref.clone().into()),

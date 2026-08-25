@@ -385,11 +385,8 @@ impl LashRuntime {
                             crate::QueuedWorkPayload::AgentFrameTask {
                                 frame_id: target,
                                 ..
-                            } if target
-                                == &crate::session_graph::frame_node_id(
-                                    &self.state.session_id,
-                                    frame_key.as_str(),
-                                )
+                            } if Some(target.as_str())
+                                == self.state.current_frame_node_id.as_deref()
                         )
                     })
                 });
@@ -397,7 +394,7 @@ impl LashRuntime {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::StoreCommitFailed,
                         format!(
-                            "agent-frame handoff did not target frame key `{}`",
+                            "agent-frame handoff did not target frame node id derived from frame key `{}`",
                             frame_key.as_str()
                         ),
                     ));

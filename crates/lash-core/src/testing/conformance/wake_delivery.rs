@@ -288,7 +288,10 @@ pub async fn wake_delivery_crash_matrix(
             .register_process(
                 process_registry::registration(process_id)
                     .with_process_provenance(crate::ProcessProvenance::session(
-                        crate::SessionScope::for_agent_frame("originating-session", frame_id),
+                        crate::SessionScope::for_agent_frame(
+                            "originating-session",
+                            crate::session_graph::frame_node_id("originating-session", frame_id),
+                        ),
                     ))
                     .with_extra_event_types([process_registry::wake_event_type("producer.wake")])
                     .with_wake_session_id(Some(authority_target_session_id.to_string())),
@@ -312,13 +315,15 @@ pub async fn wake_delivery_crash_matrix(
     }
     assert_eq!(
         authority_wakes[0].authority,
-        crate::QueuedWorkAuthority::new("originating-session")
-            .with_elevation("elevated-agent-frame-a")
+        crate::QueuedWorkAuthority::new("originating-session").with_elevation(
+            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-a",)
+        )
     );
     assert_eq!(
         authority_wakes[1].authority,
-        crate::QueuedWorkAuthority::new("originating-session")
-            .with_elevation("elevated-agent-frame-b")
+        crate::QueuedWorkAuthority::new("originating-session").with_elevation(
+            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-b",)
+        )
     );
     let authority_report = crate::WakeDeliveryDriver::drive_pending_once_with_delivery_policy(
         Arc::clone(&registry),
@@ -338,8 +343,9 @@ pub async fn wake_delivery_crash_matrix(
     assert_eq!(authority_rows.len(), 2);
     assert_eq!(
         authority_rows[0].authority,
-        crate::QueuedWorkAuthority::new("originating-session")
-            .with_elevation("elevated-agent-frame-a")
+        crate::QueuedWorkAuthority::new("originating-session").with_elevation(
+            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-a",)
+        )
     );
     assert_eq!(
         authority_rows[0].delivery_policy,
@@ -387,7 +393,10 @@ pub async fn wake_delivery_crash_matrix(
     );
     assert_eq!(
         authority_claim.batches[0].authority.elevation.as_deref(),
-        Some("elevated-agent-frame-a")
+        Some(
+            crate::session_graph::frame_node_id("originating-session", "elevated-agent-frame-a",)
+                .as_str()
+        )
     );
     authority_target
         .release_session_execution_lease(&authority_lease.completion())

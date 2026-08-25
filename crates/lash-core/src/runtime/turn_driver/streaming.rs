@@ -319,6 +319,7 @@ impl RuntimeTurnDriver<'_> {
                     .state()
                     .current_frame_node_id
                     .clone()
+                    .map(crate::FrameNodeId::into_inner)
                     .unwrap_or_default(),
                 format!(
                     "{}:turn:{}:llm:{}",

@@ -15,7 +15,7 @@ pub(super) struct TurnGraphEditor {
     base_graph: Arc<SessionGraph>,
     active_events: Arc<Vec<SessionHistoryRecord>>,
     active_messages: MessageSequence,
-    current_frame_node_id: Option<String>,
+    current_frame_node_id: Option<crate::FrameNodeId>,
     append_builder: crate::session_graph::SessionGraphAppendBuilder,
     pre_turn_append_leaf: Option<String>,
     append_builder_minted_node_ids: HashSet<String>,
@@ -37,7 +37,7 @@ impl TurnGraphEditor {
     pub(super) fn new(
         base_graph: Arc<SessionGraph>,
         base_read_model: SessionReadModel,
-        current_frame_node_id: Option<String>,
+        current_frame_node_id: Option<crate::FrameNodeId>,
         draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
         persisted_node_ids: HashSet<String>,

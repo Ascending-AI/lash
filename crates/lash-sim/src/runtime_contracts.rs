@@ -375,12 +375,12 @@ pub fn runtime_agent_frame_invariant_facts(
     let active_frame_ids = snapshot
         .current_frame_node_id
         .iter()
-        .cloned()
+        .map(ToString::to_string)
         .collect::<Vec<_>>();
     let current_frame_exists = snapshot
         .current_frame_node_id
         .as_ref()
-        .is_some_and(|frame| frame_ids.contains(frame));
+        .is_some_and(|frame| frame_ids.contains(frame.as_str()));
     let canonical_frame_node_id = snapshot
         .session_graph
         .nearest_frame_node_id(snapshot.session_graph.leaf_node_id.as_deref());
@@ -412,13 +412,18 @@ pub fn runtime_agent_frame_invariant_facts(
         .into_iter()
         .collect::<Vec<_>>();
     let passed = active_frame_ids.len() == 1
-        && active_frame_ids.first() == snapshot.current_frame_node_id.as_ref()
+        && active_frame_ids.first().map(String::as_str)
+            == snapshot.current_frame_node_id.as_deref()
         && current_frame_exists
         && current_frame_active
         && nodes_without_agent_frame.is_empty()
         && node_agent_frame_ids_without_record.is_empty();
     RuntimeAgentFrameInvariantFacts {
-        current_frame_node_id: snapshot.current_frame_node_id.clone().unwrap_or_default(),
+        current_frame_node_id: snapshot
+            .current_frame_node_id
+            .clone()
+            .map(lash_core::FrameNodeId::into_inner)
+            .unwrap_or_default(),
         frame_count: frame_ids.len(),
         active_frame_ids,
         current_frame_exists,

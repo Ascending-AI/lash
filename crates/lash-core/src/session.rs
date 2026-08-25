@@ -385,7 +385,7 @@ impl Session {
     pub(crate) fn code_execution_context<'run>(
         &self,
         session_id: &str,
-        agent_frame_id: &str,
+        agent_frame_id: crate::FrameNodeId,
         sessions: Arc<dyn crate::plugin::SessionStateService>,
         session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
         session_graph: Arc<dyn crate::plugin::SessionGraphService>,
@@ -417,7 +417,7 @@ impl Session {
             parent_invocation: None,
             execution_env_spec: execution_env_spec.clone(),
             session_id: session_id.to_string(),
-            agent_frame_id: agent_frame_id.to_string(),
+            agent_frame_id,
             event_tx,
             checkpoint_messages,
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

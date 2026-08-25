@@ -248,7 +248,7 @@ async fn enqueue_config_settlement_blocker(
             session_id,
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
             vec![crate::QueuedWorkPayload::agent_frame_task(
-                "config-settlement-blocker",
+                crate::session_graph::frame_node_id(session_id, "config-settlement-blocker"),
                 "block the FIFO head",
                 None,
             )],

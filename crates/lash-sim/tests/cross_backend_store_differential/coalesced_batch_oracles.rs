@@ -190,7 +190,10 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                     &runner.session_id,
                     DeliveryPolicy::EarliestSafeBoundary,
                     vec![QueuedWorkPayload::agent_frame_task(
-                        "literal-oracle-frame",
+                        lash_core::facade_support::frame_node_id(
+                            &runner.session_id,
+                            "literal-oracle-frame",
+                        ),
                         row.id,
                         None,
                     )],
@@ -354,7 +357,10 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
                         &runner.session_id,
                         DeliveryPolicy::EarliestSafeBoundary,
                         vec![QueuedWorkPayload::agent_frame_task(
-                            "ready-gap-frame",
+                            lash_core::facade_support::frame_node_id(
+                                &runner.session_id,
+                                "ready-gap-frame",
+                            ),
                             source_key,
                             None,
                         )],

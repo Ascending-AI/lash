@@ -169,7 +169,7 @@ pub struct ToolDispatchContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub session_id: String,
-    pub agent_frame_id: crate::AgentFrameId,
+    pub agent_frame_id: crate::FrameNodeId,
     pub event_tx: mpsc::Sender<SessionStreamEvent>,
     pub(crate) checkpoint_messages: CheckpointMessageBuffer,
     pub(crate) trigger_outcomes: ToolTriggerOutcomeBuffer,

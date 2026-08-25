@@ -912,7 +912,11 @@ impl SessionGraphScenario {
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(operation.clone());
         commit.graph = malformed_graph_append(&state, &operation, shape % 4)?;
         if matches!(shape % 4, 0 | 3) {
-            commit.current_frame_node_id = commit.graph.leaf_node_id.clone();
+            commit.current_frame_node_id = commit
+                .graph
+                .leaf_node_id
+                .clone()
+                .map(crate::FrameNodeId::new);
         }
         let error = commit_runtime_state_for_property(&live.store, commit, "malformed")
             .await
@@ -1406,7 +1410,7 @@ fn malformed_graph_append(
     Ok(match shape {
         0 => {
             let frame_key = format!("malformed-duplicate-{}", state.head_revision);
-            let node_id = crate::frame_node_id(&state.session_id, &frame_key);
+            let node_id = crate::frame_node_id(&state.session_id, &frame_key).into_inner();
             let frame = |parent_node_id: Option<String>| crate::SessionNodeRecord {
                 node_id: node_id.clone(),
                 parent_node_id,
@@ -1436,7 +1440,7 @@ fn malformed_graph_append(
         },
         _ => {
             let frame_key = format!("malformed-cycle-{}", state.head_revision);
-            let node_id = crate::frame_node_id(&state.session_id, &frame_key);
+            let node_id = crate::frame_node_id(&state.session_id, &frame_key).into_inner();
             crate::GraphAppend {
                 nodes: vec![crate::SessionNodeRecord {
                     node_id: node_id.clone(),

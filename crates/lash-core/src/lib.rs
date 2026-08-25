@@ -985,12 +985,13 @@ pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
 pub use plugin::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord,
-    AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginError, PluginExtensions,
-    PluginOptions, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
-    PluginSnapshotMeta, ProcessEngineContributionContext, ProtocolBeforeLlmCallContext,
-    ProtocolLlmCallAction, SessionContextOverlay, SessionCreateRequest, SessionGraphService,
-    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
-    SessionStateService, SessionToolAccess, SubagentSessionContext,
+    AppendSessionNodesOutcome, AppendSessionNodesRequest, FrameNodeId, PluginError,
+    PluginExtensions, PluginOptions, PluginSessionSnapshot, PluginSnapshotArtifact,
+    PluginSnapshotEntry, PluginSnapshotMeta, ProcessEngineContributionContext,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionContextOverlay,
+    SessionCreateRequest, SessionGraphService, SessionPluginSource, SessionReadView,
+    SessionRelation, SessionSnapshot, SessionStartPoint, SessionStateService, SessionToolAccess,
+    SubagentSessionContext,
 };
 pub(crate) use plugin::{
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginRuntimeDirective, SessionTurnInput,

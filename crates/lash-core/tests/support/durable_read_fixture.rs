@@ -196,7 +196,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 SESSION_ID,
                 DeliveryPolicy::EarliestSafeBoundary,
                 vec![QueuedWorkPayload::agent_frame_task(
-                    "durable-read-frame",
+                    lash_core::facade_support::frame_node_id(SESSION_ID, "durable-read-frame"),
                     "durable read queued task",
                     None,
                 )],
@@ -717,7 +717,8 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         matches!(
             &queued[0].items[0].payload,
             QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-                if frame_id == "durable-read-frame" && task == "durable read queued task"
+                if frame_id.as_str() == "durable-read-frame"
+                    && task == "durable read queued task"
         ),
         "durable fixture semantic drift: queued-work payload changed"
     );

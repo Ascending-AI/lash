@@ -334,7 +334,10 @@ async fn session_store_factory_claimable_queued_work_peek(
             &fenced_request.session_id,
             crate::DeliveryPolicy::EarliestSafeBoundary,
             vec![crate::QueuedWorkPayload::agent_frame_task(
-                "claim-fence-frame",
+                crate::session_graph::frame_node_id(
+                    &fenced_request.session_id,
+                    "claim-fence-frame",
+                ),
                 "claim fence",
                 None,
             )],
@@ -1621,7 +1624,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     );
     let child = crate::SessionNodeRecord {
         node_id: "cross-session-child".to_string(),
-        parent_node_id: Some(foreign_parent.clone()),
+        parent_node_id: Some(foreign_parent.to_string()),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: crate::SessionNodePayload::Event {
             event: crate::SessionHistoryRecord::Protocol(

@@ -3000,6 +3000,9 @@ lash::plugins::ExecutionStateSnapshot::from_hydrated
 lash::plugins::ExecutionStateSnapshot::from_root
 lash::plugins::ExecutionStateSnapshot::root
 lash::plugins::ExecutionStateSnapshot::unchanged_component
+lash::plugins::FrameNodeId
+lash::plugins::FrameNodeId::as_str
+lash::plugins::FrameNodeId::into_inner
 lash::plugins::HostTurnProtocol
 lash::plugins::HydratedExecutionState
 lash::plugins::HydratedExecutionState::components
@@ -8605,6 +8608,7 @@ lash::testing::conformance::wake_delivery_ordering_group_conformance
 lash::testing::conformance::worklist_captured_boundary_defers_beyond_bound_insert
 lash::testing::conformance::worklist_excludes_rows_terminalized_before_a_later_page
 lash::testing::conformance::worklist_next_scan_recovers_insert_behind_cursor
+lash::testing::frame_node_id
 lash::testing::mock_attempt_context
 lash::testing::mock_tool_context
 lash::testing::test_code_protocol_factories

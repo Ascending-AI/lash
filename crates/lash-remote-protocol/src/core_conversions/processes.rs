@@ -1,3 +1,8 @@
+fn restore_frame_node_id(value: String) -> lash_core::FrameNodeId {
+    serde_json::from_value(serde_json::Value::String(value))
+        .expect("a serialized frame node id is a transparent string")
+}
+
 impl From<lash_core::SessionScope> for RemoteSessionScope {
     fn from(value: lash_core::SessionScope) -> Self {
         let lash_core::SessionScope {
@@ -6,7 +11,7 @@ impl From<lash_core::SessionScope> for RemoteSessionScope {
         } = value;
         Self {
             session_id,
-            agent_frame_id,
+            agent_frame_id: agent_frame_id.map(Into::into),
         }
     }
 }
@@ -19,7 +24,7 @@ impl From<RemoteSessionScope> for lash_core::SessionScope {
         } = value;
         Self {
             session_id,
-            agent_frame_id,
+            agent_frame_id: agent_frame_id.map(restore_frame_node_id),
         }
     }
 }
@@ -33,7 +38,7 @@ impl From<lash_core::ProcessOriginator> for RemoteProcessOriginator {
                 agent_frame_id,
             } => Self::Session {
                 session_id,
-                agent_frame_id,
+                agent_frame_id: agent_frame_id.map(Into::into),
             },
         }
     }
@@ -48,7 +53,7 @@ impl From<RemoteProcessOriginator> for lash_core::ProcessOriginator {
                 agent_frame_id,
             } => Self::Session {
                 session_id,
-                agent_frame_id,
+                agent_frame_id: agent_frame_id.map(restore_frame_node_id),
             },
         }
     }

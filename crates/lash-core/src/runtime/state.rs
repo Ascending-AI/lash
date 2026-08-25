@@ -590,7 +590,7 @@ pub struct RuntimeSessionState {
     #[serde(skip)]
     pub agent_frames: Vec<crate::AgentFrameRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_frame_node_id: Option<String>,
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
     #[serde(default)]
     pub session_graph: crate::SessionGraph,
     #[serde(default)]
@@ -967,7 +967,7 @@ impl RuntimeSessionState {
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
-            .map(str::to_string);
+            .map(crate::FrameNodeId::new);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
@@ -1008,7 +1008,7 @@ impl RuntimeSessionState {
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
         {
-            self.current_frame_node_id = Some(frame_node_id.to_string());
+            self.current_frame_node_id = Some(crate::FrameNodeId::new(frame_node_id));
             self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
             return;
         }
@@ -1021,7 +1021,7 @@ impl RuntimeSessionState {
         let frame_key = "initial-frame";
         let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, frame_key);
         self.session_graph.append_frame_open_with_id_at(
-            frame_node_id.clone(),
+            frame_node_id.to_string(),
             frame_key.to_string(),
             crate::AgentFrameReason::initial(),
             assignment,
@@ -1045,7 +1045,7 @@ impl RuntimeSessionState {
         let frame_key = "initial-frame";
         let frame_node_id = crate::session_graph::frame_node_id(&self.session_id, frame_key);
         self.session_graph.append_frame_open_with_id_at(
-            frame_node_id.clone(),
+            frame_node_id.to_string(),
             frame_key.to_string(),
             crate::AgentFrameReason::initial(),
             assignment,
@@ -1283,9 +1283,9 @@ pub(crate) fn apply_graph_commit_node_id_mapping(
         .session_graph
         .remap_node_ids(&state.session_id, mapping);
     if let Some(current) = state.current_frame_node_id.as_mut()
-        && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current)
+        && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
     {
-        *current = derived.clone();
+        *current = crate::FrameNodeId::new(derived.clone());
     }
     state.agent_frames = state
         .session_graph
@@ -1372,7 +1372,11 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     state.ensure_agent_frame_initialized_with_clock(clock);
     if request.frame_id.trim().is_empty() {
         return crate::OpenAgentFrameResult {
-            frame_node_id: state.current_frame_node_id.clone().unwrap_or_default(),
+            frame_node_id: state
+                .current_frame_node_id
+                .clone()
+                .map(crate::FrameNodeId::into_inner)
+                .unwrap_or_default(),
             opened: false,
             initial_node_ids: Vec::new(),
         };
@@ -1387,7 +1391,7 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     let protocol_turn_options = state.protocol_turn_options.clone();
     let frame_node_id = crate::session_graph::frame_node_id(&state.session_id, &request.frame_id);
     let opened = state.session_graph.append_frame_open_with_id_at(
-        frame_node_id.clone(),
+        frame_node_id.to_string(),
         request.frame_id.clone(),
         request.reason,
         assignment,
@@ -1397,14 +1401,14 @@ pub(super) fn open_agent_frame_in_state_with_clock(
     if !opened {
         if state.current_frame_node_id.as_deref() == Some(frame_node_id.as_str()) {
             return crate::OpenAgentFrameResult {
-                frame_node_id,
+                frame_node_id: frame_node_id.into_inner(),
                 opened: false,
                 initial_node_ids: Vec::new(),
             };
         }
         state
             .session_graph
-            .set_leaf_node_id(Some(frame_node_id.clone()));
+            .set_leaf_node_id(Some(frame_node_id.to_string()));
     }
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
@@ -1425,7 +1429,11 @@ pub(super) fn open_agent_frame_in_state_with_clock(
         clock,
     );
     crate::OpenAgentFrameResult {
-        frame_node_id: state.current_frame_node_id.clone().unwrap_or_default(),
+        frame_node_id: state
+            .current_frame_node_id
+            .clone()
+            .map(crate::FrameNodeId::into_inner)
+            .unwrap_or_default(),
         opened: true,
         initial_node_ids,
     }

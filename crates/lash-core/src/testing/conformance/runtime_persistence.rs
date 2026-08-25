@@ -844,7 +844,7 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             parent_node_facts: Some(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
-                frame_node_id: seed_frame_node_id.clone(),
+                frame_node_id: seed_frame_node_id.to_string(),
             }),
         })
         .expect("plan same-leaf commit");
@@ -886,7 +886,7 @@ async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
             parent_node_facts: Some(crate::store::ParentNodeFacts {
                 node_id: old_leaf.clone(),
                 generation: state.session_graph.active_path_nodes().len() as u64 - 1,
-                frame_node_id: seed_frame_node_id,
+                frame_node_id: seed_frame_node_id.into_inner(),
             }),
         })
         .expect("plan leaf-changing commit");
@@ -1779,7 +1779,7 @@ async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePersis
             "different-session",
             DeliveryPolicy::AfterCurrentTurnCommit,
             vec![QueuedWorkPayload::agent_frame_task(
-                "atomic-frame",
+                crate::session_graph::frame_node_id("different-session", "atomic-frame"),
                 "must roll back",
                 None,
             )],
@@ -2736,7 +2736,7 @@ fn queued_draft(
         session_id,
         delivery_policy,
         vec![QueuedWorkPayload::agent_frame_task(
-            format!("frame:{text}"),
+            crate::session_graph::frame_node_id(session_id, &format!("frame:{text}")),
             text,
             None,
         )],
@@ -2856,7 +2856,10 @@ pub(super) async fn commit_runtime_state_for_test(
 }
 
 fn sample_session_node(session_id: &str, id: &str, parent: Option<&str>) -> SessionNodeRecord {
-    let node_id = parent.map_or_else(|| crate::frame_node_id(session_id, id), |_| id.to_string());
+    let node_id = parent.map_or_else(
+        || crate::frame_node_id(session_id, id).into_inner(),
+        |_| id.to_string(),
+    );
     SessionNodeRecord {
         node_id,
         parent_node_id: parent.map(ToOwned::to_owned),
@@ -2913,7 +2916,7 @@ async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn Runt
     let custom_reason = AgentFrameReason::new("plan_mode");
     let second_frame_node_id = crate::session_graph::frame_node_id(&state.session_id, "frame-2");
     assert!(state.session_graph.append_frame_open_with_id_at(
-        second_frame_node_id.clone(),
+        second_frame_node_id.to_string(),
         "frame-2".to_string(),
         custom_reason.clone(),
         assignment,
@@ -2968,7 +2971,7 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
         let derived_node_id = node.node_id.clone();
         let commit = RuntimeCommit {
             expected_head_revision: 0,
-            current_frame_node_id: Some(derived_node_id.clone()),
+            current_frame_node_id: Some(crate::FrameNodeId::new(derived_node_id.clone())),
             graph: crate::GraphAppend {
                 nodes: vec![node],
                 leaf_node_id: Some(derived_node_id),
@@ -3030,8 +3033,8 @@ async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Runtim
     let left_node_id = crate::frame_node_id(session_id, "cas-left");
     let right_node_id = crate::frame_node_id(session_id, "cas-right");
     assert!(
-        persisted.graph.nodes[0].node_id == left_node_id
-            || persisted.graph.nodes[0].node_id == right_node_id,
+        persisted.graph.nodes[0].node_id == left_node_id.as_str()
+            || persisted.graph.nodes[0].node_id == right_node_id.as_str(),
         "the persisted graph must come from one of the two writers"
     );
     release_session_execution_lease_for_test(&store, &lease).await;
@@ -4513,7 +4516,7 @@ async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>
     .expect("branch fixture graph is valid");
     let state = RuntimeSessionState {
         session_id: "branchy".to_string(),
-        current_frame_node_id: Some(root_node_id.clone()),
+        current_frame_node_id: Some(crate::FrameNodeId::new(root_node_id.clone())),
         session_graph: graph,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
@@ -7427,7 +7430,7 @@ async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Runtim
             "root",
             DeliveryPolicy::AfterCurrentTurnCommit,
             vec![QueuedWorkPayload::agent_frame_task(
-                "follow-frame",
+                crate::session_graph::frame_node_id("root", "follow-frame"),
                 "follow-on task",
                 None,
             )],
@@ -9376,7 +9379,7 @@ async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersis
     let node_id = crate::session_graph::frame_node_id(&state.session_id, frame_key);
     let graph = crate::GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: node_id.clone(),
+            node_id: node_id.to_string(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
@@ -9388,7 +9391,7 @@ async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersis
                 protocol_turn_options: ProtocolTurnOptions::default(),
             },
         }],
-        leaf_node_id: Some(node_id.clone()),
+        leaf_node_id: Some(node_id.to_string()),
     };
     let (first, node_id_mapping) =
         RuntimeCommit::persisted_state_with_graph_commit(&state, graph, &[])
@@ -9396,7 +9399,7 @@ async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersis
             .expect("stamp guarded commit");
     assert_eq!(
         node_id_mapping,
-        vec![(node_id.clone(), node_id.clone())],
+        vec![(node_id.to_string(), node_id.to_string())],
         "operation stamping must return the append-id mapping"
     );
     commit_runtime_state_for_test(&store, first.clone(), "realization-guard")
@@ -9479,7 +9482,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
     let frame_key = "collision-frame";
     let colliding_id = crate::session_graph::frame_node_id(&state.session_id, frame_key);
     let original = crate::SessionNodeRecord {
-        node_id: colliding_id.clone(),
+        node_id: colliding_id.to_string(),
         parent_node_id: None,
         timestamp: "2026-07-26T10:00:00Z".to_string(),
         payload: crate::SessionNodePayload::FrameOpen {
@@ -9492,7 +9495,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         },
     };
     state.session_graph =
-        crate::SessionGraph::from_nodes(vec![original.clone()], Some(colliding_id.clone()))
+        crate::SessionGraph::from_nodes(vec![original.clone()], Some(colliding_id.to_string()))
             .expect("collision fixture seed graph is valid");
     let initial = RuntimeCommit::persisted_state_for_test(&state, &[]);
     let first = commit_runtime_state_for_test(&store, initial, "collision-seed")
@@ -9514,7 +9517,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
         &state,
         crate::GraphAppend {
             nodes: vec![replacement],
-            leaf_node_id: Some(colliding_id.clone()),
+            leaf_node_id: Some(colliding_id.to_string()),
         },
         &[],
     );
@@ -9525,7 +9528,7 @@ async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersist
     assert!(
         matches!(
             &err,
-            StoreError::NodeIdCollision { node_id } if node_id == &colliding_id
+            StoreError::NodeIdCollision { node_id } if node_id == colliding_id.as_str()
         ),
         "unexpected durable collision error: {err:?}"
     );
@@ -9551,7 +9554,7 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
                 sample_session_node("root", "duplicate", None),
                 sample_session_node("root", "duplicate", None),
             ],
-            leaf_node_id: Some(duplicate_node_id.clone()),
+            leaf_node_id: Some(duplicate_node_id.to_string()),
         },
         &[],
     );
@@ -9561,7 +9564,7 @@ async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersisten
     assert!(
         matches!(
             &err,
-            StoreError::NodeIdCollision { node_id } if node_id == &duplicate_node_id
+            StoreError::NodeIdCollision { node_id } if node_id == duplicate_node_id.as_str()
         ),
         "unexpected duplicate-id error: {err:?}"
     );
@@ -9662,7 +9665,7 @@ async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
         },
         &[],
     );
-    move_attempt.current_frame_node_id = old_leaf.clone();
+    move_attempt.current_frame_node_id = old_leaf.clone().map(crate::FrameNodeId::new);
     let error = store
         .commit_runtime_state(move_attempt)
         .await

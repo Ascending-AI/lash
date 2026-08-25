@@ -80,12 +80,23 @@ fn realistic_commit(
     logical_bytes: usize,
     sample: usize,
 ) -> RuntimeCommit {
+    let frame_node_id = lash_core::facade_support::frame_node_id(session_id, "benchmark-frame");
     let nodes = (0..row_shape.graph)
         .map(|index| {
-            let node_id = format!("{session_id}:node:{index}");
+            let node_id = if index == 0 {
+                frame_node_id.to_string()
+            } else {
+                format!("{session_id}:node:{index}")
+            };
             SessionNodeRecord {
                 node_id: node_id.clone(),
-                parent_node_id: (index > 0).then(|| format!("{session_id}:node:{}", index - 1)),
+                parent_node_id: (index > 0).then(|| {
+                    if index == 1 {
+                        frame_node_id.to_string()
+                    } else {
+                        format!("{session_id}:node:{}", index - 1)
+                    }
+                }),
                 timestamp: "2026-08-20T12:00:00Z".to_string(),
                 payload: if index == 0 {
                     SessionNodePayload::FrameOpen {
@@ -144,7 +155,7 @@ fn realistic_commit(
         &[],
         CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::Unbounded),
     );
-    commit.current_frame_node_id = Some(format!("{session_id}:node:0"));
+    commit.current_frame_node_id = Some(frame_node_id);
     commit.config = PersistedSessionConfig::from(&state.policy);
     commit.config.provider_id = "benchmark".to_string();
     commit.graph = GraphAppend {

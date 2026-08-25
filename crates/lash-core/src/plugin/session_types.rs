@@ -46,7 +46,7 @@ pub struct SessionSnapshot {
     #[serde(skip)]
     pub agent_frames: Vec<AgentFrameRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_frame_node_id: Option<String>,
+    pub current_frame_node_id: Option<FrameNodeId>,
     #[serde(default)]
     pub session_graph: crate::SessionGraph,
     #[serde(default)]
@@ -129,7 +129,7 @@ impl SessionSnapshot {
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
-            .map(str::to_string);
+            .map(FrameNodeId::new);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
@@ -140,7 +140,7 @@ impl SessionSnapshot {
         self.current_frame_node_id = self
             .session_graph
             .nearest_frame_node_id(self.session_graph.leaf_node_id.as_deref())
-            .map(str::to_string);
+            .map(FrameNodeId::new);
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 }
@@ -169,6 +169,83 @@ pub enum SessionPluginSource {
 }
 
 pub type AgentFrameId = String;
+
+/// Durable identity of a frame-open node in the session graph.
+///
+/// This is distinct from [`AgentFrameId`], which is the caller-provided key
+/// material used to derive this value. Its transparent representation preserves
+/// the existing serialized string bytes, including the empty no-frame sentinel.
+#[repr(transparent)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FrameNodeId(String);
+
+#[cfg(test)]
+impl Default for FrameNodeId {
+    fn default() -> Self {
+        Self::new(String::new())
+    }
+}
+
+impl FrameNodeId {
+    /// Wraps an already-derived durable frame-node identity inside core.
+    pub(crate) fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_raw_for_testing(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Borrows the durable frame-node identity as text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns the owned durable frame-node identity.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::ops::Deref for FrameNodeId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for FrameNodeId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::borrow::Borrow<str> for FrameNodeId {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Display for FrameNodeId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl From<FrameNodeId> for String {
+    fn from(value: FrameNodeId) -> Self {
+        value.into_inner()
+    }
+}
+
+impl From<&FrameNodeId> for String {
+    fn from(value: &FrameNodeId) -> Self {
+        value.to_string()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -259,6 +336,24 @@ mod agent_frame_reason_tests {
     }
 }
 
+#[cfg(test)]
+mod frame_node_id_tests {
+    use super::FrameNodeId;
+
+    #[test]
+    fn frame_node_id_round_trips_original_string_bytes_and_empty_sentinel() {
+        for encoded in [r#""frame-node/v2/derived""#, r#""""#] {
+            let frame_node_id: FrameNodeId =
+                serde_json::from_str(encoded).expect("deserialize frame node id");
+
+            assert_eq!(
+                serde_json::to_string(&frame_node_id).expect("serialize frame node id"),
+                encoded
+            );
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentFrameAssignment {
     pub policy: SessionPolicy,
@@ -293,10 +388,10 @@ impl AgentFrameAssignment {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentFrameRecord {
-    pub frame_node_id: String,
+    pub frame_node_id: FrameNodeId,
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_frame_node_id: Option<String>,
+    pub previous_frame_node_id: Option<FrameNodeId>,
     #[serde(default)]
     pub reason: AgentFrameReason,
     pub created_at: String,
@@ -308,16 +403,16 @@ pub struct AgentFrameRecord {
 impl AgentFrameRecord {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_at(
-        frame_node_id: impl Into<String>,
+        frame_node_id: FrameNodeId,
         session_id: impl Into<String>,
-        previous_frame_node_id: Option<String>,
+        previous_frame_node_id: Option<FrameNodeId>,
         reason: AgentFrameReason,
         assignment: AgentFrameAssignment,
         protocol_turn_options: ProtocolTurnOptions,
         created_at: impl Into<String>,
     ) -> Self {
         Self {
-            frame_node_id: frame_node_id.into(),
+            frame_node_id,
             session_id: session_id.into(),
             previous_frame_node_id,
             reason,

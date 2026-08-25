@@ -78,13 +78,15 @@ async fn enqueue(
             policy: session.policy_snapshot(),
         })
         .await?;
+    let frame_node_id =
+        lash::testing::frame_node_id(&session.session_id(), "docs-selected-drain-frame");
     let batch = store
         .enqueue_queued_work(
             lash::persistence::QueuedWorkBatchDraft::new(
                 session.session_id(),
                 lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
                 vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
-                    "docs-selected-drain-frame",
+                    frame_node_id,
                     source_key,
                     None,
                 )],

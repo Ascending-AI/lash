@@ -194,7 +194,7 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     let current = after
         .agent_frames
         .iter()
-        .find(|frame| Some(&frame.frame_node_id) == after.current_frame_node_id.as_ref())
+        .find(|frame| Some(frame.frame_node_id.as_str()) == after.current_frame_node_id.as_deref())
         .expect("current frame");
     assert_eq!(current.reason.as_str(), "compaction");
     assert_eq!(

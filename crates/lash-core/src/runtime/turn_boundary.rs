@@ -515,10 +515,11 @@ impl TurnBoundary {
                     .session_graph
                     .remap_node_ids(&session_id, &node_id_mapping);
                 if let Some(current) = finalized.state.current_frame_node_id.as_mut()
-                    && let Some((_, derived)) =
-                        node_id_mapping.iter().find(|(draft, _)| draft == current)
+                    && let Some((_, derived)) = node_id_mapping
+                        .iter()
+                        .find(|(draft, _)| draft == current.as_str())
                 {
-                    *current = derived.clone();
+                    *current = crate::FrameNodeId::new(derived.clone());
                 }
                 finalized.state.agent_frames = finalized
                     .state
@@ -771,7 +772,7 @@ mod tests {
             let mut nodes = state.session_graph.nodes.clone();
             nodes.extend(graph.nodes.iter().cloned().map(|mut node| {
                 if node.parent_node_id.is_none() {
-                    node.parent_node_id = Some(frame_node_id.clone());
+                    node.parent_node_id = Some(frame_node_id.to_string());
                 }
                 node
             }));
@@ -1343,7 +1344,7 @@ mod tests {
                 "session-1",
                 crate::DeliveryPolicy::EarliestSafeBoundary,
                 vec![crate::QueuedWorkPayload::agent_frame_task(
-                    "fig905-frame",
+                    crate::session_graph::frame_node_id("session-1", "fig905-frame"),
                     "peer-owned row",
                     None,
                 )],

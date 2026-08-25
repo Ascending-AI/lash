@@ -132,20 +132,21 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
-    let frame_node_id = format!("agent-frame:{session_id}:current");
+    let frame_key = format!("conflicting-frame-{session_id}");
+    let frame_node_id = lash_core::facade_support::frame_node_id(session_id, &frame_key);
     let mut nodes = state.session_graph.nodes.clone();
     nodes.push(lash_core::SessionNodeRecord {
-        node_id: frame_node_id.clone(),
+        node_id: frame_node_id.to_string(),
         parent_node_id: state.session_graph.leaf_node_id.clone(),
         timestamp: "2026-07-27T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
-            frame_key: format!("conflicting-frame-{session_id}"),
+            frame_key,
             reason: lash_core::AgentFrameReason::continue_as(),
             assignment: lash_core::AgentFrameAssignment::from_policy(current_policy),
             protocol_turn_options: Default::default(),
         },
     });
-    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.clone()))
+    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.to_string()))
         .expect("session lifecycle fixture graph is valid");
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
@@ -1689,7 +1690,7 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
     let mut nodes = state.session_graph.nodes.clone();
     let frame = nodes
         .iter_mut()
-        .find(|node| Some(&node.node_id) == state.current_frame_node_id.as_ref())
+        .find(|node| Some(node.node_id.as_str()) == state.current_frame_node_id.as_deref())
         .expect("initial frame node");
     let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut frame.payload else {
         panic!("current frame must be a FrameOpen node");

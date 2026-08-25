@@ -1466,7 +1466,7 @@ fn queued_draft(slot: u8, value: u8, coalesce: bool) -> QueuedWorkBatchDraft {
         SESSION_ID,
         DeliveryPolicy::EarliestSafeBoundary,
         vec![QueuedWorkPayload::agent_frame_task(
-            format!("property-frame-{value}"),
+            crate::session_graph::frame_node_id(SESSION_ID, &format!("property-frame-{value}")),
             format!("property-work-{value}"),
             None,
         )],

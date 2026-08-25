@@ -195,7 +195,7 @@ pub struct SessionHead {
     #[serde(skip)]
     pub head_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_frame_node_id: Option<String>,
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub graph: crate::SessionGraph,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -217,7 +217,7 @@ pub struct SessionHeadPayload {
     pub session_id: String,
     pub config: crate::PersistedSessionConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_frame_node_id: Option<String>,
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
 }
 
 /// Fully assembled session-head metadata returned by a store.
@@ -234,7 +234,7 @@ pub struct SessionHeadMeta {
     pub session_id: String,
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
-    pub current_frame_node_id: Option<String>,
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub checkpoint_ref: Option<BlobRef>,
     pub leaf_node_id: Option<String>,
 }
@@ -287,7 +287,7 @@ pub struct PersistedSessionRead {
     pub session_id: String,
     pub head_revision: u64,
     pub config: crate::PersistedSessionConfig,
-    pub current_frame_node_id: Option<String>,
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub graph: crate::SessionGraph,
     pub checkpoint_ref: Option<BlobRef>,
     pub checkpoint: Option<HydratedSessionCheckpoint>,
@@ -501,7 +501,7 @@ impl RuntimeCommit {
         for (ordinal, node) in self.graph.nodes.iter().enumerate() {
             let expected = match &node.payload {
                 crate::SessionNodePayload::FrameOpen { frame_key, .. } => {
-                    crate::session_graph::frame_node_id(&self.session_id, frame_key)
+                    crate::session_graph::frame_node_id(&self.session_id, frame_key).into_inner()
                 }
                 _ => {
                     derive_history_node_id(&self.session_id, &completed.operation, ordinal as u64)?
@@ -639,7 +639,7 @@ impl RuntimeCommit {
         projected_graph.set_leaf_node_id(graph.leaf_node_id().cloned());
         let current_frame_node_id = projected_graph
             .nearest_frame_node_id(projected_graph.leaf_node_id.as_deref())
-            .map(ToOwned::to_owned);
+            .map(crate::FrameNodeId::new);
         Ok(Self {
             commit_budget,
             session_id: state.session_id.clone(),
@@ -785,12 +785,12 @@ pub fn append_request_commit_for_testing(
     )
 }
 
-fn remap_optional_node_id(node_id: &mut Option<String>, mapping: &[(String, String)]) {
+fn remap_optional_node_id(node_id: &mut Option<crate::FrameNodeId>, mapping: &[(String, String)]) {
     let Some(current) = node_id.as_mut() else {
         return;
     };
-    if let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current) {
-        *current = derived.clone();
+    if let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str()) {
+        *current = crate::FrameNodeId::new(derived.clone());
     }
 }
 

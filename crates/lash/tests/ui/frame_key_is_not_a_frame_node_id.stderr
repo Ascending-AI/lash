@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/frame_key_is_not_a_frame_node_id.rs:7:9
+  |
+6 |     let _ = lash::persistence::QueuedWorkPayload::agent_frame_task(
+  |             ------------------------------------------------------ arguments to this function are incorrect
+7 |         frame_key,
+  |         ^^^^^^^^^ expected `FrameNodeId`, found `String`
+  |
+note: associated function defined here
+ --> $WORKSPACE/crates/lash-core/src/runtime/turn_queue.rs
+  |
+  |     pub fn agent_frame_task(
+  |            ^^^^^^^^^^^^^^^^

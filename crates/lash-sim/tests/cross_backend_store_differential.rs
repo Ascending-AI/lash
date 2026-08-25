@@ -296,6 +296,7 @@ fn is_frame_alias(node_id: &str) -> bool {
 fn scoped_node_id(session_id: &str, node_id: &str) -> String {
     if is_frame_alias(node_id) {
         lash_core::facade_support::frame_node_id(session_id, &differential_frame_key(node_id))
+            .into_inner()
     } else {
         format!("{session_id}:{node_id}")
     }
@@ -625,7 +626,7 @@ fn runtime_commit(
     expected_head_revision: u64,
     graph: &GraphSpec,
     turn_commit: Option<TurnCommitSpec>,
-    current_frame_node_id: Option<String>,
+    current_frame_node_id: Option<lash_core::FrameNodeId>,
     checkpoint: HydratedSessionCheckpoint,
     usage_deltas: Vec<TokenLedgerEntry>,
     committed_attachment_ids: Vec<AttachmentId>,
@@ -642,9 +643,13 @@ fn runtime_commit(
     commit.current_frame_node_id = commit
         .graph
         .appended_nodes()
-        .filter(|node| matches!(node.payload, SessionNodePayload::FrameOpen { .. }))
+        .filter_map(|node| match &node.payload {
+            SessionNodePayload::FrameOpen { frame_key, .. } => Some(
+                lash_core::facade_support::frame_node_id(session_id, frame_key),
+            ),
+            _ => None,
+        })
         .last()
-        .map(|node| node.node_id.clone())
         .or(current_frame_node_id);
     if let Some(turn_commit) = turn_commit {
         commit.turn_commit = RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
@@ -1341,7 +1346,7 @@ struct BackendRunner {
     successor_lease: Option<lash_core::SessionExecutionLease>,
     stale_turn_input_claim: Option<TurnInputClaim>,
     queued_work_claim: Option<QueuedWorkClaim>,
-    current_frame_node_id: Option<String>,
+    current_frame_node_id: Option<lash_core::FrameNodeId>,
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
     expected_execution_state: Option<Vec<u8>>,
@@ -1589,7 +1594,10 @@ impl BackendRunner {
                         &self.session_id,
                         DeliveryPolicy::AfterCurrentTurnCommit,
                         vec![QueuedWorkPayload::agent_frame_task(
-                            "differential-frame",
+                            lash_core::facade_support::frame_node_id(
+                                &self.session_id,
+                                "differential-frame",
+                            ),
                             "exercise queued-work claim state",
                             None,
                         )],

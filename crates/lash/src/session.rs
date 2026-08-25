@@ -987,12 +987,11 @@ impl LashSession {
         if let Some(slot) = &self.process_phase_probe_slot {
             let observation = self.runtime.observe();
             slot.set_for_session(observation.session_id(), Arc::clone(&probe));
-            if let Some(current_frame) =
-                observation.persisted_state.current_frame_node_id.as_deref()
+            if let Some(current_frame) = observation.persisted_state.current_frame_node_id.as_ref()
             {
                 let scope = lash_core::SessionScope::for_agent_frame(
                     observation.session_id(),
-                    current_frame,
+                    current_frame.clone(),
                 );
                 slot.set_for_scope(&scope, probe);
             }

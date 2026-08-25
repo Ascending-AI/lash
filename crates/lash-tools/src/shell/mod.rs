@@ -392,7 +392,10 @@ impl StandardShell {
         let session_scope = if context.agent_frame_id().is_empty() {
             lash_core::SessionScope::new(context.session_id())
         } else {
-            lash_core::SessionScope::for_agent_frame(context.session_id(), context.agent_frame_id())
+            lash_core::SessionScope::for_agent_frame(
+                context.session_id(),
+                context.agent_frame_id().clone(),
+            )
         };
         let mut request = ProcessStartRequest::new(
             process_id.clone(),

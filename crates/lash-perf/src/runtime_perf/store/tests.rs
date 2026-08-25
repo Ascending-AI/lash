@@ -75,7 +75,7 @@ async fn rejected_commits_do_not_change_the_instrumentation_counter() {
         "other-session",
         DeliveryPolicy::AfterCurrentTurnCommit,
         vec![QueuedWorkPayload::agent_frame_task(
-            "follow-frame",
+            lash_core::facade_support::frame_node_id("other-session", "follow-frame"),
             "follow-on task",
             None,
         )],

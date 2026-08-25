@@ -403,11 +403,10 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let first_state = factory_state(&first, "first", 0).await;
     let second_state = factory_state(&second, "second", 0).await;
     let commit = |state: &RuntimeSessionState| {
+        let frame_node_id =
+            lash_core::facade_support::frame_node_id(&state.session_id, "shared-frame-key");
         let node = lash_core::SessionNodeRecord {
-            node_id: lash_core::facade_support::frame_node_id(
-                &state.session_id,
-                "shared-frame-key",
-            ),
+            node_id: frame_node_id.to_string(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
             payload: lash_core::SessionNodePayload::FrameOpen {
@@ -432,7 +431,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             nodes: vec![node.clone()],
             leaf_node_id: Some(node.node_id.clone()),
         };
-        commit.current_frame_node_id = Some(node.node_id.clone());
+        commit.current_frame_node_id = Some(frame_node_id);
         commit
     };
 
@@ -474,8 +473,10 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let first_state = factory_state(&first, "leaf-a", 0).await;
     let second_state = factory_state(&second, "leaf-b", 0).await;
     let frame_key = "leaf-a-node";
+    let frame_node_id =
+        lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key);
     let node = lash_core::SessionNodeRecord {
-        node_id: lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key),
+        node_id: frame_node_id.to_string(),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
         payload: lash_core::SessionNodePayload::FrameOpen {
@@ -492,7 +493,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         nodes: vec![node.clone()],
         leaf_node_id: Some(node.node_id.clone()),
     };
-    first_commit.current_frame_node_id = Some(node.node_id.clone());
+    first_commit.current_frame_node_id = Some(frame_node_id);
     first
         .commit_runtime_state(first_commit)
         .await

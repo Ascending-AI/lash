@@ -380,7 +380,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
             vec![QueuedWorkPayload::agent_frame_task(
-                "clock-contract-frame",
+                lash_core::facade_support::frame_node_id(&session_id, "clock-contract-frame"),
                 "clock-contract queued work",
                 None,
             )],

@@ -417,8 +417,8 @@ pub mod plugins {
     };
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{
-        AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, HostTurnProtocol,
-        PersistedSegmentHandover, ProcessEngine, ProcessEngineRunContext,
+        AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, FrameNodeId,
+        HostTurnProtocol, PersistedSegmentHandover, ProcessEngine, ProcessEngineRunContext,
         ProcessEngineValidationContext, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
         ProtocolDriverState, ProtocolTurnExtension, ProtocolTurnOptionsError, SegmentHandover,
         SessionContextOverlay, SessionPluginSource, TurnDriverPreamble,

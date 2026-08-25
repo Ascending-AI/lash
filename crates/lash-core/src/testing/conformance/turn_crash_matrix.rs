@@ -1316,7 +1316,7 @@ async fn seed_reference_ingress(
                 &identity.session_id,
                 crate::DeliveryPolicy::EarliestSafeBoundary,
                 vec![crate::QueuedWorkPayload::agent_frame_task(
-                    "trace-frame",
+                    crate::session_graph::frame_node_id(&identity.session_id, "trace-frame"),
                     "trace-source",
                     None,
                 )],

@@ -408,7 +408,10 @@ fn queued_batch_draft(
         session_id,
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
         vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
-            "process-operations-selected-drain-frame",
+            lash_core::facade_support::frame_node_id(
+                session_id,
+                "process-operations-selected-drain-frame",
+            ),
             source_key,
             None,
         )],

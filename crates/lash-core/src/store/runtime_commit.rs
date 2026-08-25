@@ -75,7 +75,7 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
     pub config: crate::PersistedSessionConfig,
-    pub current_frame_node_id: Option<String>,
+    pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub graph: GraphAppend,
     pub checkpoint: HydratedSessionCheckpoint,
     /// Usage rows published atomically by this commit, each carrying a stable

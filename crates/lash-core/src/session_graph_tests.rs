@@ -472,7 +472,7 @@ fn nearest_frame_is_derived_from_ancestry() {
     let mut graph = SessionGraph::default();
     let first = frame_node_id("session", "first-frame");
     assert!(graph.append_frame_open_with_id_at(
-        first.clone(),
+        first.to_string(),
         "first-frame".to_string(),
         crate::AgentFrameReason::initial(),
         assignment.clone(),
@@ -482,7 +482,7 @@ fn nearest_frame_is_derived_from_ancestry() {
     let first_message = graph.append_message(text_message("m1", MessageRole::User, "first"));
     let second = frame_node_id("session", "second-frame");
     assert!(graph.append_frame_open_with_id_at(
-        second.clone(),
+        second.to_string(),
         "second-frame".to_string(),
         crate::AgentFrameReason::continue_as(),
         assignment,
@@ -645,7 +645,7 @@ fn a_frame_read_model_is_shared_by_identity_until_the_active_path_moves() {
     let mut graph = SessionGraph::default();
     let frame = frame_node_id("session", "frame");
     assert!(graph.append_frame_open_with_id_at(
-        frame.clone(),
+        frame.to_string(),
         "frame".to_string(),
         crate::AgentFrameReason::initial(),
         assignment,

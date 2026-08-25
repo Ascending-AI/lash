@@ -613,7 +613,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: request.session_id.clone(),
                 config: crate::PersistedSessionConfig::from(&request.policy),
-                current_frame_node_id: Some(current_frame_node_id),
+                current_frame_node_id: Some(crate::FrameNodeId::new(current_frame_node_id)),
             },
             0,
             Some(checkpoint_ref),

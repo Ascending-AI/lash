@@ -6,7 +6,10 @@ fn queued_work_test_draft(
         session_id,
         lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
         vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
-            "workbench-queued-work-test-frame",
+            lash::testing::frame_node_id(
+                session_id,
+                "workbench-queued-work-test-frame",
+            ),
             source_key,
             None,
         )],

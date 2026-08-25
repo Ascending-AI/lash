@@ -174,8 +174,14 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
         }
     }
 
-    let deleted = SessionScope::for_agent_frame("scoped-prune-deleted", "scoped-prune-frame");
-    let surviving = SessionScope::for_agent_frame("scoped-prune-surviving", "scoped-prune-frame");
+    let deleted = SessionScope::for_agent_frame(
+        "scoped-prune-deleted",
+        crate::session_graph::frame_node_id("scoped-prune-deleted", "scoped-prune-frame"),
+    );
+    let surviving = SessionScope::for_agent_frame(
+        "scoped-prune-surviving",
+        crate::session_graph::frame_node_id("scoped-prune-surviving", "scoped-prune-frame"),
+    );
     register_for(&registry, "scoped-prune-deleted-terminal", &deleted).await;
     complete(&registry, "scoped-prune-deleted-terminal").await;
     register_for(&registry, "scoped-prune-deleted-live", &deleted).await;
