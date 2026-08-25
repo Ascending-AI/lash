@@ -516,7 +516,6 @@ mod tests {
         lash_core::ExecRequest {
             language: "lashlang".to_string(),
             code: code.to_string(),
-            accept_finish: true,
         }
     }
 
@@ -668,7 +667,6 @@ mod tests {
                         lash_core::ExecRequest {
                             language: "lashlang".to_string(),
                             code: "scratch_note = \"after execution\"".to_string(),
-                            accept_finish: true,
                         },
                     )
                     .await
@@ -697,7 +695,6 @@ mod tests {
                         lash_core::ExecRequest {
                             language: "typescript".to_string(),
                             code: "const answer: number = 40 + 2; finish(answer);".to_string(),
-                            accept_finish: true,
                         },
                     )
                     .await
@@ -711,7 +708,6 @@ mod tests {
                         lash_core::ExecRequest {
                             language: "python".to_string(),
                             code: "finish(42)".to_string(),
-                            accept_finish: true,
                         },
                     )
                     .await
@@ -737,7 +733,6 @@ mod tests {
                         lash_core::ExecRequest {
                             language: "lashlang".to_string(),
                             code: "finish(42)".to_string(),
-                            accept_finish: true,
                         },
                     )
                     .await

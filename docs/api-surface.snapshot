@@ -2971,7 +2971,6 @@ lash::plugins::ContextProjector::project
 lash::plugins::EnqueueMessagesDirective
 lash::plugins::EnqueueMessagesDirective::messages
 lash::plugins::ExecRequest
-lash::plugins::ExecRequest::accept_finish
 lash::plugins::ExecRequest::code
 lash::plugins::ExecRequest::language
 lash::plugins::ExecResponse

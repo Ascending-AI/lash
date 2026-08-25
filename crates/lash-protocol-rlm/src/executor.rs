@@ -194,7 +194,6 @@ impl RlmCheckpointPerfFixture {
             ExecRequest {
                 language: "lashlang".to_string(),
                 code,
-                accept_finish: false,
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -1049,7 +1048,6 @@ mod tests {
                 language: "lashlang".to_string(),
                 code: r#"await control.continue_as({ task: "continue deterministically" })?"#
                     .to_string(),
-                accept_finish: true,
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -1117,7 +1115,6 @@ mod tests {
             ExecRequest {
                 language: "lashlang".to_string(),
                 code,
-                accept_finish: true,
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),
@@ -1242,7 +1239,6 @@ mod tests {
             ExecRequest {
                 language: "lashlang".to_string(),
                 code: code.to_string(),
-                accept_finish: true,
             },
             Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
             surface,
@@ -1270,7 +1266,6 @@ mod tests {
                 ExecRequest {
                     language: "lashlang".to_string(),
                     code: "i = 0\nwhile i < 5000 { i = i + 1 }\nfinish i".to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -1299,7 +1294,6 @@ mod tests {
                 ExecRequest {
                     language: "lashlang".to_string(),
                     code: "value = 1".to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -1331,7 +1325,6 @@ mod tests {
             let request = || ExecRequest {
                 language: "lashlang".to_string(),
                 code: "finish 1".to_string(),
-                accept_finish: true,
             };
             let resolver = || Arc::new(ProjectionRegistry::new());
             let surface = || {
@@ -1518,7 +1511,6 @@ mod tests {
         ExecRequest {
             language: "lashlang".to_string(),
             code: "await web.fetch({})?\nawait mystery.x({})?".to_string(),
-            accept_finish: true,
         }
     }
 
@@ -1701,7 +1693,6 @@ mod tests {
                         finish result
                     "#
                     .to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -1766,7 +1757,6 @@ mod tests {
                 ExecRequest {
                     language: "typescript".to_string(),
                     code: "const result = await web.fetch({ url: 'https://example.test' }); finish(result);".to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -1825,7 +1815,6 @@ mod tests {
                         finish to_int("invalid_int")
                     "#
                     .to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -1873,7 +1862,6 @@ mod tests {
             let request = || ExecRequest {
                 language: "lashlang".to_string(),
                 code: "process later() { finish 1 }\nfinish 1".to_string(),
-                accept_finish: true,
             };
             let resolver = || Arc::new(ProjectionRegistry::new());
             let context = || lash_core::testing::code_execution_context();
@@ -1938,7 +1926,6 @@ mod tests {
                         finish(1);
                     "#
                     .to_string(),
-                    accept_finish: true,
                 },
                 artifact_store.clone(),
                 LashlangSurface::new(
@@ -2350,7 +2337,6 @@ mod tests {
                     finish("signal-sent");
                 "#
                 .to_string(),
-                accept_finish: true,
             },
             artifact_store,
             surface,
@@ -2493,7 +2479,6 @@ mod tests {
                     finish({ id: processId, status: status });
                 "#
                 .to_string(),
-                accept_finish: true,
             },
             artifact_store,
             surface,
@@ -2655,7 +2640,6 @@ mod tests {
             ExecRequest {
                 language: "lashlang".to_string(),
                 code: code.to_string(),
-                accept_finish: true,
             },
             Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
             surface,
@@ -2688,7 +2672,6 @@ mod tests {
             ExecRequest {
                 language: "typescript".to_string(),
                 code: code.to_string(),
-                accept_finish: true,
             },
             Arc::new(lashlang::InMemoryLashlangArtifactStore::new()),
             LashlangSurface::new(
@@ -2843,7 +2826,6 @@ mod tests {
                         finish handle
                     "#
                     .to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 surface,
@@ -2999,7 +2981,6 @@ mod tests {
                         finish true
                     "#
                     .to_string(),
-                    accept_finish: true,
                 },
                 artifact_store.clone(),
                 surface.clone(),
@@ -3030,7 +3011,6 @@ mod tests {
                         finish await triggers.list({})?
                     "#
                     .to_string(),
-                    accept_finish: true,
                 },
                 artifact_store,
                 surface,
@@ -3900,7 +3880,6 @@ mod tests {
                 ExecRequest {
                     language: "lashlang".to_string(),
                     code: "print healthy\nprint dead\nfinish ordinary".to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -3958,7 +3937,6 @@ mod tests {
                 ExecRequest {
                     language: "lashlang".to_string(),
                     code: "finish healthy".to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -4501,7 +4479,6 @@ mod tests {
                 ExecRequest {
                     language: "lashlang".to_string(),
                     code: "scratch_note = \"after execution\"".to_string(),
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::new(
@@ -4557,7 +4534,6 @@ mod tests {
                 ExecRequest {
                     language: "lashlang".to_string(),
                     code,
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::new(
@@ -4654,7 +4630,6 @@ mod tests {
                 ExecRequest {
                     language: "lashlang".to_string(),
                     code,
-                    accept_finish: true,
                 },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::new(
@@ -4930,7 +4905,6 @@ finish final_ids"#;
             ExecRequest {
                 language: "typescript".to_string(),
                 code: code.to_string(),
-                accept_finish: true,
             },
             lashlang::global_in_memory_lashlang_artifact_store(),
             LashlangSurface::default(),

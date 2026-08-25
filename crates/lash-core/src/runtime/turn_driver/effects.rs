@@ -574,7 +574,6 @@ impl RuntimeTurnDriver<'_> {
                     crate::ExecRequest {
                         language,
                         code: code.to_string(),
-                        accept_finish: true,
                     },
                 )
                 .await

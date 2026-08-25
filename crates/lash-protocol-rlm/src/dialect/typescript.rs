@@ -931,7 +931,6 @@ mod tests {
                         ExecRequest {
                             language: "typescript".to_string(),
                             code: "const answer: number = 40 + 2; finish(answer);".to_string(),
-                            accept_finish: true,
                         },
                         RlmProjectedBindings::new(),
                     )
