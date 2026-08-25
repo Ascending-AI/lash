@@ -1195,10 +1195,7 @@ mod tests {
         // Byte-level: `serde_json::Value` compares as a `BTreeMap` here, so only the emitted
         // string pins field order — the property the persisted envelope actually depends on.
         let encoded = serde_json::to_string(&options).expect("serialize options");
-        assert_eq!(
-            encoded,
-            r#"{"schema_version":999,"payload":{"mode":"test"}}"#
-        );
+        assert_eq!(encoded, r#"{"schema_version":1,"payload":{"mode":"test"}}"#);
         assert_eq!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, 1);
 
         let round_tripped: ProtocolTurnOptions =
