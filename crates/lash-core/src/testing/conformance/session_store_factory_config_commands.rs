@@ -278,7 +278,7 @@ pub(super) async fn session_config_settlement_timeout_is_typed(
     let mut runtime = runtime_for_config_settlement(
         Arc::clone(&store),
         &request,
-        std::time::Duration::from_millis(30),
+        std::time::Duration::from_millis(300),
     )
     .await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
@@ -296,7 +296,7 @@ pub(super) async fn session_config_settlement_timeout_is_typed(
     );
     assert!(
         started.elapsed() < std::time::Duration::from_secs(1),
-        "30ms settlement timeout must not hang the facade writer"
+        "300ms settlement timeout must not hang the facade writer"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
