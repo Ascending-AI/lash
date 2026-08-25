@@ -32,6 +32,7 @@ GATED_JOBS = {
 
 UNGATED_JOBS = {
     "plan",
+    "facade-only-examples",
     "test-doc",
     "repo-gates",
     "lint",

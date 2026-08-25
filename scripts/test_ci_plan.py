@@ -107,12 +107,12 @@ class ConclusionTests(unittest.TestCase):
 
     def test_skipped_ungated_job_fails(self) -> None:
         needs = successful_needs()
-        needs["lint"]["result"] = "skipped"
+        needs["facade-only-examples"]["result"] = "skipped"
         self.assertTrue(ci_plan.evaluate_conclusion(needs))
 
     def test_missing_needed_job_fails(self) -> None:
         needs = successful_needs()
-        del needs["functional-e2e"]
+        del needs["facade-only-examples"]
         self.assertTrue(ci_plan.evaluate_conclusion(needs))
 
 

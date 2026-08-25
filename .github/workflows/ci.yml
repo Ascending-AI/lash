@@ -1960,6 +1960,7 @@ jobs:
     if: always()
     needs:
       - plan
+      - facade-only-examples
       - test-doc
       - repo-gates
       - api-coverage
