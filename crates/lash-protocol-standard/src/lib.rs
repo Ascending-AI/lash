@@ -38,8 +38,8 @@ use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, LlmOutputPart, LlmResponse,
     ProtocolBuildInput, SessionError, ToolOutcome, TurnDriverConfig, TurnDriverPreamble,
     facade_support::ToolInvocation, facade_support::TurnFinish, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::append_assistant_text_part,
-    facade_support::normalized_response_parts, facade_support::reasoning_part,
+    facade_support::TurnStop, facade_support::normalized_response_parts,
+    facade_support::reasoning_part,
 };
 use serde_json::Value;
 
@@ -388,7 +388,7 @@ fn collect_standard_response(llm_response: &LlmResponse) -> StandardResponse {
                     continue;
                 }
                 let previous_len = assistant_text.len();
-                append_assistant_text_part(&mut assistant_text, &text);
+                lash_core::facade_support::append_assistant_text_part(&mut assistant_text, &text);
                 parts.push(StandardResponsePart::Text {
                     text: assistant_text[previous_len..].to_string(),
                     response_meta,

@@ -625,6 +625,10 @@ pub(crate) use lash_sansio::{
     prompt_template_fingerprint, prompt_text_fingerprint, resolve_prompt_layers,
     visible_response_parts,
 };
+pub use tool_provider::{
+    ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
+    ToolSessionAdmin, ToolSessionModel,
+};
 /// Project a successful tool control into its terminal turn outcome.
 ///
 /// Agent-frame seeds are typed at their serde boundary, so a terminal outcome

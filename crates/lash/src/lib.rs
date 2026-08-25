@@ -189,14 +189,21 @@ pub mod tools {
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
         PendingCompletion, PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent,
-        StartProcessIntent, TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation,
-        ToolArgumentProjectionPolicy, ToolAttemptOutcome, ToolCall, ToolCallOutcome,
-        ToolCallOutput, ToolCallRecord, ToolContext, ToolContract, ToolDefinition,
+        StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
+        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation,
+        ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
+        ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContext,
+        ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDispatchClient,
         ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntent,
-        ToolIntentExecutionOutcome, ToolIntentKind, ToolIntents, ToolManifest, ToolOutcome,
-        ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider,
-        ToolRegistry, ToolRetryStatus, ToolValue, facade_support::ReconfigureError,
-        facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
+        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd,
+        ToolIntentParentEndAction, ToolIntentParentEndOutcome, ToolIntentRefusalReason,
+        ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
+        ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient, ToolProvider, ToolRegistry,
+        ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
+        derive_tool_intent_identity, facade_support::OrchestrationContext,
+        facade_support::ReconfigureError, facade_support::ToolRegistryFacadeOps,
+        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
+        facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
     };
     pub use lash_core::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
     /// Tool-execution request batches, replies, and child-process observation hooks.
@@ -411,8 +418,8 @@ pub mod plugins {
         AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, HostTurnProtocol,
         PersistedSegmentHandover, ProcessEngine, ProcessEngineRunContext,
         ProcessEngineValidationContext, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
-        ProtocolTurnOptionsError, SegmentHandover, SessionContextOverlay, SessionPluginSource,
-        TurnDriverPreamble,
+        ProtocolDriverState, ProtocolTurnExtension, ProtocolTurnOptionsError, SegmentHandover,
+        SessionContextOverlay, SessionPluginSource, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
@@ -771,7 +778,7 @@ pub mod runtime {
 pub mod prompt {
     pub use lash_core::{
         PromptBuiltin, PromptContribution, PromptContributionGate, PromptLayer, PromptSlot,
-        PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
+        PromptSlotLayer, PromptTemplate, PromptTemplateEntry, PromptTemplateSection,
         facade_support::default_prompt_template,
     };
 }
@@ -829,8 +836,9 @@ pub mod provider {
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
     pub use lash_core::{
-        AttemptOutcome, ExecutionEvidence, ExecutionEvidenceCollectionInterruption, LlmRequest,
-        LlmRequestScope, LlmResponse, LlmStreamEvidence, ProtocolPosition, ProviderEndpointError,
+        AttemptOutcome, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
+        ExecutionEvidenceMergeError, LlmRequest, LlmRequestScope, LlmResponse, LlmStreamEvidence,
+        NormalizedError, ProtocolPosition, ProviderEndpointError,
         facade_support::LlmTransportError,
     };
     pub use lash_core::{

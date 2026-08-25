@@ -29,6 +29,12 @@ pub struct ToolSessionAdmin<'run> {
 }
 
 impl<'run> ToolSessionAdmin<'run> {
+    /// Read the current session's effective model and generation policy.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors use this capability to align nested model work with
+    /// the policy of the session that invoked them.
     pub async fn model(&self) -> Result<ToolSessionModel, PluginError> {
         let snapshot = self.snapshot_current().await?;
         let generation = snapshot
@@ -43,10 +49,22 @@ impl<'run> ToolSessionAdmin<'run> {
         })
     }
 
+    /// Read a snapshot of the session that invoked the current tool.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors use this capability for session-aware behavior
+    /// without depending on the runtime's session-state implementation.
     pub async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
         self.snapshot(&self.session_id).await
     }
 
+    /// Read a snapshot of a named managed session.
+    ///
+    /// # Integrator class
+    ///
+    /// Orchestrating tool implementors use this capability to inspect a child
+    /// or peer session through the supported session-service boundary.
     pub async fn snapshot(
         &self,
         session_id: impl AsRef<str>,
@@ -54,6 +72,12 @@ impl<'run> ToolSessionAdmin<'run> {
         self.sessions.snapshot_session(session_id.as_ref()).await
     }
 
+    /// Create a managed session through the runtime lifecycle service.
+    ///
+    /// # Integrator class
+    ///
+    /// Orchestrating tool implementors use this capability to create sessions
+    /// without acquiring the runtime's concrete lifecycle implementation.
     pub async fn create_session(
         &self,
         request: crate::SessionCreateRequest,
@@ -61,6 +85,12 @@ impl<'run> ToolSessionAdmin<'run> {
         self.session_lifecycle.create_session(request).await
     }
 
+    /// Close a named managed session through the runtime lifecycle service.
+    ///
+    /// # Integrator class
+    ///
+    /// Orchestrating tool implementors use this capability to finish sessions
+    /// they own through the supported lifecycle boundary.
     pub async fn close_session(&self, session_id: &str) -> Result<(), PluginError> {
         self.session_lifecycle.close_session(session_id).await
     }
@@ -89,14 +119,32 @@ impl<'run> ToolSessionAdmin<'run> {
         self.session_lifecycle.start_turn(request).await
     }
 
+    /// Read the current session's serialized tool catalog.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors use this capability when nested work needs the
+    /// session's effective tool membership and contracts.
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         self.sessions.tool_catalog(&self.session_id).await
     }
 
+    /// Share the current session's immutable serialized tool catalog.
+    ///
+    /// # Integrator class
+    ///
+    /// Tool implementors use this capability to reuse the effective catalog
+    /// across nested work without copying its serialized entries.
     pub async fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, PluginError> {
         self.sessions.shared_tool_catalog(&self.session_id).await
     }
 
+    /// Change named tool membership for the current session.
+    ///
+    /// # Integrator class
+    ///
+    /// Orchestrating tool implementors use this capability to reconfigure the
+    /// current session through the runtime-owned membership service.
     pub async fn set_tool_membership(
         &self,
         names: &[String],

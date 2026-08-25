@@ -80,6 +80,12 @@ pub struct ToolProcessEventClient {
 }
 
 impl ToolProcessEventClient {
+    /// Wait for a later event of the requested type on the current process.
+    ///
+    /// # Integrator class
+    ///
+    /// Durable-process tool implementors use this capability to await
+    /// runtime-journaled process events through the supported facade.
     pub async fn wait_event_after(
         &self,
         event_type: &str,
@@ -96,6 +102,12 @@ impl ToolProcessEventClient {
             .await
     }
 
+    /// Append one typed payload to the current process event journal.
+    ///
+    /// # Integrator class
+    ///
+    /// Durable-process tool implementors use this convenience capability when
+    /// the default append-request policy is sufficient.
     pub async fn emit(
         &self,
         event_type: impl Into<String>,
@@ -105,6 +117,12 @@ impl ToolProcessEventClient {
             .await
     }
 
+    /// Append an explicit event request to the current process journal.
+    ///
+    /// # Integrator class
+    ///
+    /// Durable-process tool implementors use this capability when they need to
+    /// supply the complete supported append-request contract.
     pub async fn emit_request(
         &self,
         request: crate::ProcessEventAppendRequest,
