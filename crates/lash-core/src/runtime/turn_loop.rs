@@ -598,20 +598,44 @@ impl TypedTurnPhase for PostCommitDelivery {
 }
 
 struct TurnDriverSessionLoan<'slot, 'run> {
-    slot: &'slot mut Option<Session>,
+    session: &'slot mut Option<Session>,
     driver: Option<Box<RuntimeTurnDriver<'run>>>,
 }
 
+struct TurnDriverRemainder {
+    policy: RuntimeSessionPolicy,
+    turn_pipeline: TurnBoundary,
+    llm_calls: Vec<crate::LlmCallRecord>,
+    pending_queue_claims: Vec<crate::QueuedWorkClaim>,
+    pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
+}
+
 impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
-    fn new(slot: &'slot mut Option<Session>, driver: Box<RuntimeTurnDriver<'run>>) -> Self {
+    fn new(session: &'slot mut Option<Session>, driver: Box<RuntimeTurnDriver<'run>>) -> Self {
         Self {
-            slot,
+            session,
             driver: Some(driver),
         }
     }
 
-    fn into_inner(mut self) -> Box<RuntimeTurnDriver<'run>> {
-        self.driver.take().expect("turn driver loan is present")
+    fn reclaim(mut self) -> TurnDriverRemainder {
+        let RuntimeTurnDriver {
+            session,
+            policy,
+            turn_pipeline,
+            llm_calls,
+            pending_queue_claims,
+            pending_turn_input_claims,
+            ..
+        } = *self.driver.take().expect("turn driver loan is present");
+        *self.session = Some(session);
+        TurnDriverRemainder {
+            policy,
+            turn_pipeline,
+            llm_calls,
+            pending_queue_claims,
+            pending_turn_input_claims,
+        }
     }
 }
 
@@ -634,7 +658,11 @@ impl std::ops::DerefMut for TurnDriverSessionLoan<'_, '_> {
 impl Drop for TurnDriverSessionLoan<'_, '_> {
     fn drop(&mut self) {
         if let Some(driver) = self.driver.take() {
-            *self.slot = Some(driver.session);
+            // Re-arm the still-owned driver as a loan and consume it through
+            // reclaim(); the inner loan's Drop is a no-op because reclaim()
+            // takes the driver.
+            let loan = TurnDriverSessionLoan::new(&mut *self.session, driver);
+            drop(loan.reclaim());
         }
     }
 }
@@ -1770,7 +1798,7 @@ impl LashRuntime {
     #[allow(clippy::too_many_arguments)]
     async fn finish_cancelled_turn_after_effect_abort(
         &mut self,
-        driver: RuntimeTurnDriver<'_>,
+        driver: TurnDriverRemainder,
         mut assembler: TurnAssembler,
         cancellation_messages: crate::MessageSequence,
         events: &dyn EventSink,
@@ -1782,21 +1810,13 @@ impl LashRuntime {
         turn_index: usize,
         trace_turn_id: String,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
-        emit_parent_end_events(
-            driver.finish_parent_end_actions().await?,
-            &mut assembler,
-            events,
-        )
-        .await;
-        let RuntimeTurnDriver {
-            session,
+        let TurnDriverRemainder {
             policy,
             turn_pipeline,
             pending_queue_claims,
             pending_turn_input_claims,
             ..
         } = driver;
-        self.session = Some(session);
         emit_terminal_sequence(
             &mut assembler,
             events,
@@ -3803,71 +3823,55 @@ impl LashRuntime {
         .await;
         let (new_messages, _new_protocol_iteration) = match run_result {
             Ok(result) => result,
-            Err(err) if cancel.is_cancelled() => {
-                if turn_control.evidence().is_none() {
-                    turn_control
-                        .observe_pending_cancel(
-                            turn_cancel_peek_controller,
-                            crate::runtime::turn_control::TurnCancelPeekIdentity::PostAbortGate,
-                        )
-                        .await?;
-                }
-                if turn_control.evidence().is_some() {
-                    let driver = driver.into_inner();
-                    self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
-                    let cancellation_messages = driver.turn_pipeline.message_sequence();
-                    return Box::pin(self.finish_cancelled_turn_after_effect_abort(
-                        *driver,
-                        assembler,
-                        cancellation_messages,
-                        events,
-                        &finish_scoped_effect_controller,
-                        &cancel,
-                        session_execution_lease,
-                        session_execution_lease_release_policy,
-                        turn_control.as_ref(),
-                        turn_index,
-                        trace_turn_id,
-                    ))
-                    .await;
-                }
-                emit_parent_end_events(
-                    driver.finish_parent_end_actions().await?,
-                    &mut assembler,
-                    events,
-                )
-                .await;
-                let driver = driver.into_inner();
-                self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
-                let RuntimeTurnDriver {
-                    session,
-                    pending_queue_claims,
-                    pending_turn_input_claims,
-                    ..
-                } = *driver;
-                self.session = Some(session);
-                self.abandon_queued_work_claims_after_local_abort(&err, &pending_queue_claims)
-                    .await;
-                self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
-                    .await;
-                return Err(err);
-            }
             Err(err) => {
+                if cancel.is_cancelled() {
+                    if turn_control.evidence().is_none() {
+                        turn_control
+                            .observe_pending_cancel(
+                                turn_cancel_peek_controller,
+                                crate::runtime::turn_control::TurnCancelPeekIdentity::PostAbortGate,
+                            )
+                            .await?;
+                    }
+                    if turn_control.evidence().is_some() {
+                        let cancellation_messages = driver.turn_pipeline.message_sequence();
+                        emit_parent_end_events(
+                            driver.finish_parent_end_actions().await?,
+                            &mut assembler,
+                            events,
+                        )
+                        .await;
+                        let driver = driver.reclaim();
+                        self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
+                        return Box::pin(self.finish_cancelled_turn_after_effect_abort(
+                            driver,
+                            assembler,
+                            cancellation_messages,
+                            events,
+                            &finish_scoped_effect_controller,
+                            &cancel,
+                            session_execution_lease,
+                            session_execution_lease_release_policy,
+                            turn_control.as_ref(),
+                            turn_index,
+                            trace_turn_id,
+                        ))
+                        .await;
+                    }
+                }
                 emit_parent_end_events(
                     driver.finish_parent_end_actions().await?,
                     &mut assembler,
                     events,
                 )
                 .await;
-                let driver = driver.into_inner();
+                let driver = driver.reclaim();
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
-                let RuntimeTurnDriver {
-                    session,
+                let TurnDriverRemainder {
                     pending_queue_claims,
                     pending_turn_input_claims,
                     ..
-                } = *driver;
-                self.session = Some(session);
+                } = driver;
                 self.abandon_queued_work_claims_after_local_abort(&err, &pending_queue_claims)
                     .await;
                 self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
@@ -3875,7 +3879,13 @@ impl LashRuntime {
                 return Err(err);
             }
         };
-        let driver = driver.into_inner();
+        emit_parent_end_events(
+            driver.finish_parent_end_actions().await?,
+            &mut assembler,
+            events,
+        )
+        .await;
+        let driver = driver.reclaim();
         self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
         tracing::debug!(
             new_message_count = new_messages.len(),
@@ -3883,22 +3893,13 @@ impl LashRuntime {
             "runtime post-run_task"
         );
 
-        emit_parent_end_events(
-            driver.finish_parent_end_actions().await?,
-            &mut assembler,
-            events,
-        )
-        .await;
-        let RuntimeTurnDriver {
-            session,
+        let TurnDriverRemainder {
             policy,
             turn_pipeline,
             llm_calls,
             pending_queue_claims,
             pending_turn_input_claims,
-            ..
-        } = *driver;
-        self.session = Some(session);
+        } = driver;
         let pending_claims =
             LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
         let finish_result = Box::pin(self.finish_turn(
