@@ -1090,6 +1090,20 @@ fn benchmark_field(name: &str, ty: lash::rlm::TypeExpr) -> lash::rlm::TypeField 
     }
 }
 
+trait RuntimePerfCoreBuilderExt {
+    fn with_manual_high_traffic_queue_drain(self, scenario: RuntimePerfScenario) -> Self;
+}
+
+impl RuntimePerfCoreBuilderExt for lash::LashCoreBuilder {
+    fn with_manual_high_traffic_queue_drain(self, scenario: RuntimePerfScenario) -> Self {
+        if scenario.is_high_traffic() {
+            self.disable_queued_work_driver()
+        } else {
+            self
+        }
+    }
+}
+
 pub(crate) async fn build_runtime_with_sqlite_store(
     scenario: RuntimePerfScenario,
     root: PathBuf,
@@ -1195,6 +1209,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
                 .plugins(plugin_stack)
+                .with_manual_high_traffic_queue_drain(scenario)
                 .build(runtime_perf_owner())?,
         ),
         ExecutionMode::Rlm => {
@@ -1225,6 +1240,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .store_factory(store_factory.clone())
                     .plugins(plugin_stack)
                     .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
+                    .with_manual_high_traffic_queue_drain(scenario)
                     .build(runtime_perf_owner())?,
             )
         }
@@ -1306,6 +1322,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
                 .plugins(plugin_stack)
+                .with_manual_high_traffic_queue_drain(scenario)
                 .build(runtime_perf_owner())?,
         ),
         ExecutionMode::Rlm => {
@@ -1331,6 +1348,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
                     .store_factory(store_factory.clone())
                     .plugins(plugin_stack)
                     .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
+                    .with_manual_high_traffic_queue_drain(scenario)
                     .build(runtime_perf_owner())?,
             )
         }
