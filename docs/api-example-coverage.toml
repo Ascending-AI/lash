@@ -1572,33 +1572,37 @@ usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surfac
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::EffectJournalAddressing"
+symbol = "lash::durability::EffectJournalAddressing"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::EffectJournalAddressing"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative durable effect hosts implement this controller capability to distinguish key-addressed replay from ordinal-addressed replay; bundled Restate and PostgreSQL hosts exercise both values in crates/lash-restate/src/controller/mod.rs and crates/lash-postgres-store/src/postgres/effect_replay.rs, while no example defines another effect host."
 
 [[api]]
-symbol = "lash_core::EffectJournalAddressing::KeyAddressed"
+symbol = "lash::durability::EffectJournalAddressing::KeyAddressed"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::EffectJournalAddressing::KeyAddressed"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: key-addressed durable effect hosts use this value so nested effects retain stable replay identities; the bundled PostgreSQL host uses it in crates/lash-postgres-store/src/postgres/effect_replay.rs, while no example defines another key-addressed effect host."
 
 [[api]]
-symbol = "lash_core::EffectJournalAddressing::OrdinalAddressed"
+symbol = "lash::durability::EffectJournalAddressing::OrdinalAddressed"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::EffectJournalAddressing::OrdinalAddressed"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: ordinal-addressed workflow effect hosts use this value so recorded bodies fail closed before emitting nested journal commands; the bundled Restate host uses it in crates/lash-restate/src/controller/mod.rs, while no example defines another ordinal-addressed effect host."
 
 [[api]]
-symbol = "lash_core::EffectJournalAddressing::Runtime"
+symbol = "lash::durability::EffectJournalAddressing::Runtime"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::EffectJournalAddressing::Runtime"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: runtime-owned effect hosts inherit this default when no durable effect journal addresses commands; bundled inline hosts exercise the default in crates/lash-core/src/runtime/effect/executor.rs, while no example defines another runtime-owned effect host."
@@ -10155,7 +10159,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmOutputPart"]
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:8#use lash::direct::{LlmOutputPart, LlmStreamEvent, LlmUsage};"
+usage = "examples/agent-workbench/src/failure_provider.rs:9#    LlmOutputPart, LlmStreamEvent, LlmUsage, ProviderReasoningReplay, ProviderRouteIdentity,"
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -18343,7 +18347,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStoreCreateRequest"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:277#policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),"
+usage = "examples/agent-workbench/src/restate_tests.rs:277#policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -18362,7 +18366,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStoreCreateRequest::policy"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/restate_tests.rs:277#policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),"
+usage = "examples/agent-workbench/src/restate_tests.rs:277#policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),"
 assertion = "examples/agent-workbench/src/restate_tests.rs:301#assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);"
 
 [[api]]
@@ -31951,7 +31955,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:10#    GenerationRetryGuarantee, LlmRequest, LlmResponse, LlmTransportError, Provider,"
+usage = "examples/agent-workbench/src/failure_provider.rs:12#    GenerationRetryGuarantee, LlmContentBlock, LlmMessage, LlmRequest, LlmResponse, LlmRole,"
 reason = "Syntax-only evidence: the recorded example anchor is an import, which only brings the item into scope; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -47918,8 +47922,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessCommand::Cancel::replay"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:533#assert_eq!(cancel_events.len(), 1);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:533#assert_eq!(cancel_events.len(), 1);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:539#assert_eq!(cancel_events.len(), 1);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:539#assert_eq!(cancel_events.len(), 1);"
 reason = "The executable FIG-1294 ingress law submits a cancellation with ingress replay identity and asserts that a conflicting duplicate creates only one durable cancel event."
 
 [[api]]
@@ -52676,8 +52680,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionPolicy::new"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash_core::TurnBudget::Unbounded);"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash_core::TurnBudget::Unbounded);"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash::TurnBudget::Unbounded);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash::TurnBudget::Unbounded);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -52723,8 +52727,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionPolicy::turn_budget"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash_core::TurnBudget::Unbounded);"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash_core::TurnBudget::Unbounded);"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash::TurnBudget::Unbounded);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:475#assert_eq!(state.policy.turn_budget, lash::TurnBudget::Unbounded);"
 
 [[api]]
 symbol = "lash::runtime::SessionSnapshot"
@@ -67486,45 +67490,50 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::AttemptOutcome"
+symbol = "lash::provider::AttemptOutcome"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::AttemptOutcome"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:841#outcome: lash_core::AttemptOutcome::Completed,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::AttemptOutcome::Aborted"
+symbol = "lash::provider::AttemptOutcome::Aborted"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::AttemptOutcome::Aborted"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1084#lash_core::AttemptOutcome::Aborted,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::AttemptOutcome::Completed"
+symbol = "lash::provider::AttemptOutcome::Completed"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::AttemptOutcome::Completed"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:841#outcome: lash_core::AttemptOutcome::Completed,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::AttemptOutcome::Failed"
+symbol = "lash::provider::AttemptOutcome::Failed"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::AttemptOutcome::Failed"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1112#lash_core::AttemptOutcome::Failed,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::AttemptOutcome::Interrupted"
+symbol = "lash::provider::AttemptOutcome::Interrupted"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::AttemptOutcome::Interrupted"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1098#lash_core::AttemptOutcome::Interrupted,"
@@ -67996,57 +68005,64 @@ disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol executors report source-level effect outcomes for durable observation assembly."
 
 [[api]]
-symbol = "lash_core::ExecutedCallOutcome"
+symbol = "lash::persistence::ExecutedCallOutcome"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::ExecutedCallOutcome"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol executors report source-level effect outcomes for durable observation assembly."
 
 [[api]]
-symbol = "lash_core::ExecutedCallOutcome::Err"
+symbol = "lash::persistence::ExecutedCallOutcome::Err"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ExecutedCallOutcome::Err"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol executors report failed source-level effects for durable observation assembly."
 
 [[api]]
-symbol = "lash_core::ExecutedCallOutcome::Ok"
+symbol = "lash::persistence::ExecutedCallOutcome::Ok"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ExecutedCallOutcome::Ok"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol executors report successful source-level effects for durable observation assembly."
 
 [[api]]
-symbol = "lash_core::ExecutedCallOutcome::as_str"
+symbol = "lash::persistence::ExecutedCallOutcome::as_str"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::ExecutedCallOutcome::as_str"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol history renderers format compact source-level effect outcomes."
 
 [[api]]
-symbol = "lash_core::ExecutedCallRecord"
+symbol = "lash::persistence::ExecutedCallRecord"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::ExecutedCallRecord"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol executors report source-level effect outcomes for durable observation assembly."
 
 [[api]]
-symbol = "lash_core::ExecutedCallRecord::operation"
+symbol = "lash::persistence::ExecutedCallRecord::operation"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::ExecutedCallRecord::operation"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol executors preserve the source module.operation instead of a host tool alias."
 
 [[api]]
-symbol = "lash_core::ExecutedCallRecord::outcome"
+symbol = "lash::persistence::ExecutedCallRecord::outcome"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::ExecutedCallRecord::outcome"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: alternative protocol executors report whether each source-level effect succeeded or failed."
@@ -68060,17 +68076,19 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::__for_testing"
+symbol = "lash::tools::InternalProcessContext::__for_testing"
 kind = "function"
 availability = "all-features"
+aliases = ["lash_core::InternalProcessContext::__for_testing"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:381#let context = lash_core::InternalProcessContext::__for_testing(&tool);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:387#let context = lash::tools::InternalProcessContext::__for_testing(&tool);"
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::__attempt_context"
+symbol = "lash::tools::InternalProcessContext::__attempt_context"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessContext::__attempt_context"]
 area = "processes"
 disposition = "internal-consumed"
 usage = "crates/lash-tools/src/shell/mod.rs:643#context: &call.context.__attempt_context(),"
@@ -68309,249 +68327,280 @@ area = "observation-admin"
 disposition = "internal-consumed"
 usage = "crates/lash/src/core.rs:488#(lash_core::ObserverInheritance::Only(ids), Some(process_registry)) => {"
 [[api]]
-symbol = "lash_core::Part"
+symbol = "lash::messages::Part"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::Part"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-provider-anthropic/src/stream.rs:337#tx.send(LlmStreamEvent::Part(part));"
 
 [[api]]
-symbol = "lash_core::Part::attachment"
+symbol = "lash::messages::Part::attachment"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::attachment"]
 area = "attachments"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::Part::content"
+symbol = "lash::messages::Part::content"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::content"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-standard-plugins/src/rolling_history.rs:83#part.content = placeholder.to_string();"
 
 [[api]]
-symbol = "lash_core::Part::id"
+symbol = "lash::messages::Part::id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::id"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::Part::kind"
+symbol = "lash::messages::Part::kind"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::kind"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-standard-plugins/src/rolling_history.rs:79#if !matches!(part.kind, PartKind::Attachment) || part.attachment.is_none() {"
 
 [[api]]
-symbol = "lash_core::Part::prune_state"
+symbol = "lash::messages::Part::prune_state"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::prune_state"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::Part::reasoning_meta"
+symbol = "lash::messages::Part::reasoning_meta"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::reasoning_meta"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::Part::response_meta"
+symbol = "lash::messages::Part::response_meta"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::response_meta"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::Part::tool_call_id"
+symbol = "lash::messages::Part::tool_call_id"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::tool_call_id"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::Part::tool_name"
+symbol = "lash::messages::Part::tool_name"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::tool_name"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::Part::tool_replay"
+symbol = "lash::messages::Part::tool_replay"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::Part::tool_replay"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::Part::attachment_part"
+symbol = "lash::messages::Part::attachment_part"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::attachment_part"]
 area = "attachments"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers constructing transcript attachments outside the workspace."
 
 [[api]]
-symbol = "lash_core::Part::code"
+symbol = "lash::messages::Part::code"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::code"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: custom protocol and durable-store implementers constructing typed transcript parts outside the workspace."
 
 [[api]]
-symbol = "lash_core::Part::error"
+symbol = "lash::messages::Part::error"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::error"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: custom protocol and durable-store implementers constructing typed transcript parts outside the workspace."
 
 [[api]]
-symbol = "lash_core::Part::output"
+symbol = "lash::messages::Part::output"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::output"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: custom protocol and durable-store implementers constructing typed transcript parts outside the workspace."
 
 [[api]]
-symbol = "lash_core::Part::prose"
+symbol = "lash::messages::Part::prose"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::prose"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: custom provider and protocol implementers preserving assistant response replay metadata while constructing transcript prose."
 
 [[api]]
-symbol = "lash_core::Part::reasoning"
+symbol = "lash::messages::Part::reasoning"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::reasoning"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: custom provider and protocol implementers preserving opaque reasoning replay metadata across transcript turns."
 
 [[api]]
-symbol = "lash_core::Part::text"
+symbol = "lash::messages::Part::text"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::text"]
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Concrete host class: custom provider, protocol, and durable-store implementers constructing typed transcript text outside the workspace."
 
 [[api]]
-symbol = "lash_core::Part::tool_call"
+symbol = "lash::messages::Part::tool_call"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::tool_call"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party provider and protocol implementers preserving opaque tool-call replay metadata across transcript turns."
 
 [[api]]
-symbol = "lash_core::Part::tool_result"
+symbol = "lash::messages::Part::tool_result"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::tool_result"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin and protocol implementers constructing transcript tool results outside the workspace."
 
 [[api]]
-symbol = "lash_core::Part::tool_result_attachment"
+symbol = "lash::messages::Part::tool_result_attachment"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::Part::tool_result_attachment"]
 area = "attachments"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin and attachment-backend implementers constructing transcript tool-result attachments outside the workspace."
 
 [[api]]
-symbol = "lash_core::PartKind"
+symbol = "lash::messages::PartKind"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-protocol-rlm/src/driver/history.rs:707#lash_core::PartKind::Text | lash_core::PartKind::Prose"
 
 [[api]]
-symbol = "lash_core::PartKind::Attachment"
+symbol = "lash::messages::PartKind::Attachment"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::Attachment"]
 area = "attachments"
 disposition = "unused-justify"
 reason = "Concrete host class: custom durable store or attachment backend implementers; bundled examples use repository backends and do not implement this backend-facing contract."
 
 [[api]]
-symbol = "lash_core::PartKind::Code"
+symbol = "lash::messages::PartKind::Code"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::Code"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::PartKind::Error"
+symbol = "lash::messages::PartKind::Error"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::Error"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::PartKind::Output"
+symbol = "lash::messages::PartKind::Output"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::Output"]
 area = "sessions-turns"
 disposition = "unused-remove"
 reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
 
 [[api]]
-symbol = "lash_core::PartKind::Prose"
+symbol = "lash::messages::PartKind::Prose"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::Prose"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-protocol-rlm/src/driver/history.rs:707#lash_core::PartKind::Text | lash_core::PartKind::Prose"
 
 [[api]]
-symbol = "lash_core::PartKind::Reasoning"
+symbol = "lash::messages::PartKind::Reasoning"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::Reasoning"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-protocol-rlm/src/driver/history.rs:723#if !matches!(part.kind, lash_core::PartKind::Reasoning) {"
 
 [[api]]
-symbol = "lash_core::PartKind::Text"
+symbol = "lash::messages::PartKind::Text"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::Text"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-protocol-rlm/src/driver/history.rs:707#lash_core::PartKind::Text | lash_core::PartKind::Prose"
 
 [[api]]
-symbol = "lash_core::PartKind::ToolCall"
+symbol = "lash::messages::PartKind::ToolCall"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::ToolCall"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::PartKind::ToolResult"
+symbol = "lash::messages::PartKind::ToolResult"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PartKind::ToolResult"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
@@ -69797,41 +69846,46 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::ProtocolPosition"
+symbol = "lash::provider::ProtocolPosition"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::ProtocolPosition"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::ProtocolPosition::NoResponse"
+symbol = "lash::provider::ProtocolPosition::NoResponse"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ProtocolPosition::NoResponse"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::ProtocolPosition::OutputStarted"
+symbol = "lash::provider::ProtocolPosition::OutputStarted"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ProtocolPosition::OutputStarted"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::ProtocolPosition::ResponseObserved"
+symbol = "lash::provider::ProtocolPosition::ResponseObserved"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ProtocolPosition::ResponseObserved"]
 area = "observation-admin"
 disposition = "internal-consumed"
 usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:595#core_llm::ProtocolPosition::ResponseObserved => Self::ResponseObserved,"
 
 [[api]]
-symbol = "lash_core::ProtocolPosition::TerminalObserved"
+symbol = "lash::provider::ProtocolPosition::TerminalObserved"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ProtocolPosition::TerminalObserved"]
 area = "observation-admin"
 disposition = "internal-test-only"
 usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:842#protocol_position: lash_core::ProtocolPosition::TerminalObserved,"
@@ -70630,94 +70684,105 @@ usage = "crates/lash/src/tests/control_admin.rs:24#_session: &lash_core::Session
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload"
+symbol = "lash::persistence::SessionNodePayload"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-postgres-store/src/postgres/support.rs:755#lash_core::SessionNodePayload::FrameOpen { .. }"
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::Event"
+symbol = "lash::persistence::SessionNodePayload::Event"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::Event"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:100#SessionNodePayload::Event {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::Event::event"
+symbol = "lash::persistence::SessionNodePayload::Event::event"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::Event::event"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-postgres-store/tests/commit_size_benchmark.rs:101#event: SessionHistoryRecord::Protocol("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::FrameOpen"
+symbol = "lash::persistence::SessionNodePayload::FrameOpen"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::FrameOpen"]
 area = "sessions-turns"
 disposition = "internal-consumed"
 usage = "crates/lash-postgres-store/src/postgres/support.rs:755#lash_core::SessionNodePayload::FrameOpen { .. }"
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::FrameOpen::assignment"
+symbol = "lash::persistence::SessionNodePayload::FrameOpen::assignment"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::FrameOpen::assignment"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash/src/tests.rs:166#if let lash_core::SessionNodePayload::FrameOpen { assignment, .. } = &mut node.payload {"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::FrameOpen::frame_key"
+symbol = "lash::persistence::SessionNodePayload::FrameOpen::frame_key"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::FrameOpen::frame_key"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:142#frame_key: format!(\"conflicting-frame-{session_id}\"),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::FrameOpen::protocol_turn_options"
+symbol = "lash::persistence::SessionNodePayload::FrameOpen::protocol_turn_options"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::FrameOpen::protocol_turn_options"]
 area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::FrameOpen::reason"
+symbol = "lash::persistence::SessionNodePayload::FrameOpen::reason"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::FrameOpen::reason"]
 area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs:143#reason: lash_core::AgentFrameReason::continue_as(),"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::Plugin"
+symbol = "lash::persistence::SessionNodePayload::Plugin"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::Plugin"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::Plugin::body"
+symbol = "lash::persistence::SessionNodePayload::Plugin::body"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::Plugin::body"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::SessionNodePayload::Plugin::plugin_type"
+symbol = "lash::persistence::SessionNodePayload::Plugin::plugin_type"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::SessionNodePayload::Plugin::plugin_type"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
@@ -71124,28 +71189,31 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::ToolRegistry"
+symbol = "lash::tools::ToolRegistry"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::ToolRegistry"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
-symbol = "lash_core::ToolRegistry::from_tool_provider"
+symbol = "lash::tools::ToolRegistry::from_tool_provider"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::ToolRegistry::from_tool_provider"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "FIG-863 ruling: ToolRegistry is the internal resolution authority and from_tool_provider remains an engine construction seam; it deliberately has no lash facade home."
 
 [[api]]
-symbol = "lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools"
+symbol = "lash::tools::ToolRegistry::from_tool_provider_with_orchestrating_tools"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools"]
 area = "plugins"
 disposition = "internal-test-only"
-usage = "examples/docs-snippets/src/tools.rs:122#let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools("
+usage = "examples/docs-snippets/src/tools.rs:122#let error = match lash::tools::ToolRegistry::from_tool_provider_with_orchestrating_tools("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -75502,9 +75570,10 @@ disposition = "internal-consumed"
 usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:284#let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request);"
 
 [[api]]
-symbol = "lash_core::facade_support::deterministic_subscription_id"
+symbol = "lash::triggers::deterministic_subscription_id"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::facade_support::deterministic_subscription_id"]
 area = "triggers"
 disposition = "internal-consumed"
 usage = "crates/lash-postgres-store/src/postgres/trigger_store.rs:29#let subscription_id = lash_core::facade_support::deterministic_subscription_id("
@@ -80463,103 +80532,103 @@ disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolContext::sessions` hands `ToolSessionAdmin` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this type is exercised in-repo at crates/lash-core/src/tool_provider.rs::ToolContext::sessions#`ToolSessionAdmin {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError"
+symbol = "lash::tools::ReconfigureError"
 kind = "enum"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError"]
+aliases = ["lash_core::facade_support::ReconfigureError", "lash_core::tool_registry::ReconfigureError"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: first-party plugin crates and core runtime internals -- this type is exercised in-repo at crates/lash-core/src/tool_registry.rs::facade_ops::ToolRegistry::add_tool_provider#`) -> Result<ToolSourceHandle, ReconfigureError> {`, crates/lash-core/src/tool_registry.rs::facade_ops::ToolState::set_membership#`return Err(ReconfigureError::Validation(format!(`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::GenerationMismatch"
+symbol = "lash::tools::ReconfigureError::GenerationMismatch"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::GenerationMismatch"]
+aliases = ["lash_core::facade_support::ReconfigureError::GenerationMismatch", "lash_core::tool_registry::ReconfigureError::GenerationMismatch"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::from_tool_registrations_with_hidden_tools#`source_id, providers,`, crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::apply_state#`return Err(ReconfigureError::GenerationMismatch {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::GenerationMismatch::actual"
+symbol = "lash::tools::ReconfigureError::GenerationMismatch::actual"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::GenerationMismatch::actual"]
+aliases = ["lash_core::facade_support::ReconfigureError::GenerationMismatch::actual", "lash_core::tool_registry::ReconfigureError::GenerationMismatch::actual"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::apply_state#`actual: current_generation,`, crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::apply_state#`actual: state.generation,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::GenerationMismatch::expected"
+symbol = "lash::tools::ReconfigureError::GenerationMismatch::expected"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::GenerationMismatch::expected"]
+aliases = ["lash_core::facade_support::ReconfigureError::GenerationMismatch::expected", "lash_core::tool_registry::ReconfigureError::GenerationMismatch::expected"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised in-repo at crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::apply_state#`expected: next.generation,`, crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::apply_state#`expected: next.generation,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision"
+symbol = "lash::tools::ReconfigureError::CrossLaneToolIdCollision"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision"]
+aliases = ["lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision", "lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 assertion = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"
+symbol = "lash::tools::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"]
+aliases = ["lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id", "lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::leaf_source_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tools.rs:137#assert_eq!(leaf_source_id, \"plugins\");"
 assertion = "examples/docs-snippets/src/tools.rs:137#assert_eq!(leaf_source_id, \"plugins\");"
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::tool_id"
+symbol = "lash::tools::ReconfigureError::CrossLaneToolIdCollision::tool_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::tool_id"]
+aliases = ["lash_core::facade_support::ReconfigureError::CrossLaneToolIdCollision::tool_id", "lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision::tool_id"]
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 assertion = "examples/docs-snippets/src/tools.rs:136#assert_eq!(tool_id.as_str(), \"tool:batch\");"
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::UnknownSource"
+symbol = "lash::tools::ReconfigureError::UnknownSource"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::UnknownSource"]
+aliases = ["lash_core::facade_support::ReconfigureError::UnknownSource", "lash_core::tool_registry::ReconfigureError::UnknownSource"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::restore_state#`let rebound = {`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::UnknownSource::0"
+symbol = "lash::tools::ReconfigureError::UnknownSource::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::UnknownSource::0"]
+aliases = ["lash_core::facade_support::ReconfigureError::UnknownSource::0", "lash_core::tool_registry::ReconfigureError::UnknownSource::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this field is exercised at crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::empty_with_hidden_tools#`next_live_source_id: 0,`, not by any example, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::Validation"
+symbol = "lash::tools::ReconfigureError::Validation"
 kind = "variant"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::Validation"]
+aliases = ["lash_core::facade_support::ReconfigureError::Validation", "lash_core::tool_registry::ReconfigureError::Validation"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: core runtime internals -- this variant is exercised in-repo at crates/lash-core/src/tool_registry/registry_impl.rs::ToolRegistry::refresh_sources#`.map(|(id, source)| (id.clone(), Arc::clone(source)))`, crates/lash-core/src/tool_registry.rs::facade_ops::ToolState::set_membership#`return Err(ReconfigureError::Validation(format!(`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
-symbol = "lash_core::facade_support::ReconfigureError::Validation::0"
+symbol = "lash::tools::ReconfigureError::Validation::0"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::tool_registry::ReconfigureError::Validation::0"]
+aliases = ["lash_core::facade_support::ReconfigureError::Validation::0", "lash_core::tool_registry::ReconfigureError::Validation::0"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::ToolRegistry::from_tool_provider` hands `ReconfigureError` to hosts (plugin and tool implementers). Consumer class: the runtime-agnostic sans-io layer and the documentation-snippet example host -- this field is exercised in-repo at crates/lash-sansio/src/llm/types.rs::NonNegativeFiniteF64::new#`let value = if value == 0.0 { 0.0 } else { value };`, crates/lash-sansio/src/llm/types.rs::NonNegativeFiniteF64::check_finite_non_negative#`if value < 0.0 {`. An example already reaches it, but this row records no usage anchor, so the disposition stays unused until that anchor is recorded."
@@ -82609,8 +82678,8 @@ aliases = ["lash_core::AttemptContext"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:123#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:123#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
 reason = "The executable FIG-1294 docs-snippet provider uses AttemptContext to emit an intent and asserts that the emitted intent preserves its session identity."
 
 [[api]]
@@ -82774,8 +82843,8 @@ aliases = ["lash_core::AttemptContext::session_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:123#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:123#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
 reason = "The executable FIG-1294 attempt provider emits an intent from AttemptContext::session_id(), and its behavioral law asserts that the emitted intent preserves that identity."
 
 [[api]]
@@ -83079,8 +83148,8 @@ aliases = ["lash_core::StartProcessIntent"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:300#assert_eq!(start_intent.session_id, SESSION);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:300#assert_eq!(start_intent.session_id, SESSION);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:303#assert_eq!(start_intent.session_id, SESSION);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:303#assert_eq!(start_intent.session_id, SESSION);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83090,8 +83159,8 @@ aliases = ["lash_core::StartProcessIntent::on_parent_end"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:295#on_parent_end: lash::tools::ProcessParentEndPolicy::Cancel,"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:317#assert_eq!(settled.len(), 1);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:181#on_parent_end: lash::tools::ProcessParentEndPolicy::Cancel,"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:320#assert_eq!(settled.len(), 1);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83101,8 +83170,8 @@ aliases = ["lash_core::StartProcessIntent::request"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:290#request: lash::process::ProcessStartRequest::external("
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:302#start_intent.request.id.as_str(),"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:176#request: lash::process::ProcessStartRequest::external("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:305#start_intent.request.id.as_str(),"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83112,8 +83181,8 @@ aliases = ["lash_core::StartProcessIntent::session_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:289#session_id: SESSION.to_string(),"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:300#assert_eq!(start_intent.session_id, SESSION);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:175#session_id: SESSION.to_string(),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:303#assert_eq!(start_intent.session_id, SESSION);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83265,8 +83334,8 @@ aliases = ["lash_core::ToolIntent"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:305#assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:305#assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:308#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::StartProcess);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:308#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::StartProcess);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83294,8 +83363,8 @@ aliases = ["lash_core::ToolIntent::EmitProcessEvent"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83306,7 +83375,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1294_ingress.rs:44#lash::tools::ToolIntent::EmitProcessEvent(lash::tools::EmitProcessEventIntent {"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83316,7 +83385,7 @@ aliases = ["lash_core::ToolIntent::EmitTrigger"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+usage = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::EmitTrigger);"
 assertion = "examples/agent-workbench/src/mail.rs:640#assert_eq!(declared.request.source_type, MAIL_RECEIVED_SOURCE_TYPE);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
@@ -83356,8 +83425,8 @@ aliases = ["lash_core::ToolIntent::StartProcess"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:305#assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:305#assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:308#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::StartProcess);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:308#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::StartProcess);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83367,8 +83436,8 @@ aliases = ["lash_core::ToolIntent::StartProcess::0"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:288#let intent = lash::tools::ToolIntent::StartProcess(Box::new(lash::tools::StartProcessIntent {"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:300#assert_eq!(start_intent.session_id, SESSION);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:291#let intent = lash::tools::ToolIntent::StartProcess(Box::new(lash::tools::StartProcessIntent {"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:303#assert_eq!(start_intent.session_id, SESSION);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83378,8 +83447,8 @@ aliases = ["lash_core::ToolIntent::kind"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:305#assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:198#assert_eq!(recorded_kind, first_kind);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:308#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::StartProcess);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:201#assert_eq!(recorded_kind, first_kind);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83389,8 +83458,8 @@ aliases = ["lash_core::ToolIntent::session_id"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:181#assert_eq!(start.session_id(), SESSION);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:181#assert_eq!(start.session_id(), SESSION);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:184#assert_eq!(start.session_id(), SESSION);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:184#assert_eq!(start.session_id(), SESSION);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83400,7 +83469,7 @@ aliases = ["lash_core::ToolIntents"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:118#assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:120#lash::tools::TOOL_INTENT_PROTOCOL_V1"
 assertion = "examples/docs-snippets/src/fig1294_ingress.rs:117#assert!(!intents.is_empty());"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
@@ -83411,8 +83480,8 @@ aliases = ["lash_core::ToolIntents::intents"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:119#assert_eq!(intents.intents.len(), 1);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:120#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:122#assert_eq!(intents.intents.len(), 1);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:123#assert_eq!(intents.intents[0].session_id(), attempt.session_id());"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83433,8 +83502,8 @@ aliases = ["lash_core::ToolIntents::protocol_version"]
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:118#assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:118#assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:120#lash::tools::TOOL_INTENT_PROTOCOL_V1"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:120#lash::tools::TOOL_INTENT_PROTOCOL_V1"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83445,7 +83514,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/fig1294_ingress.rs:94#lash::tools::ToolIntents::v1(vec![event_intent(call.context.session_id())]),"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:119#assert_eq!(intents.intents.len(), 1);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:122#assert_eq!(intents.intents.len(), 1);"
 reason = "The executable FIG-1294 provider and ingress laws exercise this authoring surface and assert the admitted or returned durable intent behavior."
 
 [[api]]
@@ -83511,9 +83580,10 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::TOOL_INTENT_PROTOCOL_V1"
+symbol = "lash::tools::TOOL_INTENT_PROTOCOL_V1"
 kind = "constant"
 availability = "default+all-features"
+aliases = ["lash_core::TOOL_INTENT_PROTOCOL_V1"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
@@ -83533,8 +83603,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:158#assert!(matches!("
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#ToolIntentExecutionOutcome::Executed { .. }"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:161#assert!(matches!("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:163#ToolIntentExecutionOutcome::Executed { .. }"
 reason = "The executable FIG-1294 ingress law observes a realized host outcome and asserts that it is the typed Executed result."
 
 [[api]]
@@ -83544,8 +83614,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:158#assert!(matches!("
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#ToolIntentExecutionOutcome::Executed { .. }"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:161#assert!(matches!("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:163#ToolIntentExecutionOutcome::Executed { .. }"
 reason = "The executable FIG-1294 ingress law matches the realized host outcome and asserts the Executed variant."
 
 [[api]]
@@ -83564,8 +83634,8 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:508#assert!(matches!("
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:512#kind: lash_core::ToolIntentKind::CancelProcess,"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:161#assert!(matches!("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:518#kind: lash::tools::ToolIntentKind::CancelProcess,"
 reason = "The executable FIG-1294 ingress law matches a realized Executed outcome and asserts its concrete CancelProcess kind."
 
 [[api]]
@@ -83707,59 +83777,66 @@ disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentKind"
+symbol = "lash::tools::ToolIntentKind"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::ToolIntentKind"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentKind::CancelProcess"
+symbol = "lash::tools::ToolIntentKind::CancelProcess"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ToolIntentKind::CancelProcess"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentKind::EmitProcessEvent"
+symbol = "lash::tools::ToolIntentKind::EmitProcessEvent"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ToolIntentKind::EmitProcessEvent"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentKind::EmitTrigger"
+symbol = "lash::tools::ToolIntentKind::EmitTrigger"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ToolIntentKind::EmitTrigger"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
-assertion = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);"
+usage = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::EmitTrigger);"
+assertion = "examples/agent-workbench/src/mail.rs:635#assert_eq!(intent.kind(), lash::tools::ToolIntentKind::EmitTrigger);"
 reason = "The workbench inbox `send` tool declares this emission so the committed mail row and its `mail.received` occurrence land in one attempt outcome."
 
 [[api]]
-symbol = "lash_core::ToolIntentKind::SignalProcess"
+symbol = "lash::tools::ToolIntentKind::SignalProcess"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ToolIntentKind::SignalProcess"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentKind::StartProcess"
+symbol = "lash::tools::ToolIntentKind::StartProcess"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ToolIntentKind::StartProcess"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
 
 [[api]]
-symbol = "lash_core::ToolIntentKind::as_str"
+symbol = "lash::tools::ToolIntentKind::as_str"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::ToolIntentKind::as_str"]
 area = "plugins"
 disposition = "unused-justify"
 reason = "Runtime host contract for typed tool-intent admission, execution, refusal, and observation; examples do not implement alternative durable hosts."
@@ -84380,8 +84457,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCore::tool_intents"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84390,8 +84467,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:422#direct.as_output().value_for_projection()[\"name\"],"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:422#direct.as_output().value_for_projection()[\"name\"],"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:428#direct.as_output().value_for_projection()[\"name\"],"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:428#direct.as_output().value_for_projection()[\"name\"],"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84400,8 +84477,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84410,8 +84487,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84420,8 +84497,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84430,8 +84507,8 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84440,8 +84517,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84450,8 +84527,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:262#assert_eq!(recorded_replay_key, \"forged\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:262#assert_eq!(recorded_replay_key, \"forged\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:265#assert_eq!(recorded_replay_key, \"forged\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:265#assert_eq!(recorded_replay_key, \"forged\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84460,8 +84537,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:150#assert_eq!(key.identity(), derived.identity());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:153#assert_eq!(key.identity(), derived.identity());"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84470,8 +84547,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84480,8 +84557,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84490,8 +84567,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:160#ToolIntentExecutionOutcome::Executed { .. }"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#ToolIntentExecutionOutcome::Executed { .. }"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:163#ToolIntentExecutionOutcome::Executed { .. }"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:163#ToolIntentExecutionOutcome::Executed { .. }"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84500,8 +84577,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:157#assert!(!replayed);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:160#assert!(!replayed);"
 reason = "The host-facing replay discriminator is exercised and asserted by the executable FIG-1294 ingress law."
 
 [[api]]
@@ -84510,8 +84587,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84520,8 +84597,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84530,8 +84607,8 @@ kind = "enum"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84540,8 +84617,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
 reason = "The runtime-owned duplicate refusal is exercised and asserted by the executable FIG-1294 ingress law."
 
 [[api]]
@@ -84550,8 +84627,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:168#assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:171#assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);"
 reason = "The runtime-owned duplicate refusal kind is exercised and asserted by the executable FIG-1294 ingress law."
 
 [[api]]
@@ -84560,8 +84637,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:198#assert_eq!(recorded_kind, first_kind);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:198#assert_eq!(recorded_kind, first_kind);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:201#assert_eq!(recorded_kind, first_kind);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:201#assert_eq!(recorded_kind, first_kind);"
 reason = "The executable ingress law realizes the first StartProcess submission, then observes and asserts the durable cross-kind refusal for a later EmitProcessEvent."
 
 [[api]]
@@ -84570,8 +84647,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:198#assert_eq!(recorded_kind, first_kind);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:198#assert_eq!(recorded_kind, first_kind);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:201#assert_eq!(recorded_kind, first_kind);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:201#assert_eq!(recorded_kind, first_kind);"
 reason = "The executable ingress law realizes the first StartProcess submission, then observes and asserts the durable cross-kind refusal for a later EmitProcessEvent."
 
 [[api]]
@@ -84580,8 +84657,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:199#assert_eq!(submitted_kind, event_intent(SESSION).kind());"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:199#assert_eq!(submitted_kind, event_intent(SESSION).kind());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:202#assert_eq!(submitted_kind, event_intent(SESSION).kind());"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:202#assert_eq!(submitted_kind, event_intent(SESSION).kind());"
 reason = "The executable ingress law realizes the first StartProcess submission, then observes and asserts the durable cross-kind refusal for a later EmitProcessEvent."
 
 [[api]]
@@ -84590,8 +84667,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:228#assert_eq!(expected, SCOPE);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:228#assert_eq!(expected, SCOPE);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:231#assert_eq!(expected, SCOPE);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:231#assert_eq!(expected, SCOPE);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84600,8 +84677,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:228#assert_eq!(expected, SCOPE);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:228#assert_eq!(expected, SCOPE);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:231#assert_eq!(expected, SCOPE);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:231#assert_eq!(expected, SCOPE);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84610,8 +84687,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:229#assert_eq!(recorded, \"foreign-scope\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:229#assert_eq!(recorded, \"foreign-scope\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:232#assert_eq!(recorded, \"foreign-scope\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:232#assert_eq!(recorded, \"foreign-scope\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84620,8 +84697,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84630,8 +84707,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84640,8 +84717,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:214#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:217#assert_eq!((expected.as_str(), recorded.as_str()), (SESSION, \"foreign\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84650,8 +84727,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:240#assert_eq!(expected, SESSION);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:240#assert_eq!(expected, SESSION);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:243#assert_eq!(expected, SESSION);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:243#assert_eq!(expected, SESSION);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84660,8 +84737,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:240#assert_eq!(expected, SESSION);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:240#assert_eq!(expected, SESSION);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:243#assert_eq!(expected, SESSION);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:243#assert_eq!(expected, SESSION);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84670,8 +84747,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:241#assert_eq!(recorded, \"foreign-intent\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:241#assert_eq!(recorded, \"foreign-intent\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:244#assert_eq!(recorded, \"foreign-intent\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:244#assert_eq!(recorded, \"foreign-intent\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84680,8 +84757,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:261#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:261#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:264#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:264#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84690,8 +84767,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:261#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:261#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:264#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:264#assert!(expected_replay_key.starts_with(\"tool-intent:v1:sha256:\"));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84700,8 +84777,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:262#assert_eq!(recorded_replay_key, \"forged\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:262#assert_eq!(recorded_replay_key, \"forged\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:265#assert_eq!(recorded_replay_key, \"forged\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:265#assert_eq!(recorded_replay_key, \"forged\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84710,8 +84787,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:592#assert_eq!(recorded, \"list\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:592#assert_eq!(recorded, \"list\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:599#assert_eq!(recorded, \"list\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:599#assert_eq!(recorded, \"list\");"
 reason = "The executable FIG-1294 seeded-journal law observes this typed refusal from a real host-ingress submission and asserts the recorded process-outcome discriminator."
 
 [[api]]
@@ -84720,8 +84797,8 @@ kind = "field"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:592#assert_eq!(recorded, \"list\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:592#assert_eq!(recorded, \"list\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:599#assert_eq!(recorded, \"list\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:599#assert_eq!(recorded, \"list\");"
 reason = "The executable FIG-1294 seeded-journal law destructures the discriminator field from the observed refusal and asserts the exhaustive List spelling."
 
 [[api]]
@@ -84731,8 +84808,8 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolProvider::execute_internal"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:436#fallback.as_output().value_for_projection()[\"name\"],"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:436#fallback.as_output().value_for_projection()[\"name\"],"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:442#fallback.as_output().value_for_projection()[\"name\"],"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:442#fallback.as_output().value_for_projection()[\"name\"],"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84742,178 +84819,195 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolProvider::execute_internal_by_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin"
+symbol = "lash::tools::InternalProcessAdmin"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:405#assert_eq!(value[\"start_ok\"], false);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:405#assert_eq!(value[\"start_ok\"], false);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:411#assert_eq!(value[\"start_ok\"], false);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:411#assert_eq!(value[\"start_ok\"], false);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin::await_process"
+symbol = "lash::tools::InternalProcessAdmin::await_process"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin::await_process"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:407#assert_eq!(value[\"await_error\"], true);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:407#assert_eq!(value[\"await_error\"], true);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:413#assert_eq!(value[\"await_error\"], true);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:413#assert_eq!(value[\"await_error\"], true);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin::cancel"
+symbol = "lash::tools::InternalProcessAdmin::cancel"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin::cancel"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:408#assert_eq!(value[\"cancel_error\"], true);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:408#assert_eq!(value[\"cancel_error\"], true);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:414#assert_eq!(value[\"cancel_error\"], true);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:414#assert_eq!(value[\"cancel_error\"], true);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin::complete_external"
+symbol = "lash::tools::InternalProcessAdmin::complete_external"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin::complete_external"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:353#.complete_external("
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:410#assert_eq!(value[\"complete_error\"], true);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:359#.complete_external("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:416#assert_eq!(value[\"complete_error\"], true);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin::list_handles_filtered"
+symbol = "lash::tools::InternalProcessAdmin::list_handles_filtered"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin::list_handles_filtered"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:345#.list_handles_filtered(&lash_core::ProcessListFilter::default())"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"list_ok\"], false);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:351#.list_handles_filtered(&lash::process::ProcessListFilter::default())"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:412#assert_eq!(value[\"list_ok\"], false);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin::signal"
+symbol = "lash::tools::InternalProcessAdmin::signal"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin::signal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:350#.signal(\"docs-missing\", \"resume\", serde_json::Value::Null)"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:409#assert_eq!(value[\"signal_error\"], true);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:356#.signal(\"docs-missing\", \"resume\", serde_json::Value::Null)"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:415#assert_eq!(value[\"signal_error\"], true);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin::start"
+symbol = "lash::tools::InternalProcessAdmin::start"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin::start"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:338#.start(lash_core::ProcessStartRequest::external("
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:405#assert_eq!(value[\"start_ok\"], false);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:344#.start(lash::process::ProcessStartRequest::external("
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:411#assert_eq!(value[\"start_ok\"], false);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessContext"
+symbol = "lash::tools::InternalProcessContext"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessContext"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:402#assert_eq!(value[\"session_id\"], \"test-session\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:402#assert_eq!(value[\"session_id\"], \"test-session\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:408#assert_eq!(value[\"session_id\"], \"test-session\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:408#assert_eq!(value[\"session_id\"], \"test-session\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::cancellation_token"
+symbol = "lash::tools::InternalProcessContext::cancellation_token"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessContext::cancellation_token"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:367#\"has_cancellation\": context.cancellation_token().is_some(),"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:404#assert_eq!(value[\"has_cancellation\"], false);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:373#\"has_cancellation\": context.cancellation_token().is_some(),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:410#assert_eq!(value[\"has_cancellation\"], false);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::process_events"
+symbol = "lash::tools::InternalProcessContext::process_events"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessContext::process_events"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::process_id"
+symbol = "lash::tools::InternalProcessContext::process_id"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessContext::process_id"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:366#\"process_id\": context.process_id(),"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:403#assert!(value[\"process_id\"].is_null());"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:372#\"process_id\": context.process_id(),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:409#assert!(value[\"process_id\"].is_null());"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::processes"
+symbol = "lash::tools::InternalProcessContext::processes"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessContext::processes"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:405#assert_eq!(value[\"start_ok\"], false);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:405#assert_eq!(value[\"start_ok\"], false);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:411#assert_eq!(value[\"start_ok\"], false);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:411#assert_eq!(value[\"start_ok\"], false);"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessContext::session_id"
+symbol = "lash::tools::InternalProcessContext::session_id"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessContext::session_id"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:365#\"session_id\": context.session_id(),"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:402#assert_eq!(value[\"session_id\"], \"test-session\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:371#\"session_id\": context.session_id(),"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:408#assert_eq!(value[\"session_id\"], \"test-session\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessToolCall"
+symbol = "lash::tools::InternalProcessToolCall"
 kind = "struct"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessToolCall"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessToolCall::args"
+symbol = "lash::tools::InternalProcessToolCall::args"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessToolCall::args"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:401#assert_eq!(value[\"args\"], serde_json::json!({\"probe\": true}));"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:401#assert_eq!(value[\"args\"], serde_json::json!({\"probe\": true}));"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:407#assert_eq!(value[\"args\"], serde_json::json!({\"probe\": true}));"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:407#assert_eq!(value[\"args\"], serde_json::json!({\"probe\": true}));"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessToolCall::context"
+symbol = "lash::tools::InternalProcessToolCall::context"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessToolCall::context"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:402#assert_eq!(value[\"session_id\"], \"test-session\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:402#assert_eq!(value[\"session_id\"], \"test-session\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:408#assert_eq!(value[\"session_id\"], \"test-session\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:408#assert_eq!(value[\"session_id\"], \"test-session\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
-symbol = "lash_core::InternalProcessToolCall::name"
+symbol = "lash::tools::InternalProcessToolCall::name"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessToolCall::name"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:400#assert_eq!(value[\"name\"], \"internal_probe\");"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:406#assert_eq!(value[\"name\"], \"internal_probe\");"
 reason = "The executable FIG-1294 docs-snippet law exercises this typed boundary and asserts its observed admission, refusal, or internal-process outcome."
 
 [[api]]
@@ -84932,8 +85026,8 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1294_ingress.rs:317#assert_eq!(settled.len(), 1);"
-assertion = "examples/docs-snippets/src/fig1294_ingress.rs:317#assert_eq!(settled.len(), 1);"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:320#assert_eq!(settled.len(), 1);"
+assertion = "examples/docs-snippets/src/fig1294_ingress.rs:320#assert_eq!(settled.len(), 1);"
 reason = "The executable host-ingress law starts a child, settles the retained default Cancel action through the facade, and asserts one typed settlement."
 
 [[api]]
@@ -85302,18 +85396,20 @@ usage = "examples/docs-snippets/src/architecture_providers.rs:423#.validate_endp
 assertion = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
 
 [[api]]
-symbol = "lash_core::ProviderEndpointError"
+symbol = "lash::provider::ProviderEndpointError"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::ProviderEndpointError"]
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
 assertion = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
 
 [[api]]
-symbol = "lash_core::ProviderEndpointError::UserinfoNotAllowed"
+symbol = "lash::provider::ProviderEndpointError::UserinfoNotAllowed"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::ProviderEndpointError::UserinfoNotAllowed"]
 area = "protocol"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:425#assert_eq!(endpoint_error, ProviderEndpointError::UserinfoNotAllowed);"
@@ -89491,6 +89587,34 @@ symbol = "lash::durability::DurableProcessWorkerConfig::with_worker_slot_supplie
 kind = "function"
 
 [[removal_verdict]]
+symbol = "lash::messages::Part::id"
+kind = "field"
+
+[[removal_verdict]]
+symbol = "lash::messages::Part::prune_state"
+kind = "field"
+
+[[removal_verdict]]
+symbol = "lash::messages::Part::reasoning_meta"
+kind = "field"
+
+[[removal_verdict]]
+symbol = "lash::messages::Part::response_meta"
+kind = "field"
+
+[[removal_verdict]]
+symbol = "lash::messages::PartKind::Code"
+kind = "variant"
+
+[[removal_verdict]]
+symbol = "lash::messages::PartKind::Error"
+kind = "variant"
+
+[[removal_verdict]]
+symbol = "lash::messages::PartKind::Output"
+kind = "variant"
+
+[[removal_verdict]]
 symbol = "lash::observe::LiveReplayStore::current_cursor"
 kind = "function"
 
@@ -90661,34 +90785,6 @@ symbol = "lash_core::OutputState::Usable"
 kind = "variant"
 superseded_by = "unused-justify"
 reason = "678d567bf internalized this export behind the doc-hidden facade_support seam and deleted its row in the same diff, so the verdict was never discharged. FIG-1223 re-dispositions the path from checked evidence: unused-justify at lash_core::facade_support::OutputState::Usable."
-
-[[removal_verdict]]
-symbol = "lash_core::Part::id"
-kind = "field"
-
-[[removal_verdict]]
-symbol = "lash_core::Part::prune_state"
-kind = "field"
-
-[[removal_verdict]]
-symbol = "lash_core::Part::reasoning_meta"
-kind = "field"
-
-[[removal_verdict]]
-symbol = "lash_core::Part::response_meta"
-kind = "field"
-
-[[removal_verdict]]
-symbol = "lash_core::PartKind::Code"
-kind = "variant"
-
-[[removal_verdict]]
-symbol = "lash_core::PartKind::Error"
-kind = "variant"
-
-[[removal_verdict]]
-symbol = "lash_core::PartKind::Output"
-kind = "variant"
 
 [[removal_verdict]]
 symbol = "lash_core::PersistentRuntimeServices::new"
@@ -93441,9 +93537,10 @@ disposition = "internal-consumed"
 usage = "crates/lash-tools/src/shell/mod.rs:361#audit.resolved();"
 
 [[api]]
-symbol = "lash_core::InternalProcessAdmin::external_launch_audit"
+symbol = "lash::tools::InternalProcessAdmin::external_launch_audit"
 kind = "function"
 availability = "default+all-features"
+aliases = ["lash_core::InternalProcessAdmin::external_launch_audit"]
 area = "processes"
 disposition = "internal-consumed"
 usage = "crates/lash-tools/src/shell/mod.rs:299#.external_launch_audit(detached_process_id);"
@@ -95174,3 +95271,484 @@ aliases = ["lash_core::facade_support::AssembledTurn::turn_cancel_input_outcome"
 area = "sessions-turns"
 disposition = "unused-justify"
 reason = "Advanced runtime result seam projected directly into the facade TurnReport cancellation outcome."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay"
+kind = "struct"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:982#Some(lash::direct::ProviderReasoningReplay {"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay::encrypted_content"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::direct::ProviderReasoningReplay::encrypted_content`."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay::is_empty"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::direct::ProviderReasoningReplay::is_empty`."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay::item_id"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::direct::ProviderReasoningReplay::item_id`."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay::origin"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:984#origin: Some(lash::direct::ProviderRouteIdentity::new("
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay::redacted"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::direct::ProviderReasoningReplay::redacted`."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay::signature"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:983#signature: Some(format!(\"FIG1374-OPAQUE-REPLAY-{turn}\")),"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::direct::ProviderReasoningReplay::summary"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::direct::ProviderReasoningReplay::summary`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:477#LlmContentBlock::Text { text, .. }"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Attachment"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::Attachment`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Attachment::attachment_idx"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::Attachment::attachment_idx`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Reasoning"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::Reasoning`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Reasoning::replay"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::Reasoning::replay`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Reasoning::text"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::Reasoning::text`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Text"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:477#LlmContentBlock::Text { text, .. }"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Text::cache_breakpoint"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::Text::cache_breakpoint`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Text::response_meta"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::Text::response_meta`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::Text::text"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:477#LlmContentBlock::Text { text, .. }"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolCall"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolCall`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolCall::call_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolCall::call_id`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolCall::input_json"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolCall::input_json`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolCall::replay"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolCall::replay`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolCall::tool_name"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolCall::tool_name`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolResult"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolResult`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolResult::call_id"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolResult::call_id`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolResult::content"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolResult::content`."
+
+[[api]]
+symbol = "lash::provider::LlmContentBlock::ToolResult::tool_name"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmContentBlock::ToolResult::tool_name`."
+
+[[api]]
+symbol = "lash::provider::LlmMessage"
+kind = "struct"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:469#fn next_replay_route_turn(messages: &[LlmMessage]) -> usize {"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmMessage::blocks"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:474#message.blocks.iter().any(|block| {"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmMessage::is_blank"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmMessage::is_blank`."
+
+[[api]]
+symbol = "lash::provider::LlmMessage::new"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmMessage::new`."
+
+[[api]]
+symbol = "lash::provider::LlmMessage::role"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:472#.filter(|message| message.role == LlmRole::Assistant)"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmMessage::text"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The only current facade-path candidate is test construction; the member remains public with its containing provider type."
+
+[[api]]
+symbol = "lash::provider::LlmRole"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:472#.filter(|message| message.role == LlmRole::Assistant)"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmRole::Assistant"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:472#.filter(|message| message.role == LlmRole::Assistant)"
+reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
+
+[[api]]
+symbol = "lash::provider::LlmRole::System"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::provider::LlmRole::System`."
+
+[[api]]
+symbol = "lash::provider::LlmRole::User"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "unused-justify"
+reason = "The only current facade-path candidate is test construction; the member remains public with its containing provider type."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager"
+kind = "struct"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:428#let manager = Arc::new(lash::testing::MockSessionManager::default());"
+reason = "The feature-gated `lash::testing` helper is consumed only by an example test."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::closed"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::closed`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::created"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::created`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::created_snapshot"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::created_snapshot`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::process_registry"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::process_registry`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::snapshot"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::snapshot`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::tool_catalog"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::tool_catalog`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::tool_registry"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::tool_registry`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::turn"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::turn`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::turns"
+kind = "field"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::turns`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::with_snapshot"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::with_snapshot`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::with_tool_catalog"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::with_tool_catalog`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::with_tool_registry"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::with_tool_registry`."
+
+[[api]]
+symbol = "lash::testing::MockSessionManager::with_turn"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::MockSessionManager::with_turn`."
+
+[[api]]
+symbol = "lash::testing::TestClock"
+kind = "struct"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:334#lash::testing::TestClock::new("
+reason = "The feature-gated `lash::testing` helper is consumed only by an example test."
+
+[[api]]
+symbol = "lash::testing::TestClock::advance"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::TestClock::advance`."
+
+[[api]]
+symbol = "lash::testing::TestClock::new"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "examples/agent-workbench/src/main_sections/tests/queued_work.rs:334#lash::testing::TestClock::new("
+reason = "The feature-gated `lash::testing` helper is consumed only by an example test."
+
+[[api]]
+symbol = "lash::testing::TestClock::set"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "unused-justify"
+reason = "The facade re-exports the containing type required by the migrated examples; no migrated example directly exercises `lash::testing::TestClock::set`."
+
+[[api]]
+symbol = "lash::testing::mock_attempt_context"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "examples/agent-workbench/src/mail.rs:605#context: &lash::testing::mock_attempt_context(),"
+reason = "The feature-gated `lash::testing` helper is consumed only by an example test."
+
+[[api]]
+symbol = "lash::testing::mock_tool_context"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "examples/docs-snippets/src/fig1294_ingress.rs:101#let legacy = lash::testing::mock_tool_context();"
+reason = "The feature-gated `lash::testing` helper is consumed only by an example test."
+
+[[api]]
+symbol = "lash::testing::test_code_protocol_factories"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:393#plugins.extend(lash::testing::test_code_protocol_factories());"
+reason = "The feature-gated `lash::testing` helper is consumed only by an example test."

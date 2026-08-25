@@ -373,13 +373,13 @@
 
             fn text_message(
                 id: &str,
-                role: lash_core::MessageRole,
+                role: lash::messages::MessageRole,
                 content: &str,
-            ) -> lash_core::Message {
-                lash_core::Message {
+            ) -> lash::messages::Message {
+                lash::messages::Message {
                     id: id.to_string(),
                     role,
-                    parts: vec![lash_core::Part::text(
+                    parts: vec![lash::messages::Part::text(
                         format!("{id}.p0"),
                         content.to_string(),
                         None,
@@ -390,7 +390,7 @@
             }
 
             let mut plugins = lash::PluginStack::new();
-            plugins.extend(lash_core::testing::test_code_protocol_factories());
+            plugins.extend(lash::testing::test_code_protocol_factories());
             let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
             configure_workbench_plugins(
                 &mut plugins,
@@ -406,26 +406,26 @@
                 .build_session("workbench-rolling-history-session", None)
                 .expect("build rolling history plugin session");
             let messages = vec![
-                text_message("u1", lash_core::MessageRole::User, OLD_MARKER),
-                text_message("a1", lash_core::MessageRole::Assistant, "old response"),
-                text_message("u2", lash_core::MessageRole::User, CURRENT_MARKER),
+                text_message("u1", lash::messages::MessageRole::User, OLD_MARKER),
+                text_message("a1", lash::messages::MessageRole::Assistant, "old response"),
+                text_message("u2", lash::messages::MessageRole::User, CURRENT_MARKER),
             ];
-            let policy = lash_core::SessionPolicy {
-                model: lash_core::ModelSpec::builder("workbench-rolling-history-model")
+            let policy = lash::runtime::SessionPolicy {
+                model: lash::ModelSpec::builder("workbench-rolling-history-model")
                     .context_window_tokens(41_000)
                     .build()
                     .expect("rolling history model"),
-                ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                ..lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded)
             };
-            let state = lash_core::SessionSnapshot {
+            let state = lash::runtime::SessionSnapshot {
                 session_id: "workbench-rolling-history-session".to_string(),
                 policy,
-                session_graph: lash_core::SessionGraph::from_active_read_state(&messages),
-                ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
+                session_graph: lash::persistence::SessionGraph::from_active_read_state(&messages),
+                ..lash::runtime::SessionSnapshot::new(lash::runtime::SessionPolicy::new(
+                    lash::TurnBudget::Unbounded,
                 ))
             };
-            let manager = Arc::new(lash_core::testing::MockSessionManager::default());
+            let manager = Arc::new(lash::testing::MockSessionManager::default());
             let context_window_tokens = state.policy.context_window_tokens();
             let ctx = lash::plugins::TurnTransformContext {
                 session_id: state.session_id.clone(),
@@ -441,19 +441,19 @@
                 sessions: manager.clone(),
                 session_lifecycle: manager.clone(),
                 session_graph: manager,
-                scoped_effect_controller: lash_core::ScopedEffectController::shared(
+                scoped_effect_controller: lash::runtime::ScopedEffectController::shared(
                     Arc::new(
-                        lash_core::facade_support::InlineRuntimeEffectController::default(),
+                        lash::runtime::InlineRuntimeEffectController::default(),
                     ),
-                    lash_core::ExecutionScope::turn(
+                    lash::runtime::ExecutionScope::turn(
                         "workbench-rolling-history-session",
                         "workbench-rolling-history-turn",
                     ),
                 )
                 .expect("build rolling history turn scope"),
-                direct_completions: lash_core::facade_support::DirectCompletionClient::from_fn(
+                direct_completions: lash::runtime::DirectCompletionClient::from_fn(
                     |_, _| {
-                        Err(lash_core::PluginError::Session(
+                        Err(lash::plugins::PluginError::Session(
                             "direct completions are unavailable in this test".to_string(),
                         ))
                     },
@@ -472,7 +472,7 @@
                 .expect("serialize the projected prompt messages");
 
             assert_eq!(context_window_tokens, 41_000);
-            assert_eq!(state.policy.turn_budget, lash_core::TurnBudget::Unbounded);
+            assert_eq!(state.policy.turn_budget, lash::TurnBudget::Unbounded);
             assert!(
                 second_prompt.contains(CURRENT_MARKER),
                 "rolling history must retain the current user turn"

@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use lash::direct::{LlmOutputPart, LlmStreamEvent, LlmUsage};
-use lash::provider::{
-    GenerationRetryGuarantee, LlmRequest, LlmResponse, LlmTransportError, Provider,
-    ProviderComponents, ProviderFailureKind, ProviderHandle, ProviderOptions, ProviderReliability,
+use lash::direct::{
+    LlmOutputPart, LlmStreamEvent, LlmUsage, ProviderReasoningReplay, ProviderRouteIdentity,
 };
-use lash_core::llm::types::{
-    LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay, ProviderRouteIdentity,
+use lash::provider::{
+    GenerationRetryGuarantee, LlmContentBlock, LlmMessage, LlmRequest, LlmResponse, LlmRole,
+    LlmTransportError, Provider, ProviderComponents, ProviderFailureKind, ProviderHandle,
+    ProviderOptions, ProviderReliability,
 };
 
 pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO";
@@ -262,8 +262,8 @@ impl Provider for DevFailureProvider {
         "workbench-dev-failure"
     }
 
-    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
-        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    fn route_identity(&self, model: &str) -> lash::direct::ProviderRouteIdentity {
+        lash::direct::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
     }
 
     fn options(&self) -> ProviderOptions {
@@ -497,7 +497,7 @@ fn send_reasoning(request: &LlmRequest, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use lash_core::llm::types::{LlmMessage, LlmRole};
+    use lash::provider::{LlmMessage, LlmRole};
 
     use super::{DevProviderScenario, next_replay_route_turn};
 

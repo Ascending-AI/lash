@@ -1382,7 +1382,7 @@ impl WorkbenchQueuedWorkSubmitter {
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 session_id: session_id.to_string(),
                 relation: lash::persistence::SessionRelation::default(),
-                policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
             })
             .await
             .map_err(lash::runtime::RuntimeEffectControllerError::from)?;

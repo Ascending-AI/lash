@@ -34,7 +34,7 @@ fn the_workbench_bounds_both_turn_work_and_turn_stalling() {
     assert_eq!(spec.no_progress_budget, expected_workbench_bound);
 
     let policy =
-        spec.resolve_against(&lash_core::SessionPolicy::new(lash::TurnBudget::Unbounded));
+        spec.resolve_against(&lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded));
     assert_eq!(policy.turn_budget.max_turns(), Some(WORKBENCH_MAX_TURNS));
     let resolved_attempts = policy.no_progress_budget.max_attempts();
     assert_eq!(resolved_attempts, Some(WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS));

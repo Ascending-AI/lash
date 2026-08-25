@@ -429,7 +429,7 @@ mod process_work_tests {
         assert_eq!(identity.definition.as_ref().unwrap()["revision"], 7);
         let execution_env_ref = ProcessExecutionEnvSpec::new(
             Default::default(),
-            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
         )
             .stable_ref()
             .expect("derive process execution environment identity");

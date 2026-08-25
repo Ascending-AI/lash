@@ -338,15 +338,15 @@
             id: "assistant-with-replay".to_string(),
             role: lash::messages::MessageRole::Assistant,
             parts: Arc::new(vec![
-                lash_core::Part::text(
+                lash::messages::Part::text(
                     "assistant-with-replay.p0".to_string(),
                     "visible answer".to_string(),
                     None,
                 ),
-                lash_core::Part::reasoning(
+                lash::messages::Part::reasoning(
                     "assistant-with-replay.p1".to_string(),
                     "hidden portable reasoning".to_string(),
-                    Some(lash_core::llm::types::ProviderReasoningReplay {
+                    Some(lash::direct::ProviderReasoningReplay {
                         signature: Some("opaque".to_string()),
                         ..Default::default()
                     }),

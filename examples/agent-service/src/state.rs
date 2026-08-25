@@ -312,7 +312,7 @@ pub(crate) fn rlm_dialect_from_env() -> Result<lash::rlm::RlmDialect, String> {
 /// configuration change is described in the dialect it is running rather than
 /// the one this process was started with.
 pub(crate) fn rlm_dialect_from_turn_options(
-    options: &lash_core::ProtocolTurnOptions,
+    options: &lash::runtime::ProtocolTurnOptions,
 ) -> lash::rlm::RlmDialect {
     options
         .decode::<lash_rlm_types::RlmCreateExtras>()

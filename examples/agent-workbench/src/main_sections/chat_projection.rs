@@ -141,7 +141,7 @@ fn committed_chat_text(message: &lash::messages::Message) -> String {
     message
         .parts
         .iter()
-        .filter(|part| !matches!(part.kind, lash_core::PartKind::Reasoning))
+        .filter(|part| !matches!(part.kind, lash::messages::PartKind::Reasoning))
         .map(|part| part.content.as_str())
         .collect::<Vec<_>>()
         .join("\n")
@@ -165,7 +165,7 @@ fn is_rlm_assistant_prose_message(message: &lash::messages::Message) -> bool {
     is_durable_internal_rlm_message(message)
         && lash::message_role(message) == "assistant"
         && message.parts.iter().any(|part| {
-            matches!(part.kind, lash_core::PartKind::Prose) && !part.content.trim().is_empty()
+            matches!(part.kind, lash::messages::PartKind::Prose) && !part.content.trim().is_empty()
         })
 }
 
@@ -261,7 +261,7 @@ fn durable_rlm_reasoning_rows(message: &lash::messages::Message) -> Vec<Transcri
         .parts
         .iter()
         .filter(|part| {
-            matches!(part.kind, lash_core::PartKind::Reasoning)
+            matches!(part.kind, lash::messages::PartKind::Reasoning)
                 && !part.content.trim().is_empty()
         })
         .map(|part| TranscriptRow::Reasoning {

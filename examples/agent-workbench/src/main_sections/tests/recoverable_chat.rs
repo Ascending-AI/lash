@@ -1010,13 +1010,13 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                     code: "durable.tool_projection()".to_string(),
                     output: vec!["durable projection".to_string()],
                     calls: vec![
-                        lash_core::ExecutedCallRecord {
+                        lash::persistence::ExecutedCallRecord {
                             operation: "durable.success".to_string(),
-                            outcome: lash_core::ExecutedCallOutcome::Ok,
+                            outcome: lash::persistence::ExecutedCallOutcome::Ok,
                         },
-                        lash_core::ExecutedCallRecord {
+                        lash::persistence::ExecutedCallRecord {
                             operation: "durable.failure".to_string(),
-                            outcome: lash_core::ExecutedCallOutcome::Err,
+                            outcome: lash::persistence::ExecutedCallOutcome::Err,
                         },
                     ],
                     calls_omitted: 3,

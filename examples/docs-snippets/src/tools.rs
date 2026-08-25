@@ -66,7 +66,7 @@ async fn lookup_weather(args: WeatherArgs) -> WeatherReport {
 
 #[test]
 fn leaf_provider_copies_the_recorded_process_environment() {
-    let tool = lash_core::testing::mock_tool_context();
+    let tool = lash::testing::mock_tool_context();
     let attempt = lash::tools::AttemptContext::__for_testing(&tool, "docs-leaf-attempt");
     let stable_ref = attempt
         .process_execution_env_spec()
@@ -119,14 +119,14 @@ mod cross_lane_collision {
 
     #[test]
     fn leaf_and_orchestrating_tool_ids_cannot_collide() {
-        let error = match lash_core::ToolRegistry::from_tool_provider_with_orchestrating_tools(
+        let error = match lash::tools::ToolRegistry::from_tool_provider_with_orchestrating_tools(
             Arc::new(LeafBatchCollisionTool),
             vec![lash_protocol_standard::standard_batch_orchestrating_tool()],
         ) {
             Ok(_) => panic!("leaf and orchestrating registrations must have disjoint ids"),
             Err(error) => error,
         };
-        let lash_core::tool_registry::ReconfigureError::CrossLaneToolIdCollision {
+        let lash::tools::ReconfigureError::CrossLaneToolIdCollision {
             tool_id,
             leaf_source_id,
         } = error

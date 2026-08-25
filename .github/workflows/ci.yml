@@ -96,6 +96,31 @@ env:
   LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
 
 jobs:
+  facade-only-examples:
+    name: Facade-only examples
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Check example facade imports
+        run: python3 scripts/check_facade_only_examples.py
+
   # Sole writer of the shared linux-debug cache and the doctest gate. It builds
   # the superset (`cargo check --workspace --all-targets` plus the doctest
   # link) that every read-only debug-profile job restores. The nextest run is
@@ -361,6 +386,9 @@ jobs:
 
       - name: Check public API example coverage
         run: python3 scripts/check_api_example_coverage.py
+
+      - name: Check facade external types
+        run: python3 scripts/check_facade_external_types.py
 
       - name: Report sccache stats
         if: always()

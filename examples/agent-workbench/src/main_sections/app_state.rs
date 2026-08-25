@@ -975,13 +975,13 @@ pub(crate) async fn commit_assistant_transcript(
         // reasoning part for the next request's route filter to inspect.
         message.content.clear();
         message.parts = vec![
-            lash_core::Part::text(format!("{message_id}.p0"), assistant_text, None),
-            lash_core::Part::reasoning(
+            lash::messages::Part::text(format!("{message_id}.p0"), assistant_text, None),
+            lash::messages::Part::reasoning(
                 format!("{message_id}.p1"),
                 format!("FIG-1374 portable reasoning {turn}"),
-                Some(lash_core::llm::types::ProviderReasoningReplay {
+                Some(lash::direct::ProviderReasoningReplay {
                     signature: Some(format!("FIG1374-OPAQUE-REPLAY-{turn}")),
-                    origin: Some(lash_core::ProviderRouteIdentity::new(
+                    origin: Some(lash::direct::ProviderRouteIdentity::new(
                         "workbench-dev-failure",
                         "workbench-dev-failure",
                         model,

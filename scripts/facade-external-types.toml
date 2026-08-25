@@ -1,0 +1,19 @@
+# Third-party types that the current Lash facade intentionally exposes in a
+# public signature. The rustdoc-JSON gate rejects both additions and stale rows,
+# so this remains an exact reviewed snapshot rather than a growing exemption.
+external_types = [
+    "chrono::datetime::DateTime",
+    "chrono::offset::utc::Utc",
+    "compact_str::CompactString",
+    "serde_json::error::Error",
+    "serde_json::map::Map",
+    "serde_json::number::Number",
+    "serde_json::value::Value",
+    "tokio::sync::mutex::Mutex",
+    "tokio::sync::watch::Receiver",
+    "tokio_util::sync::cancellation_token::CancellationToken",
+    "tokio_util::sync::cancellation_token::WaitForCancellationFuture",
+    "tokio_util::sync::cancellation_token::WaitForCancellationFutureOwned",
+    "tokio_util::sync::cancellation_token::guard::DropGuard",
+    "tokio_util::sync::cancellation_token::guard_ref::DropGuardRef",
+]

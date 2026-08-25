@@ -198,7 +198,7 @@ mod dialect_tests {
     /// dialect is described in the one it is running.
     #[test]
     fn the_dialect_comes_from_the_turns_resolved_options() {
-        let recorded = lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
+        let recorded = lash::runtime::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
             dialect: Some(lash::rlm::RlmDialect::Typescript),
             ..Default::default()
         })
@@ -208,7 +208,9 @@ mod dialect_tests {
             lash::rlm::RlmDialect::Typescript
         );
         assert_eq!(
-            crate::state::rlm_dialect_from_turn_options(&lash_core::ProtocolTurnOptions::default()),
+            crate::state::rlm_dialect_from_turn_options(
+                &lash::runtime::ProtocolTurnOptions::default()
+            ),
             lash::rlm::RlmDialect::Lashlang
         );
     }
