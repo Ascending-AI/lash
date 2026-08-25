@@ -493,7 +493,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         lint = workflow_job_block(workflow, "lint")
 
-        self.assertIn("runs-on: blacksmith-8vcpu-ubuntu-2404", lint)
+        self.assertIn("runs-on: ubuntu-24.04", lint)
         # PR-time smoke enforces the machine-independent inventory only;
         # allocation ceilings are calibrated on the release profile and
         # enforced by --enforce-budgets in perf.yml and the Release job.
@@ -684,7 +684,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn("install_lash.sh", workflow)
         self.assertIn("needs: [prepare-release, publish-crates]", publish)
         self.assertIn("needs: [prepare-release, validate-release-ref]", publish_crates)
-        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", validate_release)
+        self.assertIn("runs-on: ubuntu-24.04", validate_release)
         self.assertIn(
             "ref: ${{ needs.prepare-release.outputs.release_sha }}", validate_release
         )
@@ -713,8 +713,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         self.assertIn("workflow_dispatch:", perf)
         self.assertNotIn("schedule:", perf)
-        self.assertIn("runs-on: blacksmith-16vcpu-ubuntu-2404", perf)
-        self.assertIn("uses: useblacksmith/rust-cache@", release_cache)
+        self.assertIn("runs-on: ubuntu-24.04", perf)
+        self.assertIn(
+            "uses: Swatinem/rust-cache@"
+            "6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2",
+            release_cache,
+        )
         self.assertIn("cargo build --locked --release --workspace", release_cache)
         self.assertNotIn("--target x86_64-unknown-linux-gnu", release_cache)
         for command in (
@@ -768,20 +772,21 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                         r"^(?:v[0-9]+(?:\.[0-9]+){0,2}|stable)$",
                     )
 
-    def test_all_confidence_fast_shards_use_blacksmith(self) -> None:
+    def test_all_confidence_fast_shards_use_github_hosted_runners(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         confidence_fast = workflow_job_block(workflow, "confidence-fast")
 
-        self.assertIn(
-            "- shard: sim-unit-perf-guards\n"
-            "            runner: blacksmith-8vcpu-ubuntu-2404",
-            confidence_fast,
-        )
-        self.assertIn(
-            "- shard: sim-generated\n"
-            "            runner: blacksmith-8vcpu-ubuntu-2404",
-            confidence_fast,
-        )
+        for shard in (
+            "scenario-harnesses",
+            "fault-matrix",
+            "sim-unit-perf-guards",
+            "sim-generated",
+            "minimizer-fixtures",
+        ):
+            self.assertIn(
+                f"- shard: {shard}\n            runner: ubuntu-24.04",
+                confidence_fast,
+            )
         self.assertNotIn("ubuntu-latest", confidence_fast)
         self.assertNotIn("Restore cargo cache (GitHub)", confidence_fast)
 
@@ -1635,14 +1640,20 @@ derive_mutation_jobs() {{
                 self.assertNotIn("mold", text)
                 self.assertNotIn("RUSTFLAGS", text)
 
-    def test_shared_debug_cache_has_one_backend(self) -> None:
+    def test_shared_debug_cache_has_one_action_and_key(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        writer = workflow_job_block(workflow, "test-doc")
+        reader = workflow_job_block(workflow, "test-shard")
 
-        # The writer saves through useblacksmith/rust-cache. A reader restoring
-        # through a different action reads a different backend and logs
-        # `No cache found` on every run, which is what every test shard did.
-        self.assertIn("shared-key: linux-debug", workflow)
-        self.assertNotIn("uses: Swatinem/rust-cache", workflow)
+        # Writer and readers must use the same action and shared key so they
+        # address the same GitHub cache namespace.
+        cache_action = (
+            "uses: Swatinem/rust-cache@"
+            "6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2"
+        )
+        for block in (writer, reader):
+            self.assertIn(cache_action, block)
+            self.assertIn("shared-key: linux-debug", block)
 
     def test_heavy_compile_jobs_route_through_sccache(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
