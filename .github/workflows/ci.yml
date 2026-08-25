@@ -100,7 +100,7 @@ jobs:
   # diff is unavailable fails open to all expensive families.
   plan:
     name: Plan CI
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
@@ -196,7 +196,7 @@ jobs:
 
   facade-only-examples:
     name: Facade-only examples
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
@@ -234,7 +234,7 @@ jobs:
   # or weakened.
   test-doc:
     name: Test docs + build cache
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -262,7 +262,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           # This job builds a superset of what the other debug-profile jobs
@@ -344,7 +344,7 @@ jobs:
   # one cargo consumer, so this job restores the shared cache read-only.
   repo-gates:
     name: Repository gates
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -371,7 +371,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -445,7 +445,7 @@ jobs:
   # test-doc critical path, and independent of every other check. Its own job.
   api-coverage:
     name: Public API example coverage
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -474,7 +474,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -502,7 +502,7 @@ jobs:
   # as the disposition gate, but is an independent machine-readable contract.
   api-surface:
     name: Public API surface snapshot
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -531,7 +531,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -557,7 +557,7 @@ jobs:
   # future cutover release. FIG-2089.
   semver-advisory:
     name: Semver advisory
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -617,7 +617,7 @@ jobs:
   # crate so every dependency needed by downstream users is carried explicitly.
   lashlang-git-consumer:
     name: Lashlang Git consumer
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -646,7 +646,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -668,7 +668,7 @@ jobs:
   # workspace check produces, and running them beside it costs nothing.
   package-feature-checks:
     name: Package feature checks
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -697,7 +697,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -764,7 +764,7 @@ jobs:
   # own job; `scripts/push-gate` runs the identical commands locally.
   runtime-feature-boundary:
     name: Runtime feature boundary
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -793,7 +793,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -847,7 +847,7 @@ jobs:
   # by hand-assigning tests to shards.
   test-shard:
     name: Test shard ${{ matrix.shard }}/4
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -885,12 +885,10 @@ jobs:
         with:
           node-version: 24
 
-      # Same action as the writer. A `Swatinem/rust-cache` restore here read a
-      # different cache backend than the `useblacksmith/rust-cache` save in
-      # test-doc, so every shard logged `No cache found` and rebuilt the whole
-      # dependency graph from scratch.
+      # Same action and shared key as the test-doc writer so every shard reads
+      # the writer's GitHub cache instead of rebuilding the dependency graph.
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -920,7 +918,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # The transcript gate reads the `Transcript:` justification from the PR
     # body. A manually dispatched run — the recovery path when GitHub stops
@@ -1015,7 +1013,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           # The test-doc job is the sole writer of the shared linux-debug cache;
@@ -1152,15 +1150,15 @@ jobs:
           - minimizer-fixtures
         include:
           - shard: scenario-harnesses
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - shard: fault-matrix
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - shard: sim-unit-perf-guards
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - shard: sim-generated
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - shard: minimizer-fixtures
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ubuntu-24.04
 
     steps:
       - name: Check out repository
@@ -1187,7 +1185,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -1218,7 +1216,7 @@ jobs:
 
   confidence-fast-summary:
     name: Confidence fast summary
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: always() && needs.plan.outputs.confidence == 'true'
     needs:
@@ -1270,7 +1268,7 @@ jobs:
 
   postgres-store:
     name: Test Postgres store (PG ${{ matrix.postgres }})
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: plan
     if: needs.plan.outputs.stores == 'true'
@@ -1324,7 +1322,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -1376,7 +1374,7 @@ jobs:
 
   s3-store:
     name: Test S3 store against MinIO
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: plan
     if: needs.plan.outputs.stores == 'true'
@@ -1402,7 +1400,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -1462,7 +1460,7 @@ jobs:
 
   stack-budget:
     name: Stack budget
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -1488,7 +1486,7 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -1516,7 +1514,7 @@ jobs:
   # behind them.
   linux-release-cache:
     name: Build Linux release cache
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Warms the release-profile cache that release.yml and perf.yml restore on
     # main. A cache written by a pull-request run is scoped to that PR's merge
@@ -1626,7 +1624,7 @@ jobs:
 
       - name: Restore cargo cache
         if: steps.detect.outputs.run == 'true'
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           # Sole writer of the linux release-profile cache; release.yml's
@@ -1667,43 +1665,43 @@ jobs:
             node: false
             artifact: none
             browser: false
-            runner: blacksmith-4vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
             node: false
             artifact: none
             browser: false
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
             node: true
             artifact: none
             browser: false
-            runner: blacksmith-2vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - name: process-operations
             recipe: process-operations-e2e
             node: false
             artifact: process-operations
             browser: false
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - name: version-bump-recreation
             recipe: version-bump-recreation-e2e
             node: false
             artifact: version-bump-recreation
             browser: false
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - name: session-lease-triage
             recipe: session-lease-triage-e2e
             node: false
             artifact: session-lease-triage
             browser: false
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: ubuntu-24.04
           - name: slack-clone-full-host
             recipe: slack-clone-full-host-e2e
             node: false
             artifact: none
             browser: true
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: ubuntu-24.04
 
     steps:
       - name: Check out repository
@@ -1730,7 +1728,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -1801,7 +1799,7 @@ jobs:
 
   restate-postgres-workers:
     name: Restate + Postgres + MinIO Workers (segment ${{ matrix.segment }})
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 45
@@ -1852,7 +1850,7 @@ jobs:
       # missed.
       - name: Restore cargo cache
         if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
@@ -1909,7 +1907,7 @@ jobs:
 
   restate-postgres-workers-summary:
     name: Restate workers E2E coverage summary
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: always()
     needs:
@@ -1958,7 +1956,7 @@ jobs:
   # failures/cancellations, ungated skips, and family skips the plan required.
   ci-conclusion:
     name: CI conclusion
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: always()
     needs:

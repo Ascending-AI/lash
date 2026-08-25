@@ -1,12 +1,6 @@
 # actionlint configuration, shared by the pre-commit hook and CI's Lint job
 # (https://github.com/rhysd/actionlint/blob/main/docs/config.md).
 
-self-hosted-runner:
-  # CI runs on Blacksmith-hosted runners; their labels are not in actionlint's
-  # built-in GitHub-hosted runner list.
-  labels:
-    - blacksmith-*
-
 paths:
   .github/workflows/ci.yml:
     ignore:

@@ -22,7 +22,7 @@ env:
 jobs:
   perf-guard-full:
     name: Perf Guard Full
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 65
 
     services:
@@ -71,7 +71,7 @@ jobs:
 
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           # Restore-only against the release cache ci.yml warms on main.
