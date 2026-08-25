@@ -95,8 +95,15 @@ Evidence prose carries nine lints, because the prose is the evidence:
 Evidence is tiered, and the tier is the *path shape* of the anchor rather than a
 word in the prose.  Four tiers exist, strongest first:
 
-1. `example-host` -- an example's own host code.  It proves a host needs the API
-   to do a real job.
+1. `example-host` -- an example's own host code.  At its strongest
+   (`used-asserted`) it proves a host needs the API to do a real job; a
+   `used-unasserted` row proves facade nameability -- the item resolves and
+   type-checks from the public surface a host compiles against -- with no claim
+   of semantic demand.  Nameability is the regression class this tier gates
+   (de-exports, visibility breaks); semantic proof for load-bearing surfaces
+   lives in examples and judged runbooks, not in this ledger.  Ruled 2026-08-25
+   (FIG-2104 review): the two strengths share the tier deliberately -- a
+   separate resolution-only tier would label rows no gate consumes differently.
 2. `example-test` -- a test module inside an example, or a file under an
    example's `tests/`.  Callable and asserted, but it can be circular: the test
    exists because the API does.
