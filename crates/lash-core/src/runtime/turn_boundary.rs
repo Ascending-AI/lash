@@ -1,6 +1,6 @@
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
-use crate::facade_support::SessionNodeRecordFacadeOps;
+use crate::facade_support::SessionNodeProjection;
 use std::sync::Arc;
 
 use crate::session_model::SessionHistoryRecord;

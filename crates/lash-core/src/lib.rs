@@ -452,7 +452,7 @@ pub mod facade_support {
     pub use crate::session::InjectedTurnInput;
     pub use crate::session::ToolInvocation;
     pub use crate::session::ToolInvocationReply;
-    pub use crate::session_graph::facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
+    pub use crate::session_graph::facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
     pub use crate::session_graph::frame_node_id;
     pub use crate::session_model::ConversationRecord;
     pub use crate::session_model::GenerationOverlay;

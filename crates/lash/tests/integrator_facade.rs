@@ -5,6 +5,8 @@
 use std::sync::Arc;
 
 use lash::SessionError;
+use lash::attachments::MediaType;
+use lash::direct::AttachmentSource;
 use lash::durability::{
     BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity, EffectJournalRetirement,
     ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
@@ -12,11 +14,12 @@ use lash::durability::{
     RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ToolAttemptLaunch, ToolCallLaunch,
     TriggerLocalExecution,
 };
-use lash::messages::{SessionMessageTreeNode, SharedJsonValue};
+use lash::messages::{PartAttachment, SessionMessageTreeNode, SharedJsonValue};
 use lash::persistence::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     LiveReplayOutcome, LiveReplaySubscription, ProcessWakeSource, QueuedCheckpointTurnInput,
-    QueuedCheckpointWork, QueuedTurnWork, SessionCursorError, TurnInputClaimMode,
+    QueuedCheckpointWork, QueuedTurnWork, SessionCursorError, SessionNodePayload,
+    SessionNodeProjection, SessionNodeRecord, TurnInputClaimMode,
     queued_work::{PendingSessionWorkOrdering, PendingWorkOrderingKey},
 };
 use lash::plugins::{
@@ -53,9 +56,10 @@ use lash::runtime::{
     RuntimeTracingConfig, RuntimeTurnPhaseProbeSlot,
 };
 use lash::tools::{
-    OrchestratingToolDef, PreparedToolBatch, PreparedToolBatchCall, ToolBatchReplies,
-    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolIntentSubmissionAdmission,
-    ToolIntentSubmissionRecord, ToolInvocation, ToolInvocationReply, ToolTriggerEffectOutcome,
+    CompactToolContract, OrchestratingToolDef, PreparedToolBatch, PreparedToolBatchCall,
+    ToolBatchReplies, ToolCallOutcome, ToolChildExecutionTraceHook, ToolChildProcessStarted,
+    ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolInvocation, ToolInvocationReply,
+    ToolTriggerEffectOutcome, ToolValue,
 };
 use lash::triggers::TriggerEventCatalog;
 
@@ -128,4 +132,50 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
     assert!(preamble.tool_names.is_empty());
     assert_eq!(&*preamble.execution_prompt, "facade protocol witness");
     assert!(preamble.prompt_contributions.is_empty());
+}
+
+#[test]
+fn remaining_host_ui_types_are_constructible_from_the_facade() {
+    let node = SessionNodeRecord {
+        node_id: "plugin-node".to_string(),
+        parent_node_id: None,
+        timestamp: "2026-08-25T00:00:00Z".to_string(),
+        payload: SessionNodePayload::Plugin {
+            plugin_type: "facade-witness".to_string(),
+            body: SharedJsonValue::new(serde_json::json!({ "reachable": true })),
+        },
+    };
+    let (plugin_type, body) = node.plugin().expect("plugin node");
+    assert_eq!(plugin_type, "facade-witness");
+    assert_eq!(body["reachable"], true);
+
+    let output_state = OutputState::Usable;
+    assert!(matches!(output_state, OutputState::Usable));
+
+    let contract = CompactToolContract {
+        name: "lookup".to_string(),
+        signature: "lookup(query: string)".to_string(),
+        returns: "object".to_string(),
+        parameters: Vec::new(),
+        return_fields: Vec::new(),
+        description: "Facade-only discovery contract".to_string(),
+        examples: Vec::new(),
+    };
+    assert_eq!(
+        contract.render_signature(),
+        "lookup(query: string) -> object"
+    );
+
+    let outcome = ToolCallOutcome::Success(ToolValue::untrusted_json(
+        serde_json::json!({ "reachable": true }),
+    ));
+    assert!(matches!(outcome, ToolCallOutcome::Success(_)));
+
+    let attachment = PartAttachment {
+        source: AttachmentSource::inline(
+            MediaType::parse("text/plain").expect("valid media type"),
+            b"facade witness".to_vec(),
+        ),
+    };
+    assert!(matches!(attachment.source, AttachmentSource::Inline { .. }));
 }
