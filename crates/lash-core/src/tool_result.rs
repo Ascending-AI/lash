@@ -271,8 +271,16 @@ impl ToolOutcome {
         matches!(self, Self::Pending(_))
     }
 
-    /// Projects a stable JSON value for protocol and process-engine implementors that expose tool
-    /// outcomes to later protocol stages.
+    /// Projects a stable JSON value for public or persisted protocol output.
+    ///
+    /// # Stable JSON projection contract
+    ///
+    /// **Every stable or public JSON projection MUST use this method.**
+    /// [`crate::ToolValue`]'s `Serialize` implementation includes its trust
+    /// envelope by design. Serializing the completed output directly leaks the
+    /// internal `$lash_tool_value: "untrusted_json"` discriminant and `value`
+    /// wrapper into the public shape. This method removes that envelope while
+    /// preserving typed attachment projection.
     pub fn value_for_projection(&self) -> serde_json::Value {
         match &self
             .as_done_output()

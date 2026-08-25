@@ -347,6 +347,17 @@ pub enum ToolCallOutcome {
     Cancelled(ToolCancellation),
 }
 
+/// A typed tool value with an explicit serialization trust envelope.
+///
+/// # Stable JSON projection contract
+///
+/// **Do not serialize this type directly into stable or public JSON.** Its
+/// [`Serialize`] implementation includes the trust envelope by design. In
+/// particular, an [`UntrustedJson`](Self::UntrustedJson) value serializes with
+/// the internal `$lash_tool_value: "untrusted_json"` discriminant and a `value`
+/// wrapper. A stable or public JSON projection **MUST** go through
+/// [`ToolCallOutput::value_for_projection`], which removes that internal
+/// envelope while preserving typed attachment projection.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ToolValue {
     Null,

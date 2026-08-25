@@ -1,7 +1,7 @@
 use crate::support::*;
 use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
-    SessionNodeRecordFacadeOps, ToolStateFacadeOps,
+    SessionNodeProjection, ToolStateFacadeOps,
 };
 use lash_sansio::sync::MutexExt;
 use std::collections::{HashMap, VecDeque};

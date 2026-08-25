@@ -7,7 +7,7 @@ use crate::session_graph_integrity::{
 };
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, Clock, Message, PromptUsage, TokenUsage};
-use facade_ops::{SessionGraphFacadeOps, SessionNodeRecordFacadeOps};
+use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_sansio::core_support::MessageCoreSupport;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -19,11 +19,11 @@ pub struct RealizedNodeTimestamp {
 pub(crate) mod facade_ops {
     use super::*;
 
-    /// Facade-internal operations for [`SessionNodeRecord`].
+    /// Presentation-projection helpers for hosts rendering a [`SessionNodeRecord`].
     ///
-    /// This is not integrator surface, carries no stability promise, and exists
-    /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
-    pub trait SessionNodeRecordFacadeOps {
+    /// Hosts use these operations to render session trees without matching on
+    /// the persisted node payload shape themselves.
+    pub trait SessionNodeProjection {
         fn event(&self) -> Option<&SessionHistoryRecord>;
 
         fn message(&self) -> Option<Message>;
@@ -31,7 +31,7 @@ pub(crate) mod facade_ops {
         fn plugin(&self) -> Option<(&str, &serde_json::Value)>;
     }
 
-    impl SessionNodeRecordFacadeOps for SessionNodeRecord {
+    impl SessionNodeProjection for SessionNodeRecord {
         fn event(&self) -> Option<&SessionHistoryRecord> {
             match &self.payload {
                 SessionNodePayload::Event { event } => Some(event),

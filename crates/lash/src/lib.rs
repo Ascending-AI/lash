@@ -187,14 +187,15 @@ pub mod tools {
     pub use lash_core::tool_dispatch::ToolTriggerEffectOutcome;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
-        EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement, PendingCompletion,
-        PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent, StartProcessIntent,
-        TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy,
-        ToolAttemptOutcome, ToolCall, ToolCallOutput, ToolCallRecord, ToolContext, ToolContract,
-        ToolDefinition, ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource,
-        ToolIntent, ToolIntentExecutionOutcome, ToolIntentKind, ToolIntents, ToolManifest,
-        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
-        ToolProvider, ToolRegistry, ToolRetryStatus, ToolValue, facade_support::ReconfigureError,
+        CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
+        PendingCompletion, PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent,
+        StartProcessIntent, TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation,
+        ToolArgumentProjectionPolicy, ToolAttemptOutcome, ToolCall, ToolCallOutcome,
+        ToolCallOutput, ToolCallRecord, ToolContext, ToolContract, ToolDefinition,
+        ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntent,
+        ToolIntentExecutionOutcome, ToolIntentKind, ToolIntents, ToolManifest, ToolOutcome,
+        ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+        ToolRegistry, ToolRetryStatus, ToolValue, facade_support::ReconfigureError,
         facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
     };
     pub use lash_core::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
@@ -324,6 +325,7 @@ pub mod persistence {
         SessionRelation, SessionStateAdmission, StoreBackend, StoreError, StoreMaintenance,
         StorePreflight, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
         StoreSchemaVerdict, TurnId, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
+        facade_support::SessionNodeProjection,
     };
     /// Committed session history flattened into presentation order, as returned
     /// by [`SessionReadView::chronological_projection`].
@@ -472,6 +474,7 @@ pub mod messages {
     pub use lash_core::session_graph::{SessionMessageTreeNode, SharedJsonValue};
     pub use lash_core::{
         Message, MessageOrigin, MessageRole, Part, PartKind, facade_support::MessageSequence,
+        session_model::message::PartAttachment,
     };
 }
 
