@@ -4,7 +4,7 @@ use std::task::{Context, Poll};
 
 use crate::support::*;
 use futures_util::Stream;
-use lash_core::facade_support::{RuntimeSessionStateFacadeOps, ToolStateFacadeOps};
+use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::{
     PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
     PendingTurnInputCancelTarget, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
@@ -36,6 +36,16 @@ pub struct SessionBuilder {
     /// `SessionCreateRequest` carries) so every plugin gets open-time options
     /// through one hook.
     pub(crate) plugin_options: PluginOptions,
+}
+
+fn empty_runtime_session_state(
+    session_id: impl Into<String>,
+    policy: SessionPolicy,
+) -> RuntimeSessionState {
+    RuntimeSessionState {
+        session_id: session_id.into(),
+        ..RuntimeSessionState::new(policy)
+    }
 }
 
 impl SessionBuilder {
@@ -167,7 +177,7 @@ impl SessionBuilder {
             Some(store) => {
                 let loaded = self.load_persisted_state(store).await?;
                 let Some(loaded) = loaded else {
-                    return Ok(RuntimeSessionState::empty_for(
+                    return Ok(empty_runtime_session_state(
                         self.session_id.clone(),
                         policy.clone(),
                     ));
@@ -187,7 +197,7 @@ impl SessionBuilder {
                 );
                 state
             }
-            None => RuntimeSessionState::empty_for(self.session_id.clone(), policy.clone()),
+            None => empty_runtime_session_state(self.session_id.clone(), policy.clone()),
         };
         Ok(state)
     }
@@ -330,7 +340,7 @@ pub(crate) async fn load_state_from_store(
     .await
     .map_err(EmbedError::Store)?
     .unwrap_or_else(|| lash_core::store::LoadedPersistedSession {
-        state: RuntimeSessionState::empty_for(session_id, policy.clone()),
+        state: empty_runtime_session_state(session_id, policy.clone()),
         config: lash_core::PersistedSessionConfig::new(policy.turn_budget),
     });
     let mut state = loaded.state;

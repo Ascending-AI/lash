@@ -2651,9 +2651,6 @@ lash::persistence::StoreError::SessionExecutionLeaseRenewalRefused::session_id
 lash::persistence::StoreError::SessionNotBound
 lash::persistence::StoreError::SessionResolutionAmbiguous
 lash::persistence::StoreError::SessionResolutionAmbiguous::session_count
-lash::persistence::StoreError::SessionStateMigrationUnavailable
-lash::persistence::StoreError::SessionStateMigrationUnavailable::current
-lash::persistence::StoreError::SessionStateMigrationUnavailable::found
 lash::persistence::StoreError::SessionStateVersionNewerThanRuntime
 lash::persistence::StoreError::SessionStateVersionNewerThanRuntime::current
 lash::persistence::StoreError::SessionStateVersionNewerThanRuntime::found

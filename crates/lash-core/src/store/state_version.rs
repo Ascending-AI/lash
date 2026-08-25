@@ -20,15 +20,12 @@ pub struct SessionStateAdmission {
 /// Interpret an independently read physical marker.
 pub fn resolve_session_state_version(marker: Option<u32>) -> Result<u32, StoreError> {
     let version = marker.unwrap_or(OLDEST_SUPPORTED_SESSION_STATE_VERSION);
-    match version.cmp(&CURRENT_SESSION_STATE_VERSION) {
-        std::cmp::Ordering::Greater => Err(StoreError::SessionStateVersionNewerThanRuntime {
+    if version == CURRENT_SESSION_STATE_VERSION {
+        Ok(version)
+    } else {
+        Err(StoreError::SessionStateVersionNewerThanRuntime {
             found: version,
             current: CURRENT_SESSION_STATE_VERSION,
-        }),
-        std::cmp::Ordering::Less => Err(StoreError::SessionStateMigrationUnavailable {
-            found: version,
-            current: CURRENT_SESSION_STATE_VERSION,
-        }),
-        std::cmp::Ordering::Equal => Ok(version),
+        })
     }
 }
