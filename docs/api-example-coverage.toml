@@ -1929,7 +1929,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Session"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1311#let error = AppError::session_open(lash::EmbedError::Session("
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1357#let error = AppError::session_open(lash::EmbedError::Session("
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -2020,8 +2020,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::EmbedError::Store"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1304#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1304#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1350#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1350#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -2850,8 +2850,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::LashCoreBuilder::lease_timings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:1914#.lease_timings(lease_timings)"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1661#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:1927#.lease_timings(lease_timings)"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1728#takeover_latency < default_ttl,"
 
 [[api]]
 symbol = "lash::LashCoreBuilder::live_replay_store"
@@ -5314,7 +5314,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1235#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1247#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5513,7 +5513,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1235#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1247#lash::EmbedError::Session(lash::SessionError::Store { context, source }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -5523,8 +5523,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::context"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1313#context: format!(\"failed to bind session `{session_id}` to its store\"),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1321#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1359#context: format!(\"failed to bind session `{session_id}` to its store\"),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1367#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionError::Store::source"
@@ -5533,8 +5533,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionError::Store::source"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1314#source: lash::persistence::StoreError::SessionDeleted {"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1321#assert_eq!(response.status(), StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1360#source: lash::persistence::StoreError::SessionDeleted {"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1367#assert_eq!(response.status(), StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::SessionListFilter"
@@ -10968,8 +10968,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimings", "lash_core::store::lease_timings::LeaseTimings"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1661#takeover_latency < default_ttl,"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1661#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1728#takeover_latency < default_ttl,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1728#takeover_latency < default_ttl,"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -10988,7 +10988,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimings::new", "lash_core::store::lease_timings::LeaseTimings::new"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1581#lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1648#lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -11016,8 +11016,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LeaseTimings::ttl", "lash_core::store::lease_timings::LeaseTimings::ttl"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1661#takeover_latency < default_ttl,"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1661#takeover_latency < default_ttl,"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1728#takeover_latency < default_ttl,"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1728#takeover_latency < default_ttl,"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -18200,8 +18200,8 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionReadView::turn_index"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1489#read_view.turn_index(),"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1489#read_view.turn_index(),"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1513#read_view.turn_index(),"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1513#read_view.turn_index(),"
 
 [[api]]
 symbol = "lash::persistence::SessionRelation"
@@ -19551,8 +19551,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1304#assert_eq!(error.status, StatusCode::CONFLICT);"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1304#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1350#assert_eq!(error.status, StatusCode::CONFLICT);"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1350#assert_eq!(error.status, StatusCode::CONFLICT);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -19562,8 +19562,8 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SessionDeleted::session_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1301#session_id: \"retired-session\".to_string(),"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1304#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1347#session_id: \"retired-session\".to_string(),"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1350#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::persistence::StoreError::SessionExecutionLeaseExpired"
@@ -20428,8 +20428,8 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputIngress::active_turn_id"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1449#== injected.ingress.active_turn_id()"
-assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1403#lash::persistence::TurnInputIngress::NextTurn"
+usage = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1534#== injected.ingress.active_turn_id()"
+assertion = "examples/agent-workbench/src/main_sections/tests/restate_recovery.rs:1407#lash::persistence::TurnInputIngress::NextTurn"
 
 [[api]]
 symbol = "lash::persistence::TurnInputIngress::admits_checkpoint"
@@ -50322,8 +50322,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1239#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1304#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1251#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1350#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::cause"
@@ -50332,7 +50332,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::cause"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1242#return match error.cause.as_ref() {"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1254#return match error.cause.as_ref() {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::code"
@@ -50351,8 +50351,8 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeError::deleted_session_id"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1239#return error.deleted_session_id().map(|session_id| (session_id, None));"
-assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1304#assert_eq!(error.status, StatusCode::CONFLICT);"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1251#return error.deleted_session_id().map(|session_id| (session_id, None));"
+assertion = "examples/agent-workbench/src/main_sections/app_state.rs:1350#assert_eq!(error.status, StatusCode::CONFLICT);"
 
 [[api]]
 symbol = "lash::runtime::RuntimeError::is_retryable"
@@ -51890,7 +51890,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::as_str"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/app_state.rs:1244#Some((session_id.as_str(), Some(error.code.as_str())))"
+usage = "examples/agent-workbench/src/main_sections/app_state.rs:1256#Some((session_id.as_str(), Some(error.code.as_str())))"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::from_wire_code"
@@ -52506,7 +52506,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2307#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2320#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -52544,7 +52544,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ScopedEffectController::shared"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:2307#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
+usage = "examples/agent-workbench/src/main_sections/tests.rs:2320#let scoped_effect_controller = lash::runtime::ScopedEffectController::shared("
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]

@@ -57,11 +57,21 @@ pub async fn load_persisted_session_admitted(
     executor_id: &str,
     lease_ttl_ms: u64,
 ) -> Result<Option<LoadedPersistedSession>, StoreError> {
-    let acquisition = store
+    let claim = store
         .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
-        .await?
-        .acquisition()
-        .ok_or(StoreError::Contended)?;
+        .await?;
+    let acquisition = match claim {
+        crate::SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition,
+        crate::SessionExecutionLeaseClaimOutcome::Busy { holder } => {
+            crate::runtime::session_execution_lease::trace_busy(
+                session_id,
+                owner,
+                executor_id,
+                &holder,
+            );
+            return Err(StoreError::Contended);
+        }
+    };
     crate::runtime::session_execution_lease::trace_acquisition(&acquisition);
     let lease = acquisition.lease;
     let fence = lease.fence();

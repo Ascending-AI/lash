@@ -1306,6 +1306,10 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create turn ingress E2E data dir");
+    let sessions = WorkbenchSessions::fresh();
+    let session_id = sessions.current();
+    let admission_gate = Arc::new(SessionOpenAdmissionGate::new(&session_id));
+    register_session_open_admission_gate(Arc::clone(&admission_gate));
 
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let requests_for_provider = Arc::clone(&requests);
@@ -1346,7 +1350,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         &data_dir,
         ingress_url,
         provider,
-        WorkbenchSessions::fresh(),
+        sessions,
         ActiveTurns::default(),
     )
     .await;
@@ -1412,6 +1416,13 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
             Some(expected)
         );
     }
+    let queued_turn = harness
+        .state
+        .active_turns
+        .for_session(&session_id)
+        .into_iter()
+        .find(|address| address.turn_id.starts_with("workbench-queued-"))
+        .expect("queued-work driver must publish the queued turn address");
     wait_for_restate_invocation_success(
         &harness.state,
         &turn_invocation_id,
@@ -1424,12 +1435,86 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         Duration::from_secs(30),
     )
     .await;
-    wait_for_session_execution_lane_release(
+    admission_gate.wait_until_admitted().await;
+    let state_for_contended_read = harness.state.clone();
+    let contended_read = tokio::spawn(async move {
+        Box::pin(app_state(
+            State(state_for_contended_read),
+            Query(SessionQuery::default()),
+        ))
+        .await
+    });
+    admission_gate.wait_until_contended().await;
+    admission_gate.release();
+    let Json(snapshot) = contended_read
+        .await
+        .expect("join contended workbench HTTP read")
+        .expect("bounded workbench open must retry after cron-sync admission releases");
+    wait_for_restate_workflow_success(
         &harness.state,
-        &harness.state.current_session_id(),
+        "WorkbenchQueuedTurnWorkflow",
+        &queued_turn.turn_id,
         Duration::from_secs(30),
     )
     .await;
+    admission_gate.finish();
+    let (_attempts, acquisitions, admissions, contentions) = admission_gate.counts();
+    assert!(contentions >= 1, "the deterministic read never observed contention");
+    assert_eq!(
+        acquisitions, admissions,
+        "every successful open claim must pass admit_session_state"
+    );
+
+    admission_gate.arm();
+    let state_for_holder = harness.state.clone();
+    let session_id_for_holder = session_id.clone();
+    let held_open = tokio::spawn(async move {
+        state_for_holder.open_session(&session_id_for_holder).await
+    });
+    admission_gate.wait_until_admitted().await;
+    let exhausted = Box::pin(app_state(
+        State(harness.state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect_err("a held admitted open must exhaust the bounded retry policy");
+    assert_eq!(exhausted.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(exhausted.verdict, AppErrorVerdict::Retryable);
+    assert_eq!(
+        exhausted.message,
+        "session is temporarily busy; retry the request"
+    );
+    let (attempts, acquisitions, admissions, contentions) = admission_gate.counts();
+    assert!(
+        (1..=SESSION_OPEN_MAX_ATTEMPTS).contains(&contentions),
+        "the logical read must stop at the host deadline or attempt cap; contentions={contentions}"
+    );
+    // Either finite bound may win; both must leave the observed attempts fenced.
+    assert_eq!(attempts, contentions + acquisitions);
+    assert_eq!(acquisitions, 1, "only the held open may acquire the lane");
+    assert_eq!(
+        acquisitions, admissions,
+        "the held claim must pass admit_session_state and no retry may bypass admission"
+    );
+    admission_gate.release();
+    held_open
+        .await
+        .expect("join held session open")
+        .expect("held admitted open completes after release");
+    admission_gate.finish();
+
+    let settled_session = harness
+        .state
+        .open_session(&session_id)
+        .await
+        .expect("open settled ingress session through the host retry boundary");
+    let read_view = settled_session.read_view();
+    assert_eq!(
+        read_view.turn_index(),
+        2,
+        "queued input must commit its own turn"
+    );
+    drop(settled_session);
 
     let captured = requests.lock_recover().clone();
     assert_eq!(captured.len(), 3, "unexpected provider request sequence");
@@ -1477,23 +1562,18 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     assert!(!captured[1].contains("queued next marker"));
     assert_eq!(captured[2].matches("queued next marker").count(), 1);
 
-    let session = harness
-        .state
-        .core
-        .session(harness.state.current_session_id())
-        .open()
-        .await
-        .expect("open settled ingress session");
-    let read_view = session.read_view();
     assert_eq!(
-        read_view.turn_index(),
+        snapshot.observation.turn_index,
         2,
         "queued input must commit its own turn"
     );
-    let committed = read_view
-        .messages()
+    let committed = snapshot
+        .transcript
         .iter()
-        .map(lash::message_text)
+        .filter_map(|row| match row {
+            TranscriptRow::Message { message } => Some(message.text.clone()),
+            TranscriptRow::Reasoning { .. } | TranscriptRow::CodeBlock { .. } => None,
+        })
         .collect::<Vec<_>>();
     assert!(
         committed
@@ -1509,12 +1589,6 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         1,
         "active injection must be one committed user message: {committed:#?}"
     );
-    let Json(snapshot) = Box::pin(app_state(
-        State(harness.state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect("load settled workbench HTTP state");
     assert_eq!(
         snapshot
             .messages
@@ -1549,15 +1623,8 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         rendered_active_input,
         "rendered page stream must receive the committed active input as a normal user message"
     );
-    assert!(
-        session
-            .pending_turn_inputs()
-            .await
-            .expect("pending inputs after settle")
-            .is_empty(),
-        "both ingress claims must settle"
-    );
-    session.close().await.expect("close ingress session");
+    assert!(snapshot.pending_turn_inputs.is_empty(), "both ingress claims must settle");
+    unregister_session_open_admission_gate(&session_id);
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
@@ -1969,25 +2036,38 @@ async fn wait_for_session_lease_generation(
     }
 }
 
-async fn wait_for_session_execution_lane_release(
+async fn wait_for_restate_workflow_success(
     state: &AppState,
-    session_id: &str,
+    workflow: &str,
+    workflow_key: &str,
     timeout: Duration,
 ) {
+    let admin = lash_restate::RestateAdminClient::new(
+        lash_restate::RestateConnection::with_client(
+            state.restate_admin_url.clone(),
+            state.restate_http.clone(),
+        ),
+    );
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        let diagnostics = state
-            .core
-            .session_lease_diagnostics(session_id)
+        match admin
+            .workflow_invocation_status(workflow, workflow_key, "run")
             .await
-            .expect("read session execution lane while waiting for release");
-        if diagnostics.is_none_or(|diagnostics| diagnostics.holder.is_none()) {
-            return;
+            .expect("query queued-work workflow status")
+        {
+            Some(status) if status.completed_successfully() => return,
+            Some(status) if status.status == "completed" => {
+                panic!(
+                    "Restate workflow {workflow}/{workflow_key} completed unsuccessfully: {status:#?}"
+                )
+            }
+            _ => {}
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "settled ingress turn did not release its session execution lane within {timeout:?}"
+            "Restate workflow {workflow}/{workflow_key} did not complete within {timeout:?}"
         );
+        // Pace polling of the external admin API; this is not test-race sequencing.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

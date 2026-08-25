@@ -157,6 +157,8 @@ where
     S: CronJobSyncSurface + Sync,
     Classify: Fn(lash::EmbedError) -> S::Error,
 {
+    #[cfg(test)]
+    crate::tests::arm_registered_session_open_admission_gate(session_id, reason);
     let session = state
         .open_session(session_id)
         .await
