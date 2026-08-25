@@ -24,9 +24,9 @@ use lash_core::{
 };
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+// Keep subsequent lines stable for machine-checked public API evidence anchors.
+// Shared test support now lives at the grouped integration-harness root.
+use crate::support::{SharedDatabaseLock, database_url};
 
 const SESSION: &str = "pg-attempt-atomicity-session";
 const TURN: &str = "pg-attempt-atomicity-turn";

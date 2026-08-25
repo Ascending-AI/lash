@@ -429,7 +429,7 @@ fn independent_processes_dump_identical_typescript_continuations() {
         let output = std::process::Command::new(std::env::current_exe().expect("current test exe"))
             .args([
                 "--exact",
-                "typescript_determinism_process_probe",
+                "dialect::typescript_determinism_process_probe",
                 "--nocapture",
             ])
             .env("LASH_TYPESCRIPT_DETERMINISM_PROBE", "1")

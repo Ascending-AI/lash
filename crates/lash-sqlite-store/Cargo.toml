@@ -1,5 +1,6 @@
 [package]
 name = "lash-sqlite-store"
+autotests = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -45,3 +46,20 @@ lash-sqlite-store = { path = ".", features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+
+[[bin]]
+name = "sqlite-await-event-helper"
+path = "src/bin/sqlite-await-event-helper.rs"
+test = false
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+[[test]]
+name = "conformance"
+path = "tests/conformance.rs"
+
+[[test]]
+name = "durable_read_fixture"
+path = "tests/durable_read_fixture.rs"

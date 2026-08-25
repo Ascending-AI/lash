@@ -235,7 +235,7 @@ fn the_abort_corpus_survives_without_the_preflight() {
             let child =
                 std::process::Command::new(std::env::current_exe().expect("test executable"))
                     .args([
-                        "the_abort_corpus_survives_without_the_preflight",
+                        "no_abort_guarantee::the_abort_corpus_survives_without_the_preflight",
                         "--exact",
                         "--nocapture",
                     ])
@@ -278,7 +278,7 @@ fn fuzzed_sources_survive_without_the_preflight() {
             let child =
                 std::process::Command::new(std::env::current_exe().expect("test executable"))
                     .args([
-                        "fuzzed_sources_survive_without_the_preflight",
+                        "no_abort_guarantee::fuzzed_sources_survive_without_the_preflight",
                         "--exact",
                         "--nocapture",
                     ])
@@ -462,7 +462,7 @@ fn an_unavailable_reservation_is_a_resource_diagnostic() {
 
     let executable = std::env::current_exe().expect("test executable");
     let command = format!(
-        "ulimit -v 2097152 && exec {} an_unavailable_reservation_is_a_resource_diagnostic --exact --nocapture",
+        "ulimit -v 2097152 && exec {} no_abort_guarantee::an_unavailable_reservation_is_a_resource_diagnostic --exact --nocapture",
         executable.display()
     );
     let output = std::process::Command::new("bash")

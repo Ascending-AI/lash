@@ -1,5 +1,6 @@
 [package]
 name = "lashlang"
+autotests = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -47,6 +48,22 @@ futures = "0.3"
 insta = "1"
 proptest = "1"
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+[[test]]
+name = "benchmark_contract"
+path = "tests/benchmark_contract.rs"
+
+[[test]]
+name = "stack_budget"
+path = "tests/stack_budget.rs"
+
+[[test]]
+name = "property"
+path = "tests/property.rs"
 
 [[bench]]
 name = "benchmark"

@@ -19,9 +19,7 @@ use lash_core::EffectHost;
 use lash_core::testing::conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url};
 
 /// A world over the configured database.
 ///

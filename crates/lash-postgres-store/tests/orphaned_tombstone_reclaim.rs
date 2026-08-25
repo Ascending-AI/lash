@@ -8,10 +8,7 @@
 use lash_core::SessionStoreFactory;
 use lash_postgres_store::PostgresStorage;
 
-#[allow(dead_code)]
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url};
 
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
     let url = database_url()?;

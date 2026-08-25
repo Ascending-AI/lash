@@ -9,9 +9,7 @@ use lash_core::{
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt as _};
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url};
 
 const PARENT_END_REASON: &str = "recorded start intent parent ended with cancel policy";
 

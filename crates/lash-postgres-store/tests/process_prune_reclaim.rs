@@ -11,10 +11,7 @@ use std::sync::Arc;
 use lash_core::{ProcessRegistry, SessionStoreFactory};
 use lash_postgres_store::PostgresStorage;
 
-#[allow(dead_code)]
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url};
 
 struct PostgresProcessPruneBlobProbe {
     storage: Arc<PostgresStorage>,
