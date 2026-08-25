@@ -26,11 +26,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: api-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   compiler-derived-call-index:
     name: Compiler-derived call index (advisory)
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 15
+    # Advisory at the job level too: a timeout cancellation is not absorbed
+    # by step-level continue-on-error (ADR 0079: advisory until the cutover).
+    continue-on-error: true
 
     steps:
       - name: Check out repository
