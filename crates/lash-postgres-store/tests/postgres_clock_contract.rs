@@ -15,6 +15,8 @@ use lash_core::{
 use lash_postgres_store::PostgresStorage;
 use sqlx::Connection as _;
 
+// Keep subsequent lines stable for machine-checked public API evidence anchors.
+// Shared test support now lives at the grouped integration-harness root.
 use crate::support::{SharedDatabaseLock, database_url};
 
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
