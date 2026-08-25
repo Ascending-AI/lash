@@ -122,6 +122,71 @@ def shell_logical_commands(script: str) -> list[str]:
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
+    def test_trunk_only_jobs_defer_on_pr_and_merge_group_events(self) -> None:
+        """Heavy suites run on trunk (push/dispatch) only: 2026-08-25 ruling.
+
+        Reassess after the FIG-2169 test-prune sweep. The job-level guard, the
+        ci_plan accounting set, and the conclusion's deferral behavior must
+        agree, or a PR either re-pays the heavy suites or merges green while a
+        trunk job silently never runs.
+        """
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        trunk_only = {
+            "semver-advisory",
+            "lashlang-git-consumer",
+            "package-feature-checks",
+            "runtime-feature-boundary",
+            "stack-budget",
+            "confidence-fast",
+            "confidence-fast-summary",
+            "postgres-store",
+            "s3-store",
+            "functional-e2e",
+        }
+        guard = (
+            "github.event_name != 'pull_request' "
+            "&& github.event_name != 'merge_group'"
+        )
+        for job in sorted(trunk_only):
+            block = workflow_job_block(workflow, job)
+            self.assertIn(f"if: {guard} && needs.plan.outputs.", block.replace(
+                "if: always() && " + guard, "if: " + guard
+            ), job)
+
+        plan = runpy.run_path(str(ROOT / "scripts" / "ci_plan.py"))
+        self.assertEqual(plan["TRUNK_ONLY_JOBS"], trunk_only)
+        self.assertEqual(plan["DEFERRED_EVENTS"], {"pull_request", "merge_group"})
+
+        evaluate = plan["evaluate_conclusion"]
+        needs = {
+            job: {"result": "success", "outputs": {}}
+            for job in plan["UNGATED_JOBS"] | set(plan["GATED_JOBS"])
+        }
+        needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
+            "docs_only": "false",
+            "fail_open": "false",
+        }
+        for job in trunk_only:
+            needs[job] = {"result": "skipped", "outputs": {}}
+        self.assertEqual(evaluate(needs, "pull_request"), [])
+        self.assertEqual(evaluate(needs, "merge_group"), [])
+        push_problems = evaluate(needs, "push")
+        self.assertEqual(len(push_problems), len(trunk_only))
+        for problem in push_problems:
+            self.assertIn("although plan.", problem)
+
+        # Workers E2E defers on the same events through step-level guards.
+        workers = workflow_job_block(workflow, "restate-postgres-workers")
+        self.assertIn(
+            "if: github.event_name == 'pull_request' "
+            "|| github.event_name == 'merge_group'",
+            workers,
+        )
+        self.assertNotIn(
+            "github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e",
+            workflow,
+        )
+
     def assert_quarantine_fixture_invalid(
         self, payload: dict[str, object], message: str
     ) -> None:
