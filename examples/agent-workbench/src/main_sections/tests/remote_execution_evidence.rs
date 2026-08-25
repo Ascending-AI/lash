@@ -1,15 +1,15 @@
 fn browser_projection_trigger_identities() -> serde_json::Value {
     serde_json::json!({
-        "session_a": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("session-a"),
+        "session_a": lash::triggers::deterministic_subscription_id(
+            &lash::triggers::TriggerOwnerScope::session("session-a"),
             "derived/v2/content-address",
         ),
-        "session_b": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("session-b"),
+        "session_b": lash::triggers::deterministic_subscription_id(
+            &lash::triggers::TriggerOwnerScope::session("session-b"),
             "derived/v2/content-address",
         ),
-        "wired": lash_core::triggers::deterministic_subscription_id(
-            &lash_core::TriggerOwnerScope::session("wired-session"),
+        "wired": lash::triggers::deterministic_subscription_id(
+            &lash::triggers::TriggerOwnerScope::session("wired-session"),
             "wired-key",
         ),
     })

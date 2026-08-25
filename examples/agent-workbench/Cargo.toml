@@ -26,7 +26,6 @@ croner = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
-lash-core = { workspace = true }
 lash-http-transport = { workspace = true }
 lashlang = { workspace = true }
 lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
@@ -57,7 +56,6 @@ uuid = { workspace = true, features = ["v4"] }
 lash-lashlang-runtime = { workspace = true }
 lash-llm-tools = { workspace = true }
 lash = { workspace = true, features = ["rlm", "testing"] }
-lash-core = { workspace = true, features = ["testing"] }
 # `testing` is a dev-dependency on purpose: it arms the loud assertions that
 # turn an accidentally-exhausted Lashlang execution bound into a test failure.
 # The judged host must not carry them — see `[profile.judged]` in the workspace

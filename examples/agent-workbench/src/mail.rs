@@ -602,7 +602,7 @@ mod tests {
             .execute(ToolCall {
                 name: "inbox__work__send",
                 args: &args,
-                context: &lash_core::testing::mock_attempt_context(),
+                context: &lash::testing::mock_attempt_context(),
             })
             .await;
         let ToolOutcome::Done(output) = refused else {
@@ -632,7 +632,7 @@ mod tests {
 
         assert_eq!(receipt, json!({ "account": "work", "id": "work-1" }));
         assert_eq!(world.inbox("work").expect("work inbox").len(), 1);
-        assert_eq!(intent.kind(), lash_core::ToolIntentKind::EmitTrigger);
+        assert_eq!(intent.kind(), lash::tools::ToolIntentKind::EmitTrigger);
         let ToolIntent::EmitTrigger(declared) = intent else {
             panic!("inbox send must declare a trigger emission")
         };

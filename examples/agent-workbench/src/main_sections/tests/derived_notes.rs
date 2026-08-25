@@ -189,7 +189,7 @@ mod derived_notes_tests {
     }
 
     fn derived_note_base(node: &lash::persistence::SessionNodeRecord) -> Option<&str> {
-        let lash_core::SessionNodePayload::Plugin { plugin_type, body } = &node.payload else {
+        let lash::persistence::SessionNodePayload::Plugin { plugin_type, body } = &node.payload else {
             return None;
         };
         if plugin_type != WORKBENCH_DERIVED_NOTE_PLUGIN_TYPE {

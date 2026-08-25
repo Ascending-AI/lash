@@ -26,7 +26,7 @@ impl AppEvents {
 fn response(text: &str) -> LlmResponse {
     LlmResponse {
         full_text: text.to_string(),
-        parts: vec![lash_core::LlmOutputPart::Text {
+        parts: vec![lash::direct::LlmOutputPart::Text {
             text: text.to_string(),
             response_meta: None,
         }],

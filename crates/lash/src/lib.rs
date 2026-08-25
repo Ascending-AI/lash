@@ -140,6 +140,7 @@ pub mod triggers {
     /// the in-memory backends [`persistence`](crate::persistence) and
     /// [`observe`](crate::observe) offer for their own store contracts.
     pub use lash_core::facade_support::InMemoryTriggerStore;
+    pub use lash_core::facade_support::deterministic_subscription_id;
     pub use lash_core::{
         LashSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
         TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
@@ -175,13 +176,15 @@ pub mod tools {
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement, PendingCompletion,
         PreparedToolCall, ProcessParentEndPolicy, SignalProcessIntent, StartProcessIntent,
-        TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy, ToolAttemptOutcome,
-        ToolCall, ToolCallOutput, ToolCallRecord, ToolContext, ToolContract, ToolDefinition,
-        ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntent,
-        ToolIntentExecutionOutcome, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
-        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRetryStatus,
-        ToolValue, facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
+        TOOL_INTENT_PROTOCOL_V1, TimeoutBehavior, ToolActivation, ToolArgumentProjectionPolicy,
+        ToolAttemptOutcome, ToolCall, ToolCallOutput, ToolCallRecord, ToolContext, ToolContract,
+        ToolDefinition, ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource,
+        ToolIntent, ToolIntentExecutionOutcome, ToolIntentKind, ToolIntents, ToolManifest,
+        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
+        ToolProvider, ToolRegistry, ToolRetryStatus, ToolValue, facade_support::ReconfigureError,
+        facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
     };
+    pub use lash_core::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
         facade_support::ToolRestoreReport, facade_support::ToolStateEntry,
@@ -213,8 +216,9 @@ pub mod direct {
     pub use lash_core::llm::types::{
         AttachmentSource, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
         LlmEventSender, LlmOutputPart, LlmStreamEvent, LlmTerminalReason, LlmUsage,
-        NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope, ProviderReplayDrop,
-        ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
+        NonNegativeFiniteF64, NonNegativeFiniteF64Error, ProviderFileScope,
+        ProviderReasoningReplay, ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind,
+        ProviderRouteIdentity,
     };
     pub use lash_core::{
         facade_support::DirectCompletion, facade_support::DirectJsonSchema,
@@ -274,18 +278,18 @@ pub mod persistence {
     };
     pub use lash_core::{
         BlobRef, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-        GcReport, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
-        MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
-        PersistedSessionConfig, PersistedTurnState, ProtocolEvent, QueuedWorkStore,
-        RuntimePersistence, ScanCoverage, SessionAdmission, SessionBinding,
-        SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
+        ExecutedCallOutcome, ExecutedCallRecord, GcReport, LeaseClaimNonce, LeaseOwnerIdentity,
+        MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
+        MaintenanceStop, MaintenanceSweep, PersistedSessionConfig, PersistedTurnState,
+        ProtocolEvent, QueuedWorkStore, RuntimePersistence, ScanCoverage, SessionAdmission,
+        SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
         SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
         SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionGraph,
-        SessionHistoryRecord, SessionMeta, SessionNodeRecord, SessionReadView, SessionRelation,
-        StoreBackend, StoreError, StoreMaintenance, StorePreflight, StoreSchemaDatabase,
-        StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId, TurnInputStore,
-        VacuumReport, WorkClaim, WorkCompletion,
+        SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
+        SessionRelation, StoreBackend, StoreError, StoreMaintenance, StorePreflight,
+        StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict, TurnId,
+        TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
     };
     /// Committed session history flattened into presentation order, as returned
     /// by [`SessionReadView::chronological_projection`].
@@ -387,7 +391,9 @@ pub mod plugins {
 }
 
 pub mod messages {
-    pub use lash_core::{Message, MessageOrigin, MessageRole, facade_support::MessageSequence};
+    pub use lash_core::{
+        Message, MessageOrigin, MessageRole, Part, PartKind, facade_support::MessageSequence,
+    };
 }
 
 /// Attachment values: identity, media type, and the metadata that travels with
@@ -605,7 +611,7 @@ pub mod durability {
         ProcessDrainDeferred, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
     };
     pub use lash_core::{
-        EffectHost, facade_support::DurableProcessWorker,
+        EffectHost, EffectJournalAddressing, facade_support::DurableProcessWorker,
         facade_support::DurableProcessWorkerConfig, facade_support::InlineEffectHost,
         facade_support::LeaseTimings, facade_support::LeaseTimingsError,
         facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
@@ -696,11 +702,19 @@ pub mod provider {
     /// selection. The snake_case [`ModelEffortValidationCategory`] codes are a
     /// stable contract a capability catalog can branch on.
     pub use lash_core::facade_support::ModelEffortValidationCategory;
-    pub use lash_core::llm::types::LlmOutputSpec;
+    pub use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmOutputSpec, LlmRole};
     pub use lash_core::provider::ModelEffortValidationError;
     pub use lash_core::provider::{
         DefaultProviderFailureClassifier, ProviderFailureClassifier, ProviderRateLimitPolicy,
         ProviderReliability, ProviderRetryPolicy, RequestTimeout,
+    };
+    /// Request/response/error vocabulary of [`Provider::complete`],
+    /// re-exported so hosts can implement provider decorators (admission
+    /// gates, metrics taps) against the facade alone.
+    pub use lash_core::{
+        AttemptOutcome, ExecutionEvidence, ExecutionEvidenceCollectionInterruption, LlmRequest,
+        LlmRequestScope, LlmResponse, LlmStreamEvidence, ProtocolPosition, ProviderEndpointError,
+        facade_support::LlmTransportError,
     };
     pub use lash_core::{
         CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
@@ -708,12 +722,5 @@ pub mod provider {
         facade_support::GenerationRetryGuarantee, facade_support::LlmTimeouts,
         facade_support::Provider, facade_support::ProviderComponents,
         facade_support::ProviderHandle, facade_support::ProviderOptions,
-    };
-    /// Request/response/error vocabulary of [`Provider::complete`],
-    /// re-exported so hosts can implement provider decorators (admission
-    /// gates, metrics taps) against the facade alone.
-    pub use lash_core::{
-        ExecutionEvidence, ExecutionEvidenceCollectionInterruption, LlmRequest, LlmRequestScope,
-        LlmResponse, LlmStreamEvidence, facade_support::LlmTransportError,
     };
 }

@@ -140,7 +140,10 @@ them into an amnesty channel (FIG-1223):
   tie its line to the type that owns it --
   qualified on the line, or reached through a receiver that *resolves* to that
   type -- because `reference_exists` is a substring match and a leaf name matches
-  by coincidence.  Resolution is textual and hop by hop (`type_facts`): the
+  by coincidence.  The quoted source text, not its incidental line number, is
+  the durable identity: documentation or formatting above an unchanged consumer
+  relocates the anchor within the same file before these semantic checks run.
+  Resolution is textual and hop by hop (`type_facts`): the
   `impl` block types `self`, struct fields and method return types carry the
   chain forward, `type` aliases are followed, `impl Trait for Type` ties a
   receiver to the trait that owns the member, and a variant's declared payload
@@ -1745,6 +1748,23 @@ def reference_exists(reference: str) -> bool:
     return source is not None and reference.split("#", 1)[-1] in source
 
 
+def resolved_internal_reference(reference: str) -> str | None:
+    """Resolve an internal anchor after non-semantic line movement.
+
+    Internal consumers live in workspace source where documentation-only edits
+    routinely move the recorded line.  The exact source snippet remains the
+    durable identity; relocation stays within the recorded file, and the caller
+    still applies import, declaration, and member-owner checks to the resolved
+    line.
+    """
+    if reference_exists(reference):
+        return reference
+    relocated = relocated_reference(reference)
+    if relocated is not None and reference_exists(relocated):
+        return relocated
+    return None
+
+
 #: Kinds whose name means nothing without the item that owns it: `id` is a
 #: hundred fields, `AcceptedInjectedTurnInput::id` is one.
 MEMBER_KINDS = {"field", "variant", "function", "assoc_const", "assoc_type"}
@@ -3328,19 +3348,21 @@ def row_errors(
     elif assertion:
         errors.append(f"{symbol}: only used-asserted entries may name an assertion")
     if disposition in INTERNAL_DISPOSITIONS:
-        if not reference_exists(usage):
+        resolved_usage = resolved_internal_reference(usage)
+        if resolved_usage is None:
             errors.append(
                 f"{symbol}: stale or invalid internal consumer reference "
                 f"{usage!r}. An internal seam's justification is its anchor, "
-                "so the file, line, and source text all have to resolve."
+                "so the recorded file and source text have to resolve."
             )
-        imported = import_anchor_defect(usage)
+        checked_usage = resolved_usage or usage
+        imported = import_anchor_defect(checked_usage)
         if imported:
             errors.append(
                 f"{symbol}: usage anchor {usage!r} {imported}. An internal "
                 "seam's claim is that shipped code needs the item."
             )
-        declared = declaration_anchor_defect(symbol, usage)
+        declared = declaration_anchor_defect(symbol, checked_usage)
         if declared:
             errors.append(
                 f"{symbol}: usage anchor {usage!r} {declared}. An internal "
@@ -3354,7 +3376,7 @@ def row_errors(
                 entry.get("aliases"),
                 kind or "",
                 leaf_owners.get(symbol.split("::")[-1], set()) - owners,
-                usage,
+                checked_usage,
             )
             if defect:
                 errors.append(

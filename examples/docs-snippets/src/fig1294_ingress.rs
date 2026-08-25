@@ -98,8 +98,8 @@ impl ToolProvider for AttemptIntentProvider {
 
 #[tokio::test]
 async fn attempt_provider_returns_a_behaviorally_checked_intent_batch() {
-    let legacy = lash_core::testing::mock_tool_context();
-    let attempt = lash_core::AttemptContext::__for_testing(&legacy, SCOPE);
+    let legacy = lash::testing::mock_tool_context();
+    let attempt = lash::tools::AttemptContext::__for_testing(&legacy, SCOPE);
     let args = serde_json::json!({});
     let result = ToolProvider::execute_attempt(
         &AttemptIntentProvider,
@@ -115,7 +115,10 @@ async fn attempt_provider_returns_a_behaviorally_checked_intent_batch() {
     };
     assert!(result.into_output().is_success());
     assert!(!intents.is_empty());
-    assert_eq!(intents.protocol_version, lash_core::TOOL_INTENT_PROTOCOL_V1);
+    assert_eq!(
+        intents.protocol_version,
+        lash::tools::TOOL_INTENT_PROTOCOL_V1
+    );
     assert_eq!(intents.intents.len(), 1);
     assert_eq!(intents.intents[0].session_id(), attempt.session_id());
 }
@@ -165,7 +168,7 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     else {
         panic!("the runtime-owned tier must type its process-store duplicate")
     };
-    assert_eq!(kind, lash_core::ToolIntentKind::EmitProcessEvent);
+    assert_eq!(kind, lash::tools::ToolIntentKind::EmitProcessEvent);
 
     let cross_kind_key = ingress.key("docs-cross-kind", 0);
     let start = lash::tools::ToolIntent::StartProcess(Box::new(lash::tools::StartProcessIntent {
@@ -302,7 +305,7 @@ async fn ingress_start_retains_and_settles_default_parent_end() -> anyhow::Resul
         start_intent.request.id.as_str(),
         "replaced-by-the-intent-key"
     );
-    assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);
+    assert_eq!(intent.kind(), lash::tools::ToolIntentKind::StartProcess);
     let admitted = ingress.submit(key, intent).await;
     assert!(matches!(
         admitted,
@@ -327,22 +330,25 @@ impl StaticToolExecute for InternalProbe {
         ToolOutcome::ok(serde_json::json!({"fallback": call.name}))
     }
 
-    async fn execute_internal(&self, call: lash_core::InternalProcessToolCall<'_>) -> ToolOutcome {
-        let lash_core::InternalProcessToolCall {
+    async fn execute_internal(
+        &self,
+        call: lash::tools::InternalProcessToolCall<'_>,
+    ) -> ToolOutcome {
+        let lash::tools::InternalProcessToolCall {
             name,
             args,
             context,
         } = call;
-        let admin: lash_core::InternalProcessAdmin<'_> = context.processes();
+        let admin: lash::tools::InternalProcessAdmin<'_> = context.processes();
         let start = admin
-            .start(lash_core::ProcessStartRequest::external(
+            .start(lash::process::ProcessStartRequest::external(
                 "docs-internal-start",
-                lash_core::ProcessOriginator::host(),
+                lash::process::ProcessOriginator::host(),
                 serde_json::Value::Null,
             ))
             .await;
         let list = admin
-            .list_handles_filtered(&lash_core::ProcessListFilter::default())
+            .list_handles_filtered(&lash::process::ProcessListFilter::default())
             .await;
         let await_process = admin.await_process("docs-missing").await;
         let cancel = admin.cancel("docs-missing").await;
@@ -352,7 +358,7 @@ impl StaticToolExecute for InternalProbe {
         let complete = admin
             .complete_external(
                 "docs-missing",
-                lash_core::ProcessAwaitOutput::Success {
+                lash::process::ProcessAwaitOutput::Success {
                     value: serde_json::Value::Null,
                     control: None,
                 },
@@ -377,8 +383,8 @@ impl StaticToolExecute for InternalProbe {
 
 #[tokio::test]
 async fn internal_process_contract_is_separate_and_observable() {
-    let tool = lash_core::testing::mock_tool_context();
-    let context = lash_core::InternalProcessContext::__for_testing(&tool);
+    let tool = lash::testing::mock_tool_context();
+    let context = lash::tools::InternalProcessContext::__for_testing(&tool);
     let definition = ToolDefinition::raw(
         "tool:internal_probe",
         "internal_probe",
@@ -411,7 +417,7 @@ async fn internal_process_contract_is_separate_and_observable() {
 
     let direct = lash::tools::StaticToolExecute::execute_internal(
         provider.executor(),
-        lash_core::InternalProcessToolCall {
+        lash::tools::InternalProcessToolCall {
             name: "internal_probe",
             args: &serde_json::json!({"direct": true}),
             context: &context,
@@ -425,7 +431,7 @@ async fn internal_process_contract_is_separate_and_observable() {
 
     let fallback = lash::tools::ToolProvider::execute_internal(
         &provider,
-        lash_core::InternalProcessToolCall {
+        lash::tools::InternalProcessToolCall {
             name: "internal_probe",
             args: &serde_json::json!({"fallback": true}),
             context: &context,
@@ -509,7 +515,7 @@ async fn runtime_owned_cancel_uses_ingress_identity() -> anyhow::Result<()> {
         first,
         lash::tools::ToolIntentIngressOutcome::Admitted {
             outcome: ToolIntentExecutionOutcome::Executed {
-                kind: lash_core::ToolIntentKind::CancelProcess,
+                kind: lash::tools::ToolIntentKind::CancelProcess,
                 ..
             },
             replayed: false,
@@ -520,7 +526,7 @@ async fn runtime_owned_cancel_uses_ingress_identity() -> anyhow::Result<()> {
         duplicate,
         lash::tools::ToolIntentIngressOutcome::Refused {
             refusal: lash::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                kind: lash_core::ToolIntentKind::CancelProcess,
+                kind: lash::tools::ToolIntentKind::CancelProcess,
             }
         }
     ));
@@ -538,34 +544,35 @@ async fn runtime_owned_cancel_uses_ingress_identity() -> anyhow::Result<()> {
 struct SeededOutsideProtocolOutcome;
 
 #[async_trait]
-impl lash_core::AwaitEventResolver for SeededOutsideProtocolOutcome {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
+impl lash::runtime::AwaitEventResolver for SeededOutsideProtocolOutcome {
+    fn replay_ownership(&self) -> lash::EffectReplayOwnership {
+        lash::EffectReplayOwnership::Controller
     }
 
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
+    fn journal_addressing(&self) -> lash::durability::EffectJournalAddressing {
+        lash::durability::EffectJournalAddressing::KeyAddressed
     }
 }
 
-impl lash_core::EffectHost for SeededOutsideProtocolOutcome {
+impl lash::durability::EffectHost for SeededOutsideProtocolOutcome {
     fn scoped<'run>(
         &'run self,
-        scope: lash_core::ExecutionScope,
-    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
-        lash_core::ScopedEffectController::borrowed(self, scope)
+        scope: lash::runtime::ExecutionScope,
+    ) -> Result<lash::runtime::ScopedEffectController<'run>, lash::runtime::RuntimeError> {
+        lash::runtime::ScopedEffectController::borrowed(self, scope)
     }
 }
 
 #[async_trait]
-impl lash_core::RuntimeEffectController for SeededOutsideProtocolOutcome {
+impl lash::runtime::RuntimeEffectController for SeededOutsideProtocolOutcome {
     async fn execute_effect(
         &self,
-        _envelope: lash_core::RuntimeEffectEnvelope,
-        _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        Ok(lash_core::RuntimeEffectOutcome::Process {
-            result: lash_core::ProcessEffectOutcome::List {
+        _envelope: lash::runtime::RuntimeEffectEnvelope,
+        _local_executor: lash::runtime::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash::runtime::RuntimeEffectOutcome, lash::runtime::RuntimeEffectControllerError>
+    {
+        Ok(lash::runtime::RuntimeEffectOutcome::Process {
+            result: lash::runtime::ProcessEffectOutcome::List {
                 entries: Vec::new(),
             },
         })

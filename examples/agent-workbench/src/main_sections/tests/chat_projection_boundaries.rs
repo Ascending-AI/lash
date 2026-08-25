@@ -10,7 +10,7 @@ fn probe_turn_input(turn_id: &str, message_id: &str) -> lash::messages::Message 
     lash::messages::Message {
         id: message_id.to_string(),
         role: lash::messages::MessageRole::User,
-        parts: Arc::new(vec![lash_core::Part::text(
+        parts: Arc::new(vec![lash::messages::Part::text(
             format!("{message_id}.p0"),
             "ask".to_string(),
             None,
@@ -28,7 +28,7 @@ fn probe_turn_cause(message_id: &str) -> lash::messages::Message {
     lash::messages::Message {
         id: message_id.to_string(),
         role: lash::messages::MessageRole::Event,
-        parts: Arc::new(vec![lash_core::Part::text(
+        parts: Arc::new(vec![lash::messages::Part::text(
             format!("{message_id}.p0"),
             "the producer woke this session".to_string(),
             None,
@@ -48,12 +48,12 @@ fn probe_plugin_prose(message_id: &str, prose: &str) -> lash::messages::Message 
         id: message_id.to_string(),
         role: lash::messages::MessageRole::Assistant,
         parts: Arc::new(vec![
-            lash_core::Part::reasoning(
+            lash::messages::Part::reasoning(
                 format!("{message_id}.p0"),
                 format!("reasoning for {message_id}"),
                 None,
             ),
-            lash_core::Part::prose(format!("{message_id}.p1"), prose.to_string(), None),
+            lash::messages::Part::prose(format!("{message_id}.p1"), prose.to_string(), None),
         ]),
         origin: Some(lash::messages::MessageOrigin::Plugin {
             plugin_id: lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID.to_string(),
@@ -66,7 +66,7 @@ fn probe_runtime_assistant(message_id: &str, prose: &str) -> lash::messages::Mes
     lash::messages::Message {
         id: message_id.to_string(),
         role: lash::messages::MessageRole::Assistant,
-        parts: Arc::new(vec![lash_core::Part::prose(
+        parts: Arc::new(vec![lash::messages::Part::prose(
             format!("{message_id}.p0"),
             prose.to_string(),
             None,

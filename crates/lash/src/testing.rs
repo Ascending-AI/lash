@@ -2,7 +2,10 @@
 //! to script model responses in integration tests without a live provider.
 
 pub use lash_core::TestLocalProcessRegistry;
-pub use lash_core::testing::{TestProvider, TestProviderBuilder};
+pub use lash_core::testing::{
+    MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
+    mock_tool_context, test_code_protocol_factories,
+};
 
 #[cfg(test)]
 pub(crate) fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {

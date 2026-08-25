@@ -44,7 +44,7 @@ mod tests {
     #[tokio::test]
     async fn inspection_reads_the_settled_view_without_opening_a_session() -> anyhow::Result<()> {
         let factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
-        let policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+        let policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
         let store = factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 session_id: SESSION_ID.to_string(),
@@ -52,14 +52,14 @@ mod tests {
                 policy: policy.clone(),
             })
             .await?;
-        let mut state = lash_core::RuntimeSessionState {
+        let mut state = lash::persistence::RuntimeSessionState {
             session_id: SESSION_ID.to_string(),
-            ..lash_core::RuntimeSessionState::new(policy)
+            ..lash::persistence::RuntimeSessionState::new(policy)
         };
-        state.append_active_conversation_messages(&[lash_core::Message {
+        state.append_active_conversation_messages(&[lash::messages::Message {
             id: "docs-read-session-message".to_string(),
-            role: lash_core::MessageRole::User,
-            parts: vec![lash_core::Part::text(
+            role: lash::messages::MessageRole::User,
+            parts: vec![lash::messages::Part::text(
                 "docs-read-session-message.p0".to_string(),
                 "inspect me".to_string(),
                 None,
@@ -68,7 +68,7 @@ mod tests {
             origin: None,
         }]);
         store
-            .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            .commit_runtime_state(lash::persistence::RuntimeCommit::persisted_state_for_test(
                 &state,
                 &[],
             ))

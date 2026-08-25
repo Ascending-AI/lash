@@ -31,6 +31,14 @@ rust_line_limit_for() {
   fi
 }
 
+budget_line_count() {
+  local file="$1"
+  # Rustdoc expands the public contract without increasing implementation
+  # complexity. Keep the production ceiling on source lines while allowing a
+  # documentation-only change to describe an otherwise unchanged file.
+  awk '!/^[[:space:]]*\/\/[/!]/ { lines += 1 } END { print lines + 0 }' "$file"
+}
+
 # Pre-existing files that exceed the budget, exempt with a one-line reason.
 # This is an explicit, closed list — a new file over budget still fails hard.
 # The intended direction of travel is to shrink an entry below its limit and
@@ -93,7 +101,7 @@ while IFS= read -r -d '' file; do
     kind="production"
   fi
 
-  lines=$(wc -l < "$file")
+  lines=$(budget_line_count "$file")
   if ((lines > limit)); then
     failures+=("$kind:$lines:$rel")
   fi

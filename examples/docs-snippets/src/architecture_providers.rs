@@ -400,7 +400,7 @@ mod asserted_examples {
             ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
         };
         use lash::provider::ProviderComponents;
-        use lash_core::ProviderEndpointError;
+        use lash::provider::ProviderEndpointError;
 
         let normalized = ProviderRouteIdentity::for_endpoint(
             "openai_compatible",

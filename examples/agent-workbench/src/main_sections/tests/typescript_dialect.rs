@@ -259,7 +259,7 @@ fn the_workbench_typescript_tutorials_link() {
 /// dialect, and copy keyed on configuration teaches the other one.
 #[test]
 fn the_tutorials_follow_the_turns_resolved_options() {
-    let typescript = lash_core::ProtocolTurnOptions::typed(
+    let typescript = lash::runtime::ProtocolTurnOptions::typed(
         lash_rlm_types::RlmCreateExtras {
             dialect: Some(lash::rlm::RlmDialect::Typescript),
             ..Default::default()
@@ -274,7 +274,7 @@ fn the_tutorials_follow_the_turns_resolved_options() {
 
     // Absent options are how every pre-dialect session reads.
     assert_eq!(
-        tutorial_dialect(&lash_core::ProtocolTurnOptions::default()),
+        tutorial_dialect(&lash::runtime::ProtocolTurnOptions::default()),
         lash::rlm::RlmDialect::Lashlang
     );
 }

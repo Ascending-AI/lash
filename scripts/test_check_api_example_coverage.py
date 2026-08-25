@@ -35,6 +35,7 @@ from check_api_example_coverage import (
     example_test_tier_errors,
     internal_consumer_errors,
     relocation_key,
+    resolved_internal_reference,
     removal_verdict_errors,
     scope_blocks,
     test_module_paths,
@@ -2451,6 +2452,44 @@ class InternalConsumerTests(unittest.TestCase):
         self.assertEqual(
             self.errors("crates/lash-restate/src/lib.rs:588#let outcome: TurnOutcome ="), []
         )
+
+
+class InternalReferenceRelocationTests(unittest.TestCase):
+    """Internal anchors survive documentation-only line movement."""
+
+    def test_relocates_the_exact_source_within_the_recorded_file(self):
+        module = check_api_example_coverage
+        relative = "crates/lash/src/relocated_fixture.rs"
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            path = repo / relative
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "/// Newly added docs.\n\nlet value = lash_core::Thing::new();\n",
+                encoding="utf-8",
+            )
+            stale = f"{relative}:1#let value = lash_core::Thing::new();"
+            with mock.patch.object(module, "REPO", repo), mock.patch.dict(
+                module._SOURCE_LINES, {}, clear=True
+            ):
+                self.assertEqual(
+                    resolved_internal_reference(stale),
+                    f"{relative}:3#let value = lash_core::Thing::new();",
+                )
+
+    def test_rejects_an_anchor_whose_source_text_disappeared(self):
+        module = check_api_example_coverage
+        relative = "crates/lash/src/relocated_fixture.rs"
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            path = repo / relative
+            path.parent.mkdir(parents=True)
+            path.write_text("let replacement = NewThing::new();\n", encoding="utf-8")
+            stale = f"{relative}:1#let value = lash_core::Thing::new();"
+            with mock.patch.object(module, "REPO", repo), mock.patch.dict(
+                module._SOURCE_LINES, {}, clear=True
+            ):
+                self.assertIsNone(resolved_internal_reference(stale))
 
 
 class RemovalVerdictTests(unittest.TestCase):

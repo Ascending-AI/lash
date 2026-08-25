@@ -22,7 +22,7 @@
 /// ratified default. Absent or undecodable options read as the default, which
 /// is how every pre-dialect session reads.
 pub(crate) fn tutorial_dialect(
-    options: &lash_core::ProtocolTurnOptions,
+    options: &lash::runtime::ProtocolTurnOptions,
 ) -> lash::rlm::RlmDialect {
     options
         .decode::<lash_rlm_types::RlmCreateExtras>()

@@ -211,7 +211,7 @@ assert_eq!(
     start_intent.request.id.as_str(),
     "replaced-by-the-intent-key"
 );
-assert_eq!(intent.kind(), lash_core::ToolIntentKind::StartProcess);
+assert_eq!(intent.kind(), lash::tools::ToolIntentKind::StartProcess);
 let admitted = ingress.submit(key, intent).await;
 assert!(matches!(
     admitted,

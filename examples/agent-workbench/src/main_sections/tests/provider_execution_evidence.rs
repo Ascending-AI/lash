@@ -236,10 +236,10 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             .clone();
         assert_eq!(first_record.attempts.len(), 2);
         let failed_attempt = &first_record.attempts[0];
-        assert_eq!(failed_attempt.outcome, lash_core::AttemptOutcome::Failed);
+        assert_eq!(failed_attempt.outcome, lash::provider::AttemptOutcome::Failed);
         assert_eq!(
             failed_attempt.protocol_position,
-            lash_core::ProtocolPosition::NoResponse
+            lash::provider::ProtocolPosition::NoResponse
         );
         assert!(failed_attempt.evidence.is_none());
         let failed_error = failed_attempt
@@ -256,7 +256,7 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
         assert_eq!(first_record.attempts[1].ordinal, 2);
         assert_eq!(
             first_record.attempts[1].outcome,
-            lash_core::AttemptOutcome::Completed
+            lash::provider::AttemptOutcome::Completed
         );
         assert_delivered_provider_evidence(
             &first_observation_line,
