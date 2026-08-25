@@ -1441,8 +1441,10 @@ derive_mutation_jobs() {{
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
             ),
-            "api-coverage": ("python3 scripts/check_api_example_coverage.py",),
-            "api-surface": ("python3 scripts/api_surface.py check",),
+            "api-coverage": (
+                "python3 scripts/check_api_example_coverage.py",
+                "python3 scripts/api_surface.py check",
+            ),
             "package-feature-checks": (
                 "cargo check -p lash-internal-protocol-rlm --features testing --locked",
                 "cargo check -p agent-workbench --locked",
@@ -1664,7 +1666,6 @@ derive_mutation_jobs() {{
             "test-shard",
             "repo-gates",
             "api-coverage",
-            "api-surface",
             "package-feature-checks",
             "runtime-feature-boundary",
             "lint",

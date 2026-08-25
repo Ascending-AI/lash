@@ -494,57 +494,8 @@ jobs:
       - name: Check facade external types
         run: python3 scripts/check_facade_external_types.py
 
-      - name: Report sccache stats
-        if: always()
-        run: sccache --show-stats
-
-  # The checked facade snapshot uses the same rustdoc graph and cache geometry
-  # as the disposition gate, but is an independent machine-readable contract.
-  api-surface:
-    name: Public API surface snapshot
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
-
-    steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          git fetch \
-            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
-
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
-      - name: Install Rust toolchain
-        uses: ./.github/actions/rust-toolchain
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
-
+      # Same rustdoc graph and cache geometry as the coverage gate, so it
+      # rides in this job instead of paying a second rustdoc build.
       - name: Check public API surface snapshot
         run: python3 scripts/api_surface.py check
 
@@ -1965,7 +1916,6 @@ jobs:
       - test-doc
       - repo-gates
       - api-coverage
-      - api-surface
       - semver-advisory
       - lashlang-git-consumer
       - package-feature-checks

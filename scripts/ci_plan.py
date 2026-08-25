@@ -16,7 +16,6 @@ CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
 
 GATED_JOBS = {
     "api-coverage": "rust",
-    "api-surface": "rust",
     "semver-advisory": "rust",
     "lashlang-git-consumer": "rust",
     "package-feature-checks": "rust",
