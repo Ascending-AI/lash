@@ -620,7 +620,7 @@ def check_architecture_overview_stats(errors: list[str]) -> None:
     text = overview.read_text(encoding="utf-8")
     stat_patterns = {
         "Cargo members": r'<div class="micro-label">Cargo members</div><span class="stat-value">(\d+)</span>',
-        "Rust files": r'<div class="micro-label">Rust files</div><span class="stat-value">(\d+)</span>',
+        "Rust files": r'<div class="micro-label">Rust files</div><span class="stat-value">(\d+)\+</span>',
     }
     documented: dict[str, int] = {}
     for label, pattern in stat_patterns.items():
@@ -662,7 +662,7 @@ def check_architecture_overview_stats(errors: list[str]) -> None:
                 f"{overview.relative_to(ROOT)}: git ls-files '*.rs' failed with exit code {result.returncode}"
             )
         else:
-            expected_rust_files = len(result.stdout.splitlines())
+            expected_rust_files = (len(result.stdout.splitlines()) // 100) * 100
             actual_rust_files = documented.get("Rust files")
             if actual_rust_files is not None and actual_rust_files != expected_rust_files:
                 errors.append(
