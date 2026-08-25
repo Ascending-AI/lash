@@ -137,6 +137,7 @@ pub use builder::EmbeddedRuntimeBuilder;
 pub use causal::process_event_invocation;
 pub(crate) use causal::tool_retry_sleep_invocation;
 pub use clock::{Clock, SystemClock};
+/// Runtime effect contracts, including local process and trigger execution capabilities.
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
     BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet,
@@ -144,16 +145,16 @@ pub use effect::{
     EffectHost, EffectJournalIdentity, EffectJournalRetirement, ExecutionScope,
     ExternalCompletionError, GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy,
     InlineEffectHost, InlineRuntimeEffectController, LlmAttachmentSpec, LlmRequestSpec,
-    LoserPolicy, ProcessCommand, ProcessEffectOutcome, ProcessOutcomeObserver,
-    ProcessTurnCancellation, Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome,
-    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace, RuntimeInvocation,
-    RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
-    RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
+    LoserPolicy, ProcessCommand, ProcessEffectOutcome, ProcessLocalExecution,
+    ProcessOutcomeObserver, ProcessTurnCancellation, Resolution, ResolveOutcome,
+    RuntimeAssistantResponseHooksOutcome, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
+    RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
+    RuntimeScope, RuntimeSleepOptions, RuntimeSubject, ScopedEffectController, SegmentProgress,
     ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
-    refuse_unhonored_group_membership, validate_replayed_effect_envelope,
+    TriggerLocalExecution, refuse_unhonored_group_membership, validate_replayed_effect_envelope,
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
@@ -161,7 +162,11 @@ pub use error::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode};
 use error::{runtime_error_from_store_commit, session_commit_error};
 #[doc(hidden)]
 pub use event_pump::drive_with_event_pump;
-pub use host::{EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeHostConfig};
+/// Embedded-host configuration and its public configuration sections.
+pub use host::{
+    EmbeddedRuntimeHost, ProcessRuntimeHost, RuntimeControlConfig, RuntimeDurabilityConfig,
+    RuntimeHostConfig, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+};
 #[cfg(any(test, feature = "testing"))]
 pub use in_memory_store::RawSessionExecutionLeaseRow;
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};

@@ -19,13 +19,14 @@ pub use envelope::{
     RuntimeReplayAttribution, RuntimeScope, RuntimeSubject, ToolAttemptEffectOutcome,
     ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch,
 };
+/// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
-    InlineRuntimeEffectController, ProcessOutcomeObserver, ProcessTurnCancellation, Resolution,
-    ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
-    ScopedEffectController, SegmentProgress,
+    InlineRuntimeEffectController, ProcessLocalExecution, ProcessOutcomeObserver,
+    ProcessTurnCancellation, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
+    RuntimeSleepOptions, ScopedEffectController, SegmentProgress, TriggerLocalExecution,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,
