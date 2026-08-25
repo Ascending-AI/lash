@@ -432,7 +432,10 @@ finish "registered"
                     .expect("worker runs the process to terminal promptly")
                     .expect("await terminal output");
             assert!(
-                matches!(outcome, lash_core::ProcessAwaitOutput::Success { .. }),
+                matches!(
+                    outcome,
+                    lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()
+                ),
                 "process `{process_id}` must reach terminal SUCCESS via the worker's rebuilt \
              runtime, got: {outcome:?}"
             );

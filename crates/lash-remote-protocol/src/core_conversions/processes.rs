@@ -159,43 +159,8 @@ impl TryFrom<lash_core::ProcessAwaitOutput> for RemoteProcessAwaitOutput {
 
     fn try_from(value: lash_core::ProcessAwaitOutput) -> Result<Self, Self::Error> {
         match value {
-            lash_core::ProcessAwaitOutput::Success { value, control } => Ok(Self::Success {
-                value,
-                control: control
-                    .map(|control| {
-                        encode_remote_json(control, "RemoteProcessAwaitOutput", "control")
-                    })
-                    .transpose()?,
-            }),
-            lash_core::ProcessAwaitOutput::Failure {
-                class,
-                code,
-                message,
-                raw,
-                control,
-            } => Ok(Self::Failure {
-                class: class.into(),
-                code,
-                message,
-                raw,
-                control: control
-                    .map(|control| {
-                        encode_remote_json(control, "RemoteProcessAwaitOutput", "control")
-                    })
-                    .transpose()?,
-            }),
-            lash_core::ProcessAwaitOutput::Cancelled {
-                message,
-                raw,
-                control,
-            } => Ok(Self::Cancelled {
-                message,
-                raw,
-                control: control
-                    .map(|control| {
-                        encode_remote_json(control, "RemoteProcessAwaitOutput", "control")
-                    })
-                    .transpose()?,
+            lash_core::ProcessAwaitOutput::Settled { output } => Ok(Self::Settled {
+                output: output.try_into()?,
             }),
             lash_core::ProcessAwaitOutput::Abandoned { evidence, control } => {
                 Ok(Self::Abandoned {
@@ -224,31 +189,8 @@ impl TryFrom<RemoteProcessAwaitOutput> for lash_core::ProcessAwaitOutput {
     fn try_from(value: RemoteProcessAwaitOutput) -> Result<Self, Self::Error> {
         value.validate("RemoteProcessAwaitOutput")?;
         match value {
-            RemoteProcessAwaitOutput::Success { value, control } => Ok(Self::Success {
-                value,
-                control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
-            }),
-            RemoteProcessAwaitOutput::Failure {
-                class,
-                code,
-                message,
-                raw,
-                control,
-            } => Ok(Self::Failure {
-                class: class.into(),
-                code,
-                message,
-                raw,
-                control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
-            }),
-            RemoteProcessAwaitOutput::Cancelled {
-                message,
-                raw,
-                control,
-            } => Ok(Self::Cancelled {
-                message,
-                raw,
-                control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
+            RemoteProcessAwaitOutput::Settled { output } => Ok(Self::Settled {
+                output: output.try_into()?,
             }),
             RemoteProcessAwaitOutput::Abandoned { evidence, control } => Ok(Self::Abandoned {
                 evidence: Box::new(evidence.try_into()?),
@@ -261,6 +203,188 @@ impl TryFrom<RemoteProcessAwaitOutput> for lash_core::ProcessAwaitOutput {
                 terminal_label,
                 pruned_at_ms,
             }),
+        }
+    }
+}
+
+impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: lash_core::ToolCallOutput) -> Result<Self, Self::Error> {
+        let lash_core::ToolCallOutput { outcome, control } = value;
+        let outcome = match outcome {
+            lash_core::ToolCallOutcome::Success(value) => {
+                RemoteProcessToolCallOutcome::Success(encode_remote_json(
+                    value,
+                    "RemoteProcessAwaitOutput",
+                    "output.outcome.success",
+                )?)
+            }
+            lash_core::ToolCallOutcome::Failure(failure) => {
+                let lash_core::ToolFailure {
+                    class,
+                    code,
+                    message,
+                    source,
+                    retry,
+                    raw,
+                } = failure;
+                RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                    class: class.into(),
+                    code,
+                    message,
+                    source: source.into(),
+                    retry: retry.into(),
+                    raw: raw
+                        .map(|raw| {
+                            encode_remote_json(
+                                raw,
+                                "RemoteProcessAwaitOutput",
+                                "output.outcome.failure.raw",
+                            )
+                        })
+                        .transpose()?,
+                })
+            }
+            lash_core::ToolCallOutcome::Cancelled(cancellation) => {
+                let lash_core::ToolCancellation {
+                    message,
+                    source,
+                    raw,
+                } = cancellation;
+                RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                    message,
+                    source: source.into(),
+                    raw: raw
+                        .map(|raw| {
+                            encode_remote_json(
+                                raw,
+                                "RemoteProcessAwaitOutput",
+                                "output.outcome.cancelled.raw",
+                            )
+                        })
+                        .transpose()?,
+                })
+            }
+        };
+        Ok(Self {
+            outcome,
+            control: control
+                .map(|control| {
+                    encode_remote_json(control, "RemoteProcessAwaitOutput", "output.control")
+                })
+                .transpose()?,
+        })
+    }
+}
+
+impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
+    type Error = RemoteProtocolError;
+
+    fn try_from(value: RemoteProcessToolCallOutput) -> Result<Self, Self::Error> {
+        let RemoteProcessToolCallOutput { outcome, control } = value;
+        let outcome = match outcome {
+            RemoteProcessToolCallOutcome::Success(value) => lash_core::ToolCallOutcome::Success(
+                decode_remote_json(value, "RemoteProcessAwaitOutput", "output.outcome.success")?,
+            ),
+            RemoteProcessToolCallOutcome::Failure(failure) => {
+                let RemoteProcessToolFailure {
+                    class,
+                    code,
+                    message,
+                    source,
+                    retry,
+                    raw,
+                } = failure;
+                lash_core::ToolCallOutcome::Failure(lash_core::ToolFailure {
+                    class: class.into(),
+                    code,
+                    message,
+                    source: source.into(),
+                    retry: retry.into(),
+                    raw: raw
+                        .map(|raw| {
+                            decode_remote_json(
+                                raw,
+                                "RemoteProcessAwaitOutput",
+                                "output.outcome.failure.raw",
+                            )
+                        })
+                        .transpose()?,
+                })
+            }
+            RemoteProcessToolCallOutcome::Cancelled(cancellation) => {
+                let RemoteProcessToolCancellation {
+                    message,
+                    source,
+                    raw,
+                } = cancellation;
+                lash_core::ToolCallOutcome::Cancelled(lash_core::ToolCancellation {
+                    message,
+                    source: source.into(),
+                    raw: raw
+                        .map(|raw| {
+                            decode_remote_json(
+                                raw,
+                                "RemoteProcessAwaitOutput",
+                                "output.outcome.cancelled.raw",
+                            )
+                        })
+                        .transpose()?,
+                })
+            }
+        };
+        Ok(Self {
+            outcome,
+            control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
+        })
+    }
+}
+
+impl From<lash_core::ToolFailureSource> for RemoteProcessToolFailureSource {
+    fn from(value: lash_core::ToolFailureSource) -> Self {
+        match value {
+            lash_core::ToolFailureSource::Runtime => Self::Runtime,
+            lash_core::ToolFailureSource::Tool => Self::Tool,
+            lash_core::ToolFailureSource::Plugin => Self::Plugin,
+            lash_core::ToolFailureSource::Policy => Self::Policy,
+            lash_core::ToolFailureSource::Cancellation => Self::Cancellation,
+            lash_core::ToolFailureSource::UnknownLegacy => Self::UnknownLegacy,
+        }
+    }
+}
+
+impl From<RemoteProcessToolFailureSource> for lash_core::ToolFailureSource {
+    fn from(value: RemoteProcessToolFailureSource) -> Self {
+        match value {
+            RemoteProcessToolFailureSource::Runtime => Self::Runtime,
+            RemoteProcessToolFailureSource::Tool => Self::Tool,
+            RemoteProcessToolFailureSource::Plugin => Self::Plugin,
+            RemoteProcessToolFailureSource::Policy => Self::Policy,
+            RemoteProcessToolFailureSource::Cancellation => Self::Cancellation,
+            RemoteProcessToolFailureSource::UnknownLegacy => Self::UnknownLegacy,
+        }
+    }
+}
+
+impl From<lash_core::ToolRetryStatus> for RemoteProcessToolRetryStatus {
+    fn from(value: lash_core::ToolRetryStatus) -> Self {
+        match value {
+            lash_core::ToolRetryStatus::Never => Self::Never,
+            lash_core::ToolRetryStatus::Safe { after_ms } => Self::Safe { after_ms },
+            lash_core::ToolRetryStatus::Exhausted { attempts } => Self::Exhausted { attempts },
+            lash_core::ToolRetryStatus::UnknownLegacy => Self::UnknownLegacy,
+        }
+    }
+}
+
+impl From<RemoteProcessToolRetryStatus> for lash_core::ToolRetryStatus {
+    fn from(value: RemoteProcessToolRetryStatus) -> Self {
+        match value {
+            RemoteProcessToolRetryStatus::Never => Self::Never,
+            RemoteProcessToolRetryStatus::Safe { after_ms } => Self::Safe { after_ms },
+            RemoteProcessToolRetryStatus::Exhausted { attempts } => Self::Exhausted { attempts },
+            RemoteProcessToolRetryStatus::UnknownLegacy => Self::UnknownLegacy,
         }
     }
 }

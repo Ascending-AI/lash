@@ -471,11 +471,12 @@ impl crate::ProcessEngine for FailOnceArtifactReadEngine {
                 "injected transient artifact-store read failure".to_string(),
             )));
         }
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"process_id": context.registration().id}),
-            control: None,
-        }
-        .into())
+        Ok(
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"process_id": context.registration().id}),
+            ))
+            .into(),
+        )
     }
 }
 
@@ -535,10 +536,9 @@ impl crate::ProcessEngine for BoundaryThenTerminalEngine {
                 vec![1, 2, 3]
             );
             Ok(crate::ProcessRunOutcome::Terminal {
-                output: Box::new(ProcessAwaitOutput::Success {
-                    value: serde_json::json!({ "segments": 2 }),
-                    control: None,
-                }),
+                output: Box::new(ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::json!({ "segments": 2 })),
+                )),
                 actions: Vec::new(),
             })
         }
@@ -582,10 +582,9 @@ impl crate::ProcessEngine for SnapshotRecordingEngine {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         self.payloads.lock_recover().push(payload);
         Ok(crate::ProcessRunOutcome::Terminal {
-            output: Box::new(ProcessAwaitOutput::Success {
-                value: serde_json::json!({ "recorded": true }),
-                control: None,
-            }),
+            output: Box::new(ProcessAwaitOutput::from_tool_output(
+                crate::ToolCallOutput::success(serde_json::json!({ "recorded": true })),
+            )),
             actions: Vec::new(),
         })
     }
@@ -604,10 +603,9 @@ impl crate::ProcessEngine for NestedProcessEngine {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
         Ok(crate::ProcessRunOutcome::Terminal {
-            output: Box::new(ProcessAwaitOutput::Success {
-                value: serde_json::json!({ "nested": "done" }),
-                control: None,
-            }),
+            output: Box::new(ProcessAwaitOutput::from_tool_output(
+                crate::ToolCallOutput::success(serde_json::json!({ "nested": "done" })),
+            )),
             actions: Vec::new(),
         })
     }
@@ -678,7 +676,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             ));
         }
         match context.await_process(process_id).await {
-            Ok(ProcessAwaitOutput::Success { .. }) => {
+            Ok(ProcessAwaitOutput::Settled { output }) if output.is_success() => {
                 crate::ToolOutcome::ok(serde_json::json!({ "nested": "done" }))
             }
             Ok(other) => crate::ToolOutcome::err_fmt(format_args!(
@@ -699,10 +697,9 @@ impl ProductionChainEngine {
     }
 
     fn success(process_id: String) -> crate::ProcessRunOutcome {
-        crate::ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "completed": process_id }),
-            control: None,
-        }
+        crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+            serde_json::json!({ "completed": process_id }),
+        ))
         .into()
     }
 
@@ -1102,7 +1099,10 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         .await
         .expect("outer session-turn process is terminal");
     assert!(
-        matches!(outer, ProcessAwaitOutput::Success { .. }),
+        matches!(
+            outer,
+            ProcessAwaitOutput::Settled { ref output } if output.is_success()
+        ),
         "outer session-turn process must succeed: {outer:?}"
     );
     assert_eq!(nested_runs.load(Ordering::SeqCst), 1);
@@ -1437,10 +1437,9 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
     let terminal = registry
         .complete_process(
             &delivery.process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({ "done": true }),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({ "done": true }),
+            )),
             crate::ProcessCompletionAuthority::workflow_key(&delivery.process_id),
         )
         .await

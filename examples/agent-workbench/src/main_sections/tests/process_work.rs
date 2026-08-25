@@ -131,10 +131,9 @@ mod process_work_tests {
         watched
             .complete_process(
                 "await-route-proc",
-                lash::process::ProcessAwaitOutput::Success {
-                    value: json!("done"),
-                    control: None,
-                },
+                lash::process::ProcessAwaitOutput::from_tool_output(
+                    lash::tools::ToolCallOutput::success(json!("done")),
+                ),
                 lash::process::ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -148,9 +147,14 @@ mod process_work_tests {
         .expect("await work route");
 
         // Terminal outcome rides the await seam (ADR 0016)...
+        assert_eq!(
+            result.outcome.terminal_status(),
+            Some(lash::process::ProcessStatus::Completed)
+        );
         assert!(matches!(
             &result.outcome,
-            lash::process::ProcessAwaitOutput::Success { value, .. } if value == &json!("done")
+            lash::process::ProcessAwaitOutput::Settled { output }
+                if output.is_success() && output.value_for_projection() == json!("done")
         ));
         // ...and the event log reconciled from the durable store is complete.
         assert!(
@@ -191,13 +195,13 @@ mod process_work_tests {
         watched
             .complete_process(
                 "failed-work-rail-proc",
-                lash::process::ProcessAwaitOutput::Failure {
-                    class: lash::tools::ToolFailureClass::External,
-                    code: "deterministic_failure".to_string(),
-                    message: "deterministic durable process failure".to_string(),
-                    raw: None,
-                    control: None,
-                },
+                lash::process::ProcessAwaitOutput::from_tool_output(
+                    lash::tools::ToolCallOutput::failure(lash::tools::ToolFailure::runtime(
+                        lash::tools::ToolFailureClass::External,
+                        "deterministic_failure",
+                        "deterministic durable process failure",
+                    )),
+                ),
                 lash::process::ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -748,11 +752,11 @@ mod process_work_tests {
             .expect("replay terminal completion");
         assert_eq!(replay.status, ProcessStatus::Completed);
         assert_eq!(replay.outcome.as_ref(), Some(&success));
-        let cancellation = ProcessAwaitOutput::Cancelled {
-            message: "operator cancelled".to_string(),
-            raw: None,
-            control: None,
-        };
+        let cancellation = ProcessAwaitOutput::from_tool_output(
+            lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime(
+                "operator cancelled",
+            )),
+        );
         assert_eq!(cancellation.terminal_status(), Some(ProcessStatus::Cancelled));
         assert_eq!(
             cancellation.into_tool_output().value_for_projection()["message"],
@@ -809,16 +813,20 @@ mod process_work_tests {
             ))
             .await
             .expect("register externally-owned work");
+        let mut batch_failure = lash::tools::ToolFailure::tool(
+            lash::tools::ToolFailureClass::External,
+            "batch_rejected",
+            "batch service rejected the export",
+        );
+        batch_failure.raw = Some(lash::tools::ToolValue::untrusted_json(
+            json!({ "retryable": false }),
+        ));
         let external_completion = registry
             .complete_process(
                 external_id,
-                ProcessAwaitOutput::Failure {
-                    class: lash::tools::ToolFailureClass::External,
-                    code: "batch_rejected".to_string(),
-                    message: "batch service rejected the export".to_string(),
-                    raw: Some(json!({ "retryable": false })),
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::failure(
+                    batch_failure,
+                )),
                 ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -826,15 +834,13 @@ mod process_work_tests {
         assert_eq!(external_completion.status, ProcessStatus::Failed);
         assert!(matches!(
             external_completion.outcome.as_ref(),
-            Some(ProcessAwaitOutput::Failure {
-                class: lash::tools::ToolFailureClass::External,
-                code,
-                message,
-                raw: Some(raw),
-                control: None,
-            }) if code == "batch_rejected"
-                && message == "batch service rejected the export"
-                && raw["retryable"] == false
+            Some(ProcessAwaitOutput::Settled { output })
+                if !output.is_success()
+                    && output.value_for_projection()["class"] == "external"
+                    && output.value_for_projection()["code"] == "batch_rejected"
+                    && output.value_for_projection()["message"]
+                        == "batch service rejected the export"
+                    && output.value_for_projection()["raw"]["retryable"] == false
         ));
         assert_eq!(ProcessCompletionAuthority::workflow_key("wf-1").label(), "workflow-key");
 
@@ -1005,10 +1011,9 @@ mod process_work_tests {
             process_registry
                 .complete_process(
                     process_id,
-                    lash::process::ProcessAwaitOutput::Success {
-                        value: json!({ "delivered": true }),
-                        control: None,
-                    },
+                    lash::process::ProcessAwaitOutput::from_tool_output(
+                        lash::tools::ToolCallOutput::success(json!({ "delivered": true })),
+                    ),
                     ProcessCompletionAuthority::external_owner(),
                 )
                 .await

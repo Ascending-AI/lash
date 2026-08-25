@@ -2049,10 +2049,9 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     registry
         .complete_process(
             &identity.replay_key,
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::json!("terminal after the recorded drain"),
-                control: None,
-            },
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("terminal after the recorded drain"),
+            )),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -2217,10 +2216,9 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
     registry
         .complete_process(
             "pg-public-intent-target",
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::json!("terminal after public intent drain"),
-                control: None,
-            },
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("terminal after public intent drain"),
+            )),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await

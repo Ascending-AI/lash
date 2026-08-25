@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::*;
 use crate::{
     ProcessInput, ProcessProvenance, ProcessRegistration, TestLocalProcessRegistry,
-    TestProcessRegistryWriteExt, ToolControl,
+    TestProcessRegistryWriteExt,
 };
 
 fn registration(process_id: &str) -> ProcessRegistration {
@@ -54,10 +54,7 @@ impl ProcessEventSink for CollectingSink {
 }
 
 fn success(value: serde_json::Value) -> ProcessAwaitOutput {
-    ProcessAwaitOutput::Success {
-        value,
-        control: None::<ToolControl>,
-    }
+    ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
 }
 
 /// ADR 0016 pins the awaiter's polling cadence: a 25ms floor, doubling

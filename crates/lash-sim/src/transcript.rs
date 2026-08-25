@@ -543,10 +543,9 @@ mod tests {
         let terminal = registry
             .complete_process(
                 process_id,
-                ProcessAwaitOutput::Success {
-                    value: serde_json::json!({"done": true}),
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                    serde_json::json!({"done": true}),
+                )),
                 ProcessCompletionAuthority::external_owner(),
             )
             .await

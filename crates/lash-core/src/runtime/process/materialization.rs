@@ -48,10 +48,9 @@ fn materialize_terminal_semantics(
                 Err(_) => selected_value_to_await_output(terminal.status, selected)?,
             }
         }
-        None if terminal.status == ProcessStatus::Completed => ProcessAwaitOutput::Success {
-            value: payload.clone(),
-            control: None,
-        },
+        None if terminal.status == ProcessStatus::Completed => {
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(payload.clone()))
+        }
         None => {
             return Err(PluginError::Session(
                 "failed or cancelled terminal events must declare await output".to_string(),
@@ -76,22 +75,24 @@ fn selected_value_to_await_output(
     value: serde_json::Value,
 ) -> Result<ProcessAwaitOutput, PluginError> {
     Ok(match status {
-        ProcessStatus::Completed => ProcessAwaitOutput::Success {
-            value,
-            control: None,
-        },
-        ProcessStatus::Failed => ProcessAwaitOutput::Failure {
-            class: crate::ToolFailureClass::Execution,
-            code: "process_failed".to_string(),
-            message: selector_value_to_string(&value),
-            raw: Some(value),
-            control: None,
-        },
-        ProcessStatus::Cancelled => ProcessAwaitOutput::Cancelled {
-            message: selector_value_to_string(&value),
-            raw: Some(value),
-            control: None,
-        },
+        ProcessStatus::Completed => {
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
+        }
+        ProcessStatus::Failed => {
+            let mut failure = crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Execution,
+                "process_failed",
+                selector_value_to_string(&value),
+            );
+            failure.raw = Some(crate::ToolValue::untrusted_json(value));
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure))
+        }
+        ProcessStatus::Cancelled => {
+            let mut cancellation =
+                crate::ToolCancellation::runtime(selector_value_to_string(&value));
+            cancellation.raw = Some(crate::ToolValue::untrusted_json(value));
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(cancellation))
+        }
         // Reached only if a producer declares its own `Abandoned` terminal event
         // and emits a raw value (not a serialized `ProcessAwaitOutput`); the
         // sweep/drain path writes structured evidence through `complete_process`,

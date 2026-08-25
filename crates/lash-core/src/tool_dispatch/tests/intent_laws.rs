@@ -227,10 +227,9 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     registry
         .complete_process(
             "intent-law-target",
-            crate::ProcessAwaitOutput::Success {
-                value: json!("terminal after the first drain"),
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
+                "terminal after the first drain"
+            ))),
             crate::ProcessCompletionAuthority::external_owner(),
         )
         .await

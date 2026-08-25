@@ -586,10 +586,9 @@ impl SurfaceRunner {
                 self.process_registry
                     .complete_process_with_parent_end(
                         "surface-intent-parent",
-                        lash_core::ProcessAwaitOutput::Success {
-                            value: serde_json::json!({"ended": true}),
-                            control: None,
-                        },
+                        lash_core::ProcessAwaitOutput::from_tool_output(
+                            lash_core::ToolCallOutput::success(serde_json::json!({"ended": true})),
+                        ),
                         lash_core::ProcessCompletionAuthority::external_owner(),
                         actions.clone(),
                     )

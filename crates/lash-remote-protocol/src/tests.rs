@@ -1543,9 +1543,11 @@ fn remote_process_dtos_json_round_trip() {
     await_request.validate().expect("valid await request");
     let await_result = RemoteProcessAwaitOutcome {
         process_id: "process:1".to_string(),
-        output: RemoteProcessAwaitOutput::Success {
-            value: serde_json::json!({ "done": true }),
-            control: None,
+        output: RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Success(serde_json::json!({ "done": true })),
+                control: None,
+            },
         },
     };
     await_result.validate().expect("valid await result");
@@ -2261,9 +2263,11 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
     );
 
     let mut non_terminal_with_outcome = remote_process_record();
-    non_terminal_with_outcome.outcome = Some(RemoteProcessAwaitOutput::Success {
-        value: serde_json::Value::Null,
-        control: None,
+    non_terminal_with_outcome.outcome = Some(RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
+            control: None,
+        },
     });
     assert!(
         non_terminal_with_outcome
@@ -2275,10 +2279,15 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
 
     let mut mismatched = remote_process_record();
     mismatched.status = RemoteProcessStatus::Completed;
-    mismatched.outcome = Some(RemoteProcessAwaitOutput::Cancelled {
-        message: "cancelled".to_string(),
-        raw: None,
-        control: None,
+    mismatched.outcome = Some(RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                message: "cancelled".to_string(),
+                source: RemoteProcessToolFailureSource::Cancellation,
+                raw: None,
+            }),
+            control: None,
+        },
     });
     assert!(
         mismatched
@@ -2318,9 +2327,11 @@ fn remote_process_event() -> RemoteProcessEvent {
         semantics: RemoteProcessEventSemantics {
             terminal: Some(RemoteProcessTerminalSemantics {
                 status: RemoteProcessStatus::Completed,
-                outcome: RemoteProcessAwaitOutput::Success {
-                    value: serde_json::json!(true),
-                    control: None,
+                outcome: RemoteProcessAwaitOutput::Settled {
+                    output: RemoteProcessToolCallOutput {
+                        outcome: RemoteProcessToolCallOutcome::Success(serde_json::json!(true)),
+                        control: None,
+                    },
                 },
             }),
             wake: Some(RemoteProcessWake {

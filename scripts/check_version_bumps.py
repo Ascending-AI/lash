@@ -144,6 +144,22 @@ IDENTIFIER_RENAME_BASELINES = {
     'crates/lash-core/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:a8285c2863162c569cafbb16c7fe31c203cba082a809439f21349b8c659de53c',
 }
 
+# Burned one-time proofs that an atomic stack's lower branch already reserved
+# the version carried by a guarded change on an upper branch. Unlike an
+# identifier-rename baseline, this explicitly acknowledges changed serialized
+# bytes. It is valid only while the stack lands atomically: the lower branch
+# must not merge independently and publish the reserved version without the
+# pinned upper-branch shape.
+STACKED_VERSION_BASELINES = {
+    # FIG-1950 is the top of #774 (FIG-1960). The lower branch performs the
+    # stack's single 46 -> 47 envelope bump; this branch supplies the process
+    # await wire change reserved under 47. The two PRs land atomically via this
+    # top PR, and #774 must not merge independently.
+    "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
+        "sha256:4ddbc94c1048226fabb1eed40d6c90b2dd175833b2ab3eb076e93e4883b89549"
+    ),
+}
+
 
 @dataclass(frozen=True)
 class Guard:
@@ -255,6 +271,7 @@ class CheckResult:
     registrations: tuple[Surface, ...] = ()
     unregistered: tuple[Unregistered, ...] = ()
     identifier_renames: tuple[Surface, ...] = ()
+    stacked_versions: tuple[Surface, ...] = ()
 
 
 class CheckError(RuntimeError):
@@ -1134,6 +1151,7 @@ def check_surfaces(
     registrations: list[Surface] = []
     unregistered: list[Unregistered] = []
     identifier_renames: list[Surface] = []
+    stacked_versions: list[Surface] = []
     for surface in surfaces:
         try:
             head_version = version_at(view, head_revision, surface)
@@ -1196,6 +1214,14 @@ def check_surfaces(
             )
             continue
         if head_version <= base_version:
+            # An atomic stack may reserve its one version bump on a lower
+            # branch and land the guarded bytes on an upper branch. That
+            # exception pins the reviewed final bytes and is not a claim that
+            # the wire stayed identical.
+            fingerprint = surface_fingerprint(head_entries)
+            if STACKED_VERSION_BASELINES.get(surface.key) == fingerprint:
+                stacked_versions.append(surface)
+                continue
             # The guarded text moved. A burned identifier-rename baseline is a
             # reviewer's signed answer that the format underneath it did not,
             # and it holds only for the exact guarded bytes it pinned.
@@ -1218,6 +1244,7 @@ def check_surfaces(
         tuple(registrations),
         tuple(unregistered),
         tuple(identifier_renames),
+        tuple(stacked_versions),
     )
 
 
@@ -1334,9 +1361,13 @@ def main(argv: list[str] | None = None) -> int:
     if result.identifier_renames:
         names = ", ".join(surface.key for surface in result.identifier_renames)
         renamed = f"; identifier-rename baseline honoured for: {names}"
+    stacked = ""
+    if result.stacked_versions:
+        names = ", ".join(surface.key for surface in result.stacked_versions)
+        stacked = f"; atomic-stack version reservation honoured for: {names}"
     print(
         f"version-bump check passed: {len(surfaces)} surfaces against "
-        f"merge-base {base[:12]}{registered}{renamed}"
+        f"merge-base {base[:12]}{registered}{renamed}{stacked}"
     )
     return 0
 

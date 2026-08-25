@@ -230,10 +230,9 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         ProcessEventAppendRequest::new(
             "process.completed",
             serde_json::json!({
-                "await_output": ProcessAwaitOutput::Success {
-                    value: serde_json::json!({"ok": true}),
-                    control: None,
-                },
+                "await_output": ProcessAwaitOutput::from_tool_output(
+                    crate::ToolCallOutput::success(serde_json::json!({"ok": true})),
+                ),
             }),
         )
         .with_replay_key("process-repair-waiting-terminal"),
@@ -283,10 +282,9 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     let request = ProcessEventAppendRequest::new(
         "process.completed",
         serde_json::json!({
-            "await_output": ProcessAwaitOutput::Success {
-                value: serde_json::json!({"ok": true}),
-                control: None,
-            },
+            "await_output": ProcessAwaitOutput::from_tool_output(
+                crate::ToolCallOutput::success(serde_json::json!({"ok": true})),
+            ),
         }),
     )
     .with_replay_key("process-repair-terminal");
@@ -320,7 +318,7 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     ));
     assert!(matches!(
         repair_record.and_then(|record| record.outcome),
-        Some(ProcessAwaitOutput::Success { .. })
+        Some(ProcessAwaitOutput::Settled { .. })
     ));
 }
 
@@ -509,10 +507,9 @@ async fn prune_serializes_same_id_reregistration_and_fresh_wake_cleanup() {
     registry
         .complete_process(
             process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!("old done"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("old done"),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await

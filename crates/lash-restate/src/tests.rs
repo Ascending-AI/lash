@@ -77,6 +77,48 @@ use endpoint_protocol::{
     restate_output_json,
 };
 
+fn process_success(value: serde_json::Value) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(value))
+}
+
+fn legacy_process_success(value: serde_json::Value) -> ProcessAwaitOutput {
+    let value =
+        serde_json::from_value(value).expect("legacy process success is a valid tool value");
+    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success_tool_value(value))
+}
+
+fn process_cancellation(
+    message: impl Into<String>,
+    raw: Option<serde_json::Value>,
+) -> ProcessAwaitOutput {
+    let mut cancellation = lash_core::ToolCancellation::runtime(message);
+    cancellation.raw = raw.map(lash_core::ToolValue::untrusted_json);
+    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(cancellation))
+}
+
+fn process_failure(
+    class: lash_core::ToolFailureClass,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    raw: Option<serde_json::Value>,
+) -> ProcessAwaitOutput {
+    let mut failure = lash_core::ToolFailure::runtime(class, code, message);
+    failure.raw = raw.map(lash_core::ToolValue::untrusted_json);
+    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(failure))
+}
+
+fn is_process_success(output: &ProcessAwaitOutput) -> bool {
+    matches!(output, ProcessAwaitOutput::Settled { output } if output.is_success())
+}
+
+fn is_process_cancellation(output: &ProcessAwaitOutput) -> bool {
+    matches!(
+        output,
+        ProcessAwaitOutput::Settled { output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))
+    )
+}
+
 fn durable_turn_scope(session_id: impl Into<String>, turn_id: impl Into<String>) -> ExecutionScope {
     let session_id = session_id.into();
     ExecutionScope::turn(&session_id, turn_id)
@@ -652,19 +694,14 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
             )
             .await;
         match outcome {
-            Ok(RuntimeEffectOutcome::Sleep) => Ok(ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            }
-            .into()),
-            Err(_) if cancellation.is_cancelled() => Ok(ProcessAwaitOutput::Cancelled {
-                message: format!(
+            Ok(RuntimeEffectOutcome::Sleep) => Ok(process_success(serde_json::Value::Null).into()),
+            Err(_) if cancellation.is_cancelled() => Ok(process_cancellation(
+                format!(
                     "process `{}` observed durable cancellation",
                     registration.id
                 ),
-                raw: None,
-                control: None,
-            }
+                None,
+            )
             .into()),
             Err(error) => Err(PluginError::Session(error.to_string())),
             Ok(other) => Err(PluginError::Session(format!(
@@ -707,11 +744,7 @@ impl RestateProcessRunner for Fig788TerminalRedriveRunner {
             )
             .await
             .map_err(|error| PluginError::Session(error.to_string()))?;
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"runner": "replayed"}),
-            control: None,
-        }
-        .into())
+        Ok(process_success(serde_json::json!({"runner": "replayed"})).into())
     }
 
     async fn request_process_cancel(
@@ -773,11 +806,7 @@ impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
                 engine_state: vec![1],
             }
         );
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"segment": 1, "terminal": true}),
-            control: None,
-        }
-        .into())
+        Ok(process_success(serde_json::json!({"segment": 1, "terminal": true})).into())
     }
 
     async fn request_process_cancel(
@@ -820,11 +849,7 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
             )
             .await
             .map_err(|error| PluginError::Session(error.to_string()))?;
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"segment": 1, "effectful_terminal": true}),
-            control: None,
-        }
-        .into())
+        Ok(process_success(serde_json::json!({"segment": 1, "effectful_terminal": true})).into())
     }
 
     async fn request_process_cancel(
@@ -1504,7 +1529,7 @@ async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
             .expect("read process")
             .expect("read redriven process")
             .outcome,
-        Some(ProcessAwaitOutput::Cancelled { .. })
+        Some(ref output) if is_process_cancellation(output)
     ));
 }
 
@@ -1545,11 +1570,7 @@ async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix(
         ]
     );
 
-    let stored = ProcessAwaitOutput::Cancelled {
-        message: "terminal outcome landed between attempts".to_string(),
-        raw: None,
-        control: None,
-    };
+    let stored = process_cancellation("terminal outcome landed between attempts", None);
     registry
         .complete_process(
             process_id,
@@ -2829,11 +2850,10 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
 }
 
 fn fig790_cancelled_process_output(process_id: &str) -> ProcessAwaitOutput {
-    ProcessAwaitOutput::Cancelled {
-        message: format!("process `{process_id}` observed durable turn cancellation"),
-        raw: None,
-        control: None,
-    }
+    process_cancellation(
+        format!("process `{process_id}` observed durable turn cancellation"),
+        None,
+    )
 }
 
 async fn fig790_process_await_endpoint(process_id: &str) -> (Endpoint, Arc<dyn ProcessRegistry>) {
@@ -2891,10 +2911,7 @@ async fn fig790_pre_pr_suspended_process_await_redrives_to_terminal() {
         process_id: process_id.to_string(),
         cancel_on_suspend_wake: false,
     };
-    let terminal = ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "deployment_compat": "terminal" }),
-        control: None,
-    };
+    let terminal = process_success(serde_json::json!({ "deployment_compat": "terminal" }));
     let replay = encode_call_replay(
         "fig790-pre-pr-terminal",
         &input,
@@ -3176,10 +3193,7 @@ async fn fig790_process_terminal_wins_when_terminal_and_cancellation_are_both_re
             .collect::<Vec<_>>(),
         vec!["await_terminal", "register_awakeable"]
     );
-    let terminal = ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "winner": "process_terminal" }),
-        control: None,
-    };
+    let terminal = process_success(serde_json::json!({ "winner": "process_terminal" }));
     let replay = encode_call_replay(
         "fig790-terminal-and-cancel-ready",
         &input,
@@ -9021,11 +9035,7 @@ impl lash_core::ProcessEngine for RestateParentEndLawEngine {
         _context: lash_core::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
     ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Ok(lash_core::ProcessAwaitOutput::Success {
-            value: serde_json::json!({"parent_end_law": "child ran"}),
-            control: None,
-        }
-        .into())
+        Ok(process_success(serde_json::json!({"parent_end_law": "child ran"})).into())
     }
 }
 
@@ -10710,10 +10720,7 @@ finish (await handle)?
     process_registry
         .complete_process(
             "restate-recorded-intent-target",
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::json!("live state mutated after drain"),
-                control: None,
-            },
+            process_success(serde_json::json!("live state mutated after drain")),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -10930,10 +10937,7 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
             }),
         )
     };
-    let terminal = ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "done": true }),
-        control: None,
-    };
+    let terminal = process_success(serde_json::json!({ "done": true }));
 
     host.execute_effect(
         start(),
@@ -11085,10 +11089,7 @@ async fn restate_controller_replays_parent_shaped_start_await_suspend_flow() {
     let host = RestateRuntimeEffectController::new(context.clone());
     let registry = process_registry();
     let process_id = "task-parent-flow-replay";
-    let terminal = ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "done": true }),
-        control: None,
-    };
+    let terminal = process_success(serde_json::json!({ "done": true }));
     let suspend_key = restate_await_event_key(
         &ExecutionScope::process(process_id),
         AwaitEventWaitIdentity::Custom {
@@ -11330,10 +11331,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
         )
         .await
         .expect("register signal target");
-    let awaited_output = ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "done": true }),
-        control: None,
-    };
+    let awaited_output = process_success(serde_json::json!({ "done": true }));
     registry
         .complete_process(
             "task-await-signal",
@@ -11364,10 +11362,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
     };
     assert_eq!(
         *output,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "done": true }),
-            control: None,
-        }
+        process_success(serde_json::json!({ "done": true }))
     );
     assert_eq!(
         sink.records
@@ -11539,11 +11534,7 @@ impl RestateProcessRunner for RecordingRunner {
             execution_scope_id: scoped_effect_controller.scope_id().to_string(),
             controller_replay_ownership: scoped_effect_controller.controller().replay_ownership(),
         });
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"ok": true}),
-            control: None,
-        }
-        .into())
+        Ok(process_success(serde_json::json!({"ok": true})).into())
     }
 
     async fn request_process_cancel(
@@ -11693,17 +11684,10 @@ impl RestateProcessRunner for CancellationAwareRunner {
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         self.started.notify_one();
         tokio::select! {
-            _ = cancellation.cancelled() => Ok(ProcessAwaitOutput::Cancelled {
-                message: "cancel signal observed".to_string(),
-                raw: None,
-                control: None,
-            }
-            .into()),
-            _ = self.finish_successfully.notified() => Ok(ProcessAwaitOutput::Success {
-                value: serde_json::json!("runner completed"),
-                control: None,
-            }
-            .into()),
+            _ = cancellation.cancelled() =>
+                Ok(process_cancellation("cancel signal observed", None).into()),
+            _ = self.finish_successfully.notified() =>
+                Ok(process_success(serde_json::json!("runner completed")).into()),
         }
     }
 
@@ -11812,7 +11796,7 @@ async fn running_process_cancel_uses_native_signal_without_poll_delay() {
     assert!(matches!(
         outcome,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
+            if is_process_cancellation(output.as_ref())
     ));
     let requests = signal_transport.requests.lock_recover();
     assert_eq!(requests.len(), 1);
@@ -11865,7 +11849,7 @@ async fn cancel_watch_reissues_after_attach_ceiling_until_segment_completes() {
     assert!(matches!(
         outcome,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Success { .. })
+            if is_process_success(output.as_ref())
     ));
     assert!(
         transport.requests.load(Ordering::SeqCst) >= 3,
@@ -12086,7 +12070,7 @@ async fn transient_cancel_registry_read_error_cannot_fall_through_to_success() {
     assert!(matches!(
         outcome,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
+            if is_process_cancellation(output.as_ref())
     ));
 }
 
@@ -12148,10 +12132,7 @@ async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
         program_hash: "program-v1".to_string(),
         engine_state: vec![1, 2, 3],
     };
-    let terminal = ProcessAwaitOutput::Success {
-        value: serde_json::json!({"result": 42}),
-        control: None,
-    };
+    let terminal = process_success(serde_json::json!({"result": 42}));
     let runner = Arc::new(SegmentedRecordingRunner {
         outcomes: Mutex::new(VecDeque::from([
             lash_core::ProcessRunOutcome::SegmentBoundary(continuation.clone()),
@@ -12291,10 +12272,7 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
             .register_process(registration.clone())
             .await
             .expect("register matrix process");
-        let terminal = ProcessAwaitOutput::Success {
-            value: serde_json::json!({"result": 99, "effects": [0, 1, 2]}),
-            control: None,
-        };
+        let terminal = process_success(serde_json::json!({"result": 99, "effects": [0, 1, 2]}));
         let runner = Arc::new(SegmentedRecordingRunner {
             outcomes: Mutex::new(VecDeque::from([
                 lash_core::ProcessRunOutcome::SegmentBoundary(lash_core::SegmentHandover {
@@ -12559,11 +12537,9 @@ async fn persisted_handover_is_change_feed_and_event_invariant() {
 #[tokio::test]
 async fn cancel_redrives_successor_engine() {
     let runner = Arc::new(SegmentedRecordingRunner {
-        outcomes: Mutex::new(VecDeque::from([ProcessAwaitOutput::Success {
-            value: serde_json::Value::Null,
-            control: None,
-        }
-        .into()])),
+        outcomes: Mutex::new(VecDeque::from([
+            process_success(serde_json::Value::Null).into()
+        ])),
         handovers: Mutex::new(Vec::new()),
         runs: AtomicUsize::new(0),
     });
@@ -12606,7 +12582,7 @@ async fn cancel_redrives_successor_engine() {
     assert!(matches!(
         outcome,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Cancelled { .. })
+            if is_process_cancellation(output.as_ref())
     ));
     assert_eq!(
         runner.runs.load(Ordering::SeqCst),
@@ -13318,10 +13294,7 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
         .expect("segmented parent exists");
     assert_eq!(
         terminal_parent.outcome,
-        Some(ProcessAwaitOutput::Success {
-            value: serde_json::json!("none"),
-            control: None,
-        }),
+        Some(process_success(serde_json::json!("none"))),
         "the terminal is durable before the injected teardown crash"
     );
     let pending = registry
@@ -13665,13 +13638,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
             .await_terminal("recover-tool")
             .await
             .expect("await recovered terminal process"),
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({
-                "$lash_tool_value": "untrusted_json",
-                "value": { "echo": "wake-after-rebuild" }
-            }),
-            control: None,
-        }
+        process_success(serde_json::json!({ "echo": "wake-after-rebuild" }))
     );
     let queue_store = store_factory
         .create_store(&lash_core::SessionStoreCreateRequest {
@@ -13782,10 +13749,7 @@ async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_r
             .await_terminal("snapshot-ok")
             .await
             .expect("await recovered snapshot-backed process"),
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!("snapshot:restored"),
-            control: None,
-        }
+        process_success(serde_json::json!("snapshot:restored"))
     );
 }
 
@@ -13833,13 +13797,19 @@ async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin_options() 
         .await_terminal("snapshot-revoked")
         .await
         .expect("await terminal revoked snapshot-backed process");
-    let ProcessAwaitOutput::Failure { code, message, .. } = await_output else {
+    let ProcessAwaitOutput::Settled { output } = await_output else {
         panic!("expected revoked snapshot process failure, got {await_output:#?}");
     };
-    assert_eq!(code, "process_host_environment_incompatible");
+    let lash_core::ToolCallOutcome::Failure(failure) = output.outcome else {
+        panic!("expected revoked snapshot process failure, got {output:#?}");
+    };
+    assert_eq!(failure.code, "process_host_environment_incompatible");
     assert!(
-        message.contains("module `tools` does not expose operation `snapshot_echo`"),
-        "{message}"
+        failure
+            .message
+            .contains("module `tools` does not expose operation `snapshot_echo`"),
+        "{}",
+        failure.message
     );
 }
 
@@ -13975,10 +13945,7 @@ async fn typescript_artifact_runs_through_process_engine_to_terminal() {
             .await_terminal("typescript-worker")
             .await
             .expect("await TypeScript process"),
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "ok": true }),
-            control: None,
-        }
+        process_success(serde_json::json!({ "ok": true }))
     );
 }
 
@@ -14095,10 +14062,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
             .await_terminal("trigger-notify")
             .await
             .expect("await recovered trigger-started process"),
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "triggered": "issue-42" }),
-            control: None,
-        },
+        process_success(serde_json::json!({ "triggered": "issue-42" })),
         "the trigger-started process must run to its terminal value on recovery"
     );
     assert!(
@@ -14125,10 +14089,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
             .await_terminal("trigger-notify")
             .await
             .expect("await after idempotent re-sweep"),
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "triggered": "issue-42" }),
-            control: None,
-        }
+        process_success(serde_json::json!({ "triggered": "issue-42" }))
     );
 }
 
@@ -14502,7 +14463,7 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
     assert!(matches!(
         output,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Success { .. })
+            if is_process_success(output.as_ref())
     ));
     assert_eq!(
         runner.ran.lock_recover().as_slice(),
@@ -14533,10 +14494,7 @@ async fn terminal_retry_returns_the_stored_outcome() {
         .register_process(rerunnable_registration("terminal-retry"))
         .await
         .expect("register process");
-    let stored = ProcessAwaitOutput::Success {
-        value: serde_json::json!({"winner": "stored"}),
-        control: None,
-    };
+    let stored = process_success(serde_json::json!({"winner": "stored"}));
     registry
         .complete_process(
             "terminal-retry",
@@ -14549,13 +14507,12 @@ async fn terminal_retry_returns_the_stored_outcome() {
     let replayed = workflow
         .complete_with_stored_outcome(
             "terminal-retry",
-            ProcessAwaitOutput::Failure {
-                class: lash_core::ToolFailureClass::Execution,
-                code: "divergent".to_string(),
-                message: "must not replace the stored outcome".to_string(),
-                raw: None,
-                control: None,
-            },
+            process_failure(
+                lash_core::ToolFailureClass::Execution,
+                "divergent",
+                "must not replace the stored outcome",
+                None,
+            ),
         )
         .await
         .expect("terminal retry");
@@ -14995,7 +14952,7 @@ async fn run_registration_runs_fresh_owner_bound() {
     assert!(matches!(
         output,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Success { .. })
+            if is_process_success(output.as_ref())
     ));
     assert_eq!(
         runner
@@ -15495,10 +15452,7 @@ async fn restate_attach_survives_control_timeout_and_honors_ceiling() {
 
     assert_eq!(
         output,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!("attached"),
-            control: None,
-        }
+        legacy_process_success(serde_json::json!("attached"))
     );
     assert!(elapsed > control_timeout, "elapsed {elapsed:?}");
     assert!(elapsed < attach_ceiling, "elapsed {elapsed:?}");
@@ -15950,10 +15904,7 @@ async fn restate_ingress_client_calls_workflow_and_decodes_output() {
 
     assert_eq!(
         output,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "ok": true }),
-            control: None,
-        }
+        legacy_process_success(serde_json::json!({ "ok": true }))
     );
     let requests = captured.lock_recover();
     assert!(
@@ -16012,10 +15963,7 @@ async fn restate_process_attach_calls_await_terminal_ingress() {
 
     assert_eq!(
         output,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!("attached"),
-            control: None,
-        }
+        legacy_process_success(serde_json::json!("attached"))
     );
 }
 
@@ -16030,11 +15978,7 @@ async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolve
         .register_process(external_registration("retained-terminal"))
         .await
         .expect("register");
-    let expected = ProcessAwaitOutput::Cancelled {
-        message: "cancelled after a long chain".to_string(),
-        raw: None,
-        control: None,
-    };
+    let expected = process_cancellation("cancelled after a long chain", None);
     registry
         .complete_process(
             "retained-terminal",
@@ -16198,10 +16142,7 @@ async fn restate_attach_before_run_resolves_with_delayed_workflow_output() {
 
     assert_eq!(
         output,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({ "eventual": true }),
-            control: None,
-        }
+        legacy_process_success(serde_json::json!({ "eventual": true }))
     );
     assert!(
         elapsed >= delay,
@@ -16230,10 +16171,7 @@ async fn restate_driver_short_circuits_terminal_without_ingress_call() {
     let deployment =
         RestateProcessDeployment::new(base_url, Arc::clone(&registry), continuation_store());
     let driver = deployment.process_work_driver();
-    let output = ProcessAwaitOutput::Success {
-        value: serde_json::json!("already-terminal"),
-        control: None,
-    };
+    let output = process_success(serde_json::json!("already-terminal"));
     driver
         .process_registry()
         .register_process(external_registration("process-1"))
@@ -16343,10 +16281,7 @@ async fn restate_deployment_sink_funnel_feeds_appended_events() {
     registry
         .complete_process(
             "sink-funnel",
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            process_success(serde_json::Value::Null),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -16395,20 +16330,8 @@ async fn restate_process_attach_is_reentrant_across_sequential_awaits() {
         .expect("second attach await");
     server.await.expect("capture server");
 
-    assert_eq!(
-        first,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!("first"),
-            control: None,
-        }
-    );
-    assert_eq!(
-        second,
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!("second"),
-            control: None,
-        }
-    );
+    assert_eq!(first, legacy_process_success(serde_json::json!("first")));
+    assert_eq!(second, legacy_process_success(serde_json::json!("second")));
     assert_eq!(
         captured.lock_recover().len(),
         2,

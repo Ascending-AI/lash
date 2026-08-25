@@ -121,10 +121,9 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
     registry
         .complete_process(
             "proc-ref-a1",
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             crate::ProcessCompletionAuthority::workflow_key("proc-ref-a1"),
         )
         .await
@@ -146,10 +145,9 @@ pub(super) async fn live_reference_summary_tracks_non_terminal_reference_counts(
         registry
             .complete_process(
                 process_id,
-                ProcessAwaitOutput::Success {
-                    value: serde_json::Value::Null,
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
                 crate::ProcessCompletionAuthority::workflow_key(process_id),
             )
             .await

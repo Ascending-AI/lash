@@ -585,7 +585,10 @@ async fn run_high_traffic_operation(
         }
         for process_id in delivery_process_ids {
             let outcome = core.processes().await_output(&process_id).await?;
-            if !matches!(outcome, lash_core::ProcessAwaitOutput::Success { .. }) {
+            if !matches!(
+                outcome,
+                lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()
+            ) {
                 anyhow::bail!(
                     "trigger high-traffic operation {ordinal} delivery process {process_id} did not succeed: {outcome:?}"
                 );

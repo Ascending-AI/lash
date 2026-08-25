@@ -20,11 +20,12 @@ impl crate::ProcessEngine for ImmediateSuccessEngine {
         context: crate::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"process_id": context.registration().id}),
-            control: None,
-        }
-        .into())
+        Ok(
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"process_id": context.registration().id}),
+            ))
+            .into(),
+        )
     }
 }
 
@@ -177,11 +178,12 @@ async fn a_row_this_worker_is_already_running_is_deferred_busy_not_admitted_twic
         ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
             self.started.notify_one();
             let _permit = self.release.acquire().await.expect("release permit");
-            Ok(ProcessAwaitOutput::Success {
-                value: serde_json::json!({"process_id": context.registration().id}),
-                control: None,
-            }
-            .into())
+            Ok(
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::json!({"process_id": context.registration().id}),
+                ))
+                .into(),
+            )
         }
     }
 

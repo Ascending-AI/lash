@@ -2381,10 +2381,9 @@ mod tests {
         };
         assert_eq!(
             terminal,
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::json!({ "ok": true }),
-                control: None,
-            }
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({ "ok": true }),
+            ))
         );
     }
 

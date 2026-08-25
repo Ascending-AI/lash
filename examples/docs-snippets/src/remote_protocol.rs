@@ -87,6 +87,87 @@ fn remote_process_start_request() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn remote_process_await_outputs() -> anyhow::Result<()> {
+    use lash::remote::processes::{
+        RemoteProcessAwaitOutput, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
+        RemoteProcessToolCancellation, RemoteProcessToolFailure, RemoteProcessToolFailureSource,
+        RemoteProcessToolRetryStatus, RemoteToolFailureClass,
+    };
+    use serde_json::json;
+    let success = RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Success(json!({ "artifact": "invoices.csv" })),
+            control: None,
+        },
+    };
+    let failure = RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                class: RemoteToolFailureClass::External,
+                code: "plugin_busy".to_string(),
+                message: "plugin asked the host to retry".to_string(),
+                source: RemoteProcessToolFailureSource::Plugin,
+                retry: RemoteProcessToolRetryStatus::Safe { after_ms: Some(41) },
+                raw: Some(json!({ "status": 503 })),
+            }),
+            control: Some(json!({ "type": "finish", "value": null })),
+        },
+    };
+    let cancelled = RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                message: "operator cancelled".to_string(),
+                source: RemoteProcessToolFailureSource::Cancellation,
+                raw: Some(json!({ "completed_rows": 8 })),
+            }),
+            control: None,
+        },
+    };
+    for output in [&success, &failure, &cancelled] {
+        output.validate("RemoteProcessAwaitOutput")?;
+    }
+    let success_json = serde_json::to_value(&success)?;
+    let success_payload = &success_json["output"]["outcome"]["payload"];
+    assert_eq!(success_payload["artifact"], "invoices.csv");
+    let failure_json = serde_json::to_value(&failure)?;
+    let failure_payload = &failure_json["output"]["outcome"]["payload"];
+    assert_eq!(failure_payload["class"], "external");
+    assert_eq!(failure_payload["code"], "plugin_busy");
+    assert_eq!(failure_payload["message"], "plugin asked the host to retry");
+    assert_eq!(failure_payload["source"], "plugin");
+    assert_eq!(failure_payload["retry"]["after_ms"], 41);
+    assert_eq!(failure_payload["raw"]["status"], 503);
+    assert_eq!(failure_json["output"]["control"]["type"], "finish");
+    let cancelled_json = serde_json::to_value(&cancelled)?;
+    let cancelled_payload = &cancelled_json["output"]["outcome"]["payload"];
+    assert_eq!(cancelled_payload["message"], "operator cancelled");
+    assert_eq!(cancelled_payload["source"], "cancellation");
+    assert_eq!(cancelled_payload["raw"]["completed_rows"], 8);
+    let sources = [
+        RemoteProcessToolFailureSource::Runtime,
+        RemoteProcessToolFailureSource::Tool,
+        RemoteProcessToolFailureSource::Plugin,
+        RemoteProcessToolFailureSource::Policy,
+        RemoteProcessToolFailureSource::Cancellation,
+        RemoteProcessToolFailureSource::UnknownLegacy,
+    ];
+    assert_eq!(
+        serde_json::to_string(&sources)?,
+        r#"["runtime","tool","plugin","policy","cancellation","unknown_legacy"]"#
+    );
+    let retry_states = [
+        RemoteProcessToolRetryStatus::Never,
+        RemoteProcessToolRetryStatus::Safe { after_ms: None },
+        RemoteProcessToolRetryStatus::Exhausted { attempts: 3 },
+        RemoteProcessToolRetryStatus::UnknownLegacy,
+    ];
+    assert_eq!(
+        serde_json::to_string(&retry_states)?,
+        r#"[{"type":"never"},{"type":"safe"},{"type":"exhausted","attempts":3},{"type":"unknown_legacy"}]"#
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod asserted_process_examples {
     use std::collections::BTreeMap;
@@ -106,7 +187,9 @@ mod asserted_process_examples {
         RemoteProcessProvenance, RemoteProcessSignalReceipt, RemoteProcessSignalRequest,
         RemoteProcessStartReceipt, RemoteProcessStartRequest, RemoteProcessStarted,
         RemoteProcessStatus, RemoteProcessStatusFilter, RemoteProcessTerminalSemantics,
-        RemoteProcessTerminalSpec, RemoteProcessValueSelector, RemoteProcessWaitKind,
+        RemoteProcessTerminalSpec, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
+        RemoteProcessToolCancellation, RemoteProcessToolFailure, RemoteProcessToolFailureSource,
+        RemoteProcessToolRetryStatus, RemoteProcessValueSelector, RemoteProcessWaitKind,
         RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
         RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeEffectKind,
         RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
@@ -775,15 +858,22 @@ mod asserted_process_examples {
         let await_result = RemoteProcessAwaitOutcome {
             // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
-            output: RemoteProcessAwaitOutput::Success {
-                value: json!({ "artifact": "invoices.csv", "rows": 12 }),
-                control: None,
+            output: RemoteProcessAwaitOutput::Settled {
+                output: RemoteProcessToolCallOutput {
+                    outcome: RemoteProcessToolCallOutcome::Success(
+                        json!({ "artifact": "invoices.csv", "rows": 12 }),
+                    ),
+                    control: None,
+                },
             },
         };
         RemoteProcessAwaitOutcome::validate(&await_result).expect("valid process await result");
         let await_json = serde_json::to_value(&await_result).expect("await result serializes");
-        assert_eq!(await_json["output"]["type"], "success");
-        assert_eq!(await_json["output"]["value"]["artifact"], "invoices.csv");
+        assert_eq!(await_json["output"]["type"], "settled");
+        assert_eq!(
+            await_json["output"]["output"]["outcome"]["payload"]["artifact"],
+            "invoices.csv"
+        );
 
         let cancel_request = RemoteProcessCancelRequest {
             // Bare body: the standalone transport call supplies the envelope.
@@ -827,19 +917,30 @@ mod asserted_process_examples {
             Some(RemoteProcessValueSelector::Payload)
         ));
 
-        let failure = RemoteProcessAwaitOutput::Failure {
-            class: RemoteToolFailureClass::External,
-            code: "export_failed".to_string(),
-            message: "the batch service rejected the export".to_string(),
-            raw: Some(json!({ "retryable": false })),
-            control: None,
+        let failure = RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                    class: RemoteToolFailureClass::External,
+                    code: "export_failed".to_string(),
+                    message: "the batch service rejected the export".to_string(),
+                    source: RemoteProcessToolFailureSource::Plugin,
+                    retry: RemoteProcessToolRetryStatus::Never,
+                    raw: Some(json!({ "retryable": false })),
+                }),
+                control: None,
+            },
         };
         RemoteProcessAwaitOutput::validate(&failure, "RemoteProcessAwaitOutput")
             .expect("valid failure output");
-        let cancelled = RemoteProcessAwaitOutput::Cancelled {
-            message: "operator cancelled the export".to_string(),
-            raw: Some(json!({ "completed_rows": 8 })),
-            control: None,
+        let cancelled = RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                    message: "operator cancelled the export".to_string(),
+                    source: RemoteProcessToolFailureSource::Cancellation,
+                    raw: Some(json!({ "completed_rows": 8 })),
+                }),
+                control: None,
+            },
         };
         RemoteProcessAwaitOutput::validate(&cancelled, "RemoteProcessAwaitOutput")
             .expect("valid cancellation output");
@@ -859,19 +960,27 @@ mod asserted_process_examples {
         };
         RemoteProcessAwaitOutput::validate(&no_longer_retained, "RemoteProcessAwaitOutput")
             .expect("valid retention information output");
-        assert_eq!(serde_json::to_value(&failure).unwrap()["class"], "external");
         assert_eq!(
-            serde_json::to_value(&cancelled).unwrap()["raw"]["completed_rows"],
+            serde_json::to_value(&failure).unwrap()["output"]["outcome"]["payload"]["class"],
+            "external"
+        );
+        assert_eq!(
+            serde_json::to_value(&cancelled).unwrap()["output"]["outcome"]["payload"]["raw"]["completed_rows"],
             8
         );
+        let abandoned_json = serde_json::to_value(&abandoned).unwrap();
+        assert_eq!(abandoned_json["evidence"]["writer"], "owner_drain");
         assert_eq!(
-            serde_json::to_value(&abandoned).unwrap()["evidence"]["writer"],
-            "owner_drain"
+            abandoned_json["evidence"]["owner"]["owner_id"],
+            "worker-berlin"
         );
         assert_eq!(
-            serde_json::to_value(&no_longer_retained).unwrap()["terminal_label"],
-            "completed"
+            abandoned_json["evidence"]["epoch_ms"],
+            1_720_000_060_000_u64
         );
+        let retained_json = serde_json::to_value(&no_longer_retained).unwrap();
+        assert_eq!(retained_json["terminal_label"], "completed");
+        assert_eq!(retained_json["pruned_at_ms"], 1_720_086_400_000_u64);
 
         let terminal_semantics = RemoteProcessTerminalSemantics {
             status: RemoteProcessStatus::Failed,

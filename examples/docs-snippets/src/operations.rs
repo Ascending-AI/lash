@@ -306,10 +306,9 @@ mod tests {
         registry
             .complete_process(
                 "deployment-drain-status-example",
-                ProcessAwaitOutput::Success {
-                    value: serde_json::Value::Null,
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
                 ProcessCompletionAuthority::external_owner(),
             )
             .await?;

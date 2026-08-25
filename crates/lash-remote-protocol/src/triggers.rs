@@ -115,6 +115,7 @@ pub struct RemoteTriggerEmitReport {
 
 impl RemoteTriggerEmitReport {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
+        // The envelope owns validation; this report has no remaining local invariants.
         Ok(())
     }
 }
@@ -162,6 +163,7 @@ impl RemoteTriggerSubscriptionFilter {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
+        // The envelope owns validation; this filter has no remaining local invariants.
         Ok(())
     }
 }

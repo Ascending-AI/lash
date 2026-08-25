@@ -556,10 +556,9 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .expect("await PostgreSQL segmented parent terminal");
     assert_eq!(
         terminal,
-        lash_core::ProcessAwaitOutput::Success {
-            value: serde_json::json!("none"),
-            control: None,
-        }
+        lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            serde_json::json!("none"),
+        ))
     );
     wait_for_count(
         &first_state.completed_local_side_effects,
@@ -879,10 +878,9 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
             .await_terminal(TOOL_PARENT)
             .await
             .expect("await PostgreSQL ToolCall parent"),
-        lash_core::ProcessAwaitOutput::Success {
-            value: serde_json::json!({"child": "tool-call"}),
-            control: None,
-        }
+        lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            serde_json::json!({"child": "tool-call"}),
+        ))
     );
     let _ = final_worker_a
         .drive_pending_processes()

@@ -39,10 +39,10 @@ fn multi_segment_trace_emits_one_started_and_one_finished() {
             engine_state: Vec::new(),
         })
     };
-    let terminal = lash_core::ProcessRunOutcome::from(lash_core::ProcessAwaitOutput::Success {
-        value: serde_json::Value::Null,
-        control: None,
-    });
+    let terminal =
+        lash_core::ProcessRunOutcome::from(lash_core::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::success(serde_json::Value::Null),
+        ));
     let lifecycle = [
         (true, boundary().is_terminal()),
         (false, boundary().is_terminal()),
@@ -61,8 +61,9 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
         .expect_err("changed bytecode identity must fail closed");
     assert!(matches!(
         *output,
-        lash_core::ProcessAwaitOutput::Failure { code, .. }
-            if code == "restate_segment_program_hash_mismatch"
+        lash_core::ProcessAwaitOutput::Settled { output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
+                if failure.code == "restate_segment_program_hash_mismatch")
     ));
 }
 
@@ -86,7 +87,8 @@ fn durable_exhaustion_has_a_typed_process_failure_surface() {
     EXECUTION_BOUND_EXHAUSTION_LOUD.store(previous, Ordering::SeqCst);
     assert!(matches!(
         output,
-        lash_core::ProcessAwaitOutput::Failure { code, .. }
-            if code == "process_execution_bound_exhausted"
+        lash_core::ProcessAwaitOutput::Settled { output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
+                if failure.code == "process_execution_bound_exhausted")
     ));
 }

@@ -278,26 +278,8 @@ impl RemoteProcessStatus {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteProcessAwaitOutput {
-    Success {
-        value: serde_json::Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<serde_json::Value>,
-    },
-    Failure {
-        class: RemoteToolFailureClass,
-        code: String,
-        message: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<serde_json::Value>,
-    },
-    Cancelled {
-        message: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<serde_json::Value>,
+    Settled {
+        output: RemoteProcessToolCallOutput,
     },
     Abandoned {
         evidence: RemoteAbandonEvidence,
@@ -313,9 +295,11 @@ pub enum RemoteProcessAwaitOutput {
 impl RemoteProcessAwaitOutput {
     fn terminal_status(&self) -> Option<RemoteProcessStatus> {
         match self {
-            Self::Success { .. } => Some(RemoteProcessStatus::Completed),
-            Self::Failure { .. } => Some(RemoteProcessStatus::Failed),
-            Self::Cancelled { .. } => Some(RemoteProcessStatus::Cancelled),
+            Self::Settled { output } => Some(match &output.outcome {
+                RemoteProcessToolCallOutcome::Success(_) => RemoteProcessStatus::Completed,
+                RemoteProcessToolCallOutcome::Failure(_) => RemoteProcessStatus::Failed,
+                RemoteProcessToolCallOutcome::Cancelled(_) => RemoteProcessStatus::Cancelled,
+            }),
             Self::Abandoned { .. } => Some(RemoteProcessStatus::Abandoned),
             Self::NoLongerRetained { .. } => None,
         }
@@ -323,16 +307,90 @@ impl RemoteProcessAwaitOutput {
 
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match self {
-            Self::Success { .. } | Self::Abandoned { .. } | Self::NoLongerRetained { .. } => Ok(()),
-            Self::Failure { code, message, .. } => {
-                require_non_empty(type_name, "await_output.code", code)?;
-                require_non_empty(type_name, "await_output.message", message)
-            }
-            Self::Cancelled { message, .. } => {
-                require_non_empty(type_name, "await_output.message", message)
-            }
+            Self::Settled { output } => output.validate(type_name),
+            Self::Abandoned { .. } | Self::NoLongerRetained { .. } => Ok(()),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteProcessToolCallOutput {
+    pub outcome: RemoteProcessToolCallOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<serde_json::Value>,
+}
+
+impl RemoteProcessToolCallOutput {
+    fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match &self.outcome {
+            RemoteProcessToolCallOutcome::Success(_) => Ok(()),
+            RemoteProcessToolCallOutcome::Failure(failure) => {
+                require_non_empty(type_name, "await_output.output.outcome.code", &failure.code)?;
+                require_non_empty(
+                    type_name,
+                    "await_output.output.outcome.message",
+                    &failure.message,
+                )
+            }
+            RemoteProcessToolCallOutcome::Cancelled(cancellation) => require_non_empty(
+                type_name,
+                "await_output.output.outcome.message",
+                &cancellation.message,
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", content = "payload", rename_all = "snake_case")]
+pub enum RemoteProcessToolCallOutcome {
+    Success(serde_json::Value),
+    Failure(RemoteProcessToolFailure),
+    Cancelled(RemoteProcessToolCancellation),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteProcessToolFailure {
+    pub class: RemoteToolFailureClass,
+    pub code: String,
+    pub message: String,
+    pub source: RemoteProcessToolFailureSource,
+    pub retry: RemoteProcessToolRetryStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessToolFailureSource {
+    Runtime,
+    Tool,
+    Plugin,
+    Policy,
+    Cancellation,
+    UnknownLegacy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteProcessToolRetryStatus {
+    Never,
+    Safe {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_ms: Option<u64>,
+    },
+    Exhausted {
+        attempts: u32,
+    },
+    UnknownLegacy,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RemoteProcessToolCancellation {
+    pub message: String,
+    pub source: RemoteProcessToolFailureSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

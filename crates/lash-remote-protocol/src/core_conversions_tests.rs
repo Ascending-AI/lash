@@ -617,10 +617,9 @@ fn process_start_requests_round_trip_core_values() {
 fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let mut record = process_record("process:record");
     record.status = lash_core::ProcessStatus::Completed;
-    record.outcome = Some(lash_core::ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "done": true }),
-        control: None,
-    });
+    record.outcome = Some(lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(serde_json::json!({ "done": true })),
+    ));
     let remote = RemoteProcessRecord::try_from(record.clone()).expect("remote record");
     remote
         .validate("RemoteProcessRecord")
@@ -704,11 +703,9 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let await_result = RemoteProcessAwaitOutcome::try_from((
         "process:await".to_string(),
-        lash_core::ProcessAwaitOutput::Cancelled {
-            message: "stopped".to_string(),
-            raw: None,
-            control: None,
-        },
+        lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
+            lash_core::ToolCancellation::runtime("stopped"),
+        )),
     ))
     .expect("remote await result");
     let (process_id, output) =
@@ -716,7 +713,8 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(process_id, "process:await");
     assert!(matches!(
         output,
-        lash_core::ProcessAwaitOutput::Cancelled { .. }
+        lash_core::ProcessAwaitOutput::Settled { ref output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))
     ));
 
     let events_response =
@@ -726,6 +724,41 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
         .expect("events response");
     assert_eq!(process_id, "process:record");
     assert_eq!(events.len(), 1);
+}
+
+#[test]
+fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
+    let failure = lash_core::ToolFailure {
+        class: lash_core::ToolFailureClass::External,
+        code: "plugin_busy".to_string(),
+        message: "plugin asked the host to retry".to_string(),
+        source: lash_core::ToolFailureSource::Plugin,
+        retry: lash_core::ToolRetryStatus::Safe { after_ms: Some(41) },
+        raw: Some(lash_core::ToolValue::untrusted_json(
+            serde_json::json!({ "status": 503 }),
+        )),
+    };
+    let core = lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
+        failure,
+    ));
+
+    let remote = RemoteProcessAwaitOutput::try_from(core.clone()).expect("remote await output");
+    assert!(matches!(
+        &remote,
+        RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                    source: RemoteProcessToolFailureSource::Plugin,
+                    retry: RemoteProcessToolRetryStatus::Safe { after_ms: Some(41) },
+                    ..
+                }),
+                ..
+            }
+        }
+    ));
+
+    let round_trip = lash_core::ProcessAwaitOutput::try_from(remote).expect("core await output");
+    assert_eq!(round_trip, core);
 }
 
 #[test]
@@ -1974,10 +2007,9 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
         semantics: lash_core::runtime::ProcessEventSemantics {
             terminal: Some(lash_core::facade_support::ProcessTerminalSemantics {
                 status: lash_core::ProcessStatus::Completed,
-                outcome: lash_core::ProcessAwaitOutput::Success {
-                    value: serde_json::json!(true),
-                    control: None,
-                },
+                outcome: lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(serde_json::json!(true)),
+                ),
             }),
             wake: Some(lash_core::facade_support::ProcessWake {
                 input: "wake".to_string(),

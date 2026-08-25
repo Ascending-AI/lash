@@ -35,10 +35,9 @@ fn assert_recovery_lease_lost_event(
 
 fn peer_completed_record(mut record: ProcessRecord) -> ProcessRecord {
     record.status = ProcessStatus::Completed;
-    record.outcome = Some(ProcessAwaitOutput::Success {
-        value: serde_json::json!({"peer": "won"}),
-        control: None,
-    });
+    record.outcome = Some(ProcessAwaitOutput::from_tool_output(
+        crate::ToolCallOutput::success(serde_json::json!({"peer": "won"})),
+    ));
     record
 }
 

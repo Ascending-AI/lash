@@ -251,29 +251,11 @@ pub struct ProcessTerminalSemantics {
     pub outcome: ProcessAwaitOutput,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessAwaitOutput {
-    Success {
-        value: serde_json::Value,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<crate::ToolControl>,
-    },
-    Failure {
-        class: crate::ToolFailureClass,
-        code: String,
-        message: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<crate::ToolControl>,
-    },
-    Cancelled {
-        message: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        raw: Option<serde_json::Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<crate::ToolControl>,
+    Settled {
+        output: crate::ToolCallOutput,
     },
     /// The owner stopped executing without recording an outcome. Written only by
     /// the sweep or an owner's graceful drain, never round-tripped from a tool
@@ -291,14 +273,126 @@ pub enum ProcessAwaitOutput {
     },
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ProcessAwaitOutputDecode {
+    Settled {
+        output: crate::ToolCallOutput,
+    },
+    Success {
+        value: serde_json::Value,
+        #[serde(default)]
+        control: Option<crate::ToolControl>,
+    },
+    Failure {
+        class: crate::ToolFailureClass,
+        code: String,
+        message: String,
+        #[serde(default)]
+        raw: Option<serde_json::Value>,
+        #[serde(default)]
+        control: Option<crate::ToolControl>,
+    },
+    Cancelled {
+        message: String,
+        #[serde(default)]
+        raw: Option<serde_json::Value>,
+        #[serde(default)]
+        control: Option<crate::ToolControl>,
+    },
+    Abandoned {
+        evidence: Box<AbandonEvidence>,
+        #[serde(default)]
+        control: Option<crate::ToolControl>,
+    },
+    NoLongerRetained {
+        terminal_label: String,
+        pruned_at_ms: u64,
+    },
+}
+
+impl<'de> Deserialize<'de> for ProcessAwaitOutput {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match ProcessAwaitOutputDecode::deserialize(deserializer)? {
+            ProcessAwaitOutputDecode::Settled { output } => Self::Settled { output },
+            ProcessAwaitOutputDecode::Success { value, control } => {
+                let mut output = match decode_process_tool_value(value, "legacy success value") {
+                    Ok(value) => crate::ToolCallOutput::success_tool_value(value),
+                    Err(failure) => crate::ToolCallOutput::failure(*failure),
+                };
+                output.control = control;
+                Self::Settled { output }
+            }
+            ProcessAwaitOutputDecode::Failure {
+                class,
+                code,
+                message,
+                raw,
+                control,
+            } => {
+                let mut output = match raw
+                    .map(|value| decode_process_tool_value(value, "legacy failure raw value"))
+                    .transpose()
+                {
+                    Ok(raw) => crate::ToolCallOutput::failure(crate::ToolFailure {
+                        class,
+                        code,
+                        message,
+                        source: crate::ToolFailureSource::UnknownLegacy,
+                        retry: crate::ToolRetryStatus::UnknownLegacy,
+                        raw,
+                    }),
+                    Err(failure) => crate::ToolCallOutput::failure(*failure),
+                };
+                output.control = control;
+                Self::Settled { output }
+            }
+            ProcessAwaitOutputDecode::Cancelled {
+                message,
+                raw,
+                control,
+            } => {
+                let mut output = match raw
+                    .map(|value| decode_process_tool_value(value, "legacy cancellation raw value"))
+                    .transpose()
+                {
+                    Ok(raw) => crate::ToolCallOutput::cancelled(crate::ToolCancellation {
+                        message,
+                        source: crate::ToolFailureSource::UnknownLegacy,
+                        raw,
+                    }),
+                    Err(failure) => crate::ToolCallOutput::failure(*failure),
+                };
+                output.control = control;
+                Self::Settled { output }
+            }
+            ProcessAwaitOutputDecode::Abandoned { evidence, control } => {
+                Self::Abandoned { evidence, control }
+            }
+            ProcessAwaitOutputDecode::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            } => Self::NoLongerRetained {
+                terminal_label,
+                pruned_at_ms,
+            },
+        })
+    }
+}
+
 impl ProcessAwaitOutput {
     /// Projects only terminal process outcomes to their durable status for store implementors,
     /// returning `None` for non-terminal or deferred output.
     pub fn terminal_status(&self) -> Option<ProcessStatus> {
         match self {
-            Self::Success { .. } => Some(ProcessStatus::Completed),
-            Self::Failure { .. } => Some(ProcessStatus::Failed),
-            Self::Cancelled { .. } => Some(ProcessStatus::Cancelled),
+            Self::Settled { output } => Some(match &output.outcome {
+                crate::ToolCallOutcome::Success(_) => ProcessStatus::Completed,
+                crate::ToolCallOutcome::Failure(_) => ProcessStatus::Failed,
+                crate::ToolCallOutcome::Cancelled(_) => ProcessStatus::Cancelled,
+            }),
             Self::Abandoned { .. } => Some(ProcessStatus::Abandoned),
             Self::NoLongerRetained { .. } => None,
         }
@@ -307,92 +401,14 @@ impl ProcessAwaitOutput {
     /// Builds a `ProcessAwaitOutput` from tool output data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_tool_output(output: crate::ToolCallOutput) -> Self {
-        let control = output.control;
-        match output.outcome {
-            crate::ToolCallOutcome::Success(value) => Self::Success {
-                value: serde_json::to_value(value)
-                    .expect("ToolValue serialization into JSON cannot fail"),
-                control,
-            },
-            crate::ToolCallOutcome::Failure(failure) => Self::Failure {
-                class: failure.class,
-                code: failure.code,
-                message: failure.message,
-                raw: failure.raw.map(|value| {
-                    serde_json::to_value(value)
-                        .expect("ToolValue serialization into JSON cannot fail")
-                }),
-                control,
-            },
-            crate::ToolCallOutcome::Cancelled(cancellation) => Self::Cancelled {
-                message: cancellation.message,
-                raw: cancellation.raw.map(|value| {
-                    serde_json::to_value(value)
-                        .expect("ToolValue serialization into JSON cannot fail")
-                }),
-                control,
-            },
-        }
+        Self::Settled { output }
     }
 
     /// Extracts the tool output outcome for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
     pub fn into_tool_output(self) -> crate::ToolCallOutput {
         match self {
-            Self::Success { value, control } => {
-                let mut output = match decode_process_tool_value(value, "success value") {
-                    Ok(value) => crate::ToolCallOutput::success_tool_value(value),
-                    Err(failure) => crate::ToolCallOutput::failure(*failure),
-                };
-                output.control = control;
-                output
-            }
-            Self::Failure {
-                class,
-                code,
-                message,
-                raw,
-                control,
-            } => {
-                let raw = match raw
-                    .map(|value| decode_process_tool_value(value, "failure raw value"))
-                    .transpose()
-                {
-                    Ok(raw) => raw,
-                    Err(failure) => {
-                        let mut output = crate::ToolCallOutput::failure(*failure);
-                        output.control = control;
-                        return output;
-                    }
-                };
-                let mut failure = crate::ToolFailure::tool(class, code, message);
-                failure.raw = raw;
-                let mut output = crate::ToolCallOutput::failure(failure);
-                output.control = control;
-                output
-            }
-            Self::Cancelled {
-                message,
-                raw,
-                control,
-            } => {
-                let raw = match raw
-                    .map(|value| decode_process_tool_value(value, "cancellation raw value"))
-                    .transpose()
-                {
-                    Ok(raw) => raw,
-                    Err(failure) => {
-                        let mut output = crate::ToolCallOutput::failure(*failure);
-                        output.control = control;
-                        return output;
-                    }
-                };
-                let mut cancellation = crate::ToolCancellation::runtime(message);
-                cancellation.raw = raw;
-                let mut output = crate::ToolCallOutput::cancelled(cancellation);
-                output.control = control;
-                output
-            }
+            Self::Settled { output } => output,
             // Abandonment has no `ToolCallOutcome` peer: a tool never self-reports
             // it. To a caller awaiting the result it surfaces one-directionally as
             // an external failure whose raw payload names it abandoned and carries
@@ -825,35 +841,85 @@ mod cancellation_identity_tests {
     }
 
     #[test]
+    fn legacy_failure_row_decodes_with_unknown_provenance_and_retry_status() {
+        let legacy = serde_json::json!({
+            "type": "failure",
+            "class": "external",
+            "code": "legacy_plugin_failure",
+            "message": "the old row omitted provenance and retry status",
+            "raw": {
+                "$lash_tool_value": "untrusted_json",
+                "value": {"status": 503}
+            }
+        });
+
+        let restored: ProcessAwaitOutput =
+            serde_json::from_value(legacy).expect("decode the pre-change persisted failure row");
+        let ProcessAwaitOutput::Settled { output } = restored else {
+            panic!("a legacy settled row must normalize to the settled arm");
+        };
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("the legacy failure row must remain a failure");
+        };
+        assert_eq!(failure.class, crate::ToolFailureClass::External);
+        assert_eq!(failure.code, "legacy_plugin_failure");
+        assert_eq!(failure.source, crate::ToolFailureSource::UnknownLegacy);
+        assert_eq!(failure.retry, crate::ToolRetryStatus::UnknownLegacy);
+        assert_eq!(
+            failure.raw.map(|raw| raw.to_json_value()),
+            Some(serde_json::json!({"status": 503}))
+        );
+    }
+
+    #[test]
     fn process_output_rejects_malformed_tags_in_every_tool_value_arm() {
         let malformed = serde_json::json!({
             "$lash_tool_value": "attachment",
             "extra": true
         });
         let outputs = [
-            ProcessAwaitOutput::Success {
-                value: malformed.clone(),
-                control: None,
-            },
-            ProcessAwaitOutput::Failure {
-                class: crate::ToolFailureClass::Execution,
-                code: "provider_failure".to_string(),
-                message: "provider failed".to_string(),
-                raw: Some(malformed.clone()),
-                control: None,
-            },
-            ProcessAwaitOutput::Cancelled {
-                message: "cancelled".to_string(),
-                raw: Some(malformed),
-                control: None,
-            },
+            serde_json::json!({
+                "type": "settled",
+                "output": {
+                    "outcome": {"status": "success", "payload": malformed.clone()}
+                }
+            }),
+            serde_json::json!({
+                "type": "settled",
+                "output": {
+                    "outcome": {
+                        "status": "failure",
+                        "payload": {
+                            "class": "execution",
+                            "code": "provider_failure",
+                            "message": "provider failed",
+                            "source": "plugin",
+                            "retry": {"type": "never"},
+                            "raw": malformed.clone()
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "type": "settled",
+                "output": {
+                    "outcome": {
+                        "status": "cancelled",
+                        "payload": {
+                            "message": "cancelled",
+                            "source": "cancellation",
+                            "raw": malformed
+                        }
+                    }
+                }
+            }),
         ];
 
         for output in outputs {
-            let crate::ToolCallOutcome::Failure(failure) = output.into_tool_output().outcome else {
-                panic!("a malformed tag must become a typed decode failure");
-            };
-            assert_eq!(failure.code, "tool_value_decode_failed");
+            assert!(
+                serde_json::from_value::<ProcessAwaitOutput>(output).is_err(),
+                "a malformed reserved tool-value tag must be rejected"
+            );
         }
     }
 }

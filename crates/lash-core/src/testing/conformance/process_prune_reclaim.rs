@@ -96,10 +96,9 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     let terminal = registry
         .complete_process(
             PROCESS_ID,
-            crate::ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -369,10 +368,9 @@ async fn prune_completed_process(registry: &dyn crate::ProcessRegistry, process_
     let terminal = registry
         .complete_process(
             process_id,
-            crate::ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             crate::ProcessCompletionAuthority::external_owner(),
         )
         .await

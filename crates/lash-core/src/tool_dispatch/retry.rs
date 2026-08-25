@@ -248,6 +248,49 @@ pub(crate) fn mark_retry_exhausted(result: ToolOutcome, attempts: u32) -> ToolOu
 #[cfg(test)]
 mod panic_tests {
     #[test]
+    fn process_await_preserves_plugin_retry_evidence_for_retry_policy() {
+        let output = crate::ToolCallOutput::failure(crate::ToolFailure {
+            class: crate::ToolFailureClass::External,
+            code: "plugin_temporarily_unavailable".to_string(),
+            message: "plugin asks the caller to retry".to_string(),
+            source: crate::ToolFailureSource::Plugin,
+            retry: crate::ToolRetryStatus::Safe { after_ms: Some(37) },
+            raw: None,
+        });
+        let persisted = serde_json::to_value(crate::ProcessAwaitOutput::from_tool_output(output))
+            .expect("serialize process await payload");
+        let restored: crate::ProcessAwaitOutput =
+            serde_json::from_value(persisted).expect("deserialize process await payload");
+        let restored = crate::ToolOutcome::from_output(restored.into_tool_output());
+
+        let failure = restored
+            .as_done_output()
+            .and_then(|output| match &output.outcome {
+                crate::ToolCallOutcome::Failure(failure) => Some(failure),
+                crate::ToolCallOutcome::Success(_) | crate::ToolCallOutcome::Cancelled(_) => None,
+            })
+            .expect("process await returns the plugin failure");
+        assert_eq!(failure.source, crate::ToolFailureSource::Plugin);
+        assert_eq!(
+            failure.retry,
+            crate::ToolRetryStatus::Safe { after_ms: Some(37) }
+        );
+        assert_eq!(
+            super::retry_after_ms(
+                &restored,
+                crate::ToolRetryPolicy::Safe {
+                    max_attempts: 2,
+                    base_delay_ms: 1,
+                    max_delay_ms: 100,
+                },
+                0,
+            ),
+            Some(37),
+            "the retry layer must honor the plugin's preserved backoff hint"
+        );
+    }
+
+    #[test]
     fn contained_tool_panic_is_loud_in_test_builds() {
         let previous = crate::panic_containment::set_loud(true);
         let panic = std::panic::catch_unwind(|| {

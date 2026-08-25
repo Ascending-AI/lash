@@ -403,10 +403,9 @@ mod tests {
         host.process_registry
             .complete_process(
                 "process",
-                crate::ProcessAwaitOutput::Success {
-                    value: serde_json::json!("done"),
-                    control: None,
-                },
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::json!("done"),
+                )),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await

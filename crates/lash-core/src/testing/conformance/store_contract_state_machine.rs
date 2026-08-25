@@ -1103,22 +1103,19 @@ fn normalize_record(mut record: ProcessRecord) -> ProcessRecord {
 
 fn terminal_output(index: u8) -> ProcessAwaitOutput {
     match index % 4 {
-        0 => ProcessAwaitOutput::Success {
-            value: serde_json::json!({"property": true}),
-            control: None,
-        },
-        1 => ProcessAwaitOutput::Failure {
-            class: crate::ToolFailureClass::External,
-            code: "property_failure".to_string(),
-            message: "generated failure".to_string(),
-            raw: None,
-            control: None,
-        },
-        2 => ProcessAwaitOutput::Cancelled {
-            message: "generated cancellation".to_string(),
-            raw: None,
-            control: None,
-        },
+        0 => ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+            serde_json::json!({"property": true}),
+        )),
+        1 => ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+            crate::ToolFailure::runtime(
+                crate::ToolFailureClass::External,
+                "property_failure",
+                "generated failure",
+            ),
+        )),
+        2 => ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+            crate::ToolCancellation::runtime("generated cancellation"),
+        )),
         _ => ProcessAwaitOutput::Abandoned {
             evidence: Box::new(crate::AbandonEvidence {
                 writer: crate::AbandonWriter::EngineGaveUp,
@@ -1925,10 +1922,9 @@ async fn assert_prune_reregister_wake_fence(
         .registry
         .complete_process(
             process,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!("old incarnation done"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("old incarnation done"),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -2010,10 +2006,9 @@ async fn assert_prune_tombstone_watermark_safety(
     registry
         .complete_process(
             eligible_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -2029,10 +2024,9 @@ async fn assert_prune_tombstone_watermark_safety(
     registry
         .complete_process(
             id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -2147,10 +2141,9 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     registry
         .complete_process(
             id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"identity": "old"}),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"identity": "old"}),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await

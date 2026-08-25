@@ -126,10 +126,9 @@ async fn wait_until_db_past(storage: &PostgresStorage, target_ms: u64, bound: Du
 }
 
 fn success(tag: &str) -> ProcessAwaitOutput {
-    ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "by": tag }),
-        control: None,
-    }
+    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+        serde_json::json!({ "by": tag }),
+    ))
 }
 
 /// Two independent hosts (separate pools/connections) compete for one process
@@ -344,10 +343,9 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     );
 
     // (5) Host B completes with its valid lease.
-    let output = ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "by": "host-b", "n": 7 }),
-        control: None,
-    };
+    let output = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+        serde_json::json!({ "by": "host-b", "n": 7 }),
+    ));
     let completed = reg_b
         .complete_process_with_lease(&lease_b, output)
         .await

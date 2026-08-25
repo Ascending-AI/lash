@@ -368,11 +368,12 @@ impl crate::ProcessEngine for FailFirstRetryEngine {
                 "injected transient process execution failure".to_string(),
             )));
         }
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"process_id": context.registration().id}),
-            control: None,
-        }
-        .into())
+        Ok(
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"process_id": context.registration().id}),
+            ))
+            .into(),
+        )
     }
 }
 
@@ -394,11 +395,12 @@ impl crate::ProcessEngine for GatedSuccessEngine {
             .await
             .expect("test release semaphore remains open")
             .forget();
-        Ok(ProcessAwaitOutput::Success {
-            value: serde_json::json!({"process_id": context.registration().id}),
-            control: None,
-        }
-        .into())
+        Ok(
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"process_id": context.registration().id}),
+            ))
+            .into(),
+        )
     }
 }
 
