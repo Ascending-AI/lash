@@ -1,5 +1,5 @@
 [package]
-name = "lash-restate"
+name = "lash-internal-restate"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,6 +9,9 @@ homepage.workspace = true
 documentation.workspace = true
 rust-version.workspace = true
 description = "Restate durable execution adapter for Lash runtime effects"
+
+[lib]
+name = "lash_restate"
 
 [lints]
 workspace = true
@@ -34,7 +37,7 @@ chrono = { workspace = true }
 http = "1"
 http-body = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
-lash = { workspace = true, features = ["testing"] }
+lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
 lash-typescript = { workspace = true }

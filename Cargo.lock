@@ -27,13 +27,13 @@ dependencies = [
  "chrono",
  "dotenvy",
  "futures-util",
- "lash-protocol-rlm",
- "lash-provider-openai",
- "lash-remote-protocol",
- "lash-restate",
- "lash-rlm-types",
+ "lash-internal-protocol-rlm",
+ "lash-internal-provider-openai",
+ "lash-internal-remote-protocol",
+ "lash-internal-restate",
+ "lash-internal-rlm-types",
+ "lash-internal-sqlite-store",
  "lash-runtime",
- "lash-sqlite-store",
  "reqwest 0.13.4",
  "restate-sdk",
  "rusqlite",
@@ -59,25 +59,25 @@ dependencies = [
  "croner",
  "dotenvy",
  "futures-util",
- "lash-core",
- "lash-http-transport",
- "lash-lashlang-runtime",
- "lash-llm-tools",
- "lash-plugin-process-controls",
- "lash-postgres-store",
- "lash-protocol-rlm",
- "lash-provider-openai",
- "lash-remote-protocol",
- "lash-restate",
- "lash-rlm-types",
+ "lash-internal-core",
+ "lash-internal-http-transport",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-llm-tools",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-postgres-store",
+ "lash-internal-protocol-rlm",
+ "lash-internal-provider-openai",
+ "lash-internal-remote-protocol",
+ "lash-internal-restate",
+ "lash-internal-rlm-types",
+ "lash-internal-sqlite-store",
+ "lash-internal-standard-plugins",
+ "lash-internal-subagents",
+ "lash-internal-tools",
+ "lash-internal-typescript",
  "lash-runtime",
  "lash-sim",
- "lash-sqlite-store",
- "lash-standard-plugins",
- "lash-subagents",
- "lash-tools",
- "lash-typescript",
- "lashlang",
  "percent-encoding",
  "reqwest 0.13.4",
  "restate-sdk",
@@ -1033,18 +1033,18 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
- "lash-plugin-mcp",
- "lash-postgres-store",
- "lash-protocol-standard",
- "lash-provider-openai",
- "lash-remote-protocol",
- "lash-restate",
+ "lash-internal-lashlang",
+ "lash-internal-plugin-mcp",
+ "lash-internal-postgres-store",
+ "lash-internal-protocol-standard",
+ "lash-internal-provider-openai",
+ "lash-internal-remote-protocol",
+ "lash-internal-restate",
+ "lash-internal-s3-store",
+ "lash-internal-sqlite-store",
+ "lash-internal-subagents",
+ "lash-internal-typescript",
  "lash-runtime",
- "lash-s3-store",
- "lash-sqlite-store",
- "lash-subagents",
- "lash-typescript",
- "lashlang",
  "rmp-serde",
  "schemars 0.8.22",
  "serde",
@@ -2005,7 +2005,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-core"
+name = "lash-internal-core"
 version = "0.0.0-dev"
 dependencies = [
  "arc-swap",
@@ -2014,9 +2014,9 @@ dependencies = [
  "futures-util",
  "hmac",
  "insta",
- "lash-http-transport",
- "lash-sansio",
- "lash-trace",
+ "lash-internal-http-transport",
+ "lash-internal-sansio",
+ "lash-internal-trace",
  "proptest",
  "rmp-serde",
  "schemars 0.8.22",
@@ -2034,29 +2034,57 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-http-transport"
+name = "lash-internal-http-transport"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "bytes",
  "httpdate",
- "lash-sansio",
+ "lash-internal-sansio",
  "reqwest 0.13.4",
  "thiserror 2.0.18",
  "tokio",
 ]
 
 [[package]]
-name = "lash-lashlang-runtime"
+name = "lash-internal-lashlang"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "compact_str 0.9.1",
+ "criterion",
+ "futures",
+ "futures-executor",
+ "insta",
+ "lash-internal-core",
+ "lash-internal-sansio",
+ "lash-regress",
+ "num-bigint",
+ "num-traits",
+ "proptest",
+ "rmp-serde",
+ "rustc-hash 2.1.3",
+ "ryu-js",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "smallvec",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "lash-internal-lashlang-runtime"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "chrono",
- "lash-core",
- "lash-remote-protocol",
- "lash-sansio",
- "lash-trace",
- "lashlang",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-remote-protocol",
+ "lash-internal-sansio",
+ "lash-internal-trace",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2068,31 +2096,439 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-llm-tools"
+name = "lash-internal-llm-tools"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "jsonschema",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-sansio",
- "lash-tool-support",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "lash-llm-transport"
+name = "lash-internal-llm-transport"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "bytes",
- "lash-core",
- "lash-http-transport",
- "lash-llm-transport",
- "lash-sansio",
+ "lash-internal-core",
+ "lash-internal-http-transport",
+ "lash-internal-llm-transport",
+ "lash-internal-sansio",
  "proptest",
  "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "lash-internal-plugin-mcp"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "base64",
+ "fastrand",
+ "futures-util",
+ "http",
+ "jsonschema",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "lash-internal-plugin-process-controls"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-tool-support",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "lash-internal-plugin-tool-output-budget"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-core",
+ "lash-internal-protocol-standard",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "lash-internal-postgres-store"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "fastrand",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-protocol-standard",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-subagents",
+ "lash-internal-tools",
+ "lash-runtime",
+ "rmp-serde",
+ "rusqlite",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-protocol-rlm"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "insta",
+ "jsonschema",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-typescript",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "syn 2.0.118",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-protocol-standard"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "insta",
+ "lash-internal-core",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-tool-support",
+ "lash-internal-tools",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "lash-internal-provider-anthropic"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "base64",
+ "lash-internal-core",
+ "lash-internal-llm-transport",
+ "lash-internal-provider-anthropic",
+ "lash-internal-sansio",
+ "proptest",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-provider-auth"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "base64",
+ "chrono",
+ "form_urlencoded",
+ "lash-internal-core",
+ "lash-internal-sansio",
+ "reqwest 0.13.4",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-provider-google"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "base64",
+ "lash-internal-core",
+ "lash-internal-llm-transport",
+ "lash-internal-provider-auth",
+ "lash-internal-provider-google",
+ "lash-internal-sansio",
+ "proptest",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-provider-openai"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "base64",
+ "bytes",
+ "futures-util",
+ "lash-internal-core",
+ "lash-internal-llm-transport",
+ "lash-internal-protocol-rlm",
+ "lash-internal-provider-auth",
+ "lash-internal-provider-openai",
+ "lash-internal-sansio",
+ "lash-runtime",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-remote-protocol"
+version = "0.0.0-dev"
+dependencies = [
+ "base64",
+ "lash-internal-core",
+ "lash-internal-sansio",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "lash-internal-restate"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "http",
+ "http-body",
+ "http-body-util",
+ "lash-internal-core",
+ "lash-internal-http-transport",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-llm-tools",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-protocol-rlm",
+ "lash-internal-protocol-standard",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-subagents",
+ "lash-internal-tools",
+ "lash-internal-trace",
+ "lash-internal-typescript",
+ "lash-runtime",
+ "restate-sdk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "lash-internal-rlm-types"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-sansio",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lash-internal-s3-store"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "lash-internal-core",
+ "object_store",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "lash-internal-sansio"
+version = "0.0.0-dev"
+dependencies = [
+ "jsonschema",
+ "proptest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "lash-internal-sqlite-store"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "flate2",
+ "futures-executor",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "rmp-serde",
+ "rusqlite",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-rusqlite",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-standard-plugins"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-tool-output-budget",
+ "lash-internal-sansio",
+ "lash-internal-tools",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "lash-internal-subagents"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "jsonschema",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-protocol-rlm",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "lash-internal-tool-support"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+]
+
+[[package]]
+name = "lash-internal-tools"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
+ "libc",
+ "portable-pty",
+ "reqwest 0.13.4",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "lash-internal-trace"
+version = "0.0.0-dev"
+dependencies = [
+ "chrono",
+ "lash-internal-sansio",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-typescript"
+version = "0.0.0-dev"
+dependencies = [
+ "futures",
+ "lash-internal-lashlang",
+ "lash-internal-typescript",
+ "ryu-js",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "swc_common",
+ "swc_ecma_ast",
+ "swc_ecma_parser",
  "tokio",
 ]
 
@@ -2106,224 +2542,24 @@ dependencies = [
  "clap",
  "dhat",
  "futures-util",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-llm-tools",
- "lash-postgres-store",
- "lash-protocol-rlm",
- "lash-provider-openai",
- "lash-rlm-types",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-llm-tools",
+ "lash-internal-postgres-store",
+ "lash-internal-protocol-rlm",
+ "lash-internal-provider-openai",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-standard-plugins",
+ "lash-internal-subagents",
  "lash-runtime",
- "lash-sansio",
- "lash-sqlite-store",
- "lash-standard-plugins",
- "lash-subagents",
  "serde",
  "serde_json",
  "stats_alloc",
  "tempfile",
  "tokio",
  "tokio-util",
- "uuid",
-]
-
-[[package]]
-name = "lash-plugin-mcp"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "base64",
- "fastrand",
- "futures-util",
- "http",
- "jsonschema",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-sansio",
- "lash-tool-support",
- "rmcp",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "lash-plugin-process-controls"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-tool-support",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "lash-plugin-tool-output-budget"
-version = "0.0.0-dev"
-dependencies = [
- "lash-core",
- "lash-protocol-standard",
- "serde",
- "serde_json",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "lash-postgres-store"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "fastrand",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-plugin-process-controls",
- "lash-protocol-standard",
- "lash-runtime",
- "lash-sansio",
- "lash-sqlite-store",
- "lash-subagents",
- "lash-tools",
- "lashlang",
- "rmp-serde",
- "rusqlite",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlx",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "lash-protocol-rlm"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "insta",
- "jsonschema",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-rlm-types",
- "lash-sansio",
- "lash-typescript",
- "lashlang",
- "rmp-serde",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2 0.10.9",
- "syn 2.0.118",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "lash-protocol-standard"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "insta",
- "lash-core",
- "lash-plugin-process-controls",
- "lash-sansio",
- "lash-sqlite-store",
- "lash-tool-support",
- "lash-tools",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "lash-provider-anthropic"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "base64",
- "lash-core",
- "lash-llm-transport",
- "lash-provider-anthropic",
- "lash-sansio",
- "proptest",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "lash-provider-auth"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "base64",
- "chrono",
- "form_urlencoded",
- "lash-core",
- "lash-sansio",
- "reqwest 0.13.4",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "lash-provider-google"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "base64",
- "lash-core",
- "lash-llm-transport",
- "lash-provider-auth",
- "lash-provider-google",
- "lash-sansio",
- "proptest",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "lash-provider-openai"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "base64",
- "bytes",
- "futures-util",
- "lash-core",
- "lash-llm-transport",
- "lash-protocol-rlm",
- "lash-provider-auth",
- "lash-provider-openai",
- "lash-runtime",
- "lash-sansio",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "tracing",
  "uuid",
 ]
 
@@ -2336,57 +2572,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-remote-protocol"
-version = "0.0.0-dev"
-dependencies = [
- "base64",
- "lash-core",
- "lash-sansio",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "lash-restate"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "http",
- "http-body",
- "http-body-util",
- "lash-core",
- "lash-http-transport",
- "lash-lashlang-runtime",
- "lash-llm-tools",
- "lash-plugin-process-controls",
- "lash-protocol-rlm",
- "lash-protocol-standard",
- "lash-runtime",
- "lash-sansio",
- "lash-sqlite-store",
- "lash-subagents",
- "lash-tools",
- "lash-trace",
- "lash-typescript",
- "lashlang",
- "restate-sdk",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
 name = "lash-restate-postgres-workers-e2e"
 version = "0.0.0"
 dependencies = [
@@ -2394,15 +2579,15 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
- "lash-core",
- "lash-llm-tools",
- "lash-postgres-store",
- "lash-protocol-rlm",
- "lash-provider-openai",
- "lash-restate",
+ "lash-internal-core",
+ "lash-internal-llm-tools",
+ "lash-internal-postgres-store",
+ "lash-internal-protocol-rlm",
+ "lash-internal-provider-openai",
+ "lash-internal-restate",
+ "lash-internal-s3-store",
+ "lash-internal-sqlite-store",
  "lash-runtime",
- "lash-s3-store",
- "lash-sqlite-store",
  "reqwest 0.13.4",
  "restate-sdk",
  "serde",
@@ -2417,40 +2602,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-rlm-types"
-version = "0.0.0-dev"
-dependencies = [
- "lash-sansio",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "lash-runtime"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "futures-util",
  "insta",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-llm-tools",
- "lash-plugin-process-controls",
- "lash-plugin-tool-output-budget",
- "lash-postgres-store",
- "lash-protocol-rlm",
- "lash-protocol-standard",
- "lash-provider-anthropic",
- "lash-remote-protocol",
- "lash-rlm-types",
- "lash-sansio",
- "lash-sqlite-store",
- "lash-standard-plugins",
- "lash-subagents",
- "lash-tool-support",
- "lash-tools",
- "lash-trace",
- "lashlang",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-llm-tools",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-tool-output-budget",
+ "lash-internal-postgres-store",
+ "lash-internal-protocol-rlm",
+ "lash-internal-protocol-standard",
+ "lash-internal-provider-anthropic",
+ "lash-internal-remote-protocol",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-standard-plugins",
+ "lash-internal-subagents",
+ "lash-internal-tool-support",
+ "lash-internal-tools",
+ "lash-internal-trace",
  "rmp-serde",
  "rusqlite",
  "serde",
@@ -2469,31 +2645,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-s3-store"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "futures-util",
- "lash-core",
- "object_store",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "lash-sansio"
-version = "0.0.0-dev"
-dependencies = [
- "jsonschema",
- "proptest",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sha2 0.10.9",
-]
-
-[[package]]
 name = "lash-sim"
 version = "0.0.0-dev"
 dependencies = [
@@ -2502,23 +2653,23 @@ dependencies = [
  "chrono",
  "fastrand",
  "insta",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-llm-transport",
- "lash-postgres-store",
- "lash-protocol-rlm",
- "lash-protocol-standard",
- "lash-provider-anthropic",
- "lash-provider-auth",
- "lash-provider-google",
- "lash-provider-openai",
- "lash-rlm-types",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-llm-transport",
+ "lash-internal-postgres-store",
+ "lash-internal-protocol-rlm",
+ "lash-internal-protocol-standard",
+ "lash-internal-provider-anthropic",
+ "lash-internal-provider-auth",
+ "lash-internal-provider-google",
+ "lash-internal-provider-openai",
+ "lash-internal-rlm-types",
+ "lash-internal-s3-store",
+ "lash-internal-sansio",
+ "lash-internal-sqlite-store",
+ "lash-internal-subagents",
+ "lash-internal-tools",
  "lash-runtime",
- "lash-s3-store",
- "lash-sansio",
- "lash-sqlite-store",
- "lash-subagents",
- "lash-tools",
  "rmp-serde",
  "rusqlite",
  "serde",
@@ -2527,157 +2678,6 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "lash-sqlite-store"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "flate2",
- "futures-executor",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-sansio",
- "lash-sqlite-store",
- "lashlang",
- "rmp-serde",
- "rusqlite",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tokio-rusqlite",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "lash-standard-plugins"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "lash-core",
- "lash-plugin-process-controls",
- "lash-plugin-tool-output-budget",
- "lash-sansio",
- "lash-tools",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "lash-subagents"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "jsonschema",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-protocol-rlm",
- "lash-rlm-types",
- "lash-sansio",
- "lash-tool-support",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "lash-tool-support"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "lash-core",
- "lash-lashlang-runtime",
- "serde",
- "serde_json",
- "serde_path_to_error",
-]
-
-[[package]]
-name = "lash-tools"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-sansio",
- "lash-tool-support",
- "libc",
- "portable-pty",
- "reqwest 0.13.4",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "lash-trace"
-version = "0.0.0-dev"
-dependencies = [
- "chrono",
- "lash-sansio",
- "opentelemetry",
- "opentelemetry_sdk",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
-name = "lash-typescript"
-version = "0.0.0-dev"
-dependencies = [
- "futures",
- "lash-typescript",
- "lashlang",
- "ryu-js",
- "serde",
- "serde_json",
- "serde_yaml",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_parser",
- "tokio",
-]
-
-[[package]]
-name = "lashlang"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "compact_str 0.9.1",
- "criterion",
- "futures",
- "futures-executor",
- "insta",
- "lash-core",
- "lash-regress",
- "lash-sansio",
- "num-bigint",
- "num-traits",
- "proptest",
- "rmp-serde",
- "rustc-hash 2.1.3",
- "ryu-js",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "smallvec",
- "thiserror 2.0.18",
- "tokio",
- "url",
 ]
 
 [[package]]
@@ -4384,10 +4384,10 @@ dependencies = [
  "bytes",
  "dotenvy",
  "futures-util",
- "lash-plugin-mcp",
- "lash-provider-openai",
+ "lash-internal-plugin-mcp",
+ "lash-internal-provider-openai",
+ "lash-internal-sqlite-store",
  "lash-runtime",
- "lash-sqlite-store",
  "reqwest 0.13.4",
  "rmcp",
  "rusqlite",
@@ -5871,8 +5871,8 @@ dependencies = [
  "anyhow",
  "axum",
  "compact_str 0.9.1",
+ "lash-internal-lashlang",
  "lash-runtime",
- "lashlang",
  "reqwest 0.13.4",
  "serde",
  "serde_json",

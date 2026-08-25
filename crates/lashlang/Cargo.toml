@@ -1,5 +1,5 @@
 [package]
-name = "lashlang"
+name = "lash-internal-lashlang"
 autotests = false
 version.workspace = true
 edition.workspace = true
@@ -13,6 +13,9 @@ rust-version.workspace = true
 description = "Lashlang: compact CodeAct language for model-authored REPL blocks in the lash agent runtime."
 keywords = ["lash", "lashlang", "agent", "codeact", "llm"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lashlang"
 
 [features]
 # Expose `lashlang::testing::conformance` so downstream crates (the durable

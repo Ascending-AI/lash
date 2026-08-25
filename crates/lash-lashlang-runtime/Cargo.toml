@@ -1,5 +1,5 @@
 [package]
-name = "lash-lashlang-runtime"
+name = "lash-internal-lashlang-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Lashlang runtime integration for lash-core process engines and tool surfaces."
 keywords = ["lash", "agent", "runtime", "lashlang"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_lashlang_runtime"
 
 [features]
 # Expose `lash_lashlang_runtime::testing::conformance`, the shared conformance

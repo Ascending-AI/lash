@@ -1,5 +1,5 @@
 [package]
-name = "lash-core"
+name = "lash-internal-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Sans-IO turn machine and runtime kernel for the lash agent runtime."
 keywords = ["lash", "agent", "runtime", "async", "ai"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_core"
 
 [features]
 # Keep core portable by default.

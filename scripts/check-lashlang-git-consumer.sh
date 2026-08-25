@@ -19,7 +19,7 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-lashlang = { git = "file://${repo_root}", rev = "${source_sha}" }
+lashlang = { package = "lash-internal-lashlang", git = "file://${repo_root}", rev = "${source_sha}" }
 EOF
 cat > "$consumer_dir/src/main.rs" <<'EOF'
 fn main() {}

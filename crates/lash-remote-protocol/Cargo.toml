@@ -1,5 +1,5 @@
 [package]
-name = "lash-remote-protocol"
+name = "lash-internal-remote-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Versioned remote embedding protocol DTOs for Lash sessions, turns, activities, tools, and LLM calls."
 keywords = ["lash", "agent", "runtime", "protocol"]
 categories = ["api-bindings", "data-structures"]
+
+[lib]
+name = "lash_remote_protocol"
 
 [lints]
 workspace = true

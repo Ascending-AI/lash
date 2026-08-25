@@ -1,5 +1,5 @@
 [package]
-name = "lash-rlm-types"
+name = "lash-internal-rlm-types"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Shared types for the RLM protocol in the lash agent runtime."
 keywords = ["lash", "agent", "rlm", "types", "lashlang"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_rlm_types"
 
 [lints]
 workspace = true

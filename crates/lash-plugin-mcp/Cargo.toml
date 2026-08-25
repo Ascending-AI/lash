@@ -1,5 +1,5 @@
 [package]
-name = "lash-plugin-mcp"
+name = "lash-internal-plugin-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "MCP (Model Context Protocol) plugin for the lash agent runtime."
 keywords = ["lash", "agent", "mcp", "plugin", "llm"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_plugin_mcp"
 
 [features]
 default = []

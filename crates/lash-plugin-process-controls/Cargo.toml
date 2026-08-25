@@ -1,5 +1,5 @@
 [package]
-name = "lash-plugin-process-controls"
+name = "lash-internal-plugin-process-controls"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Process-control plugin for the lash agent runtime."
 keywords = ["lash", "agent", "plugin", "process", "runtime"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_plugin_process_controls"
 
 [features]
 default = []

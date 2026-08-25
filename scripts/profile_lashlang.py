@@ -224,7 +224,7 @@ def maybe_build(root: Path, debug: bool, build: bool) -> None:
         "build",
         "-q",
         "-p",
-        "lashlang",
+        "lash-internal-lashlang",
         "--example",
         "perf",
         "--example",

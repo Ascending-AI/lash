@@ -1,5 +1,5 @@
 [package]
-name = "lash-provider-google"
+name = "lash-internal-provider-google"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Google OAuth (Gemini via Code Assist) provider for lash."
 keywords = ["lash", "agent", "llm", "google", "gemini"]
 categories = ["api-bindings", "asynchronous"]
+
+[lib]
+name = "lash_provider_google"
 
 [features]
 # Enables public test support and the cross-provider response-normalization
@@ -38,9 +41,9 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 # Self dev-dependency so `testing` is on for every test build of this crate:
-# a bare `cargo test -p lash-provider-google` runs the conformance law instead of
+# a bare `cargo test -p lash-internal-provider-google` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).
-lash-provider-google = { path = ".", features = ["testing"] }
+lash-provider-google = { package = "lash-internal-provider-google", path = ".", features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
 proptest = "1"
 tokio = { workspace = true, features = ["rt", "time"] }

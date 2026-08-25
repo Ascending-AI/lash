@@ -65,9 +65,9 @@ database with the production-required gate enabled:
 
 ```sh
 LASH_POSTGRES_DATABASE_URL=<disposable-url> LASH_REQUIRE_POSTGRES=1 \
-  cargo test -p lash-postgres-store --test process_parent_atomicity --locked \
+  cargo test -p lash-internal-postgres-store --test process_parent_atomicity --locked \
   -- --nocapture --test-threads=1
-cargo test -p lash-restate \
+cargo test -p lash-internal-restate \
   restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit \
   --locked -- --nocapture --test-threads=1
 ```

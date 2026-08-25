@@ -86,22 +86,22 @@ PUBLIC_KINDS = {
 #: answers to neither, and its hidden internals are not this inventory's
 #: business.  A spec is version-qualified when the graph holds two majors.
 DEPENDENCY_PACKAGES = {
-    "lash_core": ("lash-core", "lash_core", True),
-    "lash_http_transport": ("lash-http-transport", "lash_http_transport", True),
-    "lash_lashlang_runtime": ("lash-lashlang-runtime", "lash_lashlang_runtime", True),
-    "lash_typescript": ("lash-typescript", "lash_typescript", True),
+    "lash_core": ("lash-internal-core", "lash_core", True),
+    "lash_http_transport": ("lash-internal-http-transport", "lash_http_transport", True),
+    "lash_lashlang_runtime": ("lash-internal-lashlang-runtime", "lash_lashlang_runtime", True),
+    "lash_typescript": ("lash-internal-typescript", "lash_typescript", True),
     "lash_plugin_tool_output_budget": (
-        "lash-plugin-tool-output-budget",
+        "lash-internal-plugin-tool-output-budget",
         "lash_plugin_tool_output_budget",
         True,
     ),
-    "lash_protocol_rlm": ("lash-protocol-rlm", "lash_protocol_rlm", True),
-    "lash_remote_protocol": ("lash-remote-protocol", "lash_remote_protocol", True),
-    "lash_rlm_types": ("lash-rlm-types", "lash_rlm_types", True),
-    "lash_sansio": ("lash-sansio", "lash_sansio", True),
-    "lash_tool_support": ("lash-tool-support", "lash_tool_support", True),
-    "lash_trace": ("lash-trace", "lash_trace", True),
-    "lashlang": ("lashlang", "lashlang", True),
+    "lash_protocol_rlm": ("lash-internal-protocol-rlm", "lash_protocol_rlm", True),
+    "lash_remote_protocol": ("lash-internal-remote-protocol", "lash_remote_protocol", True),
+    "lash_rlm_types": ("lash-internal-rlm-types", "lash_rlm_types", True),
+    "lash_sansio": ("lash-internal-sansio", "lash_sansio", True),
+    "lash_tool_support": ("lash-internal-tool-support", "lash_tool_support", True),
+    "lash_trace": ("lash-internal-trace", "lash_trace", True),
+    "lashlang": ("lash-internal-lashlang", "lashlang", True),
     "schemars": ("schemars@0.8", "schemars", False),
     "schemars_derive": ("schemars_derive@0.8", "schemars_derive", False),
     "tokio_util": ("tokio-util", "tokio_util", False),
@@ -671,7 +671,7 @@ def configured_surface(all_features: bool) -> dict[tuple[str, str], str]:
         rustdoc("lash-runtime", "lash", all_features), all_features
     )
     core = lash_core_surface(
-        rustdoc("lash-core", "lash_core", all_features),
+        rustdoc("lash-internal-core", "lash_core", all_features),
         all_features,
         gated_core_modules(),
     )

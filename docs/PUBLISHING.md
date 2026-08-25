@@ -8,13 +8,12 @@ release publishes them all together, in dependency order.
 
 ## What gets published
 
-- **Published:** every workspace member without `publish = false`. The public
-  entry point is `lash-runtime` (imported as `lash`); embedders also pull in
-  provider crates (`lash-provider-*`), stores (`lash-sqlite-store`,
-  `lash-postgres-store`, `lash-s3-store`,
-  `lash-restate`), the remote protocol DTOs (`lash-remote-protocol`), and
-  a-la-carte capability crates (`lash-tools`, `lash-plugin-mcp`,
-  `lash-subagents`, `lash-plugin-tool-output-budget`, `lash-llm-tools`).
+- **Published:** every workspace member without `publish = false`. The sole
+  supported Lash package is `lash-runtime` (imported as `lash`); the other 28
+  Lash family packages publish as unsupported `lash-internal-*` implementation
+  artifacts, with dependency aliases preserving their source crate names.
+  `lash-regress` retains its upstream-derived package identity and is outside
+  the 29-package Lash family classified by ADR 0079.
 - **Not published:** anything marked `publish = false` — examples, E2E
   harnesses, and dev/internal tooling (`lash-perf`).
   Harness evolution lives in the separate
@@ -22,8 +21,8 @@ release publishes them all together, in dependency order.
 
 Because of the exact `=` version pins, a published crate's internal deps must
 already be on crates.io at the same version — so it is **all-or-nothing**:
-`scripts/publish_workspace.py` publishes the whole set one crate at a time in
-dependency order and waits for crates.io visibility between crates.
+`scripts/publish_workspace.py` publishes the whole set in dependency layers
+and waits for crates.io visibility before advancing to the next layer.
 
 ## How a release runs
 

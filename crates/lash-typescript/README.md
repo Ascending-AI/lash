@@ -158,7 +158,7 @@ not touch the iterable are unaffected.
 
 ## Conformance
 
-`cargo test -p lash-typescript` runs an official, commit-pinned Test262 subset
+`cargo test -p lash-internal-typescript` runs an official, commit-pinned Test262 subset
 through the same parse -> normalized AST -> shared AST -> heap VM pipeline as a
 real cell. This proves spec agreement for the selected accepted constructs; it
 does not claim that the bounded dialect accepts all of ECMAScript. The Node

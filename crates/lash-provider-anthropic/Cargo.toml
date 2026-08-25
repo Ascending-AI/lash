@@ -1,5 +1,5 @@
 [package]
-name = "lash-provider-anthropic"
+name = "lash-internal-provider-anthropic"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Anthropic API (Claude) provider for lash."
 keywords = ["lash", "agent", "llm", "anthropic", "claude"]
 categories = ["api-bindings", "asynchronous"]
+
+[lib]
+name = "lash_provider_anthropic"
 
 [features]
 # Enables public test support and the cross-provider response-normalization
@@ -35,9 +38,9 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 # Self dev-dependency so `testing` is on for every test build of this crate:
-# a bare `cargo test -p lash-provider-anthropic` runs the conformance law instead of
+# a bare `cargo test -p lash-internal-provider-anthropic` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).
-lash-provider-anthropic = { path = ".", features = ["testing"] }
+lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = ".", features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
 proptest = "1"
 tokio = { workspace = true, features = ["rt", "time"] }

@@ -1,5 +1,5 @@
 [package]
-name = "lash-typescript"
+name = "lash-internal-typescript"
 autotests = false
 version.workspace = true
 edition.workspace = true
@@ -13,6 +13,9 @@ rust-version.workspace = true
 description = "The ECMA-exact TypeScript dialect front-end for the Lash heap VM."
 keywords = ["lash", "typescript", "codeact", "agent"]
 categories = ["compilers", "parser-implementations"]
+
+[lib]
+name = "lash_typescript"
 
 [features]
 testing = []
@@ -30,7 +33,7 @@ swc_ecma_parser = { workspace = true }
 
 [dev-dependencies]
 futures = "0.3"
-lash-typescript = { path = ".", features = ["testing"] }
+lash-typescript = { package = "lash-internal-typescript", path = ".", features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"
 swc_common = { workspace = true }

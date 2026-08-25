@@ -1,5 +1,5 @@
 [package]
-name = "lash-protocol-rlm"
+name = "lash-internal-protocol-rlm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "RLM protocol (persistent Lashlang execution) for the lash agent runtime."
 keywords = ["lash", "agent", "rlm", "lashlang", "llm"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_protocol_rlm"
 
 [features]
 default = []

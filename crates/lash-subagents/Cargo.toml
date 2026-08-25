@@ -1,5 +1,5 @@
 [package]
-name = "lash-subagents"
+name = "lash-internal-subagents"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Subagent / spawn_agent harness for the lash agent runtime."
 keywords = ["lash", "agent", "subagent", "spawn", "llm"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_subagents"
 
 [lints]
 workspace = true

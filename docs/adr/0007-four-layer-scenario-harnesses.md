@@ -21,9 +21,9 @@ The runtime must protect durable session, effect, queue, lease, checkpoint, and 
 
 ## Harness Homes
 
-- Runtime Scenarios use `crates/lash-core/src/runtime/tests/runtime_scenarios.rs` as the module root, with cases in `runtime_scenarios/cases.rs` and private support modules under `runtime_scenarios/support/`. They are named ingress, checkpoint, claim, lease, fault, and commit phases. Run with `cargo test -p lash-core runtime_scenario`.
-- Standard Protocol Scenarios live in `crates/lash-protocol-standard/tests/protocol_scenarios.rs`. Run with `cargo test -p lash-protocol-standard --test protocol_scenarios`.
-- RLM Protocol Scenarios live under `crates/lash-protocol-rlm/tests/protocol_drivers/`, with the `protocol_drivers.rs` test root declaring `support`, `scenarios`, `prompt_history`, and `driver_mechanics` as sibling modules. Run with `cargo test -p lash-protocol-rlm --test protocol_drivers`.
+- Runtime Scenarios use `crates/lash-core/src/runtime/tests/runtime_scenarios.rs` as the module root, with cases in `runtime_scenarios/cases.rs` and private support modules under `runtime_scenarios/support/`. They are named ingress, checkpoint, claim, lease, fault, and commit phases. Run with `cargo test -p lash-internal-core runtime_scenario`.
+- Standard Protocol Scenarios live in `crates/lash-protocol-standard/tests/protocol_scenarios.rs`. Run with `cargo test -p lash-internal-protocol-standard --test protocol_scenarios`.
+- RLM Protocol Scenarios live under `crates/lash-protocol-rlm/tests/protocol_drivers/`, with the `protocol_drivers.rs` test root declaring `support`, `scenarios`, `prompt_history`, and `driver_mechanics` as sibling modules. Run with `cargo test -p lash-internal-protocol-rlm --test protocol_drivers`.
 - Agent Scenarios live in `crates/lash/src/tests/agent_scenarios/`. Run with `cargo test -p lash-runtime --features rlm,testing agent_scenarios`.
 
 ## Ownership Boundaries

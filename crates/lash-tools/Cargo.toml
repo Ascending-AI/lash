@@ -1,5 +1,5 @@
 [package]
-name = "lash-tools"
+name = "lash-internal-tools"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Built-in shell and web tools for the lash agent runtime."
 keywords = ["lash", "agent", "tools", "llm", "runtime"]
 categories = ["asynchronous", "development-tools"]
+
+[lib]
+name = "lash_tools"
 
 [features]
 default = []

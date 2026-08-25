@@ -113,12 +113,12 @@ LASH_MINIO_ACCESS_KEY="minioadmin" \
 LASH_MINIO_SECRET_KEY="minioadmin" \
 LASH_MINIO_PREFIX="runbooks/process-operations-${LASH_GATE_WORKTREE_SLUG}-$$" \
 LASH_REQUIRE_MINIO=1 \
-  cargo test --locked -p lash-s3-store -- --nocapture \
+  cargo test --locked -p lash-internal-s3-store -- --nocapture \
   2>&1 | tee "$artifact_dir/00-minio-conformance.log" | tee -a "$test_output"
 
 postgres_url="postgres://lash:lash@127.0.0.1:${postgres_port}/lash"
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
-  cargo test --locked -p lash-postgres-store --test conformance \
+  cargo test --locked -p lash-internal-postgres-store --test conformance \
   postgres_wake_delivery_crash_matrix_when_configured -- --nocapture --test-threads=1 \
   2>&1 | tee "$artifact_dir/01-wake-delivery.log" | tee -a "$test_output"
 echo "scenario 1 evidence: TargetGone and Expired typed discards plus blocked-head redrive passed on PostgreSQL" | tee -a "$test_output"
@@ -131,7 +131,7 @@ grep -q '"old_target_turn_count":0' "$artifact_dir/02-retarget.jsonl"
 grep -q '"new_target_turn_count":1' "$artifact_dir/02-retarget.jsonl"
 echo "scenario 2 evidence: old pending delivery is Retargeted with an audit event; one next wake reached only the new target" | tee -a "$test_output"
 
-cargo test --locked -p lash-core \
+cargo test --locked -p lash-internal-core \
   process_tool_filter_narrows_only_session_tools_and_never_internal_wakes -- --nocapture \
   2>&1 | tee "$artifact_dir/03-tool-visibility.log" | tee -a "$test_output"
 cargo test --locked -p lash-runtime \
@@ -140,7 +140,7 @@ cargo test --locked -p lash-runtime \
 echo "scenario 3 evidence: model process tools were filtered while host list/signal/cancel remained complete" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
-  cargo test --locked -p lash-postgres-store --test conformance \
+  cargo test --locked -p lash-internal-postgres-store --test conformance \
   postgres_runtime_persistence_satisfies_conformance_when_configured \
   -- --nocapture --test-threads=1 \
   2>&1 | tee "$artifact_dir/04-wake-turn-policy.log" | tee -a "$test_output"
@@ -188,7 +188,7 @@ PY
 echo "scenario 8 evidence: selected A settled alone; unselected B remained pending; replay and refusal stayed typed" | tee -a "$test_output"
 
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
-  cargo test --locked -p lash-postgres-store --test conformance \
+  cargo test --locked -p lash-internal-postgres-store --test conformance \
   postgres_process_trigger_retention_satisfies_conformance_when_configured \
   -- --nocapture --test-threads=1 \
   2>&1 | tee "$artifact_dir/07-retention.log" | tee -a "$test_output"

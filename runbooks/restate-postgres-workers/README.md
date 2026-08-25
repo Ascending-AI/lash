@@ -42,7 +42,7 @@ protocol seam, where it can splice the first worker incarnation's exact command
 journal into a fresh handler incarnation deterministically:
 
 ```sh
-cargo test -p lash-restate \
+cargo test -p lash-internal-restate \
   fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once -- --nocapture
 ```
 
@@ -97,7 +97,7 @@ docker run --rm --name lash-postgres-conformance \
   -d postgres:16
 
 LASH_POSTGRES_DATABASE_URL=postgres://postgres:postgres@localhost:55432/lash_conformance \
-  cargo test -p lash-postgres-store --locked \
+  cargo test -p lash-internal-postgres-store --locked \
   postgres_process_registry_satisfies_conformance_when_configured
 
 docker rm -f lash-postgres-conformance

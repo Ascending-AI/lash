@@ -1,5 +1,5 @@
 [package]
-name = "lash-http-transport"
+name = "lash-internal-http-transport"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Host-configurable HTTP transport seam for Lash integrations."
 keywords = ["lash", "transport", "http", "async"]
 categories = ["asynchronous", "network-programming"]
+
+[lib]
+name = "lash_http_transport"
 
 [lints]
 workspace = true

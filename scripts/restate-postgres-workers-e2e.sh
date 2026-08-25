@@ -131,7 +131,7 @@ if [ "$workflow_segment" != "2" ]; then
   LASH_MINIO_ACCESS_KEY="minioadmin" \
   LASH_MINIO_SECRET_KEY="minioadmin" \
   LASH_MINIO_PREFIX="conformance/restate-postgres-workers-${LASH_GATE_WORKTREE_SLUG}-$$" \
-    cargo test --locked -p lash-s3-store -- --nocapture \
+    cargo test --locked -p lash-internal-s3-store -- --nocapture \
     2>&1 | tee "$test_output"
 fi
 

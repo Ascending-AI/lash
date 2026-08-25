@@ -1,5 +1,5 @@
 [package]
-name = "lash-provider-auth"
+name = "lash-internal-provider-auth"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "OAuth helpers and credential storage shared by lash provider crates."
 keywords = ["lash", "agent", "oauth", "auth", "llm"]
 categories = ["api-bindings", "authentication"]
+
+[lib]
+name = "lash_provider_auth"
 
 [lints]
 workspace = true

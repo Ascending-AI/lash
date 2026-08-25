@@ -1,5 +1,5 @@
 [package]
-name = "lash-postgres-store"
+name = "lash-internal-postgres-store"
 autotests = false
 version.workspace = true
 edition.workspace = true
@@ -13,6 +13,9 @@ rust-version.workspace = true
 description = "PostgreSQL-backed durable storage for the lash agent runtime."
 keywords = ["lash", "agent", "postgres", "persistence", "store"]
 categories = ["database", "asynchronous"]
+
+[lib]
+name = "lash_postgres_store"
 
 [lints]
 workspace = true
@@ -40,7 +43,7 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 fastrand = { workspace = true }
-lash = { workspace = true, features = ["testing"] }
+lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
 lash-protocol-standard = { workspace = true, features = ["lashlang"] }

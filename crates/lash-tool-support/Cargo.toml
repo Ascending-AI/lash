@@ -1,5 +1,5 @@
 [package]
-name = "lash-tool-support"
+name = "lash-internal-tool-support"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Shared types and helpers for building tools in the lash agent runtime."
 keywords = ["lash", "agent", "tools", "support", "llm"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_tool_support"
 
 [features]
 default = []

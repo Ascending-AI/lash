@@ -1,5 +1,5 @@
 [package]
-name = "lash-llm-transport"
+name = "lash-internal-llm-transport"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "HTTP transport layer used by lash provider crates."
 keywords = ["lash", "agent", "llm", "transport", "http"]
 categories = ["asynchronous", "network-programming"]
+
+[lib]
+name = "lash_llm_transport"
 
 [features]
 # Exposes the cross-provider response-normalization conformance suite
@@ -35,6 +38,6 @@ serde_json = { workspace = true }
 proptest = { version = "1", optional = true }
 
 [dev-dependencies]
-lash-llm-transport = { path = ".", features = ["proptest-support"] }
+lash-llm-transport = { package = "lash-internal-llm-transport", path = ".", features = ["proptest-support"] }
 proptest = "1"
 tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }

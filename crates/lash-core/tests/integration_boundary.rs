@@ -48,24 +48,44 @@ fn cargo_metadata_keeps_protocol_crates_out_of_lash_core_dependencies() {
         .expect("metadata packages array");
     let core = packages
         .iter()
-        .find(|package| package["name"].as_str() == Some("lash-core"))
-        .expect("lash-core package in workspace metadata");
+        .find(|package| package["name"].as_str() == Some(env!("CARGO_PKG_NAME")))
+        .expect("current package in workspace metadata");
     let dependency_names = core["dependencies"]
         .as_array()
-        .expect("lash-core dependency array")
+        .expect("current package dependency array")
         .iter()
         .filter_map(|dependency| dependency["name"].as_str())
         .collect::<Vec<_>>();
 
-    for forbidden in [
-        concat!("lash-protocol-", "r", "lm"),
-        concat!("lash-", "lash", "lang-runtime"),
+    let forbidden_library_targets = [
+        concat!("lash_protocol_", "r", "lm"),
+        concat!("lash_", "lash", "lang_runtime"),
         concat!("lash", "lang"),
-        "lash-protocol-standard",
-    ] {
+        "lash_protocol_standard",
+    ];
+    let forbidden_package_names = packages
+        .iter()
+        .filter(|package| {
+            package["targets"].as_array().is_some_and(|targets| {
+                targets.iter().any(|target| {
+                    target["name"]
+                        .as_str()
+                        .is_some_and(|name| forbidden_library_targets.contains(&name))
+                })
+            })
+        })
+        .filter_map(|package| package["name"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        forbidden_package_names.len(),
+        forbidden_library_targets.len(),
+        "every forbidden integration library target must resolve to a workspace package"
+    );
+
+    for forbidden in forbidden_package_names {
         assert!(
             !dependency_names.contains(&forbidden),
-            "dependency direction violation: lash-core depends on integration crate {forbidden}"
+            "dependency direction violation: core depends on integration package {forbidden}"
         );
     }
 }
