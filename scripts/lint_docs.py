@@ -614,6 +614,63 @@ def check_quickstart_contract(errors: list[str]) -> None:
         errors.append("examples/docs-snippets/src/quickstart.rs: expected a lash library import")
 
 
+def check_architecture_overview_stats(errors: list[str]) -> None:
+    """Keep the architecture overview's workspace stats derived from the tree."""
+    overview = DOCS / "architecture" / "overview.html"
+    text = overview.read_text(encoding="utf-8")
+    stat_patterns = {
+        "Cargo members": r'<div class="micro-label">Cargo members</div><span class="stat-value">(\d+)</span>',
+        "Rust files": r'<div class="micro-label">Rust files</div><span class="stat-value">(\d+)\+</span>',
+    }
+    documented: dict[str, int] = {}
+    for label, pattern in stat_patterns.items():
+        matches = re.findall(pattern, text)
+        if len(matches) != 1:
+            errors.append(
+                f"{overview.relative_to(ROOT)}: expected exactly one {label} stat, found {len(matches)}"
+            )
+            continue
+        documented[label] = int(matches[0])
+
+    try:
+        cargo = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+        members = cargo["workspace"]["members"]
+    except (KeyError, TypeError, OSError, tomllib.TOMLDecodeError) as error:
+        errors.append(f"Cargo.toml: unable to read workspace members for architecture stats: {error}")
+    else:
+        expected_members = len(members)
+        actual_members = documented.get("Cargo members")
+        if actual_members is not None and actual_members != expected_members:
+            errors.append(
+                f"{overview.relative_to(ROOT)}: Cargo members stat {actual_members} does not match "
+                f"Cargo.toml [workspace] members ({expected_members})"
+            )
+
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "*.rs"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        errors.append(f"{overview.relative_to(ROOT)}: unable to count tracked Rust files: {error}")
+    else:
+        if result.returncode != 0:
+            errors.append(
+                f"{overview.relative_to(ROOT)}: git ls-files '*.rs' failed with exit code {result.returncode}"
+            )
+        else:
+            expected_rust_files = (len(result.stdout.splitlines()) // 100) * 100
+            actual_rust_files = documented.get("Rust files")
+            if actual_rust_files is not None and actual_rust_files != expected_rust_files:
+                errors.append(
+                    f"{overview.relative_to(ROOT)}: Rust files stat {actual_rust_files} does not match "
+                    f"git ls-files '*.rs' ({expected_rust_files})"
+                )
+
+
 SNIPPETS_SRC = ROOT / "examples" / "docs-snippets" / "src"
 REGION_START = re.compile(r"^(\s*)// docs:start:([\w-]+)\s*$")
 PRE_BLOCK = re.compile(r"<pre([^>]*)><code>(.*?)</code></pre>", re.S)
@@ -765,6 +822,7 @@ def main() -> int:
     check_schema_version_claims(errors)
     check_remote_protocol_version(errors)
     check_quickstart_contract(errors)
+    check_architecture_overview_stats(errors)
     check_code_snippets(errors, fix)
     if errors:
         for err in errors:
