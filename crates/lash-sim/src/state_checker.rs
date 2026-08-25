@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
+use crate::runtime_contracts::RuntimeUsageTotals;
 #[cfg(test)]
 use crate::scheduler::BoundaryKind;
 use crate::scheduler::DeliveredBoundary;
@@ -13,7 +14,7 @@ struct CheckedSession {
     nodes: BTreeMap<String, Value>,
     leaf_node_id: Option<String>,
     usage_rows: Vec<Value>,
-    current_turn_usage: Value,
+    current_turn_usage: RuntimeUsageTotals,
     checked_commits: usize,
 }
 
@@ -178,7 +179,7 @@ fn fold_usage_rows(
     let rows = rows
         .as_array()
         .ok_or_else(|| format!("checkpoint checker `{session_id}` usage rows are not an array"))?;
-    checked.current_turn_usage = sum_usage(rows, false);
+    checked.current_turn_usage = sum_usage(rows);
     for row in rows {
         let source = row.get("source");
         let model = row.get("model");
@@ -187,7 +188,7 @@ fn fold_usage_rows(
             .iter_mut()
             .find(|existing| existing.get("source") == source && existing.get("model") == model)
         {
-            for field in USAGE_FIELDS {
+            for &field in RuntimeUsageTotals::FIELDS {
                 let total = existing
                     .pointer(&format!("/usage/{field}"))
                     .and_then(Value::as_i64)
@@ -197,7 +198,7 @@ fn fold_usage_rows(
                             .and_then(Value::as_i64)
                             .unwrap_or_default(),
                     );
-                existing["usage"][*field] = json!(total);
+                existing["usage"][field] = json!(total);
             }
         } else {
             checked.usage_rows.push(row.clone());
@@ -263,8 +264,8 @@ fn compare_read_model(
             "checkpoint checker `{session_id}` transcript reconstruction diverged from read model"
         ));
     }
-    let usage = &checked.current_turn_usage;
-    if read.get("token_usage") != Some(usage) {
+    let usage = checked.current_turn_usage.fields_value();
+    if read.get("token_usage") != Some(&usage) {
         return Err(format!(
             "checkpoint checker `{session_id}` usage reconstruction diverged from read model: checker={usage}; read={}",
             read.get("token_usage").unwrap_or(&Value::Null)
@@ -313,7 +314,7 @@ fn compare_runtime_facts(
             "checkpoint checker `{session_id}` transcript reconstruction diverged from runtime read facts"
         ));
     }
-    let usage = with_total(&checked.current_turn_usage);
+    let usage = json!(checked.current_turn_usage);
     if runtime
         .observed
         .pointer("/runtime_invariant_facts/usage/total_usage")
@@ -327,7 +328,7 @@ fn compare_runtime_facts(
                 .unwrap_or(&Value::Null)
         ));
     }
-    let ledger_usage = sum_usage(&checked.usage_rows, true);
+    let ledger_usage = json!(sum_usage(&checked.usage_rows));
     if runtime
         .observed
         .pointer("/runtime_invariant_facts/usage/token_ledger_total")
@@ -381,46 +382,18 @@ fn rows_by_id(rows: &[Value], session_id: &str) -> Result<BTreeMap<String, Value
         .collect()
 }
 
-fn sum_usage(rows: &[Value], include_total: bool) -> Value {
-    let mut totals = Map::new();
-    let mut total = 0i64;
-    for field in USAGE_FIELDS {
-        let value = rows
-            .iter()
-            .filter_map(|row| {
-                row.pointer(&format!("/usage/{field}"))
-                    .and_then(Value::as_i64)
-            })
-            .sum::<i64>();
-        if *field != "reasoning_output_tokens" {
-            total += value;
-        }
-        totals.insert((*field).to_string(), json!(value));
+fn sum_usage(rows: &[Value]) -> RuntimeUsageTotals {
+    let mut total = RuntimeUsageTotals::default();
+    for row in rows {
+        let contribution = RuntimeUsageTotals::from_field_values(|field| {
+            row.pointer(&format!("/usage/{field}"))
+                .and_then(Value::as_i64)
+                .unwrap_or_default()
+        });
+        total.saturating_add_assign(&contribution);
     }
-    if include_total {
-        totals.insert("total_tokens".to_string(), json!(total));
-    }
-    Value::Object(totals)
+    total
 }
-
-fn with_total(usage: &Value) -> Value {
-    let mut usage = usage.as_object().cloned().unwrap_or_default();
-    let total = USAGE_FIELDS
-        .iter()
-        .filter(|field| **field != "reasoning_output_tokens")
-        .filter_map(|field| usage.get(*field).and_then(Value::as_i64))
-        .sum::<i64>();
-    usage.insert("total_tokens".to_string(), json!(total));
-    Value::Object(usage)
-}
-
-const USAGE_FIELDS: &[&str] = &[
-    "input_tokens",
-    "output_tokens",
-    "cache_read_input_tokens",
-    "cache_write_input_tokens",
-    "reasoning_output_tokens",
-];
 
 #[cfg(test)]
 mod tests {
@@ -438,13 +411,7 @@ mod tests {
                 "cache_write_input_tokens": 0,
                 "reasoning_output_tokens": 0
             }})],
-            current_turn_usage: json!({
-                "input_tokens": 5,
-                "output_tokens": 2,
-                "cache_read_input_tokens": 0,
-                "cache_write_input_tokens": 0,
-                "reasoning_output_tokens": 0
-            }),
+            current_turn_usage: RuntimeUsageTotals::new(5, 2, 0, 0, 0),
             ..CheckedSession::default()
         };
         let runtime = DeliveredBoundary {

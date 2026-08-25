@@ -1,55 +1,14 @@
 use std::collections::BTreeMap;
 
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 
+use crate::runtime_contracts::RuntimeUsageTotals;
 use crate::store::CheckpointWriteEvent;
 use crate::trace::OracleVerdict;
 
 pub const RUNTIME_USAGE_CONSERVATION_ORACLE: &str = "sim.oracle.runtime-usage-conservation.v1";
 
 type UsageKey = (String, String);
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct UsageTotals {
-    fields: BTreeMap<&'static str, i64>,
-}
-
-impl UsageTotals {
-    fn add_row(&mut self, row: &Value, context: &str) -> Result<(), String> {
-        for field in USAGE_FIELDS {
-            let value = row
-                .pointer(&format!("/usage/{field}"))
-                .and_then(Value::as_i64)
-                .ok_or_else(|| format!("{context} usage row has no integer `{field}`"))?;
-            let total = self.fields.entry(field).or_default();
-            *total = total
-                .checked_add(value)
-                .ok_or_else(|| format!("{context} usage `{field}` overflowed"))?;
-        }
-        Ok(())
-    }
-
-    fn add_totals(&mut self, other: &Self, context: &str) -> Result<(), String> {
-        for field in USAGE_FIELDS {
-            let total = self.fields.entry(field).or_default();
-            *total = total
-                .checked_add(other.fields.get(field).copied().unwrap_or_default())
-                .ok_or_else(|| format!("{context} usage `{field}` overflowed"))?;
-        }
-        Ok(())
-    }
-
-    fn as_value(&self) -> Value {
-        let mut object = Map::new();
-        for field in USAGE_FIELDS {
-            object.insert(
-                (*field).to_string(),
-                json!(self.fields.get(field).copied().unwrap_or_default()),
-            );
-        }
-        Value::Object(object)
-    }
-}
 
 /// Conservation law over the checkpoint v3 usage-write stream. Submitted
 /// contributions are folded independently by `(source, model)` and compared
@@ -71,8 +30,10 @@ pub fn checkpoint_usage_conservation(writes: &[CheckpointWriteEvent]) -> OracleV
 fn check_usage_conservation(
     writes: &[CheckpointWriteEvent],
 ) -> Result<(usize, usize, usize), String> {
-    let mut submitted_by_session = BTreeMap::<String, BTreeMap<UsageKey, UsageTotals>>::new();
-    let mut final_accepted_by_session = BTreeMap::<String, BTreeMap<UsageKey, UsageTotals>>::new();
+    let mut submitted_by_session =
+        BTreeMap::<String, BTreeMap<UsageKey, RuntimeUsageTotals>>::new();
+    let mut final_accepted_by_session =
+        BTreeMap::<String, BTreeMap<UsageKey, RuntimeUsageTotals>>::new();
     let mut checked_commits = 0usize;
     let mut checked_entries = 0usize;
 
@@ -93,7 +54,7 @@ fn check_usage_conservation(
         let submitted = fold_rows(&state.submitted_usage_rows, &context)?;
         checked_entries += state.submitted_usage_rows.as_array().map_or(0, Vec::len);
         let cumulative = submitted_by_session.entry(session_id.clone()).or_default();
-        merge_usage(cumulative, &submitted, &context)?;
+        merge_usage(cumulative, &submitted);
 
         let accepted_raw = state
             .accepted_raw_rows
@@ -109,12 +70,12 @@ fn check_usage_conservation(
             .accepted_read_model
             .as_ref()
             .ok_or_else(|| format!("{context} has no accepted read-model projection"))?;
-        let submitted_turn_total = sum_by_key(&submitted, &context)?;
+        let submitted_turn_total = sum_by_key(&submitted);
         let read_turn_usage = accepted_read.get("token_usage").unwrap_or(&Value::Null);
-        if submitted_turn_total.as_value() != *read_turn_usage {
+        if submitted_turn_total.fields_value() != *read_turn_usage {
             return Err(format!(
                 "{context} submitted usage diverged from read model: submitted={}; read={read_turn_usage}",
-                submitted_turn_total.as_value()
+                submitted_turn_total.fields_value()
             ));
         }
 
@@ -141,11 +102,14 @@ fn check_usage_conservation(
     Ok((submitted_by_session.len(), checked_commits, checked_entries))
 }
 
-fn fold_rows(rows: &Value, context: &str) -> Result<BTreeMap<UsageKey, UsageTotals>, String> {
+fn fold_rows(
+    rows: &Value,
+    context: &str,
+) -> Result<BTreeMap<UsageKey, RuntimeUsageTotals>, String> {
     let rows = rows
         .as_array()
         .ok_or_else(|| format!("{context} rows are not an array"))?;
-    let mut by_key = BTreeMap::new();
+    let mut by_key = BTreeMap::<UsageKey, RuntimeUsageTotals>::new();
     for row in rows {
         let source = row
             .get("source")
@@ -155,42 +119,40 @@ fn fold_rows(rows: &Value, context: &str) -> Result<BTreeMap<UsageKey, UsageTota
             .get("model")
             .and_then(Value::as_str)
             .ok_or_else(|| format!("{context} usage row has no model"))?;
+        let usage = row.get("usage").unwrap_or(&Value::Null);
+        let contribution = RuntimeUsageTotals::from_value(usage)
+            .map_err(|field| format!("{context} usage row has no integer `{field}`"))?;
         by_key
             .entry((source.to_string(), model.to_string()))
-            .or_insert_with(UsageTotals::default)
-            .add_row(row, context)?;
+            .or_default()
+            .saturating_add_assign(&contribution);
     }
     Ok(by_key)
 }
 
 fn merge_usage(
-    target: &mut BTreeMap<UsageKey, UsageTotals>,
-    contribution: &BTreeMap<UsageKey, UsageTotals>,
-    context: &str,
-) -> Result<(), String> {
+    target: &mut BTreeMap<UsageKey, RuntimeUsageTotals>,
+    contribution: &BTreeMap<UsageKey, RuntimeUsageTotals>,
+) {
     for (key, totals) in contribution {
         target
             .entry(key.clone())
             .or_default()
-            .add_totals(totals, context)?;
+            .saturating_add_assign(totals);
     }
-    Ok(())
 }
 
-fn sum_by_key(
-    usage: &BTreeMap<UsageKey, UsageTotals>,
-    context: &str,
-) -> Result<UsageTotals, String> {
-    let mut total = UsageTotals::default();
+fn sum_by_key(usage: &BTreeMap<UsageKey, RuntimeUsageTotals>) -> RuntimeUsageTotals {
+    let mut total = RuntimeUsageTotals::default();
     for contribution in usage.values() {
-        total.add_totals(contribution, context)?;
+        total.saturating_add_assign(contribution);
     }
-    Ok(total)
+    total
 }
 
 fn require_equal(
-    submitted: &BTreeMap<UsageKey, UsageTotals>,
-    accepted: &BTreeMap<UsageKey, UsageTotals>,
+    submitted: &BTreeMap<UsageKey, RuntimeUsageTotals>,
+    accepted: &BTreeMap<UsageKey, RuntimeUsageTotals>,
     context: &str,
     projection: &str,
 ) -> Result<(), String> {
@@ -201,14 +163,6 @@ fn require_equal(
         "usage conservation `{context}` diverged from {projection}: submitted={submitted:?}; accepted={accepted:?}"
     ))
 }
-
-const USAGE_FIELDS: &[&str] = &[
-    "input_tokens",
-    "output_tokens",
-    "cache_read_input_tokens",
-    "cache_write_input_tokens",
-    "reasoning_output_tokens",
-];
 
 #[cfg(test)]
 mod tests {

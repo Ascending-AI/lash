@@ -72,14 +72,101 @@ pub struct RuntimeUsageInvariantFacts {
     pub passed: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct RuntimeUsageTotals {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_read_input_tokens: i64,
-    pub cache_write_input_tokens: i64,
-    pub reasoning_output_tokens: i64,
-    pub total_tokens: i64,
+macro_rules! define_runtime_usage_totals {
+    ($($field:ident => $contributes_to_total:literal),+ $(,)?) => {
+        #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+        pub struct RuntimeUsageTotals {
+            $(pub $field: i64,)+
+            pub total_tokens: i64,
+        }
+
+        impl RuntimeUsageTotals {
+            pub const FIELDS: &'static [&'static str] = &[$(stringify!($field)),+];
+
+            pub fn new($($field: i64),+) -> Self {
+                let mut totals = Self {
+                    $($field,)+
+                    total_tokens: 0,
+                };
+                totals.refresh_total();
+                totals
+            }
+
+            pub fn from_field_values(
+                mut value: impl FnMut(&'static str) -> i64,
+            ) -> Self {
+                Self::new($(value(stringify!($field))),+)
+            }
+
+            pub fn from_value(value: &Value) -> Result<Self, &'static str> {
+                for &field in Self::FIELDS {
+                    if value.get(field).and_then(Value::as_i64).is_none() {
+                        return Err(field);
+                    }
+                }
+                Ok(Self::from_field_values(|field| {
+                    value
+                        .get(field)
+                        .and_then(Value::as_i64)
+                        .expect("usage field presence checked above")
+                }))
+            }
+
+            pub fn field(&self, field: &str) -> Option<i64> {
+                match field {
+                    $(stringify!($field) => Some(self.$field),)+
+                    _ => None,
+                }
+            }
+
+            pub fn set_field(&mut self, field: &str, value: i64) -> bool {
+                match field {
+                    $(stringify!($field) => self.$field = value,)+
+                    _ => return false,
+                }
+                self.refresh_total();
+                true
+            }
+
+            pub fn saturating_add_assign(&mut self, other: &Self) {
+                $(self.$field = self.$field.saturating_add(other.$field);)+
+                self.refresh_total();
+            }
+
+            pub fn saturating_add(mut self, other: &Self) -> Self {
+                self.saturating_add_assign(other);
+                self
+            }
+
+            pub fn fields_value(&self) -> Value {
+                let mut object = serde_json::Map::new();
+                for &field in Self::FIELDS {
+                    object.insert(
+                        field.to_string(),
+                        serde_json::json!(self.field(field).expect("declared usage field")),
+                    );
+                }
+                Value::Object(object)
+            }
+
+            fn refresh_total(&mut self) {
+                self.total_tokens = 0;
+                $(
+                    if $contributes_to_total {
+                        self.total_tokens = self.total_tokens.saturating_add(self.$field);
+                    }
+                )+
+            }
+        }
+    };
+}
+
+define_runtime_usage_totals! {
+    input_tokens => true,
+    output_tokens => true,
+    cache_read_input_tokens => true,
+    cache_write_input_tokens => true,
+    reasoning_output_tokens => false,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -466,40 +553,21 @@ pub fn runtime_final_value_invariant_facts(
 
 impl RuntimeUsageTotals {
     pub fn from_usage(usage: &lash_core::TokenUsage) -> Self {
-        let total_tokens = [
+        Self::new(
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_read_input_tokens,
             usage.cache_write_input_tokens,
-        ]
-        .into_iter()
-        .fold(0_i64, i64::saturating_add);
-        Self {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            cache_read_input_tokens: usage.cache_read_input_tokens,
-            cache_write_input_tokens: usage.cache_write_input_tokens,
-            reasoning_output_tokens: usage.reasoning_output_tokens,
-            total_tokens,
-        }
+            usage.reasoning_output_tokens,
+        )
     }
 
     fn sum<'a>(usages: impl IntoIterator<Item = &'a lash_core::TokenUsage>) -> Self {
-        let mut usage = lash_core::TokenUsage::default();
+        let mut total = Self::default();
         for item in usages {
-            usage.input_tokens = usage.input_tokens.saturating_add(item.input_tokens);
-            usage.output_tokens = usage.output_tokens.saturating_add(item.output_tokens);
-            usage.cache_read_input_tokens = usage
-                .cache_read_input_tokens
-                .saturating_add(item.cache_read_input_tokens);
-            usage.cache_write_input_tokens = usage
-                .cache_write_input_tokens
-                .saturating_add(item.cache_write_input_tokens);
-            usage.reasoning_output_tokens = usage
-                .reasoning_output_tokens
-                .saturating_add(item.reasoning_output_tokens);
+            total.saturating_add_assign(&Self::from_usage(item));
         }
-        Self::from_usage(&usage)
+        total
     }
 
     pub fn is_non_negative(&self) -> bool {
@@ -622,6 +690,29 @@ mod tests {
             reasoning_output_tokens: 0,
         });
         assert!(!totals.is_non_negative());
+    }
+
+    #[test]
+    fn usage_totals_own_the_field_list_and_saturating_total_rule() {
+        assert_eq!(
+            RuntimeUsageTotals::FIELDS,
+            &[
+                "input_tokens",
+                "output_tokens",
+                "cache_read_input_tokens",
+                "cache_write_input_tokens",
+                "reasoning_output_tokens",
+            ]
+        );
+
+        let mut totals = RuntimeUsageTotals::new(i64::MAX - 2, 1, 1, 1, i64::MAX);
+        assert_eq!(totals.total_tokens, i64::MAX);
+
+        totals.saturating_add_assign(&RuntimeUsageTotals::new(3, i64::MAX, 0, 0, 1));
+        assert_eq!(totals.input_tokens, i64::MAX);
+        assert_eq!(totals.output_tokens, i64::MAX);
+        assert_eq!(totals.reasoning_output_tokens, i64::MAX);
+        assert_eq!(totals.total_tokens, i64::MAX);
     }
 
     #[test]

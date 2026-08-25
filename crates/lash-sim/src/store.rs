@@ -4,7 +4,7 @@ use lash_core::StoreError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::runtime_contracts::{RuntimeTurnObservation, runtime_turn_contract};
+use crate::runtime_contracts::{RuntimeTurnObservation, RuntimeUsageTotals, runtime_turn_contract};
 use crate::scheduler::{BoundaryEvent, BoundaryKind};
 use crate::trace::{
     AbstractWorldSummary, DurableEffectAbstractSummary, ProviderTurnSummary,
@@ -218,18 +218,12 @@ impl ModelStore {
                 if let Some(usage) =
                     observed.pointer("/runtime_invariant_facts/usage/token_ledger_total")
                 {
-                    session.cumulative_input_tokens = usage
-                        .get("input_tokens")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(session.cumulative_input_tokens);
-                    session.cumulative_output_tokens = usage
-                        .get("output_tokens")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(session.cumulative_output_tokens);
-                    session.cumulative_reasoning_output_tokens = usage
-                        .get("reasoning_output_tokens")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(session.cumulative_reasoning_output_tokens);
+                    for &field in RuntimeUsageTotals::FIELDS {
+                        if let Some(value) = usage.get(field).and_then(Value::as_i64) {
+                            let known_field = session.cumulative_usage.set_field(field, value);
+                            debug_assert!(known_field);
+                        }
+                    }
                 }
                 let text = observed
                     .get("provider_output")
@@ -545,45 +539,34 @@ impl ModelStore {
                     .get("provider_kind")
                     .and_then(Value::as_str)
                     .unwrap_or("openai-compatible");
-                let (input_tokens, output_tokens, reasoning_output_tokens) = match provider_kind {
-                    "openai" => (5, 2, 0),
-                    "anthropic" => (7, 4, 0),
-                    "google_oauth" => (6, 4, 1),
-                    _ => (0, 0, 0),
-                };
+                let (input_tokens, output_tokens, reasoning_output_tokens): (i64, i64, i64) =
+                    match provider_kind {
+                        "openai" => (5, 2, 0),
+                        "anthropic" => (7, 4, 0),
+                        "google_oauth" => (6, 4, 1),
+                        _ => (0, 0, 0),
+                    };
                 let usage = |multiplier: i64| {
-                    let input_tokens = input_tokens * multiplier;
-                    let output_tokens = output_tokens * multiplier;
-                    let reasoning_output_tokens = reasoning_output_tokens * multiplier;
-                    json!({
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "cache_read_input_tokens": 0,
-                        "cache_write_input_tokens": 0,
-                        "reasoning_output_tokens": reasoning_output_tokens,
-                        "total_tokens": input_tokens + output_tokens,
-                    })
+                    RuntimeUsageTotals::new(
+                        input_tokens.saturating_mul(multiplier),
+                        output_tokens.saturating_mul(multiplier),
+                        0,
+                        0,
+                        reasoning_output_tokens.saturating_mul(multiplier),
+                    )
                 };
                 let turn_usage = usage(1);
-                let (prior_input, prior_output, prior_reasoning, prior_ledger_keys) = self
-                    .sessions
-                    .get(&event.actor_alias)
-                    .map_or((0, 0, 0, BTreeSet::new()), |session| {
-                        (
-                            session.cumulative_input_tokens,
-                            session.cumulative_output_tokens,
-                            session.cumulative_reasoning_output_tokens,
-                            session.usage_ledger_keys.clone(),
-                        )
-                    });
-                let total_usage = json!({
-                    "input_tokens": prior_input + input_tokens,
-                    "output_tokens": prior_output + output_tokens,
-                    "cache_read_input_tokens": 0,
-                    "cache_write_input_tokens": 0,
-                    "reasoning_output_tokens": prior_reasoning + reasoning_output_tokens,
-                    "total_tokens": prior_input + input_tokens + prior_output + output_tokens,
-                });
+                let (prior_usage, prior_ledger_keys) =
+                    self.sessions.get(&event.actor_alias).map_or_else(
+                        || (RuntimeUsageTotals::default(), BTreeSet::new()),
+                        |session| {
+                            (
+                                session.cumulative_usage.clone(),
+                                session.usage_ledger_keys.clone(),
+                            )
+                        },
+                    );
+                let total_usage = prior_usage.saturating_add(&turn_usage);
                 let mut ledger_keys = prior_ledger_keys;
                 if input_tokens != 0 || output_tokens != 0 || reasoning_output_tokens != 0 {
                     ledger_keys.insert(provider_kind.to_string());
@@ -1230,9 +1213,7 @@ struct ModelSession {
     ingress_count: usize,
     provider_turns: Vec<ProviderTurnSummary>,
     usage_ledger_keys: BTreeSet<String>,
-    cumulative_input_tokens: i64,
-    cumulative_output_tokens: i64,
-    cumulative_reasoning_output_tokens: i64,
+    cumulative_usage: RuntimeUsageTotals,
     tool_outputs: Vec<String>,
     exec_code_outputs: Vec<String>,
     observer_turn_indices: Vec<usize>,
@@ -1260,9 +1241,7 @@ impl ModelSession {
             ingress_count: 0,
             provider_turns: Vec::new(),
             usage_ledger_keys: BTreeSet::new(),
-            cumulative_input_tokens: 0,
-            cumulative_output_tokens: 0,
-            cumulative_reasoning_output_tokens: 0,
+            cumulative_usage: RuntimeUsageTotals::default(),
             tool_outputs: Vec::new(),
             exec_code_outputs: Vec::new(),
             observer_turn_indices: Vec::new(),
