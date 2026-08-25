@@ -181,6 +181,10 @@ impl RuntimeExecutionContext<'_> {
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
         intent_drain_slot: Option<crate::tool_dispatch::IntentDrainGuard>,
     ) -> CoordinatedToolLaunch {
+        let authorization = match child.execution_grant {
+            Some(grant) => ToolCallAuthorization::Granted(grant),
+            None => ToolCallAuthorization::Catalog(child.call.tool_id.clone()),
+        };
         let call_id = child.call.call_id.clone();
         let tool_name = child.call.tool_name.clone();
         let args = child.call.args.clone();
@@ -189,7 +193,7 @@ impl RuntimeExecutionContext<'_> {
         self.emit_tool_call_started(&call_id, &tool_name, args.clone(), activity_id.clone())
             .await;
 
-        if child.execution_grant.is_none()
+        if authorization.allows_orchestration()
             && self.dispatch.is_orchestrating_tool(&child.call.tool_id)
         {
             let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&self.dispatch))
@@ -229,17 +233,18 @@ impl RuntimeExecutionContext<'_> {
         let retry_policy = crate::tool_dispatch::resolve_retry_policy(
             self.dispatch.as_ref(),
             &child.call.tool_id,
-            child.execution_grant.as_deref(),
+            authorization.execution_grant(),
         );
         let intent_trace_hook = child_execution_trace_hook.clone();
         let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =
             child_execution_trace_hook
                 .map(|hook| std::iter::once((call_id.clone(), hook)).collect())
                 .unwrap_or_default();
+        let execution_grant = authorization.into_execution_grant();
         let coordinated = coordinate_tool_invocation(
             self.dispatch.as_ref(),
             child.call.clone(),
-            child.execution_grant,
+            execution_grant,
             retry_policy,
             ToolAttemptEffectIdentity::Batch {
                 parent: parent_invocation.clone(),
@@ -313,80 +318,56 @@ impl RuntimeExecutionContext<'_> {
         // time the concurrent batch starts, so it leads the settlement order.
         let mut settled_during_preparation = Vec::new();
 
-        for (index, call) in calls.into_iter().enumerate() {
-            let preparation = if let Some(grant) = call.execution_grant.as_deref().cloned() {
-                let pending = crate::sansio::PendingToolCall {
-                    call_id: call.id.clone(),
-                    tool_name: grant.manifest().name.clone(),
-                    args: call.args,
-                    replay: None,
+        for (index, mut call) in calls.into_iter().enumerate() {
+            let authorization = ToolCallAuthorization::from_invocation(&mut call);
+            let Some(tool_name) = authorization.tool_name(self.dispatch.as_ref()) else {
+                let outcome = ToolDispatchOutcome {
+                    record: ToolCallRecord {
+                        call_id: Some(call.id.clone()),
+                        tool: call.tool_id.to_string(),
+                        args: call.args,
+                        output: ToolCallOutput::failure(ToolFailure::runtime(
+                            ToolFailureClass::Unavailable,
+                            "tool_unavailable",
+                            format!("Tool id `{}` is unavailable in this session", call.tool_id),
+                        )),
+                        duration_ms: 0,
+                    },
+                    attempts: Vec::new(),
+                    intents: crate::ToolIntents::default(),
+                    intent_outcomes: Vec::new(),
                 };
-                (
-                    Some(grant.clone()),
-                    prepare_granted_tool_call_with_context(
-                        self.dispatch.as_ref(),
-                        &grant,
-                        pending,
-                        Some(call.id.clone()),
+                let completed = self
+                    .complete_tool_call(
+                        index,
+                        call.id,
+                        None,
+                        outcome,
+                        TurnActivityId::new(format!("tool:{}", batch_id)),
                     )
-                    .await,
-                )
-            } else {
-                let Some(manifest) = crate::tool_dispatch::resolve_callable_manifest_by_id(
-                    self.dispatch.as_ref(),
-                    &call.tool_id,
-                ) else {
-                    let outcome = ToolDispatchOutcome {
-                        record: ToolCallRecord {
-                            call_id: Some(call.id.clone()),
-                            tool: call.tool_id.to_string(),
-                            args: call.args,
-                            output: ToolCallOutput::failure(ToolFailure::runtime(
-                                ToolFailureClass::Unavailable,
-                                "tool_unavailable",
-                                format!(
-                                    "Tool id `{}` is unavailable in this session",
-                                    call.tool_id
-                                ),
-                            )),
-                            duration_ms: 0,
-                        },
-                        attempts: Vec::new(),
-                        intents: crate::ToolIntents::default(),
-                        intent_outcomes: Vec::new(),
-                    };
-                    let completed = self
-                        .complete_tool_call(
-                            index,
-                            call.id,
-                            None,
-                            outcome,
-                            TurnActivityId::new(format!("tool:{}", batch_id)),
-                        )
-                        .await;
-                    replies[index] = Some(
-                        ToolInvocationReply::from_output(completed.completed.output)
-                            .with_record(completed.record),
-                    );
-                    settled_during_preparation.push(index);
-                    continue;
-                };
-
-                let pending = crate::sansio::PendingToolCall {
-                    call_id: call.id.clone(),
-                    tool_name: manifest.name,
-                    args: call.args,
-                    replay: None,
-                };
-                (None, self.prepare_tool_call(pending).await)
+                    .await;
+                replies[index] = Some(
+                    ToolInvocationReply::from_output(completed.completed.output)
+                        .with_record(completed.record),
+                );
+                settled_during_preparation.push(index);
+                continue;
             };
-            let (execution_grant, preparation) = preparation;
+            let pending = crate::sansio::PendingToolCall {
+                call_id: call.id.clone(),
+                tool_name,
+                args: call.args,
+                replay: None,
+            };
+            let preparation = authorization
+                .prepare(self.dispatch.as_ref(), pending, call.id.clone())
+                .await;
             match preparation {
                 ToolPreparationOutcome::Prepared(prepared) => {
                     prepared_entries.push((
                         index,
                         *prepared,
-                        execution_grant,
+                        authorization,
                         call.child_execution_trace_hook,
                     ));
                 }
@@ -416,7 +397,9 @@ impl RuntimeExecutionContext<'_> {
                 batch_id.clone(),
                 prepared_entries
                     .iter()
-                    .map(|(_, prepared, grant, _)| (prepared.clone(), grant.clone()))
+                    .map(|(_, prepared, authorization, _)| {
+                        (prepared.clone(), authorization.execution_grant().cloned())
+                    })
                     .collect(),
             );
             let child_trace_hooks = prepared_entries
@@ -566,8 +549,310 @@ impl RuntimeExecutionContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_sansio::sync::MutexExt as _;
+    use std::collections::BTreeSet;
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn granted_tool_definition() -> crate::ToolDefinition {
+        crate::ToolDefinition::raw(
+            "tool:granted_orchestration_probe",
+            "granted_orchestration_probe",
+            "Proves granted calls stay in the leaf lane",
+            serde_json::json!({ "type": "object" }),
+            serde_json::json!({ "type": "string" }),
+        )
+    }
+
+    struct GrantedLeafTool;
+
+    #[async_trait::async_trait]
+    impl crate::ToolProvider for GrantedLeafTool {
+        fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+            vec![granted_tool_definition().manifest()]
+        }
+
+        fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+            (name == "granted_orchestration_probe")
+                .then(|| Arc::new(granted_tool_definition().contract()))
+        }
+
+        async fn prepare_granted_tool_call(
+            &self,
+            _grant: &crate::ToolExecutionGrant,
+            call: crate::ToolPrepareCall<'_>,
+        ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
+            Ok(crate::PreparedToolCall::identity(
+                call.tool_id,
+                call.pending,
+            ))
+        }
+
+        async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("catalog leaf"))
+        }
+
+        async fn execute_granted(
+            &self,
+            _grant: &crate::ToolExecutionGrant,
+            _args: &serde_json::Value,
+            _context: &crate::AttemptContext<'_>,
+        ) -> crate::ToolOutcome {
+            crate::ToolOutcome::ok(serde_json::json!("granted leaf"))
+        }
+    }
+
+    struct OrchestrationProbe {
+        executions: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::facade_support::OrchestratingToolImplementation for OrchestrationProbe {
+        fn manifest(&self) -> crate::ToolManifest {
+            granted_tool_definition().manifest()
+        }
+
+        fn contract(&self) -> Arc<crate::ToolContract> {
+            Arc::new(granted_tool_definition().contract())
+        }
+
+        async fn execute(
+            &self,
+            _args: &serde_json::Value,
+            _context: &crate::facade_support::OrchestrationContext<'_>,
+        ) -> crate::ToolOutcome {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            crate::ToolOutcome::ok(serde_json::json!("orchestrated"))
+        }
+    }
+
+    fn granted_call_context(
+        event_tx: tokio::sync::mpsc::Sender<crate::SessionStreamEvent>,
+    ) -> (crate::RuntimeExecutionContext<'static>, Arc<AtomicUsize>) {
+        let executions = Arc::new(AtomicUsize::default());
+        let orchestrating =
+            crate::facade_support::OrchestratingToolDef::new(Arc::new(OrchestrationProbe {
+                executions: Arc::clone(&executions),
+            }));
+        let registry = crate::ToolRegistry::from_tool_registrations_with_hidden_tools(
+            Vec::new(),
+            vec![orchestrating],
+            BTreeSet::new(),
+        )
+        .expect("orchestration probe registry");
+        let plugins = crate::plugin::PluginHost::empty()
+            .build_session("granted-call-session", None)
+            .expect("plugin session");
+        let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
+        let host = Arc::new(crate::testing::MockSessionManager::default());
+        let dispatch = crate::tool_dispatch::ToolDispatchContext {
+            plugins,
+            tools: Arc::new(GrantedLeafTool),
+            tool_registry: Some(Arc::new(registry)),
+            tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
+                granted_tool_definition(),
+            ])),
+            sessions: host.clone(),
+            session_lifecycle: host.clone(),
+            session_graph: host,
+            processes: Arc::new(crate::UnavailableProcessService),
+            trigger_router: None,
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
+                crate::InlineRuntimeEffectController::default(),
+            )),
+            direct_completions: crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+            parent_invocation: None,
+            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            ),
+            session_id: "granted-call-session".to_string(),
+            agent_frame_id: String::new(),
+            event_tx,
+            checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
+            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
+            recorded_intent_outcomes:
+                crate::tool_dispatch::RecordedToolIntentOutcomeBuffer::default(),
+            attachment_store: Arc::clone(&attachment_store),
+            attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
+            turn_context: crate::TurnContext::default(),
+            clock: Arc::new(crate::SystemClock),
+        };
+        (
+            crate::RuntimeExecutionContext::new(
+                "granted-call-session".to_string(),
+                Arc::new(dispatch),
+                Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+                attachment_store,
+                Arc::new(crate::ChronologicalProjection::default()),
+                None,
+                crate::TurnContext::default(),
+            ),
+            executions,
+        )
+    }
+
+    fn granted_call() -> crate::ToolExecutionGrant {
+        crate::ToolExecutionGrant::from_definition(granted_tool_definition())
+    }
+
+    #[tokio::test]
+    async fn scalar_granted_call_never_orchestrates() {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
+        let (context, orchestration_executions) = granted_call_context(event_tx);
+
+        let reply = context
+            .call_tool_with_execution_grant(
+                "scalar-granted".to_string(),
+                granted_call(),
+                serde_json::json!({}),
+                0,
+            )
+            .await;
+
+        assert_eq!(
+            orchestration_executions.load(Ordering::SeqCst),
+            0,
+            "grant authority cannot enter the orchestration lane"
+        );
+        assert_eq!(
+            reply.output.value_for_projection(),
+            serde_json::json!("granted leaf")
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_granted_call_never_orchestrates() {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
+        let (context, orchestration_executions) = granted_call_context(event_tx);
+
+        let replies = context
+            .call_tool_batch(vec![
+                ToolInvocation::new(
+                    "batch-granted",
+                    crate::ToolId::from("tool:granted_orchestration_probe"),
+                    serde_json::json!({}),
+                )
+                .with_execution_grant(granted_call()),
+            ])
+            .await;
+
+        assert_eq!(
+            orchestration_executions.load(Ordering::SeqCst),
+            0,
+            "grant authority cannot enter the batch child's orchestration lane"
+        );
+        assert_eq!(
+            replies.replies[0].output.value_for_projection(),
+            serde_json::json!("granted leaf")
+        );
+    }
+
+    struct StartEventTranscriptSink {
+        stream_rx: Mutex<tokio::sync::mpsc::Receiver<crate::SessionStreamEvent>>,
+        turn_rx: Mutex<tokio::sync::mpsc::Receiver<crate::TurnActivity>>,
+        lines: Mutex<Vec<&'static str>>,
+    }
+
+    impl lash_trace::TraceSink for StartEventTranscriptSink {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            let stream_event = self
+                .stream_rx
+                .lock_recover()
+                .try_recv()
+                .expect("stream start must be queued before the trace start");
+            assert!(matches!(
+                stream_event,
+                crate::SessionStreamEvent::ToolCallStart {
+                    call_id: Some(ref call_id),
+                    ref name,
+                    ref args,
+                } if call_id == "start-order"
+                    && name == "granted_orchestration_probe"
+                    && args == &serde_json::json!({ "probe": true })
+            ));
+            assert!(matches!(
+                self.turn_rx.lock_recover().try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ));
+            assert!(matches!(
+                record.event,
+                lash_trace::TraceEvent::ToolCallStarted {
+                    call_id: Some(ref call_id),
+                    ref name,
+                    ref args,
+                } if call_id == "start-order"
+                    && name == "granted_orchestration_probe"
+                    && args == &serde_json::json!({ "probe": true })
+            ));
+            self.lines
+                .lock_recover()
+                .extend(["stream ToolCallStart", "trace ToolCallStarted"]);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn start_event_transcript_preserves_stream_trace_activity_order() {
+        let (event_tx, event_rx) = tokio::sync::mpsc::channel(1);
+        let (turn_tx, turn_rx) = tokio::sync::mpsc::channel(1);
+        let (context, _) = granted_call_context(event_tx);
+        let sink = Arc::new(StartEventTranscriptSink {
+            stream_rx: Mutex::new(event_rx),
+            turn_rx: Mutex::new(turn_rx),
+            lines: Mutex::new(Vec::new()),
+        });
+        let trace_sink: Arc<dyn lash_trace::TraceSink> = sink.clone();
+        let tracing = crate::session::execution_context::RuntimeExecutionTracing::new(
+            trace_sink,
+            lash_trace::TraceContext::default(),
+            lash_trace::TraceContext::default(),
+        );
+        let context = context
+            .with_tracing(Some(tracing))
+            .with_turn_event_sender(turn_tx);
+
+        context
+            .emit_tool_call_started(
+                "start-order",
+                "granted_orchestration_probe",
+                serde_json::json!({ "probe": true }),
+                crate::TurnActivityId::new("tool:start-order"),
+            )
+            .await;
+
+        let activity = sink
+            .turn_rx
+            .lock_recover()
+            .try_recv()
+            .expect("turn activity follows the trace start");
+        assert!(matches!(
+            activity.event,
+            crate::TurnEvent::ToolCallStarted {
+                call_id: Some(ref call_id),
+                ref name,
+                ref args,
+                graph_key: None,
+                parent_call_id: None,
+            } if call_id == "start-order"
+                && name == "granted_orchestration_probe"
+                && args == &serde_json::json!({ "probe": true })
+        ));
+        sink.lines.lock_recover().push("activity ToolCallStarted");
+        let transcript = sink.lines.lock_recover().join("\n");
+
+        insta::assert_snapshot!(transcript, @r#"
+        stream ToolCallStart
+        trace ToolCallStarted
+        activity ToolCallStarted
+        "#);
+    }
 
     #[derive(Clone, Copy)]
     enum BatchFailureResponse {
