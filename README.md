@@ -126,8 +126,6 @@ way a web service does.
 
 Feature requests and bug reports welcome — open an [issue](https://github.com/Ascending-AI/lash/issues). At this alpha stage detailed write-ups (what you tried, expected, and saw) help more than drive-by PRs — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Exact documentation-only CI classification probe for FIG-2055.
-
 ## License
 
 MIT
