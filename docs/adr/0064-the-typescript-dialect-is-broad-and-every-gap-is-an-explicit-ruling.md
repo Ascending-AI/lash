@@ -52,6 +52,10 @@ than by construct list:
   Restricted `globalThis` member paths work the same way: any depth rooted at
   an identifier member, with reserved value identifiers (`undefined`, `NaN`,
   `Infinity`) that can never name a session global.
+- **For-of snapshot safety** refuses a loop body that may mutate the iterable,
+  including calls carried by destructuring defaults, parameter defaults, and
+  computed pattern keys; the v1 iterator snapshots rather than observes live
+  mutation.
 - **Async helpers** are accepted by moving the restriction from where `await`
   may appear to what it may await: operands must ground transitively in the
   durable agent surface. The async array driver executes callbacks

@@ -750,6 +750,8 @@ mod tests {
                 "adapter/prototype_chain.rs",
                 include_str!("adapter/prototype_chain.rs"),
             ),
+            ("adapter/tests.rs", include_str!("adapter/tests.rs")),
+            ("adapter/traversal.rs", include_str!("adapter/traversal.rs")),
             ("lower/mod.rs", include_str!("lower/mod.rs")),
             ("lower/binding.rs", include_str!("lower/binding.rs")),
             ("lower/calls.rs", include_str!("lower/calls.rs")),

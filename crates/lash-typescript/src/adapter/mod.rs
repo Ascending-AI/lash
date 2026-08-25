@@ -11,6 +11,9 @@ mod enums;
 mod nesting;
 mod prototype_chain;
 mod rejections;
+#[cfg(test)]
+mod tests;
+mod traversal;
 
 use enums::{ConstEnumValue, enum_member_property_name};
 use nesting::{guard_source_nesting, source_nesting_diagnostic};

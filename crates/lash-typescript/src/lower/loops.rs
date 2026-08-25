@@ -209,146 +209,47 @@ fn expression_root_binding(expr: &Expr) -> Option<&str> {
 
 /// Whether an expression mentions `binding` anywhere.
 fn mentions_binding(expr: &Expr, binding: &str) -> bool {
-    fn any(exprs: &[Expr], binding: &str) -> bool {
-        exprs.iter().any(|expr| mentions_binding(expr, binding))
-    }
-    match expr {
-        Expr::Ident(name) => name.as_str() == binding,
-        Expr::Array(items) => items.iter().any(|item| match item {
-            ArrayElement::Value(value) | ArrayElement::Spread(value) => {
-                mentions_binding(value, binding)
-            }
-        }),
-        Expr::Object(entries) => entries.iter().any(|property| match property {
-            ObjectProperty::KeyValue(key, value) => {
-                matches!(key, PropertyKey::Computed(key) if mentions_binding(key, binding))
-                    || mentions_binding(value, binding)
-            }
-            ObjectProperty::Spread(value) => mentions_binding(value, binding),
-        }),
-        Expr::Assign { value, target, .. } => {
-            mentions_binding(value, binding)
-                || match target {
-                    TsAssignTarget::Member { object, property } => {
-                        mentions_binding(object, binding)
-                            || match property {
-                                MemberProperty::Index(index) => mentions_binding(index, binding),
-                                MemberProperty::Field(_) => false,
-                            }
-                    }
-                    TsAssignTarget::Ident(name) => name.as_str() == binding,
-                    TsAssignTarget::Pattern(pattern) => pattern_mentions_binding(pattern, binding),
-                }
-        }
-        Expr::Unary { value, .. } | Expr::Await(value) => mentions_binding(value, binding),
-        Expr::Member { object, property } => {
-            mentions_binding(object, binding)
-                || match property {
-                    MemberProperty::Index(index) => mentions_binding(index, binding),
-                    MemberProperty::Field(_) => false,
-                }
-        }
-        Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
-            mentions_binding(left, binding) || mentions_binding(right, binding)
-        }
-        Expr::Conditional {
-            test,
-            consequent,
-            alternate,
-        } => {
-            mentions_binding(test, binding)
-                || mentions_binding(consequent, binding)
-                || mentions_binding(alternate, binding)
-        }
-        Expr::Template { expressions, .. } => any(expressions, binding),
-        Expr::Call { callee, args } => {
-            mentions_binding(callee, binding)
-                || args.iter().any(|arg| match arg {
-                    CallArg::Value(value) | CallArg::Spread(value) => {
-                        mentions_binding(value, binding)
-                    }
-                })
-        }
-        Expr::New { args, .. } => args.iter().any(|arg| match arg {
-            CallArg::Value(value) | CallArg::Spread(value) => mentions_binding(value, binding),
-        }),
-        Expr::OptionalChain { base, operations } => {
-            mentions_binding(base, binding)
-                || operations.iter().any(|operation| match operation {
-                    OptionalOperation::Member { property, .. } => {
-                        matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
-                    }
-                    OptionalOperation::Call { args, .. } => args.iter().any(|arg| match arg {
-                        CallArg::Value(value) | CallArg::Spread(value) => {
-                            mentions_binding(value, binding)
-                        }
-                    }),
-                })
-        }
-        Expr::Function(function) => match &function.body {
-            FunctionBody::Block(statements) => statements
-                .iter()
-                .any(|stmt| statement_mentions_binding(stmt, binding)),
-            FunctionBody::Expression(expr) => mentions_binding(expr, binding),
-        },
-        Expr::Undefined
-        | Expr::Null
-        | Expr::Bool(_)
-        | Expr::Number(_)
-        | Expr::String(_)
-        | Expr::RegExp { .. } => false,
-        Expr::This => false,
-        Expr::LoneSurrogateString => false,
-        Expr::Update { target, .. } => assign_target_mentions_binding(target, binding),
-        Expr::Delete { object, property } => {
-            mentions_binding(object, binding)
-                || matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
-        }
-    }
+    matches!(expr, Expr::Ident(name) if name == binding)
+        || matches!(expr, Expr::Assign { target, .. } | Expr::Update { target, .. }
+            if assign_target_names_binding(target, binding))
+        || expr
+            .children()
+            .any(|child| mentions_binding(child, binding))
 }
 
-fn assign_target_mentions_binding(target: &TsAssignTarget, binding: &str) -> bool {
+fn assign_target_names_binding(target: &TsAssignTarget, binding: &str) -> bool {
     match target {
         TsAssignTarget::Ident(name) => name == binding,
-        TsAssignTarget::Member { object, property } => {
-            mentions_binding(object, binding)
-                || matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
-        }
-        TsAssignTarget::Pattern(pattern) => pattern_mentions_binding(pattern, binding),
+        TsAssignTarget::Pattern(pattern) => pattern_names_binding(pattern, binding),
+        TsAssignTarget::Member { .. } => false,
     }
 }
 
-fn pattern_mentions_binding(pattern: &Pattern, binding: &str) -> bool {
+fn pattern_names_binding(pattern: &Pattern, binding: &str) -> bool {
     match pattern {
         Pattern::Ident(name) => name == binding,
-        Pattern::Rest(target) => pattern_mentions_binding(target, binding),
-        Pattern::Member { object, property } => {
-            mentions_binding(object, binding)
-                || matches!(property, MemberProperty::Index(index) if mentions_binding(index, binding))
+        Pattern::Rest(target) | Pattern::Assign { target, .. } => {
+            pattern_names_binding(target, binding)
         }
-        Pattern::Assign { target, default } => {
-            pattern_mentions_binding(target, binding) || mentions_binding(default, binding)
-        }
+        Pattern::Member { .. } => false,
         Pattern::Array { elements, rest } => {
             elements
                 .iter()
                 .flatten()
-                .any(|pattern| pattern_mentions_binding(pattern, binding))
+                .any(|pattern| pattern_names_binding(pattern, binding))
                 || rest
                     .as_deref()
-                    .is_some_and(|pattern| pattern_mentions_binding(pattern, binding))
+                    .is_some_and(|pattern| pattern_names_binding(pattern, binding))
         }
-        Pattern::Object { properties, rest } => properties.iter().any(|property| {
-            matches!(&property.key, PropertyKey::Computed(key) if mentions_binding(key, binding))
-                || pattern_mentions_binding(&property.value, binding)
-        }) || rest
-            .as_deref()
-            .is_some_and(|pattern| pattern_mentions_binding(pattern, binding)),
+        Pattern::Object { properties, rest } => {
+            properties
+                .iter()
+                .any(|property| pattern_names_binding(&property.value, binding))
+                || rest
+                    .as_deref()
+                    .is_some_and(|pattern| pattern_names_binding(pattern, binding))
+        }
     }
-}
-
-fn statement_mentions_binding(stmt: &Stmt, binding: &str) -> bool {
-    statement_expressions(stmt).any(|expr| mentions_binding(expr, binding))
 }
 
 /// Whether a `for…of` body can reach the iterable it is walking.
@@ -373,7 +274,7 @@ pub(super) fn body_may_mutate_iterable(iterable: &Expr, body: &Stmt) -> Option<S
     if let Some(reason) = body_binds_iterable_elsewhere(body, binding) {
         return Some(reason);
     }
-    for expr in statement_expressions(body) {
+    for expr in body.child_expressions() {
         if let Some(reason) = expression_may_mutate(expr, binding) {
             return Some(reason);
         }
@@ -395,75 +296,31 @@ fn body_binds_iterable_elsewhere(stmt: &Stmt, binding: &str) -> Option<String> {
         }
         match expr {
             // Boxing it in a literal keeps a live reference to it.
-            Expr::Array(items) => items.iter().any(|item| match item {
-                ArrayElement::Value(value) | ArrayElement::Spread(value) => {
-                    names_iterable_directly(value, binding)
-                }
-            }),
-            Expr::Object(entries) => entries.iter().any(|property| match property {
-                ObjectProperty::KeyValue(_, value) | ObjectProperty::Spread(value) => {
-                    names_iterable_directly(value, binding)
-                }
-            }),
+            Expr::Array(_) | Expr::Object(_) => expr
+                .children()
+                .any(|child| names_iterable_directly(child, binding)),
             _ => false,
         }
     }
-    fn walk(stmt: &Stmt, binding: &str) -> Option<String> {
-        match stmt {
-            Stmt::Var { declarations, .. } => declarations.iter().find_map(|declaration| {
-                declaration
-                    .init
-                    .as_ref()
-                    .filter(|init| names_iterable_directly(init, binding))
-                    .map(|_| {
-                        format!(
-                            "binds `{binding}`, the iterable this loop is walking, to `{}`",
-                            single_pattern_name(&declaration.pattern).unwrap_or("a pattern")
-                        )
-                    })
-            }),
-            Stmt::Expr(Expr::Assign { value, .. }) if names_iterable_directly(value, binding) => {
-                Some(format!(
-                    "assigns `{binding}`, the iterable this loop is walking, to another binding"
-                ))
-            }
-            Stmt::Block(statements) => statements.iter().find_map(|stmt| walk(stmt, binding)),
-            Stmt::If {
-                consequent,
-                alternate,
-                ..
-            } => walk(consequent, binding)
-                .or_else(|| alternate.as_deref().and_then(|stmt| walk(stmt, binding))),
-            Stmt::While { body, .. }
-            | Stmt::DoWhile { body, .. }
-            | Stmt::For { body, .. }
-            | Stmt::ForOf { body, .. }
-            | Stmt::ForIn { body, .. } => walk(body, binding),
-            Stmt::Switch { cases, .. } => cases
-                .iter()
-                .flat_map(|case| &case.consequent)
-                .find_map(|stmt| walk(stmt, binding)),
-            Stmt::Try {
-                body,
-                catch,
-                finally,
-            } => body
-                .iter()
-                .find_map(|stmt| walk(stmt, binding))
-                .or_else(|| {
-                    catch
-                        .iter()
-                        .find_map(|catch| catch.body.iter().find_map(|stmt| walk(stmt, binding)))
+
+    stmt.descendants().find_map(|stmt| match stmt {
+        Stmt::Var { declarations, .. } => declarations.iter().find_map(|declaration| {
+            declaration
+                .init
+                .as_ref()
+                .filter(|init| names_iterable_directly(init, binding))
+                .map(|_| {
+                    format!(
+                        "binds `{binding}`, the iterable this loop is walking, to `{}`",
+                        single_pattern_name(&declaration.pattern).unwrap_or("a pattern")
+                    )
                 })
-                .or_else(|| {
-                    finally
-                        .iter()
-                        .find_map(|stmts| stmts.iter().find_map(|stmt| walk(stmt, binding)))
-                }),
-            _ => None,
-        }
-    }
-    walk(stmt, binding)
+        }),
+        Stmt::Expr(Expr::Assign { value, .. }) if names_iterable_directly(value, binding) => Some(
+            format!("assigns `{binding}`, the iterable this loop is walking, to another binding"),
+        ),
+        _ => None,
+    })
 }
 
 fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
@@ -507,197 +364,10 @@ fn expression_may_mutate(expr: &Expr, binding: &str) -> Option<String> {
     found
 }
 
-/// Every expression a statement contains, including nested bodies.
-fn statement_expressions(stmt: &Stmt) -> Box<dyn Iterator<Item = &Expr> + '_> {
-    match stmt {
-        Stmt::Expr(expr) | Stmt::Throw(expr) => Box::new(std::iter::once(expr)),
-        Stmt::Return(value) => Box::new(value.iter()),
-        Stmt::Block(statements) => Box::new(statements.iter().flat_map(statement_expressions)),
-        Stmt::Var { declarations, .. } => {
-            Box::new(declarations.iter().filter_map(|d| d.init.as_ref()))
-        }
-        Stmt::Enum { members, .. } => Box::new(members.iter().map(|member| &member.value)),
-        Stmt::If {
-            test,
-            consequent,
-            alternate,
-        } => Box::new(
-            std::iter::once(test)
-                .chain(statement_expressions(consequent))
-                .chain(
-                    alternate
-                        .iter()
-                        .flat_map(|stmt| statement_expressions(stmt)),
-                ),
-        ),
-        Stmt::While { test, body } => {
-            Box::new(std::iter::once(test).chain(statement_expressions(body)))
-        }
-        Stmt::DoWhile { body, test } => {
-            Box::new(statement_expressions(body).chain(std::iter::once(test)))
-        }
-        Stmt::For {
-            init,
-            test,
-            update,
-            body,
-        } => Box::new(
-            init.iter()
-                .flat_map(|stmt| statement_expressions(stmt))
-                .chain(test.iter())
-                .chain(update.iter())
-                .chain(statement_expressions(body)),
-        ),
-        Stmt::ForOf { iterable, body, .. } => {
-            Box::new(std::iter::once(iterable).chain(statement_expressions(body)))
-        }
-        Stmt::ForIn { object, body, .. } => {
-            Box::new(std::iter::once(object).chain(statement_expressions(body)))
-        }
-        Stmt::Switch {
-            discriminant,
-            cases,
-        } => Box::new(
-            std::iter::once(discriminant)
-                .chain(cases.iter().filter_map(|case| case.test.as_ref()))
-                .chain(
-                    cases
-                        .iter()
-                        .flat_map(|case| case.consequent.iter().flat_map(statement_expressions)),
-                ),
-        ),
-        Stmt::Try {
-            body,
-            catch,
-            finally,
-        } => Box::new(
-            body.iter()
-                .flat_map(statement_expressions)
-                .chain(
-                    catch
-                        .iter()
-                        .flat_map(|catch| catch.body.iter().flat_map(statement_expressions)),
-                )
-                .chain(
-                    finally
-                        .iter()
-                        .flat_map(|stmts| stmts.iter().flat_map(statement_expressions)),
-                ),
-        ),
-        Stmt::Function { function, .. } => match &function.body {
-            FunctionBody::Block(statements) => {
-                Box::new(statements.iter().flat_map(statement_expressions))
-            }
-            FunctionBody::Expression(expr) => Box::new(std::iter::once(expr.as_ref())),
-        },
-        Stmt::Empty | Stmt::Break | Stmt::Continue => Box::new(std::iter::empty()),
-    }
-}
-
 /// Walk every sub-expression, outermost first.
 fn visit_expressions<'a>(expr: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
     visit(expr);
-    let mut walk = |expr: &'a Expr| visit_expressions(expr, visit);
-    match expr {
-        Expr::Array(items) => items.iter().for_each(|item| match item {
-            ArrayElement::Value(value) | ArrayElement::Spread(value) => walk(value),
-        }),
-        Expr::Object(entries) => entries.iter().for_each(|property| match property {
-            ObjectProperty::KeyValue(key, value) => {
-                if let PropertyKey::Computed(key) = key {
-                    walk(key);
-                }
-                walk(value);
-            }
-            ObjectProperty::Spread(value) => walk(value),
-        }),
-        Expr::Assign { value, target, .. } => {
-            walk(value);
-            if let TsAssignTarget::Member { object, property } = target {
-                walk(object);
-                if let MemberProperty::Index(index) = property {
-                    walk(index);
-                }
-            }
-        }
-        Expr::Unary { value, .. } | Expr::Await(value) => walk(value),
-        Expr::Member { object, property } => {
-            walk(object);
-            if let MemberProperty::Index(index) = property {
-                walk(index);
-            }
-        }
-        Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
-            walk(left);
-            walk(right);
-        }
-        Expr::Conditional {
-            test,
-            consequent,
-            alternate,
-        } => {
-            walk(test);
-            walk(consequent);
-            walk(alternate);
-        }
-        Expr::Template { expressions, .. } => expressions.iter().for_each(walk),
-        Expr::Call { callee, args } => {
-            walk(callee);
-            args.iter().for_each(|arg| match arg {
-                CallArg::Value(value) | CallArg::Spread(value) => walk(value),
-            });
-        }
-        Expr::New { args, .. } => args.iter().for_each(|arg| match arg {
-            CallArg::Value(value) | CallArg::Spread(value) => walk(value),
-        }),
-        Expr::OptionalChain { base, operations } => {
-            walk(base);
-            for operation in operations {
-                match operation {
-                    OptionalOperation::Member {
-                        property: MemberProperty::Index(index),
-                        ..
-                    } => walk(index),
-                    OptionalOperation::Member { .. } => {}
-                    OptionalOperation::Call { args, .. } => {
-                        for arg in args {
-                            match arg {
-                                CallArg::Value(value) | CallArg::Spread(value) => walk(value),
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Expr::Function(function) => match &function.body {
-            FunctionBody::Block(statements) => statements
-                .iter()
-                .flat_map(statement_expressions)
-                .for_each(walk),
-            FunctionBody::Expression(expr) => walk(expr),
-        },
-        Expr::Undefined
-        | Expr::Null
-        | Expr::Bool(_)
-        | Expr::Number(_)
-        | Expr::String(_)
-        | Expr::Ident(_)
-        | Expr::RegExp { .. }
-        | Expr::This
-        | Expr::LoneSurrogateString => {}
-        Expr::Update { target, .. } => {
-            if let TsAssignTarget::Member { object, property } = target {
-                walk(object);
-                if let MemberProperty::Index(index) = property {
-                    walk(index);
-                }
-            }
-        }
-        Expr::Delete { object, property } => {
-            walk(object);
-            if let MemberProperty::Index(index) = property {
-                walk(index);
-            }
-        }
+    for child in expr.children() {
+        visit_expressions(child, visit);
     }
 }

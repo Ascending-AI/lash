@@ -1717,6 +1717,39 @@ fn for_of_bodies_still_reject_reaching_the_iterable() {
     }
 }
 
+#[test]
+fn for_of_bodies_reject_mutation_in_patterns_without_rejecting_legal_patterns() {
+    let environment = two_leaf_web_environment();
+    for (shape, rejected, accepted) in [
+        (
+            "destructuring default",
+            "const urls = ['a', 'b']; const xs = []; for (const u of urls) { const [a = urls.pop()] = xs; } finish('done');",
+            "const urls = ['a', 'b']; const xs = []; for (const u of urls) { const [a = u] = xs; } finish('done');",
+        ),
+        (
+            "parameter default",
+            "const urls = ['a', 'b']; for (const u of urls) { function choose(a = urls.pop()) { return a; } } finish('done');",
+            "const urls = ['a', 'b']; for (const u of urls) { function choose(a = u) { return a; } } finish('done');",
+        ),
+        (
+            "computed pattern key",
+            "const urls = ['a', 'b']; for (const u of urls) { const { [urls.pop()]: value } = {}; } finish('done');",
+            "const urls = ['a', 'b']; for (const u of urls) { const { [u]: value } = {}; } finish('done');",
+        ),
+    ] {
+        let error = lash_typescript::link(rejected, &environment)
+            .expect_err("pattern-carried iterable mutation must reject");
+        assert_eq!(error.code.as_str(), "TS_FOR_OF_UNSUPPORTED", "{shape}");
+        assert!(
+            error.to_string().contains("calls `urls.pop()`"),
+            "{shape} names the newly reached mutating call: {error}"
+        );
+
+        lash_typescript::link(accepted, &environment)
+            .unwrap_or_else(|error| panic!("legal {shape} must link: {error}"));
+    }
+}
+
 /// A leaf that fails before the batch runs settles first.
 ///
 /// This is the only reachable "leading" case in the host translation from
