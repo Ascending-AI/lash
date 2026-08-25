@@ -377,17 +377,22 @@ pub struct ToolContext<'run> {
 }
 
 #[derive(Clone)]
+/// Notification emitted when an orchestrating tool starts a child process.
 pub struct ToolChildProcessStarted {
+    /// Stable identity of the child process that started.
     pub process_id: String,
+    /// Optional tool-defined name for the child entry point.
     pub child_entry_name: Option<String>,
 }
 
 #[derive(Clone)]
+/// Callback installed by a host to observe child processes started by tools.
 pub struct ToolChildExecutionTraceHook {
     on_child_process_started: Arc<dyn Fn(ToolChildProcessStarted) + Send + Sync>,
 }
 
 impl ToolChildExecutionTraceHook {
+    /// Construct a hook from the callback invoked for each started child process.
     pub fn new(
         on_child_process_started: impl Fn(ToolChildProcessStarted) + Send + Sync + 'static,
     ) -> Self {
@@ -396,6 +401,7 @@ impl ToolChildExecutionTraceHook {
         }
     }
 
+    /// Notify the host that a tool started the supplied child process.
     pub fn child_process_started(&self, event: ToolChildProcessStarted) {
         (self.on_child_process_started)(event);
     }

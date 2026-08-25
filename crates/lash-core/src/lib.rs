@@ -1123,11 +1123,13 @@ pub use tool_intent::{
     ToolIntent, ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents,
     ToolOutcomeDone, derive_tool_intent_identity,
 };
+/// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,
     InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, PreparedToolBatch,
-    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolContext, ToolExecutionGrant,
-    ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
+    ToolChildProcessStarted, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext,
+    ToolProvider,
 };
 
 #[cfg(test)]

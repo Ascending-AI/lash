@@ -73,14 +73,14 @@ pub struct RuntimeControlConfig {
     /// Per-runtime registry cap on concurrently running managed child turns.
     /// Runtime-internal rolling-history compaction bypasses the cap while still
     /// being registered for observability and collision checks.
-    /// Defaults to [`DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT`].
+    /// Defaults to the runtime's managed-turn concurrency limit of 100.
     pub managed_turn_concurrency_limit: std::num::NonZeroUsize,
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases, process leases,
     /// and durable effect-replay leases. Queued-work and turn-input claims are
     /// not leases and carry no TTL; they pin a session execution lease generation
     /// for claimability and handoff (ADR 0029). Defaults to
-    /// [`LeaseTimings::default`] (30s TTL / 10s renew).
+    /// [`crate::LeaseTimings::default`] (30s TTL / 10s renew).
     pub lease_timings: crate::LeaseTimings,
 }
 

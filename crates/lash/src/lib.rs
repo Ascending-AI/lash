@@ -142,6 +142,8 @@ pub mod observe {
 /// keeps (`lash_*` in the first-party SQL backends) are private to lash; raw SQL
 /// against them is unsupported for reads and writes alike.
 pub mod triggers {
+    /// Trigger catalog state exposed to protocol and engine integrators.
+    pub use lash_core::TriggerEventCatalog;
     /// Process-free [`TriggerStore`] for tests and single-process hosts, matching
     /// the in-memory backends [`persistence`](crate::persistence) and
     /// [`observe`](crate::observe) offer for their own store contracts.
@@ -179,6 +181,10 @@ pub mod tools {
     pub use lash_core::ToolControl;
     /// Per-tool retry policy carried by [`ToolDefinition::with_retry_policy`].
     pub use lash_core::ToolRetryPolicy;
+    /// Collected replies returned by a runtime tool batch.
+    pub use lash_core::session::ToolBatchReplies;
+    /// Trigger-effect outcome returned through the tool dispatch context.
+    pub use lash_core::tool_dispatch::ToolTriggerEffectOutcome;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
         EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement, PendingCompletion,
@@ -192,10 +198,18 @@ pub mod tools {
         facade_support::ToolSourceHandle, facade_support::ToolTriggerClient,
     };
     pub use lash_core::{InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall};
+    /// Tool-execution request batches, replies, and child-process observation hooks.
+    pub use lash_core::{
+        PreparedToolBatch, PreparedToolBatchCall, ToolChildExecutionTraceHook,
+        ToolChildProcessStarted, facade_support::OrchestratingToolDef,
+        facade_support::ToolInvocation, facade_support::ToolInvocationReply,
+    };
     pub use lash_core::{
         ToolId, ToolState, facade_support::PLUGIN_TOOL_SOURCE_ID,
         facade_support::ToolRestoreReport, facade_support::ToolStateEntry,
     };
+    /// Runtime-owned tool-intent admission records used by process-registry integrators.
+    pub use lash_core::{ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord};
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
@@ -248,24 +262,33 @@ pub mod persistence {
     };
     pub use lash_core::CheckpointKind;
     pub use lash_core::facade_support::FileAttachmentStore;
+    /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
         DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest, InMemorySessionStore,
-        InMemorySessionStoreFactory, PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics,
-        PendingTurnInputDraft, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-        QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy,
-        QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-        QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
+        InMemorySessionStoreFactory, LiveReplayOutcome, LiveReplaySubscription,
+        PROCESS_WAKE_MERGE_KEY, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
+        ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedTurnWork,
+        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+        QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion,
+        QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
+        QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState, SessionCursorError,
         SessionStoreCreateRequest, SessionStoreFactory, TurnInputCheckpointBoundary,
-        TurnInputClaim, TurnInputClaimData, TurnInputCompletion, TurnInputCompletionData,
-        TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs,
+        TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
+        TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
+        UnclaimedTurnInputs,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
+    /// Store-integrator attachment-manifest contracts and their persisted vocabulary.
+    pub use lash_core::{
+        AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
+    };
     pub use lash_core::{QueuedWorkClaimOutcome, SelectedQueuedWorkClaimOutcome};
     /// Queued-work state, leases, and execution types.
     pub mod queued_work {
+        /// Stable queued-work ordering values and selection helpers for store implementations.
         pub use lash_core::store::queued_work::{
-            QueuedWorkClass, claim_scan_limit, derive_batch_id,
-            select_exact_turn_work_claim_prefix, select_leading_session_command,
+            PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass, claim_scan_limit,
+            derive_batch_id, select_exact_turn_work_claim_prefix, select_leading_session_command,
             select_turn_work_claim_prefix,
         };
     }
@@ -315,6 +338,8 @@ pub mod persistence {
 /// Plugin contracts, manifests, and operation types.
 pub mod plugins {
     pub use lash_core::PluginOptions;
+    /// Host-specialized driver configuration required by every [`TurnDriverPreamble`].
+    pub use lash_core::TurnDriverConfig;
     /// Durable session-lifecycle operations a hook context carries, alongside
     /// [`SessionStateService`] and [`SessionGraphService`]. Named by
     /// [`TurnTransformContext`] and [`CompactionContext`]; runtime-implemented.
@@ -324,6 +349,7 @@ pub mod plugins {
         BeforeToolCallPluginDirective, EnqueueMessagesDirective, PluginDirective,
         ReplaceToolArgsDirective, ShortCircuitToolDirective, TurnPluginDirective,
     };
+    /// Hook contracts and reports used by plugin authors.
     pub use lash_core::plugin::{
         AfterToolCallHook, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
         AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
@@ -331,7 +357,16 @@ pub mod plugins {
         BeforeToolCallHook, BeforeTurnHook, CheckpointHook, CheckpointHookContext,
         CompactionContext, ContextCompaction, ContextCompactor, ContextError,
         PluginExtensionContribution, PluginSpecBuilder, StaticPluginFactory, ToolCallHookContext,
-        ToolCatalogContext, ToolResultHookContext, ToolResultProjectionContext,
+        ToolCatalogContext, ToolResultHookContext, ToolResultProjectionContext, TurnHookReport,
+    };
+    /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
+    pub use lash_core::plugin::{
+        CheckpointApplication, CodeExecutorPlugin, ExecutionStateComponentSnapshot,
+        ExecutionStateSnapshot, HydratedExecutionState, PluginAbort, PluginSessionSnapshot,
+        PluginSnapshotArtifact, PluginSnapshotEntry, PrepareTurnRequest,
+        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
+        ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
+        ProtocolSessionPlugin, SessionAuthorityContext, TurnFinalization, TurnPreparation,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus
@@ -364,6 +399,19 @@ pub mod plugins {
     pub use lash_core::plugin::{
         PluginSnapshotMeta, SessionReadyContext, SnapshotReader, SnapshotWriter,
     };
+    /// Engine registry and narrowed execution contexts used to host custom process engines.
+    pub use lash_core::runtime::{
+        ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunGuard,
+        ProcessEngineRuntimeContext,
+    };
+    /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
+    pub use lash_core::{
+        AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, HostTurnProtocol,
+        PersistedSegmentHandover, ProcessEngine, ProcessEngineRunContext,
+        ProcessEngineValidationContext, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
+        ProtocolTurnOptionsError, SegmentHandover, SessionContextOverlay, SessionPluginSource,
+        TurnDriverPreamble,
+    };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
     /// ([`SessionGraphService`]), plus the append request/result vocabulary.
@@ -372,6 +420,8 @@ pub mod plugins {
         AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
         SessionGraphService, SessionStateService, SessionToolAccess, SubagentSessionContext,
     };
+    /// Code-executor request, response, and runtime capability context.
+    pub use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
     pub use lash_core::{
         PluginError, PluginMessage, PluginRuntimeEvent, ToolCatalog, facade_support::PluginFactory,
         facade_support::PluginHost, facade_support::PluginRegistrar, facade_support::PluginSession,
@@ -400,10 +450,26 @@ pub mod plugins {
         ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
     };
+    /// Default chat projector installed by [`TurnDriverConfig::chat`].
+    pub use lash_sansio::ChatContextProjector;
+    /// Projection contract stored by [`TurnDriverConfig`] when a protocol supplies a custom
+    /// context projector.
+    pub use lash_sansio::ContextProjector;
+    /// In-process prompt identity carried by [`TurnDriverPreamble::tool_names_fingerprint`].
+    pub use lash_sansio::PromptFingerprint;
+    /// Sans-I/O protocol handle accepted by [`TurnDriverConfig::chat`]; custom host drivers use
+    /// [`HostTurnProtocol`] as its protocol parameter.
+    pub use lash_sansio::ProtocolDriverHandle;
+    /// Callback used by [`TurnDriverConfig`] to materialize the terminal turn-limit message.
+    pub use lash_sansio::TurnLimitFinalMessage;
+    /// Model-facing tool declaration carried by [`TurnDriverPreamble::tool_specs`].
+    pub use lash_sansio::llm::types::LlmToolSpec;
 }
 
 /// Protocol message and content types.
 pub mod messages {
+    /// Read-side session-tree values exposed through integrator session views.
+    pub use lash_core::session_graph::{SessionMessageTreeNode, SharedJsonValue};
     pub use lash_core::{
         Message, MessageOrigin, MessageRole, Part, PartKind, facade_support::MessageSequence,
     };
@@ -569,6 +635,17 @@ pub mod remote {
 pub mod process {
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::process_admin::Processes;
+    /// Materialized event semantics returned to custom process registries.
+    pub use lash_core::runtime::ProcessEventSemantics;
+    /// Process-registry and event types that complete the store and engine signature closure.
+    pub use lash_core::runtime::{
+        ObserverInheritance, ProcessChange, ProcessCompletionOutcome,
+        ProcessExecutionConcurrencyError, ProcessExecutionWriteAuthority, ProcessId,
+        ProcessOutcome, ProcessParentEndPlan, ProcessStartOutcome, ProcessTerminalSemantics,
+        ProcessTerminalSpec, ProcessTombstone, SessionId, WaitKind, WaitState, WakeDelivery,
+        WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryDisposition,
+        WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    };
     pub use lash_core::{
         AbandonEvidence, AbandonRequest, AbandonWriter, CausalRef, ProcessAwaitOutput,
         ProcessCancelReceipt, ProcessChangeCursor, ProcessCompletionAuthority,
@@ -625,6 +702,14 @@ pub mod durability {
     pub use lash_core::facade_support::{
         ProcessDrainDeferred, ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation,
     };
+    /// Effect-host inputs, replay projections, and local execution capabilities.
+    pub use lash_core::runtime::{
+        BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,
+        EffectJournalRetirement, ProcessLocalExecution, ProcessOutcomeObserver,
+        ProcessTurnCancellation, RuntimeAwaitEventOptions, RuntimeEffectReplayTrace, RuntimeReplay,
+        RuntimeReplayAttribution, RuntimeSleepOptions, RuntimeSubject, SegmentProgress,
+        ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
+    };
     pub use lash_core::{
         EffectHost, EffectJournalAddressing, facade_support::DurableProcessWorker,
         facade_support::DurableProcessWorkerConfig, facade_support::InlineEffectHost,
@@ -643,21 +728,27 @@ pub mod runtime {
     /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
     /// an expected retirement (a deleted session) from a real fault.
     pub use lash_core::RuntimeErrorCause;
+    /// Assistant-output state exposed by assembled runtime turns.
+    pub use lash_core::facade_support::OutputState;
+    /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
-        AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver, CheckpointClaimSet,
-        DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient, EffectGroupHandle,
-        EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
-        GroupSettlement, GroupWakePolicy, InlineRuntimeEffectController, LashRuntime,
-        LlmAttachmentSpec, LlmRequestSpec, LoserPolicy, NoopEventSink, NoopTurnActivitySink,
-        ProcessCommand, ProcessEffectOutcome, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,
-        QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
-        QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
-        QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
-        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeObservation,
-        RuntimeScope, RuntimeTurnPhase, RuntimeTurnPhaseProbe, ScopedEffectController, TurnContext,
+        ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver,
+        CheckpointClaimSet, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient,
+        EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope,
+        GroupExecutors, GroupSettlement, GroupWakePolicy, InlineRuntimeEffectController,
+        LashRuntime, LlmAttachmentSpec, LlmRequestSpec, LoserPolicy, NoopEventSink,
+        NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver, QueuedWorkExecutionConcurrencyError,
+        QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress,
+        QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkWakeContended, QueuedWorkWakeFailure,
+        QueuedWorkWakeOutcome, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+        RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
+        RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation,
+        RuntimePromptConfig, RuntimeProviderConfig, RuntimeScope, RuntimeTracingConfig,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        TurnContext,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for
@@ -665,10 +756,11 @@ pub mod runtime {
     /// store timestamps. [`SystemClock`] is the wall-clock default; tests supply
     /// their own to make expiry deterministic.
     pub use lash_core::{Clock, facade_support::SystemClock};
+    /// Session and turn extension handles exposed to runtime integrators.
     pub use lash_core::{
-        ProtocolSessionExtensionHandle, ProtocolTurnOptions, SessionPolicy, SessionSnapshot,
-        facade_support::PersistentRuntimeServices, facade_support::SessionHandle,
-        facade_support::render_turn_causes_prompt,
+        ProtocolSessionExtensionHandle, ProtocolTurnExtensionHandle, ProtocolTurnOptions,
+        SessionPolicy, SessionSnapshot, facade_support::PersistentRuntimeServices,
+        facade_support::SessionHandle, facade_support::render_turn_causes_prompt,
     };
 }
 
@@ -723,9 +815,12 @@ pub mod provider {
     pub use lash_core::facade_support::ModelEffortValidationCategory;
     pub use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmOutputSpec, LlmRole};
     pub use lash_core::provider::ModelEffortValidationError;
+    /// Provider completion, caching, failure, retry, and rate-limiting contracts.
     pub use lash_core::provider::{
-        DefaultProviderFailureClassifier, ProviderFailureClassifier, ProviderRateLimitPolicy,
-        ProviderReliability, ProviderRetryPolicy, RequestTimeout,
+        CacheRetention, DefaultProviderFailureClassifier, ProviderCompletion,
+        ProviderCompletionError, ProviderFailureClassifier, ProviderRateLimitPermit,
+        ProviderRateLimitPolicy, ProviderRateLimiter, ProviderReliability, ProviderRetryPolicy,
+        RequestTimeout,
     };
     /// Request/response/error vocabulary of [`Provider::complete`],
     /// re-exported so hosts can implement provider decorators (admission
