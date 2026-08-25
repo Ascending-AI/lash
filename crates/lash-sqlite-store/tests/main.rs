@@ -2,6 +2,8 @@
 mod effect_group_conformance;
 #[path = "effect_group_drain_conformance.rs"]
 mod effect_group_drain_conformance;
+#[path = "graph_sequence_cutover.rs"]
+mod graph_sequence_cutover;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
 #[path = "session_meta.rs"]
@@ -14,5 +16,3 @@ mod storage_fixes;
 mod store_gc;
 #[path = "store_maintenance_outcome.rs"]
 mod store_maintenance_outcome;
-#[path = "turn_cancel_migration.rs"]
-mod turn_cancel_migration;

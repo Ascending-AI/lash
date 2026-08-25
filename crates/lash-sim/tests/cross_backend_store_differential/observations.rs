@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct DurableNode {
-    // SQL rows are read by `seq`; the in-memory vector uses its native index.
+    // SQL rows are read by generation; the in-memory vector uses its native index.
     // Comparing this normalized replay ordinal keeps transcript order
     // contract-visible without comparing backend-local sequence counters.
     pub(super) ordinal: usize,

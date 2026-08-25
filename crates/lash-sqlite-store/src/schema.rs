@@ -19,12 +19,9 @@ pub(crate) enum StoreBacking {
 /// Canonical SQLite schema for a factory-wide lash durable-core catalog.
 ///
 /// This is the *only* schema the store supports. Older durable-core databases
-/// must normally be deleted before opening with this binary. The narrow in-place
-/// exceptions are 39 -> 41 and 40 -> 41: [`ensure_schema`] creates any missing
-/// cancellation-request table and session-state marker before advancing
-/// `PRAGMA user_version`. Lash's broader durable
-/// contract still lives one level up in per-record `schema_version` stamps, not
-/// in compatibility reads.
+/// must be deleted before opening with this binary. Lash's broader durable
+/// contract still lives one level up in per-record `schema_version` stamps,
+/// not in compatibility reads.
 /// Each `checkpoint_blob_refs` row is owned by the session whose head or anchor
 /// owns the checkpoint root named by `checkpoint_ref`. Owner-scoped session
 /// delete or process prune deletes an unreferenced root and cascades its edges
@@ -81,7 +78,6 @@ CREATE TABLE IF NOT EXISTS deleted_sessions (
 );
 
 CREATE TABLE IF NOT EXISTS graph_nodes (
-    seq            INTEGER PRIMARY KEY,
     session_id     TEXT NOT NULL,
     node_id        TEXT NOT NULL UNIQUE,
     parent_node_id TEXT,
@@ -91,8 +87,6 @@ CREATE TABLE IF NOT EXISTS graph_nodes (
     tombstoned     INTEGER NOT NULL DEFAULT 0,
     UNIQUE (session_id, generation)
 );
-CREATE INDEX IF NOT EXISTS idx_graph_nodes_session_seq
-    ON graph_nodes(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_parent
     ON graph_nodes(parent_node_id);
 
@@ -429,7 +423,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a version-41 file written by an older binary self-heals into the
+/// schema, so a version-42 file written by an older binary self-heals into the
 /// newer index set on first open, and a newer file stays readable by the older
 /// binary — the two are mutually compatible on the same path. Bumping instead
 /// would reject-and-recreate live stores for a change that costs nothing to
@@ -442,7 +436,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// input outcomes.
 /// Version 41 adds the nullable independently readable session-state generation
 /// beside durable session binding metadata. NULL is the version-zero legacy map.
-pub(crate) const SCHEMA_VERSION: i32 = 41;
+/// Version 42 removes the graph-node sequence column. Per-session generation is
+/// the sole durable graph ordering authority.
+pub(crate) const SCHEMA_VERSION: i32 = 42;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -924,18 +920,6 @@ fn prepare_versioned_schema<'connection>(
     let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if user_version == schema_version {
         tx.execute_batch(schema)?;
-        return Ok(tx);
-    }
-    if database_kind == "session"
-        && matches!(user_version, 39 | 40)
-        && schema_version == SCHEMA_VERSION
-    {
-        tx.execute(
-            "ALTER TABLE session_meta ADD COLUMN session_state_version INTEGER",
-            [],
-        )?;
-        tx.execute_batch(schema)?;
-        tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);
     }
     if user_version == 0 && !has_user_schema_objects(&tx)? {

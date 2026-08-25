@@ -87,13 +87,13 @@ let core = builder.build(owner)?;</code></pre>
         <p>lash maintains no implicit migration chain, by policy. A version whose schema changed is adopted either by an explicit, published migration or by recreating the store from empty, and either step is one-way: the previous binary refuses the resulting schema on the same exact-match gate. There is no downgrade path, no rollback, and no restore procedure. Recovery from a failed bump is fix-forward.</p>
         <p>This release uses these store schema versions:</p>
         <ul>
-          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">41</span></li>
+          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">42</span></li>
           <li>SQLite process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span></li>
           <li>SQLite effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span></li>
           <li>SQLite trigger version <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span></li>
-          <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">60</span></li>
+          <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">61</span></li>
         </ul>
-        <p>The current durable-core and Postgres generations add an independently readable <code>session_state_version</code> marker to session metadata. Recovery reads it under the session-execution lease before decoding mutable continuation payloads; an absent marker means version 0. The prior generation's durable cancellation-request disposition and affected-input outcome remain intact.</p>
+        <p>SQLite durable-core <span data-format-version="SQLITE_SCHEMA_VERSION">42</span> and Postgres component <span data-format-version="POSTGRES_SCHEMA_VERSION">61</span> remove the redundant graph-node sequence column and its index. Per-session generation is now the sole durable graph ordering authority; the prior generation's session-state admission marker, durable cancellation requests, session-catalog metadata, and indexed checkpoint-manifest component edges remain intact.</p>
         <ul>
           <li>Process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> carries atomic process-parent teardown.</li>
           <li>Effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span> carries versioned tool-intent carriers, typed execution outcomes, and the durable effect-group journal.</li>
@@ -104,10 +104,11 @@ let core = builder.build(owner)?;</code></pre>
           <li>Version 58 adds the session-enumeration catalog projection.</li>
           <li>Version 59 adds durable cancellation-request disposition and affected-input outcomes.</li>
           <li>Version 60 adds the session-state admission marker.</li>
+          <li>Version 61 removes the redundant graph-node sequence column and index.</li>
         </ul>
-        <p>PostgreSQL has explicit creation-only migrations from the published component-50 through component-59 shapes. The trigger migration arms legacy zero-fan-out occurrences while live-fan-out rows use the normal terminal transition. SQLite durable-core generations 39 and 40 have exact in-place migrations to <span data-format-version="SQLITE_SCHEMA_VERSION">41</span>: both add the nullable marker, while 39 also creates the cancellation-request table. Earlier durable-core generations must be recreated. The SQLite trigger store remains a reject-and-recreate boundary.</p>
+        <p>The graph ordering cutover has no migration on either backend. SQLite durable-core databases below <span data-format-version="SQLITE_SCHEMA_VERSION">42</span> and Postgres components below <span data-format-version="POSTGRES_SCHEMA_VERSION">61</span> must be recreated, so an old graph shape can never be stamped current while retaining the removed column. The SQLite trigger store remains a reject-and-recreate boundary.</p>
         <p>If an older Postgres stamp already sits over newer-generation artifacts, Lash treats that as ledger/schema divergence. It refuses with an inspect-and-recreate remedy instead of guessing at a partial migration.</p>
-        <p><strong>Index-only SQLite additions do not move the version.</strong> The durable-core catalog is created with <code>CREATE INDEX IF NOT EXISTS</code> and open always runs the whole schema, so a later additive index reaches an existing version-41 file on its next open and a file that already has it stays readable by a binary that does not. The carve-out is index-only: any table, column, or semantic change still bumps and still rejects.</p>
+        <p><strong>Index-only SQLite additions do not move the version.</strong> The durable-core catalog is created with <code>CREATE INDEX IF NOT EXISTS</code> and open always runs the whole schema, so a later additive index reaches an existing version-42 file on its next open and a file that already has it stays readable by a binary that does not. The carve-out is index-only: any table, column, or semantic change still bumps and still rejects.</p>
         <p><strong>The store schema version is not the only boundary.</strong> The durable format versions (continuation, snapshot, RLM envelope, segment handover, checkpoint component encoding, wake delivery) gate parked state independently of the store stamp, so a store that opens cleanly can still hold work this build refuses to resume. They fail closed the same way and in both directions, with no migration decoder at any of them, so moving one needs the same drain-or-recreate plan a schema bump needs. A build publishes every version it writes as one table, <code>lash::formats</code>, so a host reads them from the binary rather than transcribing them from this page.</p>
       </aside>
       <aside class="gotcha">

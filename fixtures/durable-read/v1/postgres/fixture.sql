@@ -146,7 +146,6 @@ CREATE TABLE lash_durable_read_fixture.lash_fork_lineage (
 
 CREATE TABLE lash_durable_read_fixture.lash_graph_nodes (
     session_id text NOT NULL,
-    seq bigint NOT NULL,
     node_id text NOT NULL,
     parent_node_id text,
     generation bigint NOT NULL,
@@ -155,25 +154,6 @@ CREATE TABLE lash_durable_read_fixture.lash_graph_nodes (
     tombstoned boolean DEFAULT false NOT NULL,
     CONSTRAINT lash_graph_nodes_generation_check CHECK ((generation >= 0))
 );
-
-
---
--- Name: lash_graph_nodes_seq_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE SEQUENCE lash_durable_read_fixture.lash_graph_nodes_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: lash_graph_nodes_seq_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER SEQUENCE lash_durable_read_fixture.lash_graph_nodes_seq_seq OWNED BY lash_durable_read_fixture.lash_graph_nodes.seq;
 
 
 --
@@ -734,13 +714,6 @@ CREATE TABLE lash_durable_read_fixture.lash_wake_redelivery_fences (
 
 
 --
--- Name: lash_graph_nodes seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_graph_nodes ALTER COLUMN seq SET DEFAULT nextval('lash_durable_read_fixture.lash_graph_nodes_seq_seq'::regclass);
-
-
---
 -- Name: lash_pending_turn_inputs enqueue_seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -832,9 +805,9 @@ INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-rea
 -- Data for Name: lash_graph_nodes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 1, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', NULL, 0, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"initial-frame","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 2, 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', 1, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6","role":"User","parts":[{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 3, 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9', 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 2, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', NULL, 0, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"initial-frame","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', 1, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6","role":"User","parts":[{"id":"m_append_5b56214e4aa13f5f64634578e4b3af5426535c9018989aa3e92e2f5637692ff6.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_f6cedd50c7134f4570fe9e315994e09687c9b847f4dad77151723f0186932ee9', 'n_a4ce52601dca198bf0f1df46a748ede0704fe4f823ce2c3fa4128b8ad37b20ac', 2, 'frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f', '{"schema_version":2,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
 
 
 --
@@ -963,7 +936,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 60);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 61);
 
 
 --
@@ -1064,13 +1037,6 @@ INSERT INTO lash_durable_read_fixture.lash_wake_allocation_floors VALUES ('durab
 --
 
 INSERT INTO lash_durable_read_fixture.lash_wake_redelivery_fences VALUES ('durable-read-fixture', 'durable-read-wake-process', 1);
-
-
---
--- Name: lash_graph_nodes_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
---
-
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_graph_nodes_seq_seq', 3, true);
 
 
 --
@@ -1535,13 +1501,6 @@ CREATE INDEX idx_lash_checkpoint_blob_refs_blob_ref ON lash_durable_read_fixture
 --
 
 CREATE INDEX idx_lash_graph_nodes_parent ON lash_durable_read_fixture.lash_graph_nodes USING btree (parent_node_id);
-
-
---
--- Name: idx_lash_graph_nodes_seq; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE INDEX idx_lash_graph_nodes_seq ON lash_durable_read_fixture.lash_graph_nodes USING btree (session_id, seq);
 
 
 --

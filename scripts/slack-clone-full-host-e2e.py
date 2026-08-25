@@ -203,7 +203,7 @@ class Journey:
             "pending": "SELECT input_id, session_id, source_key, state, input_json, claim_id, "
             "claim_owner_incarnation_id, claim_session_lease_generation FROM pending_turn_inputs ORDER BY enqueue_seq",
             "nodes": "SELECT session_id, node_id, parent_node_id, generation, node_json FROM graph_nodes "
-            "WHERE tombstoned = 0 ORDER BY seq",
+            "WHERE tombstoned = 0 ORDER BY session_id, generation",
             "turns": "SELECT session_id, turn_id, result_json FROM runtime_turn_commits ORDER BY committed_at_ms",
             "meta": "SELECT session_id, relation_kind, parent_session_id, source_session_id, source_node_id "
             "FROM session_meta ORDER BY session_id",

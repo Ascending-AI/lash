@@ -107,12 +107,13 @@ const ANCHOR_TABLE: &str = "lash_schema_versions";
 /// outside it:
 ///
 /// - **The component version stamp.** It is normally the reject-and-recreate
-///   boundary. Lash-managed `Enforce` can consume the explicit migrations from
-///   the published component-50, -51, and -52 shapes to 53 after exact
-///   source-shape preflight; an older stamp over newer artifacts is divergence
-///   and is refused with an inspect-and-recreate remedy. Other mismatches remain
-///   fatal, so a valve adopted for a structural false positive cannot silently
-///   run one build against another schema generation.
+///   boundary. Component 61 is a hard cutover for every published older graph
+///   shape: the removed sequence column is refused before any creation-only
+///   migration DDL can run. Component 60 also has no applicable migration. An
+///   older stamp over incompatible artifacts is refused with an
+///   inspect-and-recreate remedy. Other mismatches remain fatal, so a valve
+///   adopted for a structural false positive cannot silently run one build
+///   against another schema generation.
 /// - **The await-event signing secret row.** Without it there is no key to
 ///   authenticate durable promises with, so there is nothing for open to return:
 ///   no secret, no store.
@@ -1046,11 +1047,9 @@ fn diff_paired_objects<T: PairedObject>(
 #[non_exhaustive]
 pub enum SchemaFinding {
     /// The component version stamp is absent or names another version. Ordinary
-    /// open treats it as fatal unless Lash-managed `Enforce` consumes one of the
-    /// exact explicit migrations from the published component-50, -51, or
-    /// -52 shapes to 53 before evaluating the open report. An older
-    /// stamp over newer artifacts is refused as ledger/schema divergence rather
-    /// than migrated partially.
+    /// open treats it as fatal. Component 61 refuses every published older graph
+    /// shape before migration DDL because those shapes carry the removed
+    /// sequence column; component 60 also has no applicable migration.
     VersionMismatch {
         /// Version this build implements.
         expected: i32,
@@ -1378,11 +1377,11 @@ impl fmt::Display for SchemaReport {
         if self.has_version_finding() {
             return write!(
                 formatter,
-                " The component schema is normally a reject-and-recreate boundary. This build \
-                 has one explicit Lash-managed migration from the published component-50 shape \
-                 to 51, run only under `SchemaCheck::Enforce` after exact source-shape preflight. \
-                 A component-50 stamp over version-51 artifacts is ledger/schema divergence and \
-                 must be refused with an inspect-and-recreate remedy; other mismatches require \
+                " The component schema is normally a reject-and-recreate boundary. Component 61 \
+                 refuses every published older graph shape before migration DDL because those \
+                 shapes carry the removed sequence column. Component 60 also has no applicable \
+                 migration. Refuse the mismatch with an inspect-and-recreate remedy; other \
+                 mismatches require \
                  the same remedy. Drain affected sessions and recreate the whole Lash trust \
                  domain with this version: reset the tombstones, await-event revocation ledger, \
                  effect journal, and Restate state together; see \

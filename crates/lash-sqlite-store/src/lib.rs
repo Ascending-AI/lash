@@ -23,13 +23,11 @@
 //! simplest backend that gives us *atomic multi-statement transactions on a
 //! single file* with durability guarantees we can reason about.
 //!
-//! ## Schema cutover, with narrow additive migrations
+//! ## Schema cutover
 //!
 //! There is exactly one supported schema (see [`schema::SCHEMA`]). Older
-//! databases must normally be deleted before opening. Durable-core 39 and 40
-//! are the exact in-place exceptions: both gain the independently readable
-//! session-state generation marker, while 39 also gains the version-40
-//! cancellation request table.
+//! databases must be deleted before opening; schema changes are explicit
+//! reject-and-recreate boundaries.
 //!
 //! ## Catalog contention
 //!
@@ -1231,7 +1229,7 @@ async fn delete_session_from_catalog(
                                SELECT 1 FROM node_anchors AS anchor
                                WHERE anchor.node_id = g.node_id
                            )
-                         ORDER BY g.seq DESC",
+                         ORDER BY g.generation DESC",
                     )
                     .map_err(sqlite_error)?;
                 let rows = stmt

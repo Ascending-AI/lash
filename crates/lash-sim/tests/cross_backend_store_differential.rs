@@ -984,10 +984,10 @@ async fn read_sqlite_durable_state(
     let durable_nodes = {
         let mut statement = connection
             .prepare(
-                "SELECT seq, node_id, parent_node_id, node_json
+                "SELECT generation, node_id, parent_node_id, node_json
                  FROM graph_nodes
                  WHERE session_id = ?1 AND tombstoned = 0
-                 ORDER BY seq ASC",
+                 ORDER BY generation ASC",
             )
             .expect("prepare SQLite durable node read");
         statement
@@ -1005,7 +1005,7 @@ async fn read_sqlite_durable_state(
             .into_iter()
             .enumerate()
             .map(
-                |(ordinal, (_seq, node_id, parent_node_id, node_json))| DurableNode {
+                |(ordinal, (_generation, node_id, parent_node_id, node_json))| DurableNode {
                     ordinal,
                     node_id,
                     parent_node_id,

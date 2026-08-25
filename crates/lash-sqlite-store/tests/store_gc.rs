@@ -634,7 +634,7 @@ async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
              WHERE node_id = (
                  SELECT node_id FROM graph_nodes
                  WHERE session_id = ?1
-                 ORDER BY seq ASC
+                 ORDER BY generation ASC
                  LIMIT 1 OFFSET 1
              )",
             ["graph-node-decode-error"],

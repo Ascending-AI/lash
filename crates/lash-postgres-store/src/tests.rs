@@ -119,6 +119,195 @@ async fn postgres_unbound_session_meta_refuses_ambiguous_resolution() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidate_order() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping bulk-delete candidate-order witness: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect bulk-delete candidate-order witness storage");
+
+    async fn run_fixture(
+        storage: &PostgresStorage,
+        ancestor_sorts_first: bool,
+    ) -> (Vec<&'static str>, std::collections::BTreeSet<&'static str>) {
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let ancestor_session = format!(
+            "bulk-order:{nonce}:{}-ancestor",
+            if ancestor_sorts_first { "a" } else { "z" }
+        );
+        let child_session = format!(
+            "bulk-order:{nonce}:{}-child",
+            if ancestor_sorts_first { "z" } else { "a" }
+        );
+        let node = |role: &str| format!("bulk-order:{nonce}:{role}");
+        let nodes = [
+            ("ancestor-root", ancestor_session.as_str(), None, 0_i64),
+            (
+                "ancestor-leaf",
+                ancestor_session.as_str(),
+                Some("ancestor-root"),
+                1_i64,
+            ),
+            (
+                "child-root",
+                child_session.as_str(),
+                Some("ancestor-root"),
+                0_i64,
+            ),
+            (
+                "child-leaf",
+                child_session.as_str(),
+                Some("child-root"),
+                1_i64,
+            ),
+        ];
+
+        for session_id in [&ancestor_session, &child_session] {
+            sqlx::query(
+                "INSERT INTO lash_sessions (session_id, head_json, leaf_node_id)
+                 VALUES ($1, '{}', NULL)",
+            )
+            .bind(session_id)
+            .execute(storage.pool())
+            .await
+            .unwrap_or_else(|error| panic!("seed witness session `{session_id}`: {error}"));
+            sqlx::query(
+                "INSERT INTO lash_session_meta
+                 (session_id, relation_kind, observer_intent_depth)
+                 VALUES ($1, 'root', 0)",
+            )
+            .bind(session_id)
+            .execute(storage.pool())
+            .await
+            .unwrap_or_else(|error| panic!("seed witness metadata `{session_id}`: {error}"));
+        }
+        for (role, session_id, parent_role, generation) in nodes {
+            sqlx::query(
+                "INSERT INTO lash_graph_nodes
+                 (session_id, node_id, parent_node_id, generation, frame_node_id, node_json)
+                 VALUES ($1, $2, $3, $4, $2, '{}')",
+            )
+            .bind(session_id)
+            .bind(node(role))
+            .bind(parent_role.map(&node))
+            .bind(generation)
+            .execute(storage.pool())
+            .await
+            .unwrap_or_else(|error| panic!("seed witness node `{role}`: {error}"));
+        }
+        sqlx::query(
+            "INSERT INTO lash_fork_lineage
+             (session_id, ancestor_session_id, fork_node_id, fork_generation)
+             VALUES ($1, $2, $3, 0)",
+        )
+        .bind(&child_session)
+        .bind(&ancestor_session)
+        .bind(node("ancestor-root"))
+        .execute(storage.pool())
+        .await
+        .expect("seed witness fork lineage");
+
+        let session_ids = vec![ancestor_session, child_session];
+        let ordered_candidates: Vec<String> = sqlx::query_scalar(
+            "SELECT graph.node_id FROM lash_graph_nodes AS graph
+             WHERE graph.session_id = ANY($1) AND graph.tombstoned = FALSE
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_graph_nodes AS child
+                   WHERE child.parent_node_id = graph.node_id
+                     AND child.tombstoned = FALSE
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_sessions AS head
+                   WHERE head.leaf_node_id = graph.node_id
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_node_anchors AS anchor
+                   WHERE anchor.node_id = graph.node_id
+               )
+             ORDER BY graph.session_id, graph.generation DESC",
+        )
+        .bind(&session_ids)
+        .fetch_all(storage.pool())
+        .await
+        .expect("read witness candidate order");
+        let role = |node_id: &str| {
+            if node_id.ends_with(":ancestor-root") {
+                "ancestor-root"
+            } else if node_id.ends_with(":ancestor-leaf") {
+                "ancestor-leaf"
+            } else if node_id.ends_with(":child-root") {
+                "child-root"
+            } else if node_id.ends_with(":child-leaf") {
+                "child-leaf"
+            } else {
+                panic!("unknown witness node `{node_id}`")
+            }
+        };
+        let candidate_roles = ordered_candidates
+            .iter()
+            .map(|node_id| role(node_id))
+            .collect::<Vec<_>>();
+
+        let before: std::collections::BTreeSet<String> = sqlx::query_scalar(
+            "SELECT node_id FROM lash_graph_nodes WHERE node_id LIKE $1 ORDER BY node_id",
+        )
+        .bind(format!("bulk-order:{nonce}:%"))
+        .fetch_all(storage.pool())
+        .await
+        .expect("read witness nodes before bulk delete")
+        .into_iter()
+        .collect();
+        let mut tx = storage
+            .pool()
+            .begin()
+            .await
+            .expect("begin witness bulk delete");
+        crate::session_factory::delete_process_sessions_tx(&mut tx, &session_ids)
+            .await
+            .expect("bulk delete witness sessions");
+        tx.commit().await.expect("commit witness bulk delete");
+        let after: std::collections::BTreeSet<String> = sqlx::query_scalar(
+            "SELECT node_id FROM lash_graph_nodes WHERE node_id LIKE $1 ORDER BY node_id",
+        )
+        .bind(format!("bulk-order:{nonce}:%"))
+        .fetch_all(storage.pool())
+        .await
+        .expect("read witness nodes after bulk delete")
+        .into_iter()
+        .collect();
+        let retired = before
+            .difference(&after)
+            .map(|node_id| role(node_id))
+            .collect();
+        (candidate_roles, retired)
+    }
+
+    let (ancestor_first_candidates, ancestor_first_retired) = run_fixture(&storage, true).await;
+    let (child_first_candidates, child_first_retired) = run_fixture(&storage, false).await;
+    assert_eq!(
+        ancestor_first_candidates,
+        ["ancestor-leaf", "child-leaf"],
+        "the first fixture must exercise ancestor-session candidate order"
+    );
+    assert_eq!(
+        child_first_candidates,
+        ["child-leaf", "ancestor-leaf"],
+        "the second fixture must reverse the cross-session candidate order"
+    );
+    assert_eq!(ancestor_first_retired, child_first_retired);
+    assert_eq!(
+        ancestor_first_retired,
+        ["ancestor-leaf", "ancestor-root", "child-leaf", "child-root"]
+            .into_iter()
+            .collect(),
+        "both candidate orders must retire the complete fork lineage"
+    );
+}
+
 #[tokio::test]
 async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
     let Some(database_url) = postgres_test_support::database_url() else {

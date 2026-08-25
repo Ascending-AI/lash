@@ -135,11 +135,10 @@ const POST_FLOOR_ARTIFACTS: [&str; 19] = [
     "lash_tool_intent_submissions",
     "uq_lash_runtime_effect_replay_group_seq",
 ];
-/// What the newest generation alone introduced — the `introduced_relations` of
-/// the migration out of the immediate predecessor version. The divergent fixture
-/// records that predecessor over the *current* catalog, so these are exactly the
-/// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_session_meta_state_version"];
+/// The predecessor artifact component 61 explicitly retires. The divergent
+/// fixture reconstructs the published component-60 graph shape before recording
+/// that predecessor, so the refusal must enumerate this exact index.
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_graph_nodes_seq"];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -643,16 +642,24 @@ async fn seed(database_url: &str) -> Result<()> {
     // that a boot gate on every restart cannot.
     let probe_before_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
-    // Rewind only the ledger. The catalog intentionally retains the current
-    // artifacts so the next phase can prove Lash distinguishes divergence from
-    // a genuine migration source shape: same stamp, but a catalog carrying
-    // relations the recorded generation never had.
+    // Reconstruct the published predecessor's graph shape before rewinding its
+    // ledger: component 60 exposed an auto-assigned sequence column and indexed
+    // it beside generation. Component 61 is a hard cutover, so this fixture must
+    // carry the removed shape and prove Lash refuses it rather than silently
+    // stamping it current.
+    sqlx::query("ALTER TABLE lash_graph_nodes ADD COLUMN seq BIGSERIAL")
+        .execute(&pool)
+        .await
+        .context("restore the component-60 graph sequence column")?;
+    sqlx::query("CREATE INDEX idx_lash_graph_nodes_seq ON lash_graph_nodes(session_id, seq)")
+        .execute(&pool)
+        .await
+        .context("restore the component-60 graph sequence index")?;
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
-    // The same walk over the same bytes with only the schema stamp moved. The
-    // controlled pair is the point: the outcome flips to refused while the
-    // drain list stays empty, which is the difference between "this deployment
-    // cannot open" and "this deployment holds data that cannot be carried".
+    // The walk now sees the exact predecessor shape and stamp. The drain list
+    // stays empty: this is a schema recreation boundary, not undecodable durable
+    // payload.
     let probe_after_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
     emit(json!({
