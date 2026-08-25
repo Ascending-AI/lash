@@ -34,7 +34,7 @@ if [ -n "$completed_manifest" ]; then
 fi
 mkdir -p "$manifest_dir"
 export LASH_E2E_WORKFLOW_MANIFEST_DIR="$manifest_dir"
-export LASH_E2E_COMPLETED_WORKFLOW_MANIFEST_CONTAINER=""
+unset LASH_E2E_COMPLETED_WORKFLOW_MANIFEST_CONTAINER
 if [ -n "$manifest_name" ]; then
   rm -f "$completed_manifest" "$manifest_dir/workflow-inventory.tsv"
   export LASH_E2E_COMPLETED_WORKFLOW_MANIFEST_CONTAINER="/e2e-manifests/$manifest_name"
