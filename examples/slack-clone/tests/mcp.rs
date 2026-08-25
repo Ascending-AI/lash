@@ -908,6 +908,15 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
         .run()
         .await
         .expect("run the opted-in badge turn");
+    let process_hopped_output = lash::process::ProcessAwaitOutput::from_tool_output(
+        stored.result.tool_calls[0].output.clone(),
+    )
+    .into_tool_output();
+    assert_eq!(
+        process_hopped_output.attachments().len(),
+        1,
+        "the MCP image attachment must survive the background-process hop to the model"
+    );
     let stored_output = stored.result.tool_calls[0].output.value_for_projection();
     let attachment = stored_output
         .as_array()

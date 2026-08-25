@@ -901,9 +901,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         call_id: Some("tool-call-1".to_string()),
         name: "search_web".to_string(),
         args: serde_json::json!({ "query": "FIG-1350" }),
-        output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
+        output: lash::tools::ToolCallOutput::success(
             serde_json::json!({ "results": [{ "title": "judged row" }] }),
-        )),
+        ),
         duration_ms: 4,
         graph_key: None,
         parent_call_id: None,
@@ -919,9 +919,9 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
         call_id: None,
         name: "search_web".to_string(),
         args: serde_json::json!({ "query": "FIG-1350 no id" }),
-        output: lash::tools::ToolCallOutput::success(lash::tools::ToolValue::from(
+        output: lash::tools::ToolCallOutput::success(
             serde_json::json!({ "results": [{ "title": "no-id row" }] }),
-        )),
+        ),
         duration_ms: 5,
         graph_key: None,
         parent_call_id: None,

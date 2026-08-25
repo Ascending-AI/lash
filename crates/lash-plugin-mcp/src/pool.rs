@@ -1157,14 +1157,14 @@ async fn tool_result_from_rmcp(
                     }
                     text_resource => {
                         if let Ok(value) = serde_json::to_value(text_resource) {
-                            content_items.push(ToolValue::from(value));
+                            content_items.push(ToolValue::untrusted_json(value));
                         }
                     }
                 }
             }
             other => {
                 if let Ok(value) = serde_json::to_value(&other) {
-                    content_items.push(ToolValue::from(value));
+                    content_items.push(ToolValue::untrusted_json(value));
                 }
             }
         }
@@ -1172,11 +1172,14 @@ async fn tool_result_from_rmcp(
 
     let value = if let Some(structured) = result.structured_content {
         if !has_attachments {
-            ToolValue::from(structured)
+            ToolValue::untrusted_json(structured)
         } else {
             ToolValue::Object(
                 [
-                    ("structured".to_string(), ToolValue::from(structured)),
+                    (
+                        "structured".to_string(),
+                        ToolValue::untrusted_json(structured),
+                    ),
                     ("content".to_string(), ToolValue::Array(content_items)),
                 ]
                 .into_iter()
@@ -1204,7 +1207,7 @@ async fn tool_result_from_rmcp(
             raw: Some(value),
         }))
     } else {
-        ToolOutcome::from_output(ToolCallOutput::success(value))
+        ToolOutcome::from_output(ToolCallOutput::success_tool_value(value))
     }
 }
 

@@ -310,19 +310,26 @@ impl ProcessAwaitOutput {
         let control = output.control;
         match output.outcome {
             crate::ToolCallOutcome::Success(value) => Self::Success {
-                value: value.to_json_value(),
+                value: serde_json::to_value(value)
+                    .expect("ToolValue serialization into JSON cannot fail"),
                 control,
             },
             crate::ToolCallOutcome::Failure(failure) => Self::Failure {
                 class: failure.class,
                 code: failure.code,
                 message: failure.message,
-                raw: failure.raw.map(|value| value.to_json_value()),
+                raw: failure.raw.map(|value| {
+                    serde_json::to_value(value)
+                        .expect("ToolValue serialization into JSON cannot fail")
+                }),
                 control,
             },
             crate::ToolCallOutcome::Cancelled(cancellation) => Self::Cancelled {
                 message: cancellation.message,
-                raw: cancellation.raw.map(|value| value.to_json_value()),
+                raw: cancellation.raw.map(|value| {
+                    serde_json::to_value(value)
+                        .expect("ToolValue serialization into JSON cannot fail")
+                }),
                 control,
             },
         }
@@ -333,7 +340,10 @@ impl ProcessAwaitOutput {
     pub fn into_tool_output(self) -> crate::ToolCallOutput {
         match self {
             Self::Success { value, control } => {
-                let mut output = crate::ToolCallOutput::success(value);
+                let mut output = match decode_process_tool_value(value, "success value") {
+                    Ok(value) => crate::ToolCallOutput::success_tool_value(value),
+                    Err(failure) => crate::ToolCallOutput::failure(*failure),
+                };
                 output.control = control;
                 output
             }
@@ -344,8 +354,19 @@ impl ProcessAwaitOutput {
                 raw,
                 control,
             } => {
+                let raw = match raw
+                    .map(|value| decode_process_tool_value(value, "failure raw value"))
+                    .transpose()
+                {
+                    Ok(raw) => raw,
+                    Err(failure) => {
+                        let mut output = crate::ToolCallOutput::failure(*failure);
+                        output.control = control;
+                        return output;
+                    }
+                };
                 let mut failure = crate::ToolFailure::tool(class, code, message);
-                failure.raw = raw.map(crate::ToolValue::from);
+                failure.raw = raw;
                 let mut output = crate::ToolCallOutput::failure(failure);
                 output.control = control;
                 output
@@ -355,8 +376,19 @@ impl ProcessAwaitOutput {
                 raw,
                 control,
             } => {
+                let raw = match raw
+                    .map(|value| decode_process_tool_value(value, "cancellation raw value"))
+                    .transpose()
+                {
+                    Ok(raw) => raw,
+                    Err(failure) => {
+                        let mut output = crate::ToolCallOutput::failure(*failure);
+                        output.control = control;
+                        return output;
+                    }
+                };
                 let mut cancellation = crate::ToolCancellation::runtime(message);
-                cancellation.raw = raw.map(crate::ToolValue::from);
+                cancellation.raw = raw;
                 let mut output = crate::ToolCallOutput::cancelled(cancellation);
                 output.control = control;
                 output
@@ -369,7 +401,7 @@ impl ProcessAwaitOutput {
             Self::Abandoned { evidence, control } => {
                 let raw = serde_json::to_value(&evidence)
                     .ok()
-                    .map(crate::ToolValue::from);
+                    .map(crate::ToolValue::untrusted_json);
                 let message = match evidence.writer {
                     AbandonWriter::OwnerDrain => {
                         "process abandoned: owner drained without recording an outcome".to_string()
@@ -408,6 +440,19 @@ impl ProcessAwaitOutput {
             })),
         }
     }
+}
+
+fn decode_process_tool_value(
+    value: serde_json::Value,
+    field: &str,
+) -> Result<crate::ToolValue, Box<crate::ToolFailure>> {
+    serde_json::from_value(value).map_err(|error| {
+        Box::new(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "tool_value_decode_failed",
+            format!("malformed {field} in process output: {error}"),
+        ))
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -777,5 +822,38 @@ mod cancellation_identity_tests {
             cancellation_replay_key("process\0id", Some("")),
             "None and Some(empty) occupy different permanent option arms"
         );
+    }
+
+    #[test]
+    fn process_output_rejects_malformed_tags_in_every_tool_value_arm() {
+        let malformed = serde_json::json!({
+            "$lash_tool_value": "attachment",
+            "extra": true
+        });
+        let outputs = [
+            ProcessAwaitOutput::Success {
+                value: malformed.clone(),
+                control: None,
+            },
+            ProcessAwaitOutput::Failure {
+                class: crate::ToolFailureClass::Execution,
+                code: "provider_failure".to_string(),
+                message: "provider failed".to_string(),
+                raw: Some(malformed.clone()),
+                control: None,
+            },
+            ProcessAwaitOutput::Cancelled {
+                message: "cancelled".to_string(),
+                raw: Some(malformed),
+                control: None,
+            },
+        ];
+
+        for output in outputs {
+            let crate::ToolCallOutcome::Failure(failure) = output.into_tool_output().outcome else {
+                panic!("a malformed tag must become a typed decode failure");
+            };
+            assert_eq!(failure.code, "tool_value_decode_failed");
+        }
     }
 }

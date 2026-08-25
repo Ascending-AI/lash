@@ -218,7 +218,7 @@ fn attachment_put_executor(
             })?;
         *captured_id.lock_recover() = Some(reference.id.clone());
         let output = if typed {
-            crate::ToolCallOutput::success(crate::ToolValue::Attachment(
+            crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
                 crate::AttachmentSource::stored(reference),
             ))
         } else {

@@ -523,9 +523,9 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
             };
             assert_eq!(
                 result.into_output().outcome,
-                crate::ToolCallOutcome::Success(crate::ToolValue::from(serde_json::json!(
-                    "pure execute ran"
-                ))),
+                crate::ToolCallOutcome::Success(crate::ToolValue::untrusted_json(
+                    serde_json::json!("pure execute ran")
+                )),
                 "an in-provider assertion panic surfaces here as a failure output"
             );
             Ok(crate::RuntimeEffectOutcome::ToolAttempt {

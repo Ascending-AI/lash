@@ -1214,7 +1214,7 @@ mod tests {
             call_id: Some("call-1".to_string()),
             tool: "make_attachment".to_string(),
             args: serde_json::json!({}),
-            output: crate::ToolCallOutput::success(crate::ToolValue::Attachment(
+            output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
                 crate::AttachmentSource::stored(tool_ref),
             )),
             duration_ms: 1,
@@ -1246,7 +1246,7 @@ mod tests {
             call_id: Some("replayed-exec-call".to_string()),
             tool: "executor_state_only".to_string(),
             args: serde_json::json!({}),
-            output: crate::ToolCallOutput::success(crate::ToolValue::Attachment(
+            output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
                 crate::AttachmentSource::stored(attachment.clone()),
             )),
             duration_ms: 1,

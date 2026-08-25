@@ -460,7 +460,7 @@ impl crate::ToolProvider for AttachmentPutTool {
             )
             .await
             .expect("tool attachment put");
-        crate::ToolOutcome::from_output(crate::ToolCallOutput::success(
+        crate::ToolOutcome::from_output(crate::ToolCallOutput::success_tool_value(
             crate::ToolValue::Attachment(crate::AttachmentSource::stored(reference)),
         ))
     }
@@ -1644,7 +1644,7 @@ impl crate::ToolProvider for FrameRotatingDynamicTool {
             }
             "new_after_rotation" => crate::ToolOutcome::ok(json!({ "called": call.name }))
                 .with_control(crate::ToolControl::Finish {
-                    value: json!("new tool executed").into(),
+                    value: crate::ToolValue::untrusted_json(json!("new tool executed")),
                 }),
             "curated_before_rotation" | "hidden_after_rotation" => {
                 crate::ToolOutcome::ok(json!({ "called": call.name }))

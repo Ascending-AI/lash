@@ -1119,7 +1119,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 1 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 1 for session-001"
+            },
             "status": "success"
           }
         },
@@ -1132,7 +1135,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 1 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 1 for session-001"
+              },
               "status": "success"
             }
           },
@@ -6354,7 +6360,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 2 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 2 for session-001"
+            },
             "status": "success"
           }
         },
@@ -6367,7 +6376,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 2 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 2 for session-001"
+              },
               "status": "success"
             }
           },
@@ -7131,8 +7143,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 85
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 85
+                    }
                   },
                   "status": "success"
                 }
@@ -8010,7 +8025,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 1 for session-002",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 1 for session-002"
+            },
             "status": "success"
           }
         },
@@ -8023,7 +8041,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 1 for session-002",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 1 for session-002"
+              },
               "status": "success"
             }
           },
@@ -8346,8 +8367,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 85
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 85
+                    }
                   },
                   "status": "success"
                 }
@@ -8789,8 +8813,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 119
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 119
+                    }
                   },
                   "status": "success"
                 }
@@ -9170,8 +9197,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 119
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 119
+                    }
                   },
                   "status": "success"
                 }
@@ -9805,8 +9835,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 110
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 110
+                    }
                   },
                   "status": "success"
                 }
@@ -10538,8 +10571,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 110
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 110
+                    }
                   },
                   "status": "success"
                 }
@@ -10601,7 +10637,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 1 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 1 for session-004"
+            },
             "status": "success"
           }
         },
@@ -10614,7 +10653,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 1 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 1 for session-004"
+              },
               "status": "success"
             }
           },
@@ -10970,8 +11012,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 131
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 131
+                    }
                   },
                   "status": "success"
                 }
@@ -11210,8 +11255,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 131
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 131
+                    }
                   },
                   "status": "success"
                 }
@@ -12503,7 +12551,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 2 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 2 for session-004"
+            },
             "status": "success"
           }
         },
@@ -12516,7 +12567,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 2 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 2 for session-004"
+              },
               "status": "success"
             }
           },
@@ -12725,7 +12779,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 3 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 3 for session-001"
+            },
             "status": "success"
           }
         },
@@ -12738,7 +12795,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 3 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 3 for session-001"
+              },
               "status": "success"
             }
           },
@@ -13123,8 +13183,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 179
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 179
+                    }
                   },
                   "status": "success"
                 }
@@ -13363,8 +13426,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 179
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 179
+                    }
                   },
                   "status": "success"
                 }
@@ -14642,7 +14708,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 4 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 4 for session-001"
+            },
             "status": "success"
           }
         },
@@ -14655,7 +14724,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 4 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 4 for session-001"
+              },
               "status": "success"
             }
           },
@@ -15925,7 +15997,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 3 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 3 for session-004"
+            },
             "status": "success"
           }
         },
@@ -15938,7 +16013,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 3 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 3 for session-004"
+              },
               "status": "success"
             }
           },
@@ -17076,8 +17154,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 245
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 245
+                    }
                   },
                   "status": "success"
                 }
@@ -17316,8 +17397,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 245
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 245
+                    }
                   },
                   "status": "success"
                 }
@@ -18124,8 +18208,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 272
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 272
+                    }
                   },
                   "status": "success"
                 }
@@ -18364,8 +18451,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 272
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 272
+                    }
                   },
                   "status": "success"
                 }
@@ -18859,7 +18949,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 2 for session-002",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 2 for session-002"
+            },
             "status": "success"
           }
         },
@@ -18872,7 +18965,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 2 for session-002",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 2 for session-002"
+              },
               "status": "success"
             }
           },
@@ -19425,7 +19521,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 3 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 3 for session-003"
+            },
             "status": "success"
           }
         },
@@ -19438,7 +19537,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 3 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 3 for session-003"
+              },
               "status": "success"
             }
           },
@@ -19979,8 +20081,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 269
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 269
+                    }
                   },
                   "status": "success"
                 }
@@ -20219,8 +20324,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 188
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 188
+                    }
                   },
                   "status": "success"
                 }
@@ -20282,7 +20390,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 1 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 1 for session-003"
+            },
             "status": "success"
           }
         },
@@ -20295,7 +20406,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 1 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 1 for session-003"
+              },
               "status": "success"
             }
           },
@@ -20356,7 +20470,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 7 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 7 for session-003"
+            },
             "status": "success"
           }
         },
@@ -20369,7 +20486,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 7 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 7 for session-003"
+              },
               "status": "success"
             }
           },
@@ -20430,7 +20550,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 4 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 4 for session-003"
+            },
             "status": "success"
           }
         },
@@ -20443,7 +20566,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 4 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 4 for session-003"
+              },
               "status": "success"
             }
           },
@@ -20504,7 +20630,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 2 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 2 for session-003"
+            },
             "status": "success"
           }
         },
@@ -20517,7 +20646,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 2 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 2 for session-003"
+              },
               "status": "success"
             }
           },
@@ -20755,8 +20887,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 287
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 287
+                    }
                   },
                   "status": "success"
                 }
@@ -20818,7 +20953,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 6 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 6 for session-003"
+            },
             "status": "success"
           }
         },
@@ -20831,7 +20969,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 6 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 6 for session-003"
+              },
               "status": "success"
             }
           },
@@ -21141,8 +21282,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 154
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 154
+                    }
                   },
                   "status": "success"
                 }
@@ -21260,7 +21404,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 5 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 5 for session-003"
+            },
             "status": "success"
           }
         },
@@ -21273,7 +21420,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 5 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 5 for session-003"
+              },
               "status": "success"
             }
           },
@@ -22055,8 +22205,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 269
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 269
+                    }
                   },
                   "status": "success"
                 }
@@ -22295,8 +22448,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 154
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 154
+                    }
                   },
                   "status": "success"
                 }
@@ -22535,8 +22691,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 188
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 188
+                    }
                   },
                   "status": "success"
                 }
@@ -22775,8 +22934,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 287
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 287
+                    }
                   },
                   "status": "success"
                 }
@@ -23077,8 +23239,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 293
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 293
+                    }
                   },
                   "status": "success"
                 }
@@ -23317,8 +23482,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 293
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 293
+                    }
                   },
                   "status": "success"
                 }
@@ -23498,7 +23666,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 8 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 8 for session-003"
+            },
             "status": "success"
           }
         },
@@ -23511,7 +23682,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 8 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 8 for session-003"
+              },
               "status": "success"
             }
           },
@@ -24276,7 +24450,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 5 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 5 for session-001"
+            },
             "status": "success"
           }
         },
@@ -24289,7 +24466,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 5 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 5 for session-001"
+              },
               "status": "success"
             }
           },
@@ -24540,7 +24720,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 4 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 4 for session-004"
+            },
             "status": "success"
           }
         },
@@ -24553,7 +24736,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 4 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 4 for session-004"
+              },
               "status": "success"
             }
           },
@@ -24863,8 +25049,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 326
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 326
+                    }
                   },
                   "status": "success"
                 }
@@ -25103,8 +25292,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 326
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 326
+                    }
                   },
                   "status": "success"
                 }
@@ -25343,8 +25535,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 329
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 329
+                    }
                   },
                   "status": "success"
                 }
@@ -25583,8 +25778,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 329
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 329
+                    }
                   },
                   "status": "success"
                 }
@@ -26222,7 +26420,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 6 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 6 for session-001"
+            },
             "status": "success"
           }
         },
@@ -26235,7 +26436,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 6 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 6 for session-001"
+              },
               "status": "success"
             }
           },
@@ -26847,8 +27051,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 364
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 364
+                    }
                   },
                   "status": "success"
                 }
@@ -27087,8 +27294,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 364
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 364
+                    }
                   },
                   "status": "success"
                 }
@@ -27702,8 +27912,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 374
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 374
+                    }
                   },
                   "status": "success"
                 }
@@ -27942,8 +28155,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 374
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 374
+                    }
                   },
                   "status": "success"
                 }
@@ -28461,8 +28677,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 382
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 382
+                    }
                   },
                   "status": "success"
                 }
@@ -28701,8 +28920,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 382
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 382
+                    }
                   },
                   "status": "success"
                 }
@@ -29203,8 +29425,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 394
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 394
+                    }
                   },
                   "status": "success"
                 }
@@ -29443,8 +29668,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 394
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 394
+                    }
                   },
                   "status": "success"
                 }
@@ -29961,7 +30189,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 5 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 5 for session-004"
+            },
             "status": "success"
           }
         },
@@ -29974,7 +30205,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 5 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 5 for session-004"
+              },
               "status": "success"
             }
           },
@@ -30391,8 +30625,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 418
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 418
+                    }
                   },
                   "status": "success"
                 }
@@ -30631,8 +30868,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 418
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 418
+                    }
                   },
                   "status": "success"
                 }
@@ -31215,7 +31455,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 7 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 7 for session-001"
+            },
             "status": "success"
           }
         },
@@ -31228,7 +31471,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 7 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 7 for session-001"
+              },
               "status": "success"
             }
           },
@@ -31320,7 +31566,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 8 for session-001",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 8 for session-001"
+            },
             "status": "success"
           }
         },
@@ -31333,7 +31582,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 8 for session-001",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 8 for session-001"
+              },
               "status": "success"
             }
           },
@@ -31478,7 +31730,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 6 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 6 for session-004"
+            },
             "status": "success"
           }
         },
@@ -31491,7 +31746,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 6 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 6 for session-004"
+              },
               "status": "success"
             }
           },
@@ -32140,8 +32398,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 449
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 449
+                    }
                   },
                   "status": "success"
                 }
@@ -32380,8 +32641,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 449
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 449
+                    }
                   },
                   "status": "success"
                 }
@@ -33132,7 +33396,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 7 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 7 for session-004"
+            },
             "status": "success"
           }
         },
@@ -33145,7 +33412,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 7 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 7 for session-004"
+              },
               "status": "success"
             }
           },
@@ -33611,8 +33881,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 476
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 476
+                    }
                   },
                   "status": "success"
                 }
@@ -33851,8 +34124,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 476
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 476
+                    }
                   },
                   "status": "success"
                 }
@@ -34091,8 +34367,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 479
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 479
+                    }
                   },
                   "status": "success"
                 }
@@ -34331,8 +34610,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 479
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 479
+                    }
                   },
                   "status": "success"
                 }
@@ -34571,8 +34853,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 482
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 482
+                    }
                   },
                   "status": "success"
                 }
@@ -34811,8 +35096,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 482
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 482
+                    }
                   },
                   "status": "success"
                 }
@@ -35077,7 +35365,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 8 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 8 for session-004"
+            },
             "status": "success"
           }
         },
@@ -35090,7 +35381,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 8 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 8 for session-004"
+              },
               "status": "success"
             }
           },
@@ -35415,8 +35709,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 496
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 496
+                    }
                   },
                   "status": "success"
                 }
@@ -35655,8 +35952,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 496
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 496
+                    }
                   },
                   "status": "success"
                 }
@@ -35924,7 +36224,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 9 for session-003",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 9 for session-003"
+            },
             "status": "success"
           }
         },
@@ -35937,7 +36240,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 9 for session-003",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 9 for session-003"
+              },
               "status": "success"
             }
           },
@@ -36316,8 +36622,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 506
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 506
+                    }
                   },
                   "status": "success"
                 }
@@ -36556,8 +36865,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 506
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 506
+                    }
                   },
                   "status": "success"
                 }
@@ -36651,7 +36963,10 @@
         },
         "runtime_tool_output": {
           "outcome": {
-            "payload": "tool result 9 for session-004",
+            "payload": {
+              "$lash_tool_value": "untrusted_json",
+              "value": "tool result 9 for session-004"
+            },
             "status": "success"
           }
         },
@@ -36664,7 +36979,10 @@
           "duration_ms": 0,
           "output": {
             "outcome": {
-              "payload": "tool result 9 for session-004",
+              "payload": {
+                "$lash_tool_value": "untrusted_json",
+                "value": "tool result 9 for session-004"
+              },
               "status": "success"
             }
           },
@@ -36958,8 +37276,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 514
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 514
+                    }
                   },
                   "status": "success"
                 }
@@ -37198,8 +37519,11 @@
               "output": {
                 "outcome": {
                   "payload": {
-                    "completed": true,
-                    "wake_tick": 514
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "completed": true,
+                      "wake_tick": 514
+                    }
                   },
                   "status": "success"
                 }
@@ -37415,10 +37739,13 @@
         "runtime_tool_output": {
           "outcome": {
             "payload": {
-              "ok": true,
-              "resolved_by": "lash-sim-boundary-scheduler",
-              "session": "suspend-tool",
-              "suspend_kind": "tool"
+              "$lash_tool_value": "untrusted_json",
+              "value": {
+                "ok": true,
+                "resolved_by": "lash-sim-boundary-scheduler",
+                "session": "suspend-tool",
+                "suspend_kind": "tool"
+              }
             },
             "status": "success"
           }
@@ -37478,10 +37805,13 @@
         "runtime_tool_output": {
           "outcome": {
             "payload": {
-              "ok": true,
-              "resolved_by": "lash-sim-boundary-scheduler",
-              "session": "suspend-durable-effect",
-              "suspend_kind": "durable_effect"
+              "$lash_tool_value": "untrusted_json",
+              "value": {
+                "ok": true,
+                "resolved_by": "lash-sim-boundary-scheduler",
+                "session": "suspend-durable-effect",
+                "suspend_kind": "durable_effect"
+              }
             },
             "status": "success"
           }
@@ -37541,10 +37871,13 @@
         "runtime_tool_output": {
           "outcome": {
             "payload": {
-              "ok": true,
-              "resolved_by": "lash-sim-boundary-scheduler",
-              "session": "suspend-exec-code",
-              "suspend_kind": "exec_code"
+              "$lash_tool_value": "untrusted_json",
+              "value": {
+                "ok": true,
+                "resolved_by": "lash-sim-boundary-scheduler",
+                "session": "suspend-exec-code",
+                "suspend_kind": "exec_code"
+              }
             },
             "status": "success"
           }

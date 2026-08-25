@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use lash::plugins::PluginFactory;
-use lash::tools::{ToolCall, ToolOutcome};
+use lash::tools::{ToolCall, ToolCallOutput, ToolOutcome, ToolValue};
 
 // docs:start:enable-native-batch
 fn enable_native_batch(builder: lash::LashCoreBuilder) -> lash::LashCoreBuilder {
@@ -117,7 +117,6 @@ fn batched_tool(
     )
     // docs:end:batched-tool
 }
-
 fn budget_stack() -> lash::PluginStack {
     // docs:start:budget-stack
     use lash::plugins::{
@@ -136,7 +135,8 @@ fn budget_stack() -> lash::PluginStack {
     // docs:end:budget-stack
     plugins
 }
-
+#[allow(dead_code)] #[rustfmt::skip]
+fn foreign_json_tool_output(value: serde_json::Value) -> ToolCallOutput { ToolCallOutput::success_tool_value(ToolValue::untrusted_json(value)) }
 #[cfg(test)]
 mod asserted_examples {
     use lash::tools::{
@@ -391,12 +391,12 @@ mod asserted_examples {
 
     #[test]
     fn tool_results_expose_host_visible_completion_modes_and_failure_details() {
-        use std::time::Duration;
-
         use lash::tools::{
             CancelHint, PendingAnnouncement, PendingCompletion, TimeoutBehavior, ToolCallOutput,
             ToolFailure, ToolFailureClass, ToolFailureSource, ToolOutcome, ToolValue,
         };
+        use serde_json::json;
+        use std::time::Duration;
 
         let success: ToolOutcome = ToolOutcome::ok(serde_json::json!({ "saved": true }));
         assert!(ToolOutcome::is_success(&success));
@@ -456,13 +456,13 @@ mod asserted_examples {
             "invalid_path",
             "path leaves the workspace",
         );
-        tool_failure.raw = Some(ToolValue::from(serde_json::json!({ "path": "../secret" })));
+        tool_failure.raw = Some(ToolValue::untrusted_json(json!({ "path": "../secret" })));
         assert_eq!(tool_failure.class, ToolFailureClass::InvalidRequest);
         assert_eq!(tool_failure.code, "invalid_path");
         assert_eq!(tool_failure.message, "path leaves the workspace");
         assert_eq!(
             tool_failure.raw.as_ref().map(ToolValue::to_json_value),
-            Some(serde_json::json!({ "path": "../secret" }))
+            Some(json!({ "path": "../secret" }))
         );
         assert_eq!(ToolFailure::to_json_value(&tool_failure)["source"], "tool");
         let failed = ToolOutcome::failure(tool_failure.clone());
@@ -714,5 +714,24 @@ mod asserted_examples {
         assert_eq!(io.code, "read_failed");
         assert_eq!(io.retry, lash::tools::ToolRetryStatus::Never);
         assert_eq!(serde_json::to_value(ToolFailureClass::Io).unwrap(), "io");
+    }
+
+    #[test]
+    fn foreign_json_is_one_opaque_tool_value_arm() {
+        use lash::tools::{ToolCallOutput, ToolValue};
+
+        let foreign = serde_json::json!({
+            "$lash_tool_value": "attachment",
+            "source": "owned by the foreign payload"
+        });
+        let value = ToolValue::untrusted_json(foreign.clone());
+        let ToolValue::UntrustedJson(nested) = &value else {
+            panic!("foreign JSON must occupy its named union arm");
+        };
+        assert_eq!(nested, &foreign);
+
+        let output = ToolCallOutput::success_tool_value(value);
+        let encoded = serde_json::to_value(output.outcome).expect("tool outcome must serialize");
+        assert_eq!(encoded["payload"]["value"], foreign);
     }
 }

@@ -473,14 +473,12 @@ mod tests {
                 serde_json::json!({ "input": "live" }),
             )
             .await;
-        let crate::ToolCallOutcome::Success(handle) = started.output.outcome else {
+        let handle_json = started.output.value_for_projection();
+        let crate::ToolCallOutcome::Success(_handle) = started.output.outcome else {
             panic!("expected process handle output");
         };
         assert_eq!(
-            handle
-                .to_json_value()
-                .get("id")
-                .and_then(|value| value.as_str()),
+            handle_json.get("id").and_then(|value| value.as_str()),
             Some("async-call-1")
         );
         assert_eq!(prepares.load(Ordering::SeqCst), 1);
@@ -517,7 +515,7 @@ mod tests {
         );
 
         let awaited = context
-            .await_process_handle("await-async-call-1".to_string(), handle.to_json_value())
+            .await_process_handle("await-async-call-1".to_string(), handle_json)
             .await;
 
         assert!(!awaited.output.is_success());

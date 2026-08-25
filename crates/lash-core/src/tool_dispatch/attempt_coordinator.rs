@@ -585,12 +585,39 @@ fn project_recorded_intent_outcomes(
     let crate::ToolCallOutcome::Success(value) = &mut output.outcome else {
         return;
     };
-    let mut projected = value.to_json_value();
-    let Some(object) = projected.as_object_mut() else {
-        return;
+    match value {
+        crate::ToolValue::Object(object) => {
+            object.insert(
+                "sequence".to_string(),
+                crate::ToolValue::Number(sequence.into()),
+            );
+        }
+        crate::ToolValue::UntrustedJson(serde_json::Value::Object(object)) => {
+            object.insert("sequence".to_string(), serde_json::json!(sequence));
+        }
+        _ => return,
+    }
+    let encoded = match serde_json::to_value(&*value) {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Internal,
+                "tool_value_encode_failed",
+                format!("failed to encode projected tool value: {error}"),
+            ));
+            return;
+        }
     };
-    object.insert("sequence".to_string(), serde_json::json!(sequence));
-    *value = crate::ToolValue::from(projected);
+    match serde_json::from_value(encoded) {
+        Ok(decoded) => *value = decoded,
+        Err(error) => {
+            *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Internal,
+                "tool_value_decode_failed",
+                format!("malformed projected tool value: {error}"),
+            ));
+        }
+    }
 }
 
 fn runtime_failure_outcome(
@@ -665,6 +692,21 @@ mod projection_tests {
         }
     }
 
+    fn signal_outcome(sequence: u64) -> crate::ToolIntentExecutionOutcome {
+        crate::ToolIntentExecutionOutcome::Executed {
+            identity: crate::ToolIntentIdentity {
+                session_id: "session".to_string(),
+                execution_scope_id: "turn".to_string(),
+                tool_call_id: "call".to_string(),
+                intent_index: 0,
+                replay_key: "replay".to_string(),
+            },
+            kind: crate::ToolIntentKind::SignalProcess,
+            result: serde_json::json!({ "sequence": sequence }),
+            parent_end: None,
+        }
+    }
+
     #[test]
     fn command_refusal_projects_its_typed_code_and_message() {
         let mut output = crate::ToolCallOutput::success(serde_json::json!("optimistic"));
@@ -700,5 +742,22 @@ mod projection_tests {
             output.value_for_projection(),
             serde_json::json!("provider-terminal")
         );
+    }
+
+    #[test]
+    fn signal_projection_rejects_a_malformed_tagged_tool_value() {
+        let mut output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Object(
+            std::collections::BTreeMap::from([(
+                "$lash_tool_value".to_string(),
+                crate::ToolValue::String("attachment".to_string()),
+            )]),
+        ));
+
+        project_recorded_intent_outcomes(&mut output, &[signal_outcome(7)]);
+
+        let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
+            panic!("a malformed projected tag must become a typed decode failure");
+        };
+        assert_eq!(failure.code, "tool_value_decode_failed");
     }
 }

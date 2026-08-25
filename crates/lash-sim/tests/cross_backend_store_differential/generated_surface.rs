@@ -857,7 +857,13 @@ impl SurfaceRunner {
                             "call_id": "surface-intent-call",
                             "tool_name": "surface_intent_provider",
                             "args": {},
-                            "output": {"outcome": {"status": "success", "payload": {"ok": true}}},
+                            "output": {"outcome": {
+                                "status": "success",
+                                "payload": {
+                                    "$lash_tool_value": "untrusted_json",
+                                    "value": {"ok": true}
+                                }
+                            }},
                             "model_return": {
                                 "call_id": "surface-intent-call",
                                 "tool_name": "surface_intent_provider",

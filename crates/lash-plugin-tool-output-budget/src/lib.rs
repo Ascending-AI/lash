@@ -353,6 +353,11 @@ fn project_tool_value_parts(
         ToolValue::Attachment(reference) => {
             parts.push(ModelToolReturnPart::Attachment(reference.clone()));
         }
+        ToolValue::UntrustedJson(value) => parts.push(ModelToolReturnPart::text(project_text(
+            &render_projected_model_value(value),
+            budget,
+            ctx,
+        ))),
         ToolValue::Null
         | ToolValue::Bool(_)
         | ToolValue::Number(_)
@@ -382,6 +387,14 @@ fn push_projected_tool_value_parts(
         ToolValue::Attachment(reference) => {
             parts.push(ModelToolReturnPart::Attachment(reference.clone()));
         }
+        ToolValue::UntrustedJson(value) => push_text_part(
+            parts,
+            project_text(
+                &serde_json::to_string(value).unwrap_or_else(|_| "null".to_string()),
+                budget,
+                ctx,
+            ),
+        ),
         ToolValue::Array(items) => {
             push_text_part(parts, "[");
             for (index, item) in items.iter().enumerate() {

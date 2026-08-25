@@ -98,7 +98,7 @@ impl StaticToolExecute for FetchUrl {
             }
         };
         if !status.is_success() {
-            let body = ToolValue::from(value.clone());
+            let body = ToolValue::untrusted_json(value.clone());
             let mut failure = ToolFailure::tool(
                 ToolFailureClass::Execution,
                 "tavily_api_error",

@@ -8136,6 +8136,7 @@ lash::tools::ToolCallOutput::outcome
 lash::tools::ToolCallOutput::replace_attachment_source
 lash::tools::ToolCallOutput::status
 lash::tools::ToolCallOutput::success
+lash::tools::ToolCallOutput::success_tool_value
 lash::tools::ToolCallOutput::value_for_projection
 lash::tools::ToolCallOutput::with_control
 lash::tools::ToolCallRecord
@@ -8476,8 +8477,11 @@ lash::tools::ToolValue::Object
 lash::tools::ToolValue::Object::0
 lash::tools::ToolValue::String
 lash::tools::ToolValue::String::0
+lash::tools::ToolValue::UntrustedJson
+lash::tools::ToolValue::UntrustedJson::0
 lash::tools::ToolValue::attachments
 lash::tools::ToolValue::to_json_value
+lash::tools::ToolValue::untrusted_json
 lash::tools::catalogue_preview_contribution
 lash::tools::catalogue_preview_contribution_for_entries
 lash::tools::catalogue_preview_contribution_for_entries_with_options

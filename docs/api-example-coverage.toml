@@ -850,7 +850,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryAttachmentStore::raw_blobs_for_testing"]
 area = "attachments"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:2143#let memory_rows = InMemoryAttachmentStore::raw_blobs_for_testing(&memory);"
+usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:2149#let memory_rows = InMemoryAttachmentStore::raw_blobs_for_testing(&memory);"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -1284,7 +1284,7 @@ availability = "all-features"
 aliases = ["lash_core::TestLocalProcessRegistry::raw_state_for_testing"]
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:994#let raw = registry.raw_state_for_testing().await;"
+usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:1000#let raw = registry.raw_state_for_testing().await;"
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -1568,7 +1568,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryTriggerStore::raw_state_for_testing"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:1046#let raw = store.raw_state_for_testing();"
+usage = "crates/lash-sim/tests/cross_backend_store_differential/generated_surface.rs:1052#let raw = store.raw_state_for_testing();"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -7059,7 +7059,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedInputAccepted::applications", "lash_core::TurnEvent::QueuedInputAccepted::applications"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:350#lash_core::TurnEvent::QueuedInputAccepted { applications } => {"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:382#lash_core::TurnEvent::QueuedInputAccepted { applications } => {"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedMessagesCommitted"
@@ -7095,7 +7095,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted", "lash_core::TurnEvent::QueuedWorkStarted"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:203#lash_core::TurnEvent::QueuedWorkStarted {"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:235#lash_core::TurnEvent::QueuedWorkStarted {"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::batch_ids"
@@ -7104,7 +7104,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::batch_ids", "lash_core::TurnEvent::QueuedWorkStarted::batch_ids"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:205#batch_ids,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:237#batch_ids,"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::boundary"
@@ -7113,7 +7113,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::boundary", "lash_core::TurnEvent::QueuedWorkStarted::boundary"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:204#boundary,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:236#boundary,"
 
 [[api]]
 symbol = "lash::TurnEvent::QueuedWorkStarted::causes"
@@ -7122,7 +7122,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::QueuedWorkStarted::causes", "lash_core::TurnEvent::QueuedWorkStarted::causes"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:206#causes,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:238#causes,"
 
 [[api]]
 symbol = "lash::TurnEvent::ReasoningDelta"
@@ -12750,7 +12750,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::cursor"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:113#cursor,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:145#cursor,"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::payload"
@@ -12768,7 +12768,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::replay_incarnation_id"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:153#lash_core::SessionObservationEvent::replay_incarnation_id(event.as_ref()).to_string();"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:185#lash_core::SessionObservationEvent::replay_incarnation_id(event.as_ref()).to_string();"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::revision"
@@ -12777,7 +12777,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::revision"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:155#let revision = lash_core::SessionObservationEvent::revision(event.as_ref()).as_u64();"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:187#let revision = lash_core::SessionObservationEvent::revision(event.as_ref()).as_u64();"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::session_id"
@@ -12786,7 +12786,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::session_id"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:151#let session_id = lash_core::SessionObservationEvent::session_id(event.as_ref()).to_string();"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:183#let session_id = lash_core::SessionObservationEvent::session_id(event.as_ref()).to_string();"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEvent::turn_id"
@@ -12795,7 +12795,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEvent::turn_id"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:112#turn_id,"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:144#turn_id,"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload"
@@ -12918,7 +12918,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionObservationEventPayload::QueueChanged::kind"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:138#lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:170#lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {"
 
 [[api]]
 symbol = "lash::observe::SessionObservationEventPayload::TurnActivity"
@@ -58077,6 +58077,16 @@ usage = "examples/docs-snippets/src/plugins_tools.rs:437#let direct_output = Too
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::tools::ToolCallOutput::success_tool_value"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ToolCallOutput::success_tool_value"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:139#ToolCallOutput::success_tool_value(ToolValue::untrusted_json(value))"
+reason = "Setup-only evidence: the host example returns the typed output directly, but no production assertion observes the constructor independently from the enclosing tool result."
+
+[[api]]
 symbol = "lash::tools::ToolCallOutput::value_for_projection"
 kind = "function"
 availability = "default+all-features"
@@ -58630,7 +58640,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolControl::Finish::value"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:16#value: lash::tools::ToolValue::from(json!({"
+usage = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:16#value: lash::tools::ToolValue::untrusted_json(json!({"
 assertion = "examples/agent-workbench/src/main_sections/tests/tool_control.rs:182#lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })"
 
 [[api]]
@@ -59133,9 +59143,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolFailure::raw"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/plugins_tools.rs:459#tool_failure.raw = Some(ToolValue::from(serde_json::json!({ \"path\": \"../secret\" })));"
+usage = "examples/docs-snippets/src/plugins_tools.rs:459#tool_failure.raw = Some(ToolValue::untrusted_json(json!({ \"path\": \"../secret\" })));"
 assertion = "examples/docs-snippets/src/plugins_tools.rs:467#assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_results_expose_host_visible_completion_modes_and_failure_details#`tool_failure.raw = Some(ToolValue::from(serde_json::json!({ \"path\": \"../secret\" })));`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_results_expose_host_visible_completion_modes_and_failure_details#`assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");` in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolFailure::to_json_value(&tool_failure)[\"source\"]` equals `\"tool\"`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_results_expose_host_visible_completion_modes_and_failure_details#`tool_failure.raw = Some(ToolValue::untrusted_json(json!({ \"path\": \"../secret\" })));`; the assertion at examples/docs-snippets/src/plugins_tools.rs::asserted_examples::tool_results_expose_host_visible_completion_modes_and_failure_details#`assert_eq!(ToolFailure::to_json_value(&tool_failure)[\"source\"], \"tool\");` in `tool_results_expose_host_visible_completion_modes_and_failure_details` observes that `ToolFailure::to_json_value(&tool_failure)[\"source\"]` equals `\"tool\"`."
 
 [[api]]
 symbol = "lash::tools::ToolFailure::retry"
@@ -60540,6 +60550,24 @@ disposition = "unused-justify"
 reason = "Concrete host class: third-party plugin, provider, or tool-source implementers implementing the extension contract."
 
 [[api]]
+symbol = "lash::tools::ToolValue::UntrustedJson"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::ToolValue::UntrustedJson"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Foreign JSON enters through ToolValue::untrusted_json; host code should not construct the raw union variant directly."
+
+[[api]]
+symbol = "lash::tools::ToolValue::UntrustedJson::0"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::ToolValue::UntrustedJson::0"]
+area = "plugins"
+disposition = "unused-justify"
+reason = "Foreign JSON enters through ToolValue::untrusted_json; host code should not construct the raw union field directly."
+
+[[api]]
 symbol = "lash::tools::ToolValue::String"
 kind = "variant"
 availability = "default+all-features"
@@ -60576,6 +60604,16 @@ area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:34#.to_json_value()"
 assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:34#lash::tools::ToolValue::String(\"ready\".to_string()).to_json_value(),"
+
+[[api]]
+symbol = "lash::tools::ToolValue::untrusted_json"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash_core::ToolValue::untrusted_json"]
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/plugins_tools.rs:139#ToolValue::untrusted_json(value)"
+reason = "Setup-only evidence: the host example feeds the constructed arm directly into ToolCallOutput::success_tool_value, but no production assertion independently observes the constructor."
 
 [[api]]
 symbol = "lash::tools::catalogue_preview_contribution"

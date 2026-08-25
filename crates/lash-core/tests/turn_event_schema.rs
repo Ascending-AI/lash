@@ -303,7 +303,15 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "call_id": "call-1",
                 "name": "read_file",
                 "args": { "path": "x" },
-                "output": { "outcome": { "status": "success", "payload": "ok" } },
+                "output": {
+                    "outcome": {
+                        "status": "success",
+                        "payload": {
+                            "$lash_tool_value": "untrusted_json",
+                            "value": "ok",
+                        },
+                    },
+                },
                 "duration_ms": 7,
                 "graph_key": "effect:s:e",
                 "parent_call_id": "parent-1",

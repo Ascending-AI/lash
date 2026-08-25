@@ -211,24 +211,28 @@ struct PreparedSpawnAgent {
 /// carrying its reason.
 fn child_task_result(output: lash_core::ProcessAwaitOutput) -> Result<Value, String> {
     match output {
-        lash_core::ProcessAwaitOutput::Success { value, .. } => {
-            let turn: lash_core::facade_support::AssembledTurn = value
-                .get("turn")
-                .cloned()
-                .map(serde_json::from_value)
-                .transpose()
-                .map_err(|err| format!("subagent process output was malformed: {err}"))?
-                .ok_or_else(|| "subagent process output was missing its turn".to_string())?;
-            Ok(task_result_value(&turn))
-        }
-        lash_core::ProcessAwaitOutput::Failure { message, .. } => Err(message),
-        lash_core::ProcessAwaitOutput::Cancelled { message, .. } => Err(message),
         lash_core::ProcessAwaitOutput::Abandoned { .. } => {
             Err("subagent process was abandoned before recording an outcome".to_string())
         }
         lash_core::ProcessAwaitOutput::NoLongerRetained { .. } => {
             Err("subagent process outcome is no longer retained".to_string())
         }
+        output => match output.into_tool_output().outcome {
+            lash_core::ToolCallOutcome::Success(value) => {
+                let value = lash_core::ToolCallOutput::success_tool_value(value)
+                    .into_value_for_projection();
+                let turn: lash_core::facade_support::AssembledTurn = value
+                    .get("turn")
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|err| format!("subagent process output was malformed: {err}"))?
+                    .ok_or_else(|| "subagent process output was missing its turn".to_string())?;
+                Ok(task_result_value(&turn))
+            }
+            lash_core::ToolCallOutcome::Failure(failure) => Err(failure.message),
+            lash_core::ToolCallOutcome::Cancelled(cancellation) => Err(cancellation.message),
+        },
     }
 }
 

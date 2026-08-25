@@ -19,6 +19,38 @@ impl RemoteTurnActivity {
     }
 }
 
+fn encode_remote_tool_call_output(
+    output: lash_core::ToolCallOutput,
+) -> Result<serde_json::Value, RemoteProtocolError> {
+    let lash_core::ToolCallOutput { outcome, control } = output;
+    let (status, payload) = match outcome {
+        lash_core::ToolCallOutcome::Success(value) => ("success", value.to_json_value()),
+        lash_core::ToolCallOutcome::Failure(failure) => ("failure", failure.to_json_value()),
+        lash_core::ToolCallOutcome::Cancelled(cancellation) => {
+            ("cancelled", cancellation.to_json_value())
+        }
+    };
+    let mut encoded = serde_json::Map::from_iter([(
+        "outcome".to_string(),
+        serde_json::json!({ "status": status, "payload": payload }),
+    )]);
+    if let Some(control) = control {
+        let projected = match control {
+            lash_core::ToolControl::SwitchAgentFrame { .. } => {
+                encode_remote_json(control, "RemoteTurnEvent", "output.control")?
+            }
+            lash_core::ToolControl::Finish { value } => {
+                serde_json::json!({ "type": "finish", "value": value.to_json_value() })
+            }
+            lash_core::ToolControl::Fail { failure } => {
+                serde_json::json!({ "type": "fail", "failure": failure.to_json_value() })
+            }
+        };
+        encoded.insert("control".to_string(), projected);
+    }
+    Ok(serde_json::Value::Object(encoded))
+}
+
 impl From<&lash_core::SessionCursor> for RemoteSessionCursor {
     fn from(value: &lash_core::SessionCursor) -> Self {
         Self::new(value.to_string())
@@ -290,7 +322,7 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 call_id,
                 name,
                 args,
-                output: encode_remote_json(output, "RemoteTurnEvent", "output")?,
+                output: encode_remote_tool_call_output(output)?,
                 duration_ms,
                 graph_key,
                 parent_call_id,

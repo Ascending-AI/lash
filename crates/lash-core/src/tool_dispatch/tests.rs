@@ -2412,13 +2412,15 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
     // The attempt body runs under `catch_unwind`, so an assertion that panics
     // inside the provider comes back as a Done failure output. Pin the exact
     // success payload, or every in-provider law above this line is unenforced.
-    let crate::ToolCallOutcome::Success(value) = &outcome.record.output.outcome else {
+    let crate::ToolCallOutcome::Success(crate::ToolValue::UntrustedJson(value)) =
+        &outcome.record.output.outcome
+    else {
         panic!(
-            "an in-provider assertion panic surfaces here as a failure output: {:?}",
+            "an in-provider assertion panic or a lossy JSON decode surfaces here: {:?}",
             outcome.record.output.outcome
         );
     };
-    assert_eq!(value.to_json_value()["provider"], json!("done"));
+    assert_eq!(value["provider"], json!("done"));
     assert_eq!(
         outcome
             .intent_outcomes

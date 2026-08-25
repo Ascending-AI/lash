@@ -205,7 +205,7 @@ impl ToolOutcome {
             message,
             source: crate::ToolFailureSource::Tool,
             retry: crate::ToolRetryStatus::Never,
-            raw: Some(crate::ToolValue::from(result)),
+            raw: Some(crate::ToolValue::untrusted_json(result)),
         }))
     }
 
@@ -246,7 +246,7 @@ impl ToolOutcome {
     /// process-engine implementors whose tool call did not complete.
     pub fn cancelled_with_raw(message: impl Into<String>, raw: serde_json::Value) -> Self {
         let mut cancellation = crate::ToolCancellation::runtime(message);
-        cancellation.raw = Some(crate::ToolValue::from(raw));
+        cancellation.raw = Some(crate::ToolValue::untrusted_json(raw));
         Self::from_output(crate::ToolCallOutput::cancelled(cancellation))
     }
 
@@ -279,16 +279,16 @@ impl ToolOutcome {
             .expect("pending tool result has no projection value")
             .outcome
         {
-            crate::ToolCallOutcome::Success(value) => value.to_json_value(),
+            crate::ToolCallOutcome::Success(value) => tool_value_for_projection(value),
             crate::ToolCallOutcome::Failure(failure) => failure
                 .raw
                 .as_ref()
-                .map(crate::ToolValue::to_json_value)
+                .map(tool_value_for_projection)
                 .unwrap_or_else(|| failure.to_json_value()),
             crate::ToolCallOutcome::Cancelled(cancellation) => cancellation
                 .raw
                 .as_ref()
-                .map(crate::ToolValue::to_json_value)
+                .map(tool_value_for_projection)
                 .unwrap_or_else(|| cancellation.to_json_value()),
         }
     }
@@ -319,6 +319,10 @@ impl ToolOutcome {
     }
 }
 
+fn tool_value_for_projection(value: &crate::ToolValue) -> serde_json::Value {
+    crate::ToolCallOutput::success_tool_value(value.clone()).value_for_projection()
+}
+
 impl<T, E> From<Result<T, E>> for ToolOutcome
 where
     T: serde::Serialize,
@@ -343,7 +347,7 @@ pub(crate) fn tool_output_from_completion_resolution(
         crate::Resolution::Err(err) => {
             let mut failure =
                 crate::ToolFailure::tool(crate::ToolFailureClass::Execution, err.code, err.message);
-            failure.raw = err.raw.map(crate::ToolValue::from);
+            failure.raw = err.raw.map(crate::ToolValue::untrusted_json);
             crate::ToolCallOutput::failure(failure)
         }
         crate::Resolution::Timeout => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
