@@ -38,7 +38,7 @@ use super::continuation::{
     CodexContinuation, CodexWebsocketContextPlan, CodexWebsocketRequestPlan,
 };
 use super::credential::{CodexCredential, credential_transport_error};
-use super::session::{CodexWebSocketAttemptError, CodexWebsocketLease};
+use super::session::{CodexAttemptProgress, CodexWebSocketAttemptError, CodexWebsocketLease};
 use super::{CodexProvider, CodexTransport, PROVIDER};
 
 #[derive(Clone, Debug)]
@@ -126,37 +126,15 @@ impl CodexProvider {
         .with_code(code)
     }
 
-    fn response_state_started_output(state: &shared::ResponsesStreamState) -> bool {
-        state.output_started()
-    }
-
-    fn is_stale_previous_response_error(error: &LlmTransportError) -> bool {
-        let haystack = format!(
-            "{}\n{}\n{}",
-            error.message,
-            error.raw.as_deref().map(String::as_str).unwrap_or_default(),
-            error.code.as_deref().unwrap_or_default()
-        )
-        .to_ascii_lowercase();
-        haystack.contains("previous_response_id")
-            || haystack.contains("previous response")
-            || haystack.contains("previous response with id")
-    }
-
     async fn complete_websocket(
         &self,
         req: LlmRequest,
         credential: &CodexCredential,
         credential_generation: u64,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
-        let full_body =
-            self.build_request_body(&req, true)
-                .map_err(|error| CodexWebSocketAttemptError {
-                    error,
-                    events_seen: false,
-                    output_started: false,
-                    stale_previous_response: false,
-                })?;
+        let full_body = self
+            .build_request_body(&req, true)
+            .map_err(CodexWebSocketAttemptError::before_send)?;
         let timeouts = self.options.llm_timeouts();
         let connect_timeout =
             response_start_timeout(timeouts.request_timeout, timeouts.chunk_timeout, true)
@@ -187,8 +165,8 @@ impl CodexProvider {
                 Ok(response) => return Ok(response),
                 Err(err)
                     if plan.context.is_continued()
-                        && err.stale_previous_response
-                        && !err.output_started
+                        && err.is_stale_previous_response()
+                        && err.progress() < CodexAttemptProgress::OutputStarted
                         && !retry_state.after_stale_previous_response =>
                 {
                     self.clear_continuation(&req);
@@ -202,7 +180,7 @@ impl CodexProvider {
                 }
                 Err(err)
                     if reused_connection
-                        && !err.events_seen
+                        && err.progress() == CodexAttemptProgress::BeforeSend
                         && !retry_state.after_dead_reused_connection =>
                 {
                     retry_state.after_dead_reused_connection = true;
@@ -238,14 +216,11 @@ impl CodexProvider {
         let request_body = match serde_json::to_string(&websocket_body) {
             Ok(request_body) => request_body,
             Err(error) => {
-                return Err(CodexWebSocketAttemptError {
-                    error: LlmTransportError::new(format!(
+                return Err(CodexWebSocketAttemptError::before_send(
+                    LlmTransportError::new(format!(
                         "Failed to serialize Codex WebSocket body: {error}"
                     )),
-                    events_seen: false,
-                    output_started: false,
-                    stale_previous_response: false,
-                });
+                ));
             }
         };
         emit_provider_request_trace(
@@ -263,24 +238,23 @@ impl CodexProvider {
         };
         self.emit_websocket_attempt_trace(provider_trace.as_ref(), &diagnostics);
         let mut events_seen = false;
+        let mut state = shared::ResponsesStreamState::default();
         if let Err(error) = attempt
             .lease_mut()
             .websocket
             .send(WsMessage::Text(request_body.clone().into()))
             .await
         {
-            return Err(CodexWebSocketAttemptError {
-                error: LlmTransportError::new(format!("Codex WebSocket send failed: {error}"))
+            return Err(CodexWebSocketAttemptError::during_stream(
+                LlmTransportError::new(format!("Codex WebSocket send failed: {error}"))
                     .with_request_body(request_body.clone())
                     .retryable(true)
                     .with_code("websocket_send"),
                 events_seen,
-                output_started: false,
-                stale_previous_response: false,
-            });
+                &state,
+            ));
         }
 
-        let mut state = shared::ResponsesStreamState::default();
         let expose_thinking = self.options.expose_thinking;
         loop {
             let next_message =
@@ -288,17 +262,15 @@ impl CodexProvider {
             let Some(message) = (match next_message {
                 Ok(message) => message,
                 Err(_) => {
-                    let output_started = Self::response_state_started_output(&state);
-                    return Err(CodexWebSocketAttemptError {
-                        error: LlmTransportError::new("Codex WebSocket stream chunk timed out")
+                    return Err(CodexWebSocketAttemptError::during_stream(
+                        LlmTransportError::new("Codex WebSocket stream chunk timed out")
                             .with_kind(ProviderFailureKind::Timeout)
                             .with_request_body(request_body.clone())
                             .retryable(true)
                             .with_code("websocket_idle_timeout"),
                         events_seen,
-                        output_started,
-                        stale_previous_response: false,
-                    });
+                        &state,
+                    ));
                 }
             }) else {
                 break;
@@ -306,18 +278,14 @@ impl CodexProvider {
             let message = match message {
                 Ok(message) => message,
                 Err(error) => {
-                    let output_started = Self::response_state_started_output(&state);
-                    return Err(CodexWebSocketAttemptError {
-                        error: LlmTransportError::new(format!(
-                            "Codex WebSocket receive failed: {error}"
-                        ))
-                        .with_request_body(request_body.clone())
-                        .retryable(true)
-                        .with_code("websocket_receive"),
+                    return Err(CodexWebSocketAttemptError::during_stream(
+                        LlmTransportError::new(format!("Codex WebSocket receive failed: {error}"))
+                            .with_request_body(request_body.clone())
+                            .retryable(true)
+                            .with_code("websocket_receive"),
                         events_seen,
-                        output_started,
-                        stale_previous_response: false,
-                    });
+                        &state,
+                    ));
                 }
             };
             let raw = match message {
@@ -325,17 +293,15 @@ impl CodexProvider {
                 WsMessage::Binary(bytes) => match String::from_utf8(bytes.to_vec()) {
                     Ok(text) => text,
                     Err(error) => {
-                        let output_started = Self::response_state_started_output(&state);
-                        return Err(CodexWebSocketAttemptError {
-                            error: LlmTransportError::new(format!(
+                        return Err(CodexWebSocketAttemptError::during_stream(
+                            LlmTransportError::new(format!(
                                 "Codex WebSocket binary frame was not UTF-8: {error}"
                             ))
                             .with_request_body(request_body.clone())
                             .with_code("websocket_protocol"),
                             events_seen,
-                            output_started,
-                            stale_previous_response: false,
-                        });
+                            &state,
+                        ));
                     }
                 },
                 WsMessage::Close(_) => break,
@@ -359,8 +325,6 @@ impl CodexProvider {
                 shared::process_sse_event(PROVIDER, &raw, &mut state, Some(&mut emitted_parts))
             };
             if let Err(error) = process_result {
-                let output_started = Self::response_state_started_output(&state);
-                let stale_previous_response = Self::is_stale_previous_response_error(&error);
                 let mut partial = shared::response_from_stream_state(
                     state.clone(),
                     Some(request_body.clone()),
@@ -368,14 +332,13 @@ impl CodexProvider {
                 );
                 partial.terminal_reason = LlmTerminalReason::Unknown;
                 partial.generation_disposition = Some(Self::generation_disposition(req, full_body));
-                return Err(CodexWebSocketAttemptError {
-                    error: error
+                return Err(CodexWebSocketAttemptError::during_stream(
+                    error
                         .with_request_body(request_body.clone())
                         .with_partial_response(partial),
                     events_seen,
-                    output_started,
-                    stale_previous_response,
-                });
+                    &state,
+                ));
             }
             emit_stream_progress(
                 stream_events.as_ref(),
@@ -418,7 +381,6 @@ impl CodexProvider {
         if !terminal_response_seen
             && stream_termination == StreamTermination::RequireTerminalEvidence
         {
-            let output_started = Self::response_state_started_output(&state);
             let mut partial = shared::response_from_stream_state(
                 state.clone(),
                 Some(request_body.clone()),
@@ -426,17 +388,16 @@ impl CodexProvider {
             );
             partial.terminal_reason = LlmTerminalReason::Unknown;
             partial.generation_disposition = Some(Self::generation_disposition(req, full_body));
-            return Err(CodexWebSocketAttemptError {
-                error: LlmTransportError::new("Codex WebSocket ended before response.completed")
+            return Err(CodexWebSocketAttemptError::during_stream(
+                LlmTransportError::new("Codex WebSocket ended before response.completed")
                     .with_request_body(request_body)
                     .with_kind(ProviderFailureKind::Stream)
                     .retryable(true)
                     .with_code("websocket_closed_before_completed")
                     .with_partial_response(partial),
                 events_seen,
-                output_started,
-                stale_previous_response: false,
-            });
+                &state,
+            ));
         }
 
         let final_response = state.final_response.clone();
@@ -714,7 +675,8 @@ impl Provider for CodexProvider {
                         return Ok(response);
                     }
                     Err(err)
-                        if matches!(self.transport, CodexTransport::Auto) && !err.events_seen =>
+                        if matches!(self.transport, CodexTransport::Auto)
+                            && err.progress() == CodexAttemptProgress::BeforeSend =>
                     {
                         self.record_websocket_fallback(&req, &err.error);
                         tracing::debug!(
@@ -725,7 +687,8 @@ impl Provider for CodexProvider {
                     }
                     Err(err) => {
                         self.clear_continuation(&req);
-                        return Err(err.error.with_output_started(err.output_started));
+                        let output_started = err.progress() == CodexAttemptProgress::OutputStarted;
+                        return Err(err.error.with_output_started(output_started));
                     }
                 }
             }

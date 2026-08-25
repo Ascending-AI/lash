@@ -274,7 +274,6 @@ fn codex_null_incomplete_details_does_not_map_to_output_limit() {
             response_meta: None,
         }],
     );
-
     assert_eq!(terminal_reason, LlmTerminalReason::Stop);
 }
 
@@ -284,7 +283,6 @@ fn codex_content_filter_incomplete_maps_to_content_filter() {
         &json!({"status":"incomplete","incomplete_details":{"reason":"content_filter"}}),
         &[],
     );
-
     assert_eq!(terminal_reason, LlmTerminalReason::ContentFilter);
 }
 
@@ -294,11 +292,9 @@ fn codex_request_body_emits_reasoning_from_capability_variant() {
     req.model = "custom-codex-model".to_string();
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
     req.model_capability = reasoning_capability();
-
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
-
     assert_eq!(body["reasoning"], json!({ "effort": "high" }));
 }
 
@@ -307,11 +303,9 @@ fn codex_request_body_emits_none_effort_for_disabled_selection() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Disabled;
     req.model_capability = reasoning_capability();
-
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
-
     assert_eq!(body["reasoning"], json!({ "effort": "none" }));
 }
 
@@ -320,11 +314,9 @@ fn codex_request_body_omits_reasoning_without_capability() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model = "custom-codex-model".to_string();
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("high".to_string());
-
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
-
     assert!(body.get("reasoning").is_none());
 }
 
@@ -368,12 +360,10 @@ fn raw_codex_builder_strips_unstamped_and_foreign_replay_fields() {
             },
         ],
     )]);
-
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .expect("Codex request serializes its neutral fallback");
     let wire = body.to_string();
-
     assert!(wire.contains("portable answer"));
     assert!(!wire.contains("unstamped-response-id"));
     assert!(!wire.contains("foreign-encrypted-content"));
@@ -443,7 +433,6 @@ async fn raw_provider_complete_filters_codex_sse_and_websocket_wire_captures() {
         .expect("raw Codex SSE completion");
     let sse_wire = http.captured().join("\n");
     assert_codex_adversarial_replay_absent(&sse_wire);
-
     let ws = spawn_scripted_websocket(vec![ScriptedWsAction::Complete {
         response_id: "resp-ws",
         message_id: "msg-ws",
@@ -467,12 +456,10 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model_variant = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
     req.model_capability = reasoning_capability();
-
     let hidden = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, true)
         .unwrap();
     assert_eq!(hidden["reasoning"], json!({ "effort": "medium" }));
-
     let exposed = CodexProvider::new("access", "refresh", 0)
         .with_options(ProviderOptions {
             expose_thinking: true,
@@ -496,7 +483,6 @@ fn codex_request_omits_output_token_cap() {
         )
         .unwrap();
     assert!(provider_limited.get("max_output_tokens").is_none());
-
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.generation.output_token_cap = NonZeroUsize::new(2_048);
     let request_limited = provider.build_request_body(&req, false).unwrap();
@@ -522,7 +508,6 @@ fn response_failed_server_error_is_retryable() {
             None,
         )
         .unwrap_err();
-
     assert!(err.retryable);
     assert_eq!(err.message, "internal stream ended unexpectedly");
 }
@@ -545,7 +530,6 @@ fn codex_request_uses_openai_schema_projection() {
         .into(),
         strict: true,
     }));
-
     let body = CodexProvider::new("access", "refresh", 0)
         .build_request_body(&req, false)
         .unwrap();
@@ -577,9 +561,7 @@ fn codex_request_history_preserves_assistant_message_metadata() {
             cache_breakpoint: false,
         }],
     )]);
-
     let body = provider.build_request_body(&req, false).unwrap();
-
     assert_eq!(body["input"][0]["type"], "message");
     assert_eq!(body["input"][0]["id"], "msg_1");
     assert_eq!(body["input"][0]["status"], "completed");
@@ -611,7 +593,6 @@ fn codex_cached_continuation_sends_delta_after_prior_request_and_response_items(
         }),
     )
     .expect("completed continuation");
-
     let second = request(vec![
         LlmMessage::text(LlmRole::User, "hello"),
         LlmMessage::new(
@@ -633,7 +614,6 @@ fn codex_cached_continuation_sends_delta_after_prior_request_and_response_items(
     let second_body = provider.build_request_body(&second, true).unwrap();
     let cached_body =
         CodexProvider::cached_websocket_body(&continuation, &second_body).expect("cached body");
-
     assert_eq!(cached_body["previous_response_id"], "resp_1");
     assert_eq!(
         cached_body["input"].as_array().expect("delta input").len(),
@@ -649,7 +629,6 @@ fn codex_websocket_request_uses_response_create_event_shape() {
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     let body = provider.build_request_body(&req, true).unwrap();
     let websocket_body = CodexProvider::websocket_create_request(&body);
-
     assert_eq!(websocket_body["type"], "response.create");
     assert_eq!(websocket_body["model"], body["model"]);
     assert_eq!(websocket_body["input"], body["input"]);
@@ -1717,7 +1696,28 @@ async fn codex_scripted_websocket_accept_loop_gives_up_loudly_after_the_bound() 
 }
 
 #[tokio::test]
-async fn codex_scripted_websocket_mid_stream_failure_does_not_fallback() {
+async fn codex_auto_allocation_only_event_failure_does_not_fallback_to_sse() {
+    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::AllocationThenError {
+        message_id: "msg_empty",
+        message: "stream exploded",
+    }])
+    .await;
+    let http = spawn_http_sse("resp_http", "msg_http", "fallback").await;
+    let mut provider =
+        websocket_test_provider(CodexTransport::Auto, http.url.clone(), ws.url.clone());
+
+    let err = provider
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .await
+        .expect_err("events-seen websocket failure");
+    assert!(err.message.contains("stream exploded"));
+    assert!(!err.output_started, "allocation alone is not host output");
+    assert_eq!(http.captured_len(), 0, "SSE must not replay the request");
+    assert_eq!(ws.captured().len(), 1);
+}
+
+#[tokio::test]
+async fn codex_auto_output_started_failure_does_not_fallback_to_sse() {
     let ws = spawn_scripted_websocket(vec![ScriptedWsAction::MidStreamError {
         message_id: "msg_1",
         text: "partial",
@@ -1731,10 +1731,10 @@ async fn codex_scripted_websocket_mid_stream_failure_does_not_fallback() {
     let err = provider
         .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
         .await
-        .expect_err("mid-stream websocket failure");
-
+        .expect_err("output-started websocket failure");
     assert!(err.message.contains("stream exploded"));
-    assert_eq!(http.captured_len(), 0);
+    assert!(err.output_started, "the text delta commits provider output");
+    assert_eq!(http.captured_len(), 0, "SSE must not replay the request");
     assert_eq!(ws.captured().len(), 1);
 }
 
