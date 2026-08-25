@@ -26,6 +26,26 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("docs-only diff", plan["reason"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
+    def test_docs_markdown_file_stays_docs_only(self) -> None:
+        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")])
+        self.assertEqual("true", plan["docs_only"])
+        self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_api_surface_snapshot_runs_every_expensive_family(self) -> None:
+        plan = ci_plan.classify([("M", "docs/api-surface.snapshot")])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_api_example_coverage_fixture_runs_every_expensive_family(self) -> None:
+        plan = ci_plan.classify([("M", "docs/api-example-coverage.toml")])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_extensionless_docs_path_runs_every_expensive_family(self) -> None:
+        plan = ci_plan.classify([("M", "docs/CNAME")])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
     def test_docs_deletion_mixed_with_docs_modification_runs_everything(self) -> None:
         plan = ci_plan.classify([("D", "docs/old.md"), ("M", "README.md")])
         self.assertEqual("false", plan["docs_only"])
@@ -41,6 +61,11 @@ class ClassifyTests(unittest.TestCase):
     def test_rust_change_runs_every_expensive_family(self) -> None:
         plan = ci_plan.classify([("M", "crates/lash-core/src/lib.rs")])
         self.assertEqual("true", plan["rust_code"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_readme_prefixed_rust_file_runs_every_expensive_family(self) -> None:
+        plan = ci_plan.classify([("A", "crates/x/src/readme_gen.rs")])
+        self.assertEqual("false", plan["docs_only"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_each_global_invalidator_runs_everything(self) -> None:
