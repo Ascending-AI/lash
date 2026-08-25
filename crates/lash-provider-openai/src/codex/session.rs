@@ -84,13 +84,13 @@ struct PrunableWebsocketSession {
 }
 
 impl CodexWebsocketSessionEntry {
-    fn reserved(credential_generation: u64) -> Self {
+    pub(super) fn reserved(credential_generation: u64) -> Self {
         Self::Reserved {
             credential_generation,
         }
     }
 
-    fn credential_generation(&self) -> u64 {
+    pub(super) fn credential_generation(&self) -> u64 {
         match self {
             Self::Reserved {
                 credential_generation,
@@ -183,9 +183,15 @@ impl CodexWebSocketAttemptError {
 }
 
 impl CodexProvider {
-    fn remove_websocket_scope(&self, scope_key: &str) {
+    pub(super) fn remove_websocket_scope(&self, scope_key: &str, credential_generation: u64) {
         let mut sessions = self.websocket_sessions.inner.lock_recover();
-        sessions.by_scope.remove(scope_key);
+        if sessions
+            .by_scope
+            .get(scope_key)
+            .is_some_and(|entry| entry.credential_generation() == credential_generation)
+        {
+            sessions.by_scope.remove(scope_key);
+        }
     }
 
     pub(super) fn prune_idle_websocket_sessions(sessions: &mut CodexWebsocketSessions) {
@@ -501,7 +507,7 @@ impl CodexProvider {
                 {
                     Ok(websocket) => websocket,
                     Err(error) => {
-                        self.remove_websocket_scope(&scope_key);
+                        self.remove_websocket_scope(&scope_key, credential_generation);
                         return Err(error);
                     }
                 };

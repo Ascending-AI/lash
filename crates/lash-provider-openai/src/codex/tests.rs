@@ -746,14 +746,30 @@ fn codex_websocket_scope_cache_generation_eviction_preserves_leased_slot() {
     let mut sessions = CodexWebsocketSessions::default();
     sessions.by_scope.insert(
         "leased".to_string(),
+        CodexWebsocketSessionEntry::reserved(4),
+    );
+    CodexProvider::evict_websocket_sessions_for_generation(&mut sessions, 5);
+    assert!(sessions.by_scope.contains_key("leased"));
+}
+
+fn assert_cleanup_preserves_newer_generation(cleanup: impl FnOnce(&CodexProvider, String)) {
+    let provider = CodexProvider::new("access", "refresh", 0);
+    let scope_key = "rotated".to_string();
+    let mut sessions = provider.websocket_sessions.inner.lock_recover();
+    sessions.by_scope.insert(
+        scope_key.clone(),
         CodexWebsocketSessionEntry::Reserved {
-            credential_generation: 4,
+            credential_generation: 5,
         },
     );
-
-    CodexProvider::evict_websocket_sessions_for_generation(&mut sessions, 5);
-
-    assert!(sessions.by_scope.contains_key("leased"));
+    drop(sessions);
+    cleanup(&provider, scope_key.clone());
+    let sessions = provider.websocket_sessions.inner.lock_recover();
+    let generation = sessions
+        .by_scope
+        .get(&scope_key)
+        .map(CodexWebsocketSessionEntry::credential_generation);
+    assert_eq!(generation, Some(5));
 }
 
 #[tokio::test]
@@ -762,44 +778,27 @@ async fn codex_websocket_release_preserves_newer_generation_reservation() {
     let (websocket, _) = tokio_tungstenite::connect_async(&ws.url)
         .await
         .expect("connect old-generation websocket");
-    let provider = CodexProvider::new("access", "refresh", 0);
-    let scope_key = "rotated".to_string();
-    provider
-        .websocket_sessions
-        .inner
-        .lock_recover()
-        .by_scope
-        .insert(
-            scope_key.clone(),
-            CodexWebsocketSessionEntry::Reserved {
-                credential_generation: 5,
+    assert_cleanup_preserves_newer_generation(move |provider, scope_key| {
+        provider.release_websocket_lease(
+            CodexWebsocketLease {
+                websocket,
+                scope_key: Some(scope_key),
+                reusable: true,
+                reused: false,
+                continuation: None,
+                credential_generation: 4,
             },
+            true,
+            None,
         );
+    });
+}
 
-    provider.release_websocket_lease(
-        CodexWebsocketLease {
-            websocket,
-            scope_key: Some(scope_key.clone()),
-            reusable: true,
-            reused: false,
-            continuation: None,
-            credential_generation: 4,
-        },
-        true,
-        None,
-    );
-
-    let sessions = provider.websocket_sessions.inner.lock_recover();
-    let entry = sessions
-        .by_scope
-        .get(&scope_key)
-        .expect("new-generation reservation remains");
-    assert!(matches!(
-        entry,
-        CodexWebsocketSessionEntry::Reserved {
-            credential_generation: 5
-        }
-    ));
+#[test]
+fn codex_websocket_connect_failure_preserves_newer_generation_reservation() {
+    assert_cleanup_preserves_newer_generation(|provider, scope_key| {
+        provider.remove_websocket_scope(&scope_key, 4);
+    });
 }
 
 async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {
