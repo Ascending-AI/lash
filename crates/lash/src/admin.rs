@@ -7,11 +7,13 @@ use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
 pub use lash_core::facade_support::AcceptedInjectedTurnInput;
 
 #[derive(Clone)]
+/// Resolves completion requests through a configured Lash core.
 pub struct Completions {
     pub(crate) core: LashCore,
 }
 
 impl Completions {
+    /// Resolves the completion request and returns its output.
     pub async fn resolve(
         &self,
         key: lash_core::AwaitEventKey,
@@ -57,6 +59,7 @@ impl CoreTriggerAdmin {
             })
     }
 
+    /// Emits a trigger event and returns the resulting delivery report.
     pub async fn emit(
         &self,
         request: lash_core::TriggerOccurrenceRequest,
@@ -75,6 +78,7 @@ impl CoreTriggerAdmin {
             .map_err(Into::into)
     }
 
+    /// Returns the active trigger subscriptions.
     pub async fn subscriptions(
         &self,
         filter: lash_core::TriggerSubscriptionFilter,
@@ -89,59 +93,69 @@ impl CoreTriggerAdmin {
 }
 
 #[derive(Clone)]
+/// Facade handle for session administration.
 pub struct SessionAdmin {
     pub(crate) runtime: RuntimeHandle,
 }
 
 impl SessionAdmin {
+    /// Returns the session-configuration administration facade.
     pub fn config(&self) -> SessionConfigAdmin {
         SessionConfigAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the tool administration facade.
     pub fn tools(&self) -> ToolAdmin {
         ToolAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the session-command administration facade.
     pub fn commands(&self) -> SessionCommandAdmin {
         SessionCommandAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the trigger administration facade.
     pub fn triggers(&self) -> SessionTriggerAdmin {
         SessionTriggerAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the current administration state.
     pub fn state(&self) -> SessionStateAdmin {
         SessionStateAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the child-session administration facade.
     pub fn children(&self) -> ChildSessionAdmin {
         ChildSessionAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the turn-input injection administration facade.
     pub fn injection(&self) -> InjectionAdmin {
         InjectionAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the protocol administration facade.
     pub fn protocol(&self) -> ProtocolAdmin {
         ProtocolAdmin {
             control: self.clone(),
         }
     }
 
+    /// Returns the process administration facade.
     pub fn processes(&self) -> SessionProcessAdmin {
         SessionProcessAdmin {
             control: self.clone(),
@@ -835,27 +849,33 @@ fn turn_input_from_plugin_message(message: PluginMessage) -> TurnInput {
 }
 
 #[derive(Clone)]
+/// Facade handle for session config administration.
 pub struct SessionConfigAdmin {
     control: SessionAdmin,
 }
 
 impl SessionConfigAdmin {
+    /// Applies a configuration patch to the session.
     pub async fn update(&self, patch: SessionConfigPatch) -> Result<()> {
         self.control.update_config(patch).await
     }
 
+    /// Sets prompt template.
     pub async fn set_prompt_template(&self, template: PromptTemplate) -> Result<()> {
         self.control.set_prompt_template(template).await
     }
 
+    /// Clears prompt template.
     pub async fn clear_prompt_template(&self) -> Result<()> {
         self.control.clear_prompt_template().await
     }
 
+    /// Adds prompt contribution.
     pub async fn add_prompt_contribution(&self, contribution: PromptContribution) -> Result<()> {
         self.control.add_prompt_contribution(contribution).await
     }
 
+    /// Replaces prompt slot.
     pub async fn replace_prompt_slot(
         &self,
         slot: PromptSlot,
@@ -864,12 +884,14 @@ impl SessionConfigAdmin {
         self.control.replace_prompt_slot(slot, contributions).await
     }
 
+    /// Clears prompt slot.
     pub async fn clear_prompt_slot(&self, slot: PromptSlot) -> Result<()> {
         self.control.clear_prompt_slot(slot).await
     }
 }
 
 #[derive(Clone)]
+/// Facade handle for tool administration.
 pub struct ToolAdmin {
     control: SessionAdmin,
 }
@@ -881,10 +903,12 @@ impl ToolAdmin {
 }
 
 impl ToolAdmin {
+    /// Returns the current administration state.
     pub async fn state(&self) -> Result<ToolState> {
         self.control.tool_state().await
     }
 
+    /// Returns the advanced configuration facade.
     pub fn advanced(&self) -> AdvancedToolAdmin {
         AdvancedToolAdmin {
             control: self.control.clone(),
@@ -903,10 +927,12 @@ impl ToolAdmin {
             .await
     }
 
+    /// Applies multiple tool-membership updates atomically.
     pub async fn set_membership_many(&self, updates: &[(lash_core::ToolId, bool)]) -> Result<u64> {
         self.control.set_tool_membership_many(updates).await
     }
 
+    /// Returns the manifests for active tools.
     pub async fn active_manifests(&self) -> Result<Vec<ToolManifest>> {
         self.control.active_tool_manifests().await
     }
@@ -976,6 +1002,7 @@ impl ToolAdmin {
 }
 
 #[derive(Clone)]
+/// Facade handle for advanced tool administration.
 pub struct AdvancedToolAdmin {
     control: SessionAdmin,
 }
@@ -1008,6 +1035,7 @@ impl AdvancedToolAdmin {
 }
 
 #[derive(Clone)]
+/// Facade handle for session command administration.
 pub struct SessionCommandAdmin {
     control: SessionAdmin,
 }
@@ -1064,6 +1092,7 @@ impl SessionTriggerAdmin {
 }
 
 #[derive(Clone)]
+/// Facade handle for session process administration.
 pub struct SessionProcessAdmin {
     control: SessionAdmin,
 }
@@ -1102,6 +1131,7 @@ impl SessionProcessAdmin {
             .map_err(Into::into)
     }
 
+    /// Starts a process in this session.
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
@@ -1142,6 +1172,7 @@ impl SessionProcessAdmin {
             .find(|process| process.process_id == process_id))
     }
 
+    /// Returns the process event stream from the requested offset.
     pub async fn events(
         &self,
         process_id: &str,
@@ -1156,10 +1187,12 @@ impl SessionProcessAdmin {
             .map_err(Into::into)
     }
 
+    /// Waits for a process to produce its terminal output.
     pub async fn await_output(&self, process_id: &str) -> Result<lash_core::ProcessAwaitOutput> {
         self.control.await_process_output(process_id).await
     }
 
+    /// Delivers a signal to a process.
     pub async fn signal(
         &self,
         process_id: &str,
@@ -1179,6 +1212,7 @@ impl SessionProcessAdmin {
             .await
     }
 
+    /// Requests cancellation of a process.
     pub async fn cancel(
         &self,
         process_id: &str,
@@ -1189,6 +1223,7 @@ impl SessionProcessAdmin {
             .await
     }
 
+    /// Requests cancellation of every process in the session.
     pub async fn cancel_all(
         &self,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -1226,19 +1261,23 @@ impl SessionProcessAdmin {
 }
 
 #[derive(Clone)]
+/// Facade handle for session state administration.
 pub struct SessionStateAdmin {
     control: SessionAdmin,
 }
 
 impl SessionStateAdmin {
+    /// Exports the session's current state as a snapshot.
     pub async fn export(&self) -> lash_core::SessionSnapshot {
         self.control.export_state().await
     }
 
+    /// Appends protocol messages to the persisted session transcript.
     pub async fn append_messages(&self, messages: Vec<PluginMessage>) -> Result<()> {
         self.control.append_messages(messages).await
     }
 
+    /// Appends a plugin-authored body to the persisted session transcript.
     pub async fn append_plugin_body(
         &self,
         plugin_type: impl Into<String>,
@@ -1247,24 +1286,29 @@ impl SessionStateAdmin {
         self.control.append_plugin_body(plugin_type, body).await
     }
 
+    /// Replaces the persisted runtime session state.
     pub async fn set_persisted(&self, state: RuntimeSessionState) -> Result<()> {
         self.control.set_persisted_state(state).await
     }
 
+    /// Persists and returns the session's current runtime state.
     pub async fn persist_current(&self) -> Result<RuntimeSessionState> {
         self.control.persist_current_state().await
     }
 
+    /// Returns the session-state persistence service.
     pub async fn session_state_service(&self) -> Result<Arc<dyn SessionStateService>> {
         self.control.session_state_service().await
     }
 
+    /// Captures the current execution state for a durable process.
     pub async fn snapshot_execution(
         &self,
     ) -> Result<Option<lash_core::plugin::HydratedExecutionState>> {
         self.control.snapshot_execution_state().await
     }
 
+    /// Restores durable process execution from a snapshot.
     pub async fn restore_execution(
         &self,
         snapshot: &lash_core::plugin::HydratedExecutionState,
@@ -1272,6 +1316,7 @@ impl SessionStateAdmin {
         self.control.restore_execution_state(snapshot).await
     }
 
+    /// Compacts the persisted session context using the supplied request.
     pub async fn compact_context(
         &self,
         instructions: Option<String>,
@@ -1284,11 +1329,13 @@ impl SessionStateAdmin {
 }
 
 #[derive(Clone)]
+/// Invokes typed or raw operations on plugins bound to a session.
 pub struct PluginOperations {
     pub(crate) control: SessionAdmin,
 }
 
 impl PluginOperations {
+    /// Invokes a typed query operation on the bound plugin.
     pub async fn query<Op: lash_core::facade_support::PluginQuery>(
         &self,
         args: Op::Args,
@@ -1300,6 +1347,7 @@ impl PluginOperations {
         decode_plugin_output::<Op>(output)
     }
 
+    /// Invokes a raw query operation on the bound plugin.
     pub async fn query_raw(
         &self,
         name: &str,
@@ -1308,6 +1356,7 @@ impl PluginOperations {
         self.control.query_plugin_raw(name, args).await
     }
 
+    /// Invokes a typed command operation on the bound plugin.
     pub async fn run_command<Op: lash_core::facade_support::PluginCommand>(
         &self,
         args: Op::Args,
@@ -1323,6 +1372,7 @@ impl PluginOperations {
         })
     }
 
+    /// Invokes a raw command operation on the bound plugin.
     pub async fn run_command_raw(
         &self,
         name: &str,
@@ -1331,6 +1381,7 @@ impl PluginOperations {
         self.control.run_plugin_command_raw(name, args).await
     }
 
+    /// Invokes a typed task operation on the bound plugin.
     pub async fn run_task<Op: lash_core::facade_support::PluginTask>(
         &self,
         args: Op::Args,
@@ -1339,6 +1390,7 @@ impl PluginOperations {
             .await
     }
 
+    /// Invokes a typed task operation with cancellation support.
     pub async fn run_task_with_cancel<Op: lash_core::facade_support::PluginTask>(
         &self,
         args: Op::Args,
@@ -1359,6 +1411,7 @@ impl PluginOperations {
         })
     }
 
+    /// Invokes a raw task operation on the bound plugin.
     pub async fn run_task_raw(
         &self,
         name: &str,
@@ -1368,6 +1421,7 @@ impl PluginOperations {
             .await
     }
 
+    /// Invokes a raw task operation with cancellation support.
     pub async fn run_task_raw_with_cancel(
         &self,
         name: &str,
@@ -1403,30 +1457,36 @@ fn decode_plugin_output<Op: lash_core::facade_support::PluginOperation>(
 }
 
 #[derive(Clone)]
+/// Facade handle for child session administration.
 pub struct ChildSessionAdmin {
     control: SessionAdmin,
 }
 
 impl ChildSessionAdmin {
+    /// Creates a child session from the supplied request.
     pub async fn create_session(&self, request: SessionCreateRequest) -> Result<SessionHandle> {
         self.control.create_child_session(request).await
     }
 
+    /// Closes the identified child session.
     pub async fn close_session(&self, session_id: &str) -> Result<()> {
         self.control.close_child_session(session_id).await
     }
 
+    /// Activates an existing managed child session.
     pub async fn activate_managed_session(&self, session_id: &str) -> Result<()> {
         self.control.activate_managed_session(session_id).await
     }
 }
 
 #[derive(Clone)]
+/// Facade handle for injection administration.
 pub struct InjectionAdmin {
     control: SessionAdmin,
 }
 
 impl InjectionAdmin {
+    /// Injects input for the session's next turn.
     pub async fn inject_turn_input(
         &self,
         turn_id: &str,
@@ -1436,6 +1496,7 @@ impl InjectionAdmin {
         self.control.inject_turn_input(turn_id, id, message).await
     }
 
+    /// Injects inputs for a specific session turn.
     pub async fn inject_turn_inputs_for_turn(
         &self,
         turn_id: &str,
@@ -1448,11 +1509,13 @@ impl InjectionAdmin {
 }
 
 #[derive(Clone)]
+/// Facade handle for protocol administration.
 pub struct ProtocolAdmin {
     control: SessionAdmin,
 }
 
 impl ProtocolAdmin {
+    /// Applies a protocol extension to the session.
     pub async fn apply_session_extension(
         &self,
         extension: lash_core::ProtocolSessionExtensionHandle,

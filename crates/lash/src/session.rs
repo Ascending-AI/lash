@@ -58,17 +58,20 @@ impl SessionBuilder {
         Ok(self)
     }
 
+    /// Configures the provider and returns the updated builder.
     pub fn provider(mut self, provider: ProviderHandle) -> Self {
         self.spec = self.spec.provider_id(provider.kind());
         self.provider = Some(provider);
         self
     }
 
+    /// Configures the session spec and returns the updated builder.
     pub fn session_spec(mut self, spec: SessionSpec) -> Self {
         self.spec = spec;
         self
     }
 
+    /// Configures the parent and returns the updated builder.
     pub fn parent(mut self, parent_session_id: impl Into<String>) -> Self {
         self.parent_session_id = Some(parent_session_id.into());
         self
@@ -85,6 +88,7 @@ impl SessionBuilder {
         self
     }
 
+    /// Configures the plugin and returns the updated builder.
     pub fn plugin<P: PluginBinding>(mut self, config: P::SessionConfig) -> Self {
         self.active_plugins.push(ActivePluginBinding {
             id: P::ID,
@@ -94,6 +98,7 @@ impl SessionBuilder {
         self
     }
 
+    /// Opens the configured session and returns its active handle.
     pub async fn open(self) -> Result<LashSession> {
         let policy = self.session_policy();
         let store = self.create_store(&policy).await?;
@@ -366,6 +371,7 @@ impl PromptLayerSink for SessionBuilder {
 }
 
 #[derive(Clone)]
+/// Provides the primary app-facing handle for an active Lash session.
 pub struct LashSession {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) effect_host: Arc<dyn EffectHost>,
@@ -484,6 +490,7 @@ impl LashSession {
             .map_err(|_| EmbedError::SessionStillInUse)
     }
 
+    /// Returns the session identifier.
     pub fn session_id(&self) -> String {
         self.runtime.observe().session_id().to_string()
     }
@@ -504,24 +511,29 @@ impl LashSession {
         lash_core::facade_support::TurnAddress::new(observation.session_id(), turn_id)
     }
 
+    /// Returns a snapshot of the session policy.
     pub fn policy_snapshot(&self) -> SessionPolicy {
         self.runtime.observe().policy.clone()
     }
 
+    /// Returns an observable handle for session read models and replay.
     pub fn observe(&self) -> ObservableSession {
         ObservableSession {
             runtime: self.runtime.clone(),
         }
     }
 
+    /// Returns the parent session identifier, if present.
     pub fn parent_session_id(&self) -> Option<&str> {
         self.parent_session_id.as_deref()
     }
 
+    /// Returns the effect host used by this runtime.
     pub fn effect_host(&self) -> Arc<dyn EffectHost> {
         Arc::clone(&self.effect_host)
     }
 
+    /// Creates a turn builder for the supplied input.
     pub fn turn(&self, input: TurnInput) -> TurnBuilder {
         TurnBuilder {
             runtime: self.runtime.clone(),
@@ -537,6 +549,7 @@ impl LashSession {
         }
     }
 
+    /// Creates a builder for draining queued work as a turn.
     pub fn queued_turn(&self) -> QueuedTurnBuilder {
         QueuedTurnBuilder {
             runtime: self.runtime.clone(),
@@ -601,28 +614,34 @@ impl LashSession {
         self.turn_cancels.cancel_all(origin)
     }
 
+    /// Returns the session administration facade.
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),
         }
     }
 
+    /// Applies a configuration patch to the active session.
     pub async fn configure(&self, patch: SessionConfigPatch) -> Result<()> {
         self.admin().config().update(patch).await
     }
 
+    /// Returns the tool administration facade.
     pub fn tools(&self) -> ToolAdmin {
         ToolAdmin::new(self.admin())
     }
 
+    /// Returns the session-command administration facade.
     pub fn commands(&self) -> SessionCommandAdmin {
         self.admin().commands()
     }
 
+    /// Returns the trigger administration facade.
     pub fn triggers(&self) -> SessionTriggerAdmin {
         self.admin().triggers()
     }
 
+    /// Returns the process administration facade.
     pub fn processes(&self) -> SessionProcessAdmin {
         SessionProcessAdmin::new(self.admin())
     }
@@ -637,12 +656,14 @@ impl LashSession {
         self.admin().refresh_background_graph().await
     }
 
+    /// Returns the typed plugin-operations facade.
     pub fn plugin_operations(&self) -> PluginOperations {
         PluginOperations {
             control: self.admin(),
         }
     }
 
+    /// Creates a builder for durably enqueueing turn input.
     pub fn enqueue(&self, input: TurnInput) -> EnqueueTurnBuilder<'_> {
         EnqueueTurnBuilder {
             session: self,
@@ -677,6 +698,7 @@ impl LashSession {
             })
     }
 
+    /// Returns the turn inputs currently awaiting consumption.
     pub async fn pending_turn_inputs(&self) -> Result<Vec<PendingTurnInput>> {
         let observation = self.runtime.observe();
         let store = observation.queue_store.as_ref().ok_or_else(|| {
@@ -731,6 +753,7 @@ impl LashSession {
             .collect())
     }
 
+    /// Cancels pending turn input.
     pub async fn cancel_pending_turn_input(
         &self,
         input_id: &str,
@@ -780,6 +803,7 @@ impl LashSession {
             .map_err(EmbedError::Runtime)
     }
 
+    /// Cancels queued work batch.
     pub async fn cancel_queued_work_batch(
         &self,
         batch_id: &str,
@@ -871,14 +895,17 @@ impl LashSession {
         }
     }
 
+    /// Returns a read-only view of the session state.
     pub fn read_view(&self) -> SessionReadView {
         self.runtime.observe().read_view.clone()
     }
 
+    /// Returns the session's current usage report.
     pub fn usage_report(&self) -> SessionUsageReport {
         self.runtime.observe().usage_report.clone()
     }
 
+    /// Installs the probe used to observe turn-phase transitions.
     pub async fn set_turn_phase_probe(
         &self,
         probe: Arc<dyn lash_core::runtime::RuntimeTurnPhaseProbe>,
@@ -906,6 +933,7 @@ impl LashSession {
 }
 
 #[derive(Clone)]
+/// Exposes read models and replayable observations for an active session.
 pub struct ObservableSession {
     pub(crate) runtime: RuntimeHandle,
 }
@@ -915,20 +943,24 @@ impl ObservableSession {
         self.runtime.observe()
     }
 
+    /// Returns the session's current local observation.
     pub fn current_observation(&self) -> SessionObservation {
         self.runtime.current_session_observation()
     }
 
+    /// Returns the session's current remote observation.
     pub fn current_remote_observation(&self) -> RemoteSessionObservation {
         RemoteSessionObservation::from_core(self.current_observation())
     }
 
+    /// Resumes local observations from the supplied replay cursor.
     pub fn resume_from_cursor(&self, cursor: &SessionCursor) -> Result<SessionResume> {
         self.runtime
             .resume_session_observation(cursor)
             .map_err(live_replay_error)
     }
 
+    /// Subscribes to local observations from the supplied replay cursor.
     pub fn subscribe_from_cursor(
         &self,
         cursor: &SessionCursor,
@@ -938,6 +970,7 @@ impl ObservableSession {
             .map_err(live_replay_error)
     }
 
+    /// Subscribes to remote DTO observations from the supplied cursor.
     pub fn subscribe_from_remote_cursor(
         &self,
         cursor: &RemoteSessionCursor,
@@ -990,26 +1023,32 @@ impl ObservableSession {
         })
     }
 
+    /// Returns the session identifier.
     pub fn session_id(&self) -> String {
         self.snapshot().session_id().to_string()
     }
 
+    /// Returns a snapshot of the session policy.
     pub fn policy_snapshot(&self) -> SessionPolicy {
         self.snapshot().policy.clone()
     }
 
+    /// Returns a read-only view of the session state.
     pub fn read_view(&self) -> SessionReadView {
         self.snapshot().read_view.clone()
     }
 
+    /// Returns the session's current usage report.
     pub fn usage_report(&self) -> SessionUsageReport {
         self.snapshot().usage_report.clone()
     }
 
+    /// Returns the session's current tool state.
     pub fn tool_state(&self) -> Option<ToolState> {
         self.snapshot().tool_state.clone()
     }
 
+    /// Returns the manifests for active tools.
     pub fn active_tool_manifests(&self) -> Vec<ToolManifest> {
         self.snapshot()
             .tool_state
@@ -1018,14 +1057,17 @@ impl ObservableSession {
             .unwrap_or_default()
     }
 
+    /// Lists process handles.
     pub async fn list_process_handles(&self) -> Vec<ProcessHandleView> {
         self.snapshot().list_process_handles().await
     }
 
+    /// Lists all process handles.
     pub async fn list_all_process_handles(&self) -> Vec<ProcessHandleView> {
         self.snapshot().list_all_process_handles().await
     }
 
+    /// Returns the process scope associated with this session.
     pub fn process_scope(&self) -> SessionScope {
         self.snapshot().process_scope()
     }
@@ -1039,35 +1081,47 @@ impl ObservableSession {
 // justification: the gap is transient and inline to avoid allocation and preserve the public stream-item API.
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
+/// Item delivered by a local session-observation stream.
 pub enum SessionObservationStreamItem {
     /// A replayed or live session observation event.
     Event(Arc<SessionObservationEvent>),
     /// A recoverable replay gap with a fresh durable observation.
     Gap {
+        /// Fresh durable observation used to replace a stale projection.
         observation: SessionObservation,
+        /// Replay gap that required snapshot replacement.
         gap: LiveReplayGap,
     },
 }
 
+/// Result of subscribing to remote observations from a replay cursor.
 pub enum RemoteSessionObservationSubscription {
+    /// Carries a successfully established remote observation stream.
     Subscribed(RemoteSessionObservationEventStream),
+    /// Carries the snapshot and replay gap encountered while subscribing.
     Gap {
+        /// Fresh remote observation used to replace a stale projection.
         observation: RemoteSessionObservation,
+        /// Replay gap that required snapshot replacement.
         gap: RemoteLiveReplayGap,
     },
 }
 
 #[derive(Clone, Debug)]
+/// Item delivered by a remote session-observation stream.
 pub enum RemoteSessionObservationStreamItem {
     /// A replayed or live session observation event encoded as remote DTOs.
     Event(RemoteSessionObservationEvent),
     /// A recoverable replay gap with a fresh remote observation snapshot.
     Gap {
+        /// Fresh remote observation used to replace a stale projection.
         observation: RemoteSessionObservation,
+        /// Replay gap that required snapshot replacement.
         gap: RemoteLiveReplayGap,
     },
 }
 
+/// Stream of remote session observation event activity.
 pub struct RemoteSessionObservationEventStream {
     inner: lash_core::LiveReplaySubscription,
     next_sequence: u64,
@@ -1081,6 +1135,7 @@ impl RemoteSessionObservationEventStream {
         }
     }
 
+    /// Waits for and returns the next remote observation event.
     pub async fn next_event(&mut self) -> Result<RemoteSessionObservationEvent> {
         futures_util::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx))
             .await
@@ -1117,6 +1172,7 @@ pub struct RemoteSessionObservationStream {
 }
 
 impl RemoteSessionObservationStream {
+    /// Returns the stream's current replay cursor.
     pub fn cursor(&self) -> RemoteSessionCursor {
         RemoteSessionCursor::from(self.inner.cursor())
     }
@@ -1158,6 +1214,7 @@ pub struct SessionObservationStream {
 }
 
 impl SessionObservationStream {
+    /// Returns the stream's current replay cursor.
     pub fn cursor(&self) -> &SessionCursor {
         &self.cursor
     }
@@ -1223,6 +1280,7 @@ fn live_replay_error(err: lash_core::LiveReplayStoreError) -> EmbedError {
     ))
 }
 
+/// Builder for configuring enqueue turn.
 pub struct EnqueueTurnBuilder<'a> {
     session: &'a LashSession,
     input: TurnInput,
@@ -1231,11 +1289,13 @@ pub struct EnqueueTurnBuilder<'a> {
 }
 
 impl<'a> EnqueueTurnBuilder<'a> {
+    /// Sets the idempotency identifier for the enqueued input.
     pub fn id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
         self
     }
 
+    /// Sets how the enqueued input enters the turn pipeline.
     pub fn ingress(mut self, ingress: TurnInputIngress) -> Self {
         self.ingress = ingress;
         self

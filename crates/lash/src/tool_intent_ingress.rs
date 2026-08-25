@@ -61,30 +61,49 @@ impl ToolIntentIngressKey {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum ToolIntentIngressRefusal {
+    /// Refuses a submission whose replay key does not match its recorded key.
     MalformedKey {
+        /// Replay key derived from the submitted intent identity.
         expected_replay_key: String,
+        /// Replay key stored with the recorded intent outcome.
         recorded_replay_key: String,
     },
+    /// Refuses a submission recorded for a different session.
     ForeignSession {
+        /// Session or scope identity expected by ingress validation.
         expected: String,
+        /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
+    /// Refuses a submission recorded for a different execution scope.
     ForeignExecutionScope {
+        /// Session or scope identity expected by ingress validation.
         expected: String,
+        /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
+    /// Refuses an intent whose session does not match the ingress session.
     IntentSessionMismatch {
+        /// Session or scope identity expected by ingress validation.
         expected: String,
+        /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
+    /// Refuses an identity already bound to a different intent kind.
     IdentityBoundToDifferentIntent {
+        /// Intent kind already bound to this identity.
         recorded_kind: lash_core::ToolIntentKind,
+        /// Intent kind supplied by the rejected submission.
         submitted_kind: lash_core::ToolIntentKind,
     },
+    /// Refuses a duplicate intent identity.
     DuplicateIdentity {
+        /// Intent kind associated with the duplicate identity.
         kind: lash_core::ToolIntentKind,
     },
+    /// Refuses a recorded outcome that is not part of the intent protocol.
     RecordedOutcomeOutsideIntentProtocol {
+        /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
 }
@@ -97,13 +116,17 @@ pub enum ToolIntentIngressRefusal {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolIntentIngressOutcome {
+    /// Carries the admitted tool-intent outcome and whether it was replayed.
     Admitted {
+        /// Execution outcome produced for the admitted intent.
         outcome: lash_core::ToolIntentExecutionOutcome,
         /// `false` when this submission realized the command and `true` when a
         /// controller-owned key-addressed journal returned an earlier outcome.
         replayed: bool,
     },
+    /// Carries the reason a tool intent was refused.
     Refused {
+        /// Reason the tool intent was refused.
         refusal: ToolIntentIngressRefusal,
     },
 }
