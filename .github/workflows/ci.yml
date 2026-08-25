@@ -96,6 +96,104 @@ env:
   LASH_CONFIDENCE_OUT_DIR: ${{ github.workspace }}/target/confidence
 
 jobs:
+  # Keep path classification cheap and conservative. Every event whose exact
+  # diff is unavailable fails open to all expensive families.
+  plan:
+    name: Plan CI
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    outputs:
+      rust: ${{ steps.classify.outputs.rust }}
+      confidence: ${{ steps.classify.outputs.confidence }}
+      stores: ${{ steps.classify.outputs.stores }}
+      functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
+      workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
+      rust_code: ${{ steps.classify.outputs.rust_code }}
+      deps_config: ${{ steps.classify.outputs.deps_config }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      workflows_only: ${{ steps.classify.outputs.workflows_only }}
+      e2e_relevant: ${{ steps.classify.outputs.e2e_relevant }}
+      scripts_gates: ${{ steps.classify.outputs.scripts_gates }}
+      fail_open: ${{ steps.classify.outputs.fail_open }}
+      reason: ${{ steps.classify.outputs.reason }}
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Classify exact diff
+        id: classify
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+
+          fail_open() {
+            python3 scripts/ci_plan.py fail-open --reason "$1" >> "${GITHUB_OUTPUT}"
+            exit 0
+          }
+
+          case "${GITHUB_EVENT_NAME}" in
+            workflow_dispatch)
+              fail_open "workflow_dispatch has no exact triggering diff"
+              ;;
+            pull_request)
+              base_sha="${PR_BASE_SHA}"
+              ;;
+            merge_group)
+              base_sha="${MERGE_GROUP_BASE_SHA}"
+              ;;
+            push)
+              base_sha="${BEFORE_SHA}"
+              ;;
+            *)
+              fail_open "unsupported event ${GITHUB_EVENT_NAME}"
+              ;;
+          esac
+
+          if [[ -z "${base_sha}" || "${base_sha}" == "0000000000000000000000000000000000000000" ]]; then
+            fail_open "event has no exact base commit"
+          fi
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          if ! git -c http.extraheader="AUTHORIZATION: basic ${auth_header}" \
+            fetch --no-tags --prune --depth=1 origin "${base_sha}"; then
+            fail_open "base commit ${base_sha} could not be fetched"
+          fi
+          if ! git rev-parse --verify "${base_sha}^{commit}" >/dev/null 2>&1; then
+            fail_open "base commit ${base_sha} is unavailable"
+          fi
+          if ! git diff --name-only --no-renames -z "${base_sha}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-paths"; then
+            fail_open "exact diff ${base_sha}..${GITHUB_SHA} could not be computed"
+          fi
+          python3 scripts/ci_plan.py classify --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
+
+      - name: Summarize plan
+        env:
+          PLAN_JSON: ${{ toJson(steps.classify.outputs) }}
+        run: |
+          {
+            echo "## CI plan"
+            echo
+            echo '```json'
+            jq . <<< "${PLAN_JSON}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   facade-only-examples:
     name: Facade-only examples
     runs-on: blacksmith-2vcpu-ubuntu-2404
@@ -328,6 +426,7 @@ jobs:
           python3 scripts/test_release_notes.py
           python3 scripts/test_restate_workers_e2e_coverage.py
           python3 scripts/test_rustdoc_json_cache.py
+          python3 scripts/test_ci_plan.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
 
@@ -345,6 +444,8 @@ jobs:
     name: Public API example coverage
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 15
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -400,6 +501,8 @@ jobs:
     name: Public API surface snapshot
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 15
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -453,6 +556,8 @@ jobs:
     name: Semver advisory
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 15
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     continue-on-error: true
     env:
       # This job owns a private cargo-semver-checks cache and does not consume
@@ -511,6 +616,8 @@ jobs:
     name: Lashlang Git consumer
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 10
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -560,6 +667,8 @@ jobs:
     name: Package feature checks
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 15
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -654,6 +763,8 @@ jobs:
     name: Runtime feature boundary
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 20
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -735,6 +846,8 @@ jobs:
     name: Test shard ${{ matrix.shard }}/4
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 15
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
 
     strategy:
       fail-fast: false
@@ -1022,6 +1135,8 @@ jobs:
     name: Confidence fast (${{ matrix.shard }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
+    needs: plan
+    if: needs.plan.outputs.confidence == 'true'
 
     strategy:
       fail-fast: false
@@ -1102,8 +1217,9 @@ jobs:
     name: Confidence fast summary
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
-    if: always()
+    if: always() && needs.plan.outputs.confidence == 'true'
     needs:
+      - plan
       - confidence-fast
 
     steps:
@@ -1153,6 +1269,8 @@ jobs:
     name: Test Postgres store (PG ${{ matrix.postgres }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
+    needs: plan
+    if: needs.plan.outputs.stores == 'true'
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -1257,6 +1375,8 @@ jobs:
     name: Test S3 store against MinIO
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
+    needs: plan
+    if: needs.plan.outputs.stores == 'true'
 
     steps:
       - name: Check out repository
@@ -1341,6 +1461,8 @@ jobs:
     name: Stack budget
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 15
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository
@@ -1530,6 +1652,8 @@ jobs:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    needs: plan
+    if: needs.plan.outputs.functional_e2e == 'true'
 
     strategy:
       fail-fast: false
@@ -1678,6 +1802,7 @@ jobs:
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 45
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
@@ -1688,8 +1813,12 @@ jobs:
         if: github.event_name == 'pull_request'
         run: echo "Workers E2E execution is deferred to the merge-queue run."
 
+      - name: Explain plan deferral
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e != 'true'
+        run: echo "Workers E2E execution is not required by the CI plan."
+
       - name: Check out repository
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
@@ -1706,11 +1835,11 @@ jobs:
           git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Install Rust toolchain
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         uses: ./.github/actions/rust-toolchain
 
       # The e2e binaries are built on the host by the just recipe and
@@ -1719,7 +1848,7 @@ jobs:
       # the same cache action the writer uses, not a second backend that always
       # missed.
       - name: Restore cargo cache
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
         with:
           cache-bin: false
@@ -1727,7 +1856,7 @@ jobs:
           save-if: false
 
       - name: Install protoc
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
@@ -1737,30 +1866,30 @@ jobs:
       # action, so it installs mold directly rather than taking on a
       # compilation cache it does not otherwise use.
       - name: Install mold
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         uses: ./.github/actions/setup-mold
 
       - name: Run distributed backend E2E
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         env:
           LASH_E2E_WORKFLOW_SEGMENT: ${{ matrix.segment }}
           LASH_E2E_COMPLETED_WORKFLOW_MANIFEST: target/restate-postgres-workers-e2e-manifests/segment-${{ matrix.segment }}/completed-workflows.txt
         run: bash scripts/restate-postgres-workers-e2e.sh
 
       - name: Run graceful drain operator-flow E2E
-        if: github.event_name != 'pull_request' && matrix.segment == 1
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true' && matrix.segment == 1
         env:
           LASH_GRACEFUL_DRAIN_ARTIFACT_DIR: target/operator-flow-artifacts/graceful-drain
         run: bash scripts/graceful-drain-e2e.sh
 
       - name: Run request abandon operator-flow E2E
-        if: github.event_name != 'pull_request' && matrix.segment == 1
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true' && matrix.segment == 1
         env:
           LASH_REQUEST_ABANDON_ARTIFACT_DIR: target/operator-flow-artifacts/request-abandon
         run: bash scripts/request-abandon-e2e.sh
 
       - name: Upload operator-flow E2E failure artifacts
-        if: failure() && github.event_name != 'pull_request' && matrix.segment == 1
+        if: failure() && github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true' && matrix.segment == 1
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: operator-flow-e2e-attempt-${{ github.run_attempt }}
@@ -1768,7 +1897,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload completed workflow manifest
-        if: always() && github.event_name != 'pull_request'
+        if: always() && github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: restate-workers-e2e-segment-${{ matrix.segment }}-attempt-${{ github.run_attempt }}
@@ -1781,11 +1910,12 @@ jobs:
     timeout-minutes: 10
     if: always()
     needs:
+      - plan
       - restate-postgres-workers
 
     steps:
       - name: Check out repository
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
@@ -1802,7 +1932,7 @@ jobs:
           git checkout --detach --force FETCH_HEAD
 
       - name: Download completed workflow manifests
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: restate-workers-e2e-segment-*-attempt-${{ github.run_attempt }}
@@ -1810,7 +1940,7 @@ jobs:
           merge-multiple: false
 
       - name: Verify complete workflow coverage
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e == 'true'
         run: >-
           python3 scripts/check_restate_workers_e2e_coverage.py
           --leg 1
@@ -1819,3 +1949,53 @@ jobs:
           --leg 2
           target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}/workflow-inventory.tsv
           target/restate-postgres-workers-e2e-download/restate-workers-e2e-segment-2-attempt-${{ github.run_attempt }}/completed-workflows.txt
+
+  # This is the single required context after FIG-2055 lands. Keep every
+  # correctness job in needs: the script rejects missing or unmapped entries,
+  # failures/cancellations, ungated skips, and family skips the plan required.
+  ci-conclusion:
+    name: CI conclusion
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    if: always()
+    needs:
+      - plan
+      - test-doc
+      - repo-gates
+      - api-coverage
+      - api-surface
+      - semver-advisory
+      - lashlang-git-consumer
+      - package-feature-checks
+      - runtime-feature-boundary
+      - test-shard
+      - lint
+      - confidence-fast
+      - confidence-fast-summary
+      - postgres-store
+      - s3-store
+      - stack-budget
+      - functional-e2e
+      - restate-postgres-workers
+      - restate-postgres-workers-summary
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Validate CI conclusion
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: python3 scripts/ci_plan.py conclusion
