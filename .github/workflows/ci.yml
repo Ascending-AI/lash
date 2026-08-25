@@ -279,6 +279,7 @@ jobs:
 
       - name: Test repository scripts
         run: |
+          python3 scripts/test_api_surface.py
           python3 scripts/test_check_api_example_coverage.py
           python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_durable_read_fixture_version.py
@@ -364,6 +365,116 @@ jobs:
       - name: Report sccache stats
         if: always()
         run: sccache --show-stats
+
+  # The checked facade snapshot uses the same rustdoc graph and cache geometry
+  # as the disposition gate, but is an independent machine-readable contract.
+  api-surface:
+    name: Public API surface snapshot
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
+      - name: Check public API surface snapshot
+        run: python3 scripts/api_surface.py check
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # cargo-semver-checks is ADVISORY: it must not be able to fail the workflow —
+  # the job succeeds regardless, with findings in the job log/summary until the
+  # future cutover release. FIG-2089.
+  semver-advisory:
+    name: Semver advisory
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
+    continue-on-error: true
+    env:
+      # This job owns a private cargo-semver-checks cache and does not consume
+      # the workflow's mold-keyed debug cache, so use the runner's default
+      # linker instead of inheriting a linker that this job does not install.
+      RUSTFLAGS: ""
+
+    steps:
+      - name: Check out repository and main baseline
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          git fetch \
+            --no-tags --depth=1 origin main:refs/remotes/origin/main
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Run cargo-semver-checks
+        id: semver
+        continue-on-error: true
+        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2
+        with:
+          package: lash-runtime
+          baseline-rev: origin/main
+          feature-group: all-features
+          rust-toolchain: manual
+
+      - name: Summarize semver advisory
+        if: always()
+        env:
+          SEMVER_OUTCOME: ${{ steps.semver.outcome }}
+        run: |
+          {
+            echo "## cargo-semver-checks advisory"
+            echo
+            echo "Outcome: \`${SEMVER_OUTCOME:-not-run}\`."
+            echo "Findings are advisory until the FIG-2089 cutover; see the cargo-semver-checks step log for details."
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   # A dependency workspace's [patch] table is invisible to its consumers.
   # Resolve lashlang from this checkout as a Git dependency in a fresh external

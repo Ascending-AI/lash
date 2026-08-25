@@ -1434,6 +1434,7 @@ derive_mutation_jobs() {{
                 "bash scripts/test-dev-script-process-identity.sh",
             ),
             "api-coverage": ("python3 scripts/check_api_example_coverage.py",),
+            "api-surface": ("python3 scripts/api_surface.py check",),
             "package-feature-checks": (
                 "cargo check -p lash-protocol-rlm --features testing --locked",
                 "cargo check -p agent-workbench --locked",
@@ -1649,6 +1650,7 @@ derive_mutation_jobs() {{
             "test-shard",
             "repo-gates",
             "api-coverage",
+            "api-surface",
             "package-feature-checks",
             "runtime-feature-boundary",
             "lint",
@@ -1658,6 +1660,23 @@ derive_mutation_jobs() {{
             block = workflow_job_block(workflow, job_id)
             self.assertIn("./.github/actions/setup-sccache", block)
         self.assertNotIn("cargo build", release)
+
+    def test_semver_job_is_advisory_and_scoped_to_the_facade(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        block = workflow_job_block(workflow, "semver-advisory")
+
+        self.assertIn("continue-on-error: true", block)
+        self.assertIn("package: lash-runtime", block)
+        self.assertIn("baseline-rev: origin/main", block)
+        self.assertIn("feature-group: all-features", block)
+        self.assertIn("GITHUB_STEP_SUMMARY", block)
+        self.assertIn("FIG-2089", block)
+        self.assertEqual(
+            yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"][
+                "semver-advisory"
+            ]["env"]["RUSTFLAGS"],
+            "",
+        )
 
     def test_ci_has_no_staging_or_automatic_release_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
