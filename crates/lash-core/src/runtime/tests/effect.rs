@@ -26,6 +26,7 @@ pub(super) struct RecordingEffectController {
     durable_workflow_controller: bool,
     replay_by_key: bool,
     execute_llm_locally: bool,
+    fail_next_tool_parent_end: Arc<std::sync::atomic::AtomicBool>,
     /// Model a host crash in the window between the journaled raw provider
     /// completion (phase 1) and hook post-processing (phase 2).
     crash_before_first_response_hooks: bool,
@@ -68,6 +69,11 @@ impl RecordingEffectController {
 
     pub(super) fn with_local_llm_execution(mut self) -> Self {
         self.execute_llm_locally = true;
+        self
+    }
+
+    pub(super) fn with_next_tool_parent_end_failure(self) -> Self {
+        self.fail_next_tool_parent_end.store(true, Ordering::SeqCst);
         self
     }
 
@@ -200,6 +206,17 @@ impl RuntimeEffectController for RecordingEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        if matches!(
+            &envelope.command,
+            RuntimeEffectCommand::Process { command }
+                if matches!(command.as_ref(), crate::ProcessCommand::ParentEnd { .. })
+        ) && self.fail_next_tool_parent_end.swap(false, Ordering::SeqCst)
+        {
+            return Err(RuntimeEffectControllerError::foreign(
+                "test_parent_end_failure",
+                "forced parent-end failure",
+            ));
+        }
         let replay_key = envelope
             .invocation
             .replay_key()

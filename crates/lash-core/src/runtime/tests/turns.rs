@@ -1905,6 +1905,51 @@ struct CasSurvivorIntentTools {
     calls: Arc<AtomicUsize>,
 }
 
+struct ParentEndFailureIntentTool;
+
+fn parent_end_failure_intent_tool() -> crate::ToolDefinition {
+    crate::ToolDefinition::raw(
+        "tool:parent_end_failure_intent",
+        "parent_end_failure_intent",
+        "Start a process whose parent-end action exercises cancelled-turn teardown.",
+        crate::ToolDefinition::default_input_schema(),
+        serde_json::json!({"type": "object", "additionalProperties": true}),
+    )
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for ParentEndFailureIntentTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        vec![parent_end_failure_intent_tool().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "parent_end_failure_intent")
+            .then(|| Arc::new(parent_end_failure_intent_tool().contract()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        panic!("the parent-end failure witness must use AttemptContext")
+    }
+
+    async fn execute_attempt(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolAttemptOutcome::done(
+            crate::ToolOutcomeDone::ok(serde_json::json!({"started": true})),
+            crate::ToolIntents::v1(vec![crate::ToolIntent::StartProcess(Box::new(
+                crate::StartProcessIntent {
+                    session_id: call.context.session_id().to_string(),
+                    request: crate::ProcessStartRequest::external(
+                        "cancelled-turn-parent-end-child",
+                        crate::ProcessOriginator::host_scoped("parent-end-failure-witness"),
+                        serde_json::json!({"witness": true}),
+                    ),
+                    on_parent_end: crate::ProcessParentEndPolicy::Abandon,
+                },
+            ))]),
+        )
+    }
+}
+
 fn cas_survivor_intent_tool() -> crate::ToolDefinition {
     crate::ToolDefinition::raw(
         "tool:cas_survivor_intent",
@@ -6009,6 +6054,106 @@ async fn cancelled_provider_stream_does_not_commit_partial_output() {
             .all(|part| !part.content.contains("partial provider text")),
         "cancelled streamed partial must not be committed to read-view history"
     );
+}
+
+#[tokio::test]
+async fn parent_end_failure_after_effect_loop_cancellation_returns_session_for_next_turn() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed_calls = Arc::clone(&calls);
+    let (second_call_started_tx, second_call_started_rx) = tokio::sync::oneshot::channel::<()>();
+    let second_call_started_tx = Arc::new(Mutex::new(Some(second_call_started_tx)));
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let call = observed_calls.fetch_add(1, Ordering::SeqCst);
+            let second_call_started_tx = Arc::clone(&second_call_started_tx);
+            async move {
+                match call {
+                    0 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "parent-end-failure-call".to_string(),
+                            tool_name: "parent_end_failure_intent".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    1 => {
+                        if let Some(tx) = second_call_started_tx.lock_recover().take() {
+                            let _ = tx.send(());
+                        }
+                        std::future::pending::<Result<LlmResponse, LlmTransportError>>().await
+                    }
+                    2 => Ok(LlmResponse {
+                        full_text: "second turn started".to_string(),
+                        parts: vec![LlmOutputPart::Text {
+                            text: "second turn started".to_string(),
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    }),
+                    _ => panic!("unexpected provider call {call}"),
+                }
+            }
+        })
+        .build();
+    let mut runtime =
+        runtime_with_plugins_and_tools(Vec::new(), Arc::new(ParentEndFailureIntentTool), transport)
+            .await;
+    let effect_controller = Arc::new(
+        super::effect::RecordingEffectController::default()
+            .with_local_llm_execution()
+            .with_next_tool_parent_end_failure(),
+    );
+    let cancel = CancellationToken::new();
+    let cancel_after_second_call_starts = cancel.clone();
+    let canceller = crate::task::spawn(async move {
+        second_call_started_rx
+            .await
+            .expect("the first turn should enter its second provider call");
+        cancel_after_second_call_starts.cancel();
+    });
+
+    let first_error = runtime
+        .run_turn_assembled(
+            TurnInput::text("start the parent-end failure witness"),
+            cancel,
+            crate::ScopedEffectController::shared(
+                effect_controller.clone(),
+                crate::ExecutionScope::turn("root", "parent-end-failure-first-turn"),
+            )
+            .expect("first turn scope"),
+        )
+        .await
+        .expect_err("the forced parent-end failure should fail the cancelled turn");
+    canceller.await.expect("canceller task");
+    assert_eq!(
+        first_error.code,
+        crate::RuntimeErrorCode::PluginSessionManager
+    );
+    assert!(first_error.message.contains("forced parent-end failure"));
+
+    let second_turn = runtime
+        .run_turn_assembled(
+            TurnInput::text("prove the runtime can start another turn"),
+            CancellationToken::new(),
+            crate::ScopedEffectController::shared(
+                effect_controller,
+                crate::ExecutionScope::turn("root", "parent-end-failure-second-turn"),
+            )
+            .expect("second turn scope"),
+        )
+        .await
+        .expect("the second turn should start on the same runtime");
+
+    assert_eq!(
+        second_turn.assistant_output.safe_text,
+        "second turn started"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]
