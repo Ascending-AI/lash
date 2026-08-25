@@ -245,6 +245,39 @@ impl SessionMetaCodec {
         Ok(stored)
     }
 
+    /// Decode one relation row together with its ordered child-table rows.
+    ///
+    /// Catalog queries use this entry point after aggregating every relation
+    /// child table in the same SQL statement as the metadata row. Keeping the
+    /// index validation here makes that single-snapshot path obey the same
+    /// corruption contract as the ordinary metadata loader.
+    pub fn decode_with_process_rows(
+        self,
+        mut stored: StoredRelation,
+        observer_intent_rows: Vec<(i64, i64, String)>,
+        fork_pending_rows: Vec<(i64, String)>,
+        fork_inheritance_rows: Vec<(i64, String)>,
+    ) -> Result<SessionMeta, StoreError> {
+        let depth = self.read_index(stored.observer_intent_depth, "observer_intent_depth")?;
+        stored.observer_intent_processes = vec![Vec::new(); depth];
+        for (layer_index, process_index, process_id) in observer_intent_rows {
+            let layer_index = self.read_index(layer_index, "observer-intent layer_index")?;
+            let layer = stored
+                .observer_intent_processes
+                .get_mut(layer_index)
+                .ok_or_else(|| self.corrupt("observer-intent process names a missing layer"))?;
+            if self.read_index(process_index, "observer-intent process_index")? != layer.len() {
+                return Err(self.corrupt("observer-intent process indexes are not contiguous"));
+            }
+            layer.push(process_id);
+        }
+        stored.fork_pending_processes =
+            self.decode_process_rows(fork_pending_rows, "fork pending process_index")?;
+        stored.fork_inheritance_processes =
+            self.decode_process_rows(fork_inheritance_rows, "fork inheritance process_index")?;
+        self.decode(stored)
+    }
+
     /// Decode and validate backend-neutral stored columns as public metadata.
     pub fn decode(self, stored: StoredRelation) -> Result<SessionMeta, StoreError> {
         let mut relation = match stored.relation_kind.as_str() {
@@ -338,6 +371,21 @@ impl SessionMetaCodec {
         } else {
             Err(self.corrupt(format!("non-fork relation has unexpected {field}")))
         }
+    }
+
+    fn decode_process_rows(
+        self,
+        rows: Vec<(i64, String)>,
+        field: &'static str,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut process_ids = Vec::with_capacity(rows.len());
+        for (process_index, process_id) in rows {
+            if self.read_index(process_index, field)? != process_ids.len() {
+                return Err(self.corrupt("process indexes are not contiguous"));
+            }
+            process_ids.push(process_id);
+        }
+        Ok(process_ids)
     }
 
     fn read_u64_text(self, value: String, field: &'static str) -> Result<u64, StoreError> {

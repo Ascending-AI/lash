@@ -5,6 +5,7 @@ use lash_core::ProcessInput;
 use lashlang::LashlangArtifactStore;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn public_session_schema_version_tracks_the_internal_schema_version() {
@@ -20,6 +21,89 @@ fn count_checkpoint_data_statement(event: rusqlite::trace::TraceEvent<'_>) {
         {
             CHECKPOINT_DATA_STATEMENT_COUNT.fetch_add(1, Ordering::Relaxed);
         }
+    }
+}
+
+fn count_session_list_statement(event: rusqlite::trace::TraceEvent<'_>) {
+    // Count EVERY statement in the traced window, not just the catalog CTE:
+    // the invariant is that listing issues one statement total, so a
+    // reintroduced per-session read must be visible to this counter.
+    if let rusqlite::trace::TraceEvent::Stmt(..) = event {
+        SESSION_LIST_STATEMENT_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+async fn traced_session_list(factory: &SqliteSessionStoreFactory) -> (Vec<SessionSummary>, usize) {
+    let conn = SqliteConnection::open_readonly(&factory.catalog_path())
+        .await
+        .expect("open session catalog for statement tracing");
+    SESSION_LIST_STATEMENT_COUNT.store(0, Ordering::Relaxed);
+    let summaries = conn
+        .call(|conn| {
+            conn.trace_v2(
+                rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+                Some(count_session_list_statement as fn(rusqlite::trace::TraceEvent<'_>)),
+            );
+            let result = list_session_summaries(conn, &SessionListFilter::default());
+            conn.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+            result
+        })
+        .await
+        .expect("list session summaries under statement trace");
+    (
+        summaries,
+        SESSION_LIST_STATEMENT_COUNT.load(Ordering::Relaxed),
+    )
+}
+
+#[tokio::test]
+async fn session_listing_statement_count_is_session_count_invariant() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let factory = SqliteSessionStoreFactory::new(dir.path());
+    let mut expected_relations = BTreeMap::new();
+
+    for index in 0..8 {
+        let session_id = format!("listing-statement-count-{index}");
+        let relation = if index == 0 {
+            lash_core::SessionRelation::Root
+        } else {
+            lash_core::SessionRelation::ObserverIntent {
+                relation: Box::new(lash_core::SessionRelation::Fork {
+                    source_session_id: "listing-statement-count-0".to_string(),
+                    source_node_id: format!("source-node-{index}"),
+                    observer_inheritance: lash_core::ObserverInheritance::Only(vec![format!(
+                        "inherited-process-{index}"
+                    )]),
+                    pending_observer_process_ids: vec![format!("pending-process-{index}")],
+                }),
+                pending_observer_process_ids: vec![format!("intent-process-{index}")],
+            }
+        };
+        factory
+            .create_store(&SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: relation.clone(),
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create session listing fixture");
+        expected_relations.insert(session_id, relation);
+
+        if index == 0 {
+            let (single, statement_count) = traced_session_list(&factory).await;
+            assert_eq!(single.len(), 1);
+            assert_eq!(statement_count, 1);
+        }
+    }
+
+    let (many, statement_count) = traced_session_list(&factory).await;
+    assert_eq!(statement_count, 1);
+    assert_eq!(many.len(), expected_relations.len());
+    for summary in many {
+        assert_eq!(
+            summary.durable_relation.as_ref(),
+            expected_relations.get(&summary.session_id)
+        );
     }
 }
 

@@ -455,7 +455,7 @@ async fn enumerate_sessions() -> anyhow::Result<()> {
     assert_eq!(root_summary.head_revision, 0);
     assert_eq!(root_summary.last_commit_at_ms, None);
     assert_eq!(root_summary.relation, SessionRelationKind::Root);
-    assert_eq!(root_summary.full_relation, Some(SessionRelation::Root));
+    assert_eq!(root_summary.durable_relation, Some(SessionRelation::Root));
     assert_eq!(root_summary.parent_session_id, None);
     assert!(!root_summary.deleted);
 
@@ -470,7 +470,7 @@ async fn enumerate_sessions() -> anyhow::Result<()> {
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].relation, SessionRelationKind::Child);
     assert_eq!(
-        children[0].full_relation,
+        children[0].durable_relation,
         Some(SessionRelation::Child {
             parent_session_id: "catalog-root".to_string(),
             caused_by: None,

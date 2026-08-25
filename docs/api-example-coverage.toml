@@ -5830,14 +5830,14 @@ usage = "examples/docs-snippets/src/persistence.rs:504#assert!(deleted[0].delete
 assertion = "examples/docs-snippets/src/persistence.rs:504#assert!(deleted[0].deleted);"
 
 [[api]]
-symbol = "lash::SessionSummary::full_relation"
+symbol = "lash::SessionSummary::durable_relation"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash::prelude::SessionSummary::full_relation", "lash_core::SessionSummary::full_relation"]
+aliases = ["lash::prelude::SessionSummary::durable_relation", "lash_core::SessionSummary::durable_relation"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/persistence.rs:458#assert_eq!(root_summary.full_relation, Some(SessionRelation::Root));"
-assertion = "examples/docs-snippets/src/persistence.rs:458#assert_eq!(root_summary.full_relation, Some(SessionRelation::Root));"
+usage = "examples/docs-snippets/src/persistence.rs:458#root_summary.durable_relation,"
+assertion = "examples/docs-snippets/src/persistence.rs:458#assert_eq!(root_summary.durable_relation, Some(SessionRelation::Root));"
 
 [[api]]
 symbol = "lash::SessionSummary::head_revision"
@@ -12154,7 +12154,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::reopen_preserving_history"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3611#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
+usage = "crates/lash/src/tests/turn_streaming.rs:3796#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
 reason = "Relocate: this all-features-only handle is implemented in lash_core::testing and exists solely so the importable replay law can distinguish preserved history from a fresh incarnation."
 
 [[api]]
@@ -12182,7 +12182,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3824#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
+usage = "crates/lash/src/tests/turn_streaming.rs:4009#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
 reason = "Relocate: this all-features-only method is implemented in lash_core::testing and consumed only to pin the distinct replay-visible and pre-notification cuts in the snapshot-subscribe conformance law."
 
 [[api]]
@@ -18186,13 +18186,13 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash::persistence::SessionReadView::relation"
+symbol = "lash::persistence::SessionReadView::durable_relation"
 kind = "function"
 availability = "default+all-features"
-aliases = ["lash_core::SessionReadView::relation"]
+aliases = ["lash_core::SessionReadView::durable_relation"]
 area = "stores"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/fig1922_read_session.rs:11#view.relation().cloned()"
+usage = "examples/docs-snippets/src/fig1922_read_session.rs:11#view.durable_relation().cloned()"
 assertion = "examples/docs-snippets/src/fig1922_read_session.rs:94#assert_eq!(session_relation(&view), Some(relation));"
 
 [[api]]
@@ -56581,7 +56581,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3612#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
+usage = "crates/lash/src/tests/turn_streaming.rs:3797#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
 reason = "Importable live-replay law exercised by the runtime's in-memory conformance test; only test code invokes it, which is the purpose of the `testing` feature."
 
 [[api]]
@@ -72451,7 +72451,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1361#) -> Result<lash_core::facade_support::AgentFrameRun> {"
+usage = "crates/lash/src/turn.rs:1513#) -> Result<lash_core::facade_support::AgentFrameRun> {"
 
 [[api]]
 symbol = "lash_core::facade_support::AgentFrameRun::acceptance"
@@ -74235,7 +74235,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:810#lash_core::facade_support::RuntimeSessionStateFacadeOps::queue_drain_scope("
+usage = "crates/lash/src/turn.rs:827#lash_core::facade_support::RuntimeSessionStateFacadeOps::queue_drain_scope("
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope"
@@ -75723,7 +75723,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:243#.add_prompt_contribution(contribution);"
+usage = "crates/lash/src/turn.rs:247#.add_prompt_contribution(contribution);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnContextFacadeOps::clear_prompt_slot"
@@ -75731,7 +75731,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:261#self.input.turn_context.clear_prompt_slot(slot);"
+usage = "crates/lash/src/turn.rs:265#self.input.turn_context.clear_prompt_slot(slot);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnContextFacadeOps::has_plugin_input"
@@ -75739,7 +75739,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1305#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
+usage = "crates/lash/src/turn.rs:1457#if plugin.requires_turn_input && !input.turn_context.has_plugin_input(plugin.id) {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnContextFacadeOps::replace_prompt_slot"
@@ -75747,7 +75747,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:255#.replace_prompt_slot(slot, contributions);"
+usage = "crates/lash/src/turn.rs:259#.replace_prompt_slot(slot, contributions);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnContextFacadeOps::set_prompt_template"
@@ -75755,7 +75755,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:235#self.input.turn_context.set_prompt_template(template);"
+usage = "crates/lash/src/turn.rs:239#self.input.turn_context.set_prompt_template(template);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions"
@@ -75763,7 +75763,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1255#) -> lash_core::facade_support::TurnOptions<'a> {"
+usage = "crates/lash/src/turn.rs:1407#) -> lash_core::facade_support::TurnOptions<'a> {"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::new"
@@ -75771,7 +75771,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1256#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
+usage = "crates/lash/src/turn.rs:1408#let mut opts = lash_core::facade_support::TurnOptions::new(cancel, scoped_effect_controller);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_events"
@@ -75779,7 +75779,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1258#opts = opts.with_events(events);"
+usage = "crates/lash/src/turn.rs:1410#opts = opts.with_events(events);"
 
 [[api]]
 symbol = "lash_core::facade_support::TurnOptions::with_local_cancel_origin_hint"
@@ -75795,7 +75795,7 @@ kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:1260#opts.with_turn_events(turn_events)"
+usage = "crates/lash/src/turn.rs:1412#opts.with_turn_events(turn_events)"
 
 [[api]]
 symbol = "lash_core::facade_support::append_assistant_text_part"
@@ -80577,7 +80577,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:14#cause: CausalColumns {"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:16#cause: CausalColumns {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::kind"
@@ -80585,7 +80585,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:15#kind: row.get(4)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:17#kind: row.get(4)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::session_id"
@@ -80593,7 +80593,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:16#session_id: row.get(5)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:18#session_id: row.get(5)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::turn_id"
@@ -80601,7 +80601,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:17#turn_id: row.get(6)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:19#turn_id: row.get(6)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::effect_id"
@@ -80609,7 +80609,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:18#effect_id: row.get(7)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:20#effect_id: row.get(7)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::call_id"
@@ -80617,7 +80617,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:19#call_id: row.get(8)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:21#call_id: row.get(8)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::process_id"
@@ -80625,7 +80625,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:20#process_id: row.get(9)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:22#process_id: row.get(9)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::process_event_sequence"
@@ -80633,7 +80633,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:21#process_event_sequence: row.get(10)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:23#process_event_sequence: row.get(10)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::occurrence_id"
@@ -80641,7 +80641,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:22#occurrence_id: row.get(11)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:24#occurrence_id: row.get(11)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_id"
@@ -80649,7 +80649,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:23#subscription_id: row.get(12)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:25#subscription_id: row.get(12)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_incarnation"
@@ -80657,7 +80657,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:24#subscription_incarnation: row.get(13)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:26#subscription_incarnation: row.get(13)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_revision"
@@ -80665,7 +80665,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:25#subscription_revision: row.get(14)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:27#subscription_revision: row.get(14)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::node_id"
@@ -80673,7 +80673,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:26#node_id: row.get(15)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:28#node_id: row.get(15)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::decode_append_request_identity"
@@ -80705,7 +80705,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:51#let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:89#let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::decode"
@@ -80713,7 +80713,15 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:276#let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:314#let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;"
+
+[[api]]
+symbol = "lash_core::store_backend_support::SessionMetaCodec::decode_with_process_rows"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:65#Ok(SessionMetaCodec::decode_with_process_rows("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::write_index"
@@ -80721,7 +80729,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:147#SessionMetaCodec::write_index("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:185#SessionMetaCodec::write_index("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::read_index"
@@ -80729,7 +80737,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:213#let depth = SessionMetaCodec::read_index("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:251#let depth = SessionMetaCodec::read_index("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::corrupt"
@@ -80737,7 +80745,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:248#SessionMetaCodec::corrupt("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:47#SessionMetaCodec::corrupt("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaWrite"
@@ -80745,7 +80753,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:48#mode: SessionMetaWrite,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:86#mode: SessionMetaWrite,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaWrite::Insert"
@@ -80753,7 +80761,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:53#SessionMetaWrite::Insert => {"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:91#SessionMetaWrite::Insert => {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaWrite::Replace"
@@ -80761,7 +80769,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:65#SessionMetaWrite::Replace => {"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:103#SessionMetaWrite::Replace => {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation"
@@ -80769,7 +80777,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:9#Ok(StoredRelation {"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:11#Ok(StoredRelation {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::session_id"
@@ -80777,7 +80785,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:10#session_id: row.get(0)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:12#session_id: row.get(0)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::relation_kind"
@@ -80785,7 +80793,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:11#relation_kind: row.get(1)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:13#relation_kind: row.get(1)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::observer_intent_depth"
@@ -80793,7 +80801,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:12#observer_intent_depth: row.get(2)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:14#observer_intent_depth: row.get(2)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::parent_session_id"
@@ -80801,7 +80809,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:13#parent_session_id: row.get(3)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:15#parent_session_id: row.get(3)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::cause"
@@ -80809,7 +80817,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:14#cause: CausalColumns {"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:16#cause: CausalColumns {"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::source_session_id"
@@ -80817,7 +80825,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:28#source_session_id: row.get(16)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:30#source_session_id: row.get(16)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::source_node_id"
@@ -80825,7 +80833,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:29#source_node_id: row.get(17)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:31#source_node_id: row.get(17)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::observer_inheritance_kind"
@@ -80833,7 +80841,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:30#observer_inheritance_kind: row.get(18)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:32#observer_inheritance_kind: row.get(18)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::observer_intent_processes"
@@ -80841,7 +80849,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:31#observer_intent_processes: Vec::new(),"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:33#observer_intent_processes: Vec::new(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::fork_pending_processes"
@@ -80849,7 +80857,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:32#fork_pending_processes: Vec::new(),"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:34#fork_pending_processes: Vec::new(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::fork_inheritance_processes"
@@ -80857,7 +80865,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:33#fork_inheritance_processes: Vec::new(),"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:35#fork_inheritance_processes: Vec::new(),"
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity"

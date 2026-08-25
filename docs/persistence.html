@@ -138,7 +138,8 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         <h2>Enumerate Sessions</h2>
         <p>Read the durable catalog through <code>LashCore</code> without opening or hydrating any session. The default includes live sessions and deletion tombstones; use a relation/deletion filter when a host needs a narrower roster.</p>
       </div>
-      <pre data-lang="rust" data-snippet="persistence#enumerate-sessions"><code>use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
+      <pre data-lang="rust" data-snippet="persistence#enumerate-sessions"><code>use lash::persistence::SessionRelation;
+use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
 
 let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
     .provider(ProviderHandle::unconfigured())
@@ -182,6 +183,7 @@ assert_eq!(root_json["session_id"], "catalog-root");
 assert_eq!(root_summary.head_revision, 0);
 assert_eq!(root_summary.last_commit_at_ms, None);
 assert_eq!(root_summary.relation, SessionRelationKind::Root);
+assert_eq!(root_summary.durable_relation, Some(SessionRelation::Root));
 assert_eq!(root_summary.parent_session_id, None);
 assert!(!root_summary.deleted);
 
@@ -195,6 +197,13 @@ assert_eq!(child_filter_json["deleted"], false);
 let children = core.sessions_filtered(child_filter).await?;
 assert_eq!(children.len(), 1);
 assert_eq!(children[0].relation, SessionRelationKind::Child);
+assert_eq!(
+    children[0].durable_relation,
+    Some(SessionRelation::Child {
+        parent_session_id: "catalog-root".to_string(),
+        caused_by: None,
+    })
+);
 assert_eq!(
     children[0].parent_session_id.as_deref(),
     Some("catalog-root")

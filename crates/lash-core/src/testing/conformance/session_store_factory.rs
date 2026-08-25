@@ -145,7 +145,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         .expect("read alongside live writer")
         .expect("committed session has a read view");
     assert_eq!(view.session_id(), SESSION_ID);
-    assert_eq!(view.relation(), Some(&expected_relation));
+    assert_eq!(view.durable_relation(), Some(&expected_relation));
     assert_eq!(view.messages().len(), 1, "history is projected");
     assert_eq!(view.message_tree().len(), 1, "tree is projected");
     assert_eq!(

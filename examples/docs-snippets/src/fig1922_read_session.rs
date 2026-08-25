@@ -8,7 +8,7 @@ async fn inspect_session(
 fn session_relation(
     view: &lash::persistence::SessionReadView,
 ) -> Option<lash::persistence::SessionRelation> {
-    view.relation().cloned()
+    view.durable_relation().cloned()
 }
 
 #[cfg(test)]

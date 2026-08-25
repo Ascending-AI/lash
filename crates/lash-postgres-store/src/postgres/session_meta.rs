@@ -5,7 +5,7 @@ use lash_core::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRe
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("PostgreSQL BIGINT");
 
-fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
+pub(crate) fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
     StoredRelation {
         session_id: row.get("session_id"),
         relation_kind: row.get("relation_kind"),
@@ -32,6 +32,42 @@ fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
         fork_pending_processes: Vec::new(),
         fork_inheritance_processes: Vec::new(),
     }
+}
+
+pub(crate) fn decode_catalog_relation(
+    stored: StoredRelation,
+    observer_intent_rows_json: &str,
+    fork_pending_rows_json: &str,
+    fork_inheritance_rows_json: &str,
+) -> Result<lash_core::SessionRelation, StoreError> {
+    let observer_intent_rows =
+        serde_json::from_str(observer_intent_rows_json).map_err(|error| {
+            SessionMetaCodec::corrupt(
+                SESSION_META_CODEC,
+                format!("invalid observer-intent process rows JSON: {error}"),
+            )
+        })?;
+    let fork_pending_rows = serde_json::from_str(fork_pending_rows_json).map_err(|error| {
+        SessionMetaCodec::corrupt(
+            SESSION_META_CODEC,
+            format!("invalid fork pending process rows JSON: {error}"),
+        )
+    })?;
+    let fork_inheritance_rows =
+        serde_json::from_str(fork_inheritance_rows_json).map_err(|error| {
+            SessionMetaCodec::corrupt(
+                SESSION_META_CODEC,
+                format!("invalid fork inheritance process rows JSON: {error}"),
+            )
+        })?;
+    Ok(SessionMetaCodec::decode_with_process_rows(
+        SESSION_META_CODEC,
+        stored,
+        observer_intent_rows,
+        fork_pending_rows,
+        fork_inheritance_rows,
+    )?
+    .relation)
 }
 
 const SELECT_COLUMNS: &str = "session_id, relation_kind, observer_intent_depth,

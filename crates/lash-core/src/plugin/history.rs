@@ -26,7 +26,7 @@ struct SessionReadState {
 #[derive(Clone, Debug)]
 struct SessionReadMeta {
     session_id: String,
-    relation: Option<crate::SessionRelation>,
+    durable_relation: Option<crate::SessionRelation>,
     policy: SessionPolicy,
     turn_index: usize,
     token_usage: crate::TokenUsage,
@@ -38,7 +38,7 @@ impl SessionReadMeta {
     fn from_snapshot_ref(snapshot: &SessionSnapshot) -> Self {
         Self {
             session_id: snapshot.session_id.clone(),
-            relation: None,
+            durable_relation: None,
             policy: snapshot.policy.clone(),
             turn_index: snapshot.turn_index,
             token_usage: snapshot.token_usage.clone(),
@@ -50,7 +50,7 @@ impl SessionReadMeta {
     fn from_persisted_ref(state: &RuntimeSessionState) -> Self {
         Self {
             session_id: state.session_id.clone(),
-            relation: None,
+            durable_relation: None,
             policy: state.policy.clone(),
             turn_index: state.turn_index,
             token_usage: state.token_usage.clone(),
@@ -64,8 +64,8 @@ impl SessionReadMeta {
         self
     }
 
-    fn with_relation(mut self, relation: crate::SessionRelation) -> Self {
-        self.relation = Some(relation);
+    fn with_durable_relation(mut self, relation: crate::SessionRelation) -> Self {
+        self.durable_relation = Some(relation);
         self
     }
 
@@ -167,7 +167,7 @@ impl SessionReadView {
         let graph = state.session_graph.clone();
         let read_model = state.read_model();
         Self(Arc::new(SessionReadState {
-            meta: SessionReadMeta::from_persisted_ref(state).with_relation(relation),
+            meta: SessionReadMeta::from_persisted_ref(state).with_durable_relation(relation),
             graph: SessionReadGraph::Owned(graph),
             read_model,
             chronological_projection: OnceLock::new(),
@@ -246,13 +246,14 @@ impl SessionReadView {
         &self.0.meta.session_id
     }
 
-    /// Borrows the complete durable relation when this view was loaded from a
-    /// session store.
+    /// Borrows the complete relation from durable session metadata, when that
+    /// metadata was available to this view's projection.
     ///
-    /// Views projected directly from a standalone snapshot or runtime state do
-    /// not carry durable session metadata and return `None`.
-    pub fn relation(&self) -> Option<&crate::SessionRelation> {
-        self.0.meta.relation.as_ref()
+    /// `None` means the projection had no durable session metadata. Views
+    /// projected directly from standalone snapshots or live runtime state
+    /// therefore return `None`.
+    pub fn durable_relation(&self) -> Option<&crate::SessionRelation> {
+        self.0.meta.durable_relation.as_ref()
     }
 
     /// Exposes policy to store, effect-host, and protocol implementors while materializing,

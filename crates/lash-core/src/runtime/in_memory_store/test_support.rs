@@ -336,6 +336,45 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn commit_without_session_meta_does_not_fabricate_durable_root_relation() {
+        let factory = super::super::InMemorySessionStoreFactory::new();
+        let session_id = "missing-meta-relation";
+        let store = factory
+            .create_store(&SessionStoreCreateRequest {
+                session_id: session_id.to_string(),
+                relation: crate::SessionRelation::Root,
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create in-memory session store");
+        let concrete = factory
+            .stores
+            .lock_recover()
+            .get(session_id)
+            .cloned()
+            .expect("concrete in-memory session store");
+        *concrete.session_meta.lock_recover() = None;
+
+        let mut state = RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        };
+        state.ensure_agent_frame_initialized();
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .await
+            .expect("commit state without session metadata");
+
+        let summaries = factory
+            .list_sessions(&crate::SessionListFilter::default())
+            .await
+            .expect("list in-memory session catalog");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].session_id, session_id);
+        assert_eq!(summaries[0].durable_relation, None);
+    }
+
+    #[tokio::test]
     async fn factory_rejects_occupied_global_node_id_without_partial_usage() {
         let factory = super::super::InMemorySessionStoreFactory::new();
         let request = |session_id: &str| SessionStoreCreateRequest {
