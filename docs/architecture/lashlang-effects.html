@@ -313,7 +313,7 @@ core.triggers()
             </div>
             <div class="listing__row">
               <div class="listing__label">typescript approximation</div>
-              <div class="listing__body"><p>The TypeScript dialect is an exact ECMA-262 subset. Syntax and standard-library behavior outside its executable inventory reject with stable <code>TS_*</code> diagnostics instead of running with a near-match; general async functions, mutable lexical captures, and mutually recursive declarations are among the named refusals. See <a href="../adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md">ADR 0062</a>.</p></div>
+              <div class="listing__body"><p>The TypeScript dialect is an exact ECMA-262 subset. Syntax and standard-library behavior outside its executable inventory reject with stable <code>TS_*</code> diagnostics instead of running with a near-match; classes, generators, mutable lexical writes through captures, and mutually recursive declarations are among the named refusals. See <a href="../adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md">ADR 0062</a>.</p></div>
             </div>
             <div class="listing__row">
               <div class="listing__label">durable value boundary</div>
@@ -325,7 +325,7 @@ core.triggers()
             </div>
             <div class="listing__row">
               <div class="listing__label">promise aggregates</div>
-              <div class="listing__body"><p>The current TypeScript RLM surface accepts <code>Promise.all</code> and <code>Promise.allSettled</code> only over array literals of top-level tool promises and resolved values. Nested aggregates, non-array iterables, process promises, and timer promises reject by name; <code>Promise.race</code> and <code>Promise.any</code> remain rejected in the current executable census. <a href="../adr/0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md">ADR 0065</a> defines the durable effect-group seam required for concurrent settlement: an unwired controller refuses the entire group surface with <code>EffectGroupUnsupported</code> rather than silently serializing it.</p></div>
+              <div class="listing__body"><p>The current TypeScript RLM surface accepts <code>Promise.all</code> and <code>Promise.allSettled</code> over top-level tool promises and resolved values in array literals; <code>items.map(async (...))</code> is a separate supported form whose callbacks run sequentially and durably. Nested tool promises, other non-array iterables, process promises, and timer promises reject by name; <code>Promise.race</code> and <code>Promise.any</code> remain rejected in the current executable census. <a href="../adr/0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md">ADR 0065</a> defines the durable effect-group seam required for concurrent settlement: an unwired controller refuses the entire group surface with <code>EffectGroupUnsupported</code> rather than silently serializing it.</p></div>
             </div>
           </div>
         </div>
