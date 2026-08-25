@@ -601,7 +601,10 @@ impl LashSession {
     /// replay deployment. `origin` is opaque host-domain data that Lash records
     /// without interpretation. Detached effects are not guaranteed to stop.
     /// `turn_id` is routing identity, not authorization; hosts must authorize
-    /// callers before invoking this API.
+    /// callers before invoking this API. Undelivered active-turn input is
+    /// deferred to the next turn; use
+    /// [`request_turn_cancel_with_disposition`](Self::request_turn_cancel_with_disposition)
+    /// to choose a different disposition.
     pub async fn request_turn_cancel(
         &self,
         turn_id: &str,
@@ -609,11 +612,41 @@ impl LashSession {
         origin: Option<String>,
         reason: Option<String>,
     ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
+        self.request_turn_cancel_with_disposition(
+            turn_id,
+            request_id,
+            origin,
+            reason,
+            lash_core::facade_support::TurnCancelDisposition::Defer,
+        )
+        .await
+    }
+
+    /// Request cooperative cancellation of exactly one turn in this session,
+    /// choosing how Lash handles active-turn input the turn did not deliver.
+    ///
+    /// The request is compiled onto the deployment's keyed-promise control
+    /// seam. An inline effect host is process-local; another process or a
+    /// replayed owner can observe the request only with a controller-owned
+    /// replay deployment. `origin` is opaque host-domain data that Lash records
+    /// without interpretation. Detached effects are not guaranteed to stop.
+    /// `turn_id` is routing identity, not authorization; hosts must authorize
+    /// callers before invoking this API. `undelivered` is first-writer-wins for
+    /// the addressed turn.
+    pub async fn request_turn_cancel_with_disposition(
+        &self,
+        turn_id: &str,
+        request_id: impl Into<String>,
+        origin: Option<String>,
+        reason: Option<String>,
+        undelivered: lash_core::facade_support::TurnCancelDisposition,
+    ) -> Result<lash_core::facade_support::TurnCancelReceipt> {
         let mut request = lash_core::facade_support::TurnCancelRequest::new(
             lash_core::facade_support::TurnAddress::new(self.session_id(), turn_id),
             request_id,
             origin,
-        );
+        )
+        .undelivered(undelivered);
         request.reason = reason;
         lash_core::facade_support::TurnWorkDriver::new(self.effect_host())
             .request_cancel(request)

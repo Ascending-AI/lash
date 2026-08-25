@@ -253,6 +253,7 @@ lash::LashSession::read_view
 lash::LashSession::refresh_background_graph
 lash::LashSession::remote_turn_input_applications
 lash::LashSession::request_turn_cancel
+lash::LashSession::request_turn_cancel_with_disposition
 lash::LashSession::revoke_durable_waits
 lash::LashSession::session_id
 lash::LashSession::set_turn_phase_probe
@@ -3972,6 +3973,7 @@ lash::prelude::LashSession::read_view
 lash::prelude::LashSession::refresh_background_graph
 lash::prelude::LashSession::remote_turn_input_applications
 lash::prelude::LashSession::request_turn_cancel
+lash::prelude::LashSession::request_turn_cancel_with_disposition
 lash::prelude::LashSession::revoke_durable_waits
 lash::prelude::LashSession::session_id
 lash::prelude::LashSession::set_turn_phase_probe

@@ -5139,6 +5139,139 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
     Ok(())
 }
 
+async fn assert_session_turn_cancel_disposition(
+    session_id: &'static str,
+    turn_id: &'static str,
+    disposition: lash_core::facade_support::TurnCancelDisposition,
+    use_legacy_method: bool,
+) -> Result<()> {
+    let (started_tx, started_rx) = oneshot::channel::<()>();
+    let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    let stream = session
+        .turn(TurnInput::text("hang until session cancellation"))
+        .turn_id(turn_id)
+        .stream()?;
+    started_rx.await.expect("turn reached the provider");
+
+    let undelivered = session
+        .enqueue(TurnInput::text("undelivered active-turn input"))
+        .id(format!("{session_id}:undelivered"))
+        .ingress(lash_core::TurnInputIngress::active_turn(
+            turn_id,
+            lash_core::TurnInputCheckpointBoundary::AfterWork,
+        ))
+        .send()
+        .await?;
+    let request_id = format!("{session_id}:cancel");
+    let receipt = if use_legacy_method {
+        session
+            .request_turn_cancel(
+                turn_id,
+                request_id.clone(),
+                Some("test-host".to_string()),
+                Some("legacy defer default".to_string()),
+            )
+            .await?
+    } else {
+        session
+            .request_turn_cancel_with_disposition(
+                turn_id,
+                request_id.clone(),
+                Some("test-host".to_string()),
+                Some("explicit disposition".to_string()),
+                disposition,
+            )
+            .await?
+    };
+    assert!(matches!(
+        receipt.outcome,
+        lash_core::facade_support::TurnCancelOutcome::Requested(ref evidence)
+            if evidence.request_id == request_id && evidence.undelivered == disposition
+    ));
+
+    let interrupted = stream.finish().await?;
+    assert!(matches!(
+        interrupted.outcome,
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
+    ));
+    assert_eq!(interrupted.cancel_input_outcome.affected_inputs.len(), 1);
+    let affected = &interrupted.cancel_input_outcome.affected_inputs[0];
+    assert_eq!(affected.input_id, undelivered.input_id);
+    assert_eq!(affected.disposition, disposition);
+
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let pending = session.pending_turn_inputs().await?;
+    match disposition {
+        lash_core::facade_support::TurnCancelDisposition::Drop => {
+            let raw_pending = store.raw_pending_turn_inputs_for_testing();
+            let dropped = raw_pending
+                .iter()
+                .find(|(input_id, ..)| input_id == &undelivered.input_id)
+                .expect("dropped input retains terminal lifecycle evidence");
+            assert_eq!(dropped.2, lash_core::TurnInputState::Cancelled);
+            assert!(
+                pending
+                    .iter()
+                    .all(|input| input.input_id != undelivered.input_id),
+                "dropped input must be absent from next-turn ingress"
+            );
+        }
+        lash_core::facade_support::TurnCancelDisposition::Defer => {
+            let deferred = pending
+                .iter()
+                .find(|input| input.input_id == undelivered.input_id)
+                .expect("deferred input remains available for the next turn");
+            assert_eq!(deferred.state, lash_core::TurnInputState::DeferredNextTurn);
+            assert!(matches!(
+                deferred.ingress,
+                lash_core::TurnInputIngress::NextTurn
+            ));
+        }
+    }
+    let record = lash_core::store::TurnInputStore::turn_cancel_request(
+        store.as_ref(),
+        &lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+    )
+    .await?
+    .expect("cancelled turn has a durable request record");
+    let settled = record.outcome.expect("cancel request record is settled");
+    assert_eq!(settled.affected_inputs, vec![affected.clone()]);
+    assert_eq!(record.request.undelivered, disposition);
+    Ok(())
+}
+
+#[tokio::test]
+async fn request_turn_cancel_with_disposition_drops_undelivered_active_input() -> Result<()> {
+    assert_session_turn_cancel_disposition(
+        "session-cancel-explicit-drop",
+        "session-cancel-explicit-drop:turn",
+        lash_core::facade_support::TurnCancelDisposition::Drop,
+        false,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn request_turn_cancel_legacy_method_defers_undelivered_active_input() -> Result<()> {
+    assert_session_turn_cancel_disposition(
+        "session-cancel-legacy-defer",
+        "session-cancel-legacy-defer:turn",
+        lash_core::facade_support::TurnCancelDisposition::Defer,
+        true,
+    )
+    .await
+}
+
 #[tokio::test]
 async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
