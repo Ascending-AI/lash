@@ -40,7 +40,7 @@ def public_exports(
 
 def resolved_export(
     item: dict[str, Any], document: dict[str, Any], all_features: bool
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Resolve a facade export to the document that owns its definition."""
     item_id = api_surface.target_id(item)
     if item_id is None:
@@ -50,8 +50,45 @@ def resolved_export(
         return local, document
     path = document["paths"].get(item_id)
     if path is None:
-        return None
-    return api_surface.external_target(path, all_features)
+        source = item["inner"].get("use", {}).get("source", item.get("name"))
+        raise RuntimeError(
+            f"facade export {source!r} targets item {item_id}, which has no rustdoc path"
+        )
+    resolved = api_surface.external_target(path, all_features)
+    if resolved is None:
+        canonical = "::".join(path.get("path") or [f"item {item_id}"])
+        feature_set = "all features" if all_features else "default features"
+        raise RuntimeError(
+            f"cannot resolve external facade export {canonical} under {feature_set}: "
+            "dependency rustdoc is unavailable or does not contain the target"
+        )
+    return resolved
+
+
+def exposed_references(
+    export: dict[str, Any], document: dict[str, Any], all_features: bool
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield signature type ids from an export, recursing through modules."""
+    item, owner = resolved_export(export, document, all_features)
+    if api_surface.item_kind(item) != "module":
+        for referenced_id in api_surface.exposed_ids(str(item["id"]), owner["index"]):
+            yield referenced_id, owner
+        return
+
+    module = item.get("inner", {}).get("module")
+    if not isinstance(module, dict) or not isinstance(module.get("items"), list):
+        raise RuntimeError(
+            f"cannot recurse external facade module export {item.get('name')!r}"
+        )
+    for child_id in module["items"]:
+        child = owner["index"].get(str(child_id))
+        if child is None:
+            raise RuntimeError(
+                "cannot recurse external facade module export "
+                f"{item.get('name')!r}: missing child item {child_id}"
+            )
+        if api_surface.public(child["visibility"]):
+            yield from exposed_references(child, owner, all_features)
 
 
 def external_types(all_features: bool) -> set[str]:
@@ -61,11 +98,9 @@ def external_types(all_features: bool) -> set[str]:
     leaked: set[str] = set()
 
     for export in public_exports(document):
-        resolved = resolved_export(export, document, all_features)
-        if resolved is None:
-            continue
-        item, owner = resolved
-        for referenced_id in api_surface.exposed_ids(str(item["id"]), owner["index"]):
+        for referenced_id, owner in exposed_references(
+            export, document, all_features
+        ):
             entry = owner["paths"].get(referenced_id)
             if entry is None or not entry.get("path"):
                 continue

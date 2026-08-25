@@ -73,6 +73,8 @@ configure_bindgen_headers() {
 # top of the script instead.
 run_release_script_tests() {
   step "Repository script tests"
+  python3 scripts/test_check_facade_external_types.py
+  python3 scripts/test_check_facade_only_examples.py
   python3 scripts/test_check_durable_read_fixture_version.py
   python3 scripts/test_check_format_versions.py
   python3 scripts/test_check_judged_build_geometry.py
@@ -185,6 +187,12 @@ run_clippy_gate() {
 # Guards whose inputs are Rust sources, the crate-adjacent schema artefacts
 # beside them, or the recipes that build them.
 run_rust_source_guards() {
+  step "Facade-only example imports"
+  python3 scripts/check_facade_only_examples.py
+
+  step "Facade external types"
+  heavy python3 scripts/check_facade_external_types.py
+
   step "Restate handler panic boundary"
   python3 scripts/check-restate-handler-panics.py
 
