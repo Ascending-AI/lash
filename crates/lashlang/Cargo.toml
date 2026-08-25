@@ -61,6 +61,10 @@ path = "tests/benchmark_contract.rs"
 name = "stack_budget"
 path = "tests/stack_budget.rs"
 
+[[test]]
+name = "property"
+path = "tests/property.rs"
+
 [[bench]]
 name = "benchmark"
 harness = false
