@@ -1,7 +1,7 @@
 # 0051. The facade is the host API; lash-core's public surface is its integrator seams
 
 Date: 2026-08-03
-Status: accepted
+Status: accepted, superseded in part by 0079
 
 ## Decision
 
