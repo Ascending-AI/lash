@@ -126,16 +126,22 @@ fn parse_event(raw: &str) -> Option<Value> {
     serde_json::from_str::<Value>(raw).ok()
 }
 
-fn is_retryable_error_event(event: &Value) -> bool {
+fn retry_verdict_for_error_event(event: &Value) -> TransportRetryVerdict {
     let error_type = event
         .get("error")
         .and_then(|e| e.get("type"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    matches!(
-        error_type,
-        "overloaded_error" | "api_error" | "rate_limit_error"
-    )
+    match error_type {
+        "rate_limit_error" | "overloaded_error" => {
+            TransportRetryVerdict::RetryableThrottle { retry_after: None }
+        }
+        "api_error" => TransportRetryVerdict::RetryableTransient,
+        "authentication_error" | "permission_error" | "invalid_request_error" => {
+            TransportRetryVerdict::Forbidden
+        }
+        _ => TransportRetryVerdict::NotRetryable,
+    }
 }
 
 impl AnthropicProvider {
@@ -186,7 +192,7 @@ impl AnthropicProvider {
         let event = parse_event(raw).ok_or_else(|| {
             LlmTransportError::new("Invalid Anthropic SSE payload")
                 .with_raw(raw.to_string())
-                .retryable(false)
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         })?;
         let kind = event
             .get("type")
@@ -395,7 +401,7 @@ impl AnthropicProvider {
                 return Err(
                     LlmTransportError::new(format!("Anthropic stream error: {msg}"))
                         .with_raw(raw.to_string())
-                        .retryable(is_retryable_error_event(&event)),
+                        .with_retry_verdict(retry_verdict_for_error_event(&event)),
                 );
             }
             _ => {}
@@ -444,5 +450,24 @@ impl AnthropicProvider {
             None => terminal_reason_from_parts(&parts),
         };
         (parts, full_text, state.usage, terminal_reason)
+    }
+}
+
+#[cfg(test)]
+mod retry_verdict_tests {
+    use super::*;
+
+    #[test]
+    fn capacity_errors_are_throttles_and_api_errors_are_transient() {
+        assert_eq!(
+            retry_verdict_for_error_event(
+                &serde_json::json!({"error": {"type": "overloaded_error"}})
+            ),
+            TransportRetryVerdict::RetryableThrottle { retry_after: None }
+        );
+        assert_eq!(
+            retry_verdict_for_error_event(&serde_json::json!({"error": {"type": "api_error"}})),
+            TransportRetryVerdict::RetryableTransient
+        );
     }
 }

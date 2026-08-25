@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
+use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::LlmRequest;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -398,7 +398,7 @@ impl CodexProvider {
                 CodexWebSocketAttemptError::before_send(
                     LlmTransportError::new("Codex WebSocket connect timed out")
                         .with_kind(ProviderFailureKind::Timeout)
-                        .retryable(true)
+                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_code("websocket_connect_timeout"),
                 )
             })?;
@@ -411,7 +411,7 @@ impl CodexProvider {
             };
             let mut transport_error =
                 LlmTransportError::new(format!("Codex WebSocket connect failed: {error}"))
-                    .retryable(true)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_code("websocket_connect");
             if let Some(status) = status {
                 transport_error = transport_error.with_status(status);

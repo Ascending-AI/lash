@@ -1,5 +1,7 @@
 use lash_core::provider::ProviderOptions;
-use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
+use lash_core::{
+    ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,
+};
 use lash_sansio::llm::types::{LlmEventSender, LlmStreamEvent, LlmUsage};
 
 use std::time::Duration;
@@ -171,21 +173,21 @@ fn event_limit_error() -> LlmTransportError {
     LlmTransportError::new("SSE event exceeded the configured byte limit")
         .with_kind(ProviderFailureKind::Stream)
         .with_code("sse_event_too_large")
-        .retryable(false)
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable)
 }
 
 fn total_limit_error() -> LlmTransportError {
     LlmTransportError::new("SSE response exceeded the configured total byte limit")
         .with_kind(ProviderFailureKind::Stream)
         .with_code("sse_response_too_large")
-        .retryable(false)
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable)
 }
 
 fn timeout_error(message: &str) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Timeout)
         .with_code("timeout")
-        .retryable(true)
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
 }
 
 pub async fn drive_sse_response<F>(
@@ -382,7 +384,7 @@ mod tests {
         let err = result.expect_err("stream read should time out");
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
         assert_eq!(err.code.as_deref(), Some("timeout"));
-        assert!(err.retryable);
+        assert!(err.is_retryable());
     }
 
     #[derive(Debug)]
@@ -421,7 +423,7 @@ mod tests {
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
         assert_eq!(err.code.as_deref(), Some("timeout"));
         assert_eq!(err.message, "request timed out");
-        assert!(err.retryable);
+        assert!(err.is_retryable());
     }
 
     #[test]
@@ -433,7 +435,7 @@ mod tests {
 
         assert_eq!(err.kind, ProviderFailureKind::Stream);
         assert_eq!(err.code.as_deref(), Some("sse_event_too_large"));
-        assert!(!err.retryable);
+        assert!(!err.is_retryable());
     }
 
     #[test]
@@ -445,7 +447,7 @@ mod tests {
 
         assert_eq!(err.kind, ProviderFailureKind::Stream);
         assert_eq!(err.code.as_deref(), Some("sse_event_too_large"));
-        assert!(!err.retryable);
+        assert!(!err.is_retryable());
     }
 
     #[test]
@@ -457,6 +459,6 @@ mod tests {
 
         assert_eq!(err.kind, ProviderFailureKind::Stream);
         assert_eq!(err.code.as_deref(), Some("sse_response_too_large"));
-        assert!(!err.retryable);
+        assert!(!err.is_retryable());
     }
 }

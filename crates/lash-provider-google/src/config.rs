@@ -118,7 +118,7 @@ pub(crate) fn credential_transport_error(error: CredentialError) -> LlmTransport
     LlmTransportError::new(error.to_string())
         .with_kind(lash_core::ProviderFailureKind::Auth)
         .with_code(code)
-        .retryable(error.retryable)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
 /// Google OAuth (Gemini via Code Assist) provider.
@@ -258,7 +258,7 @@ mod credential_tests {
         let error = credential_transport_error(CredentialError::invalid_grant());
         assert_eq!(error.kind, lash_core::ProviderFailureKind::Auth);
         assert_eq!(error.code.as_deref(), Some("credential_invalid_grant"));
-        assert!(!error.retryable);
+        assert!(!error.is_retryable());
         assert!(error.message.contains("sign in again"));
     }
 

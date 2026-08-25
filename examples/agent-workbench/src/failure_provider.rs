@@ -11,7 +11,7 @@ use lash::direct::{
 use lash::provider::{
     GenerationRetryGuarantee, LlmContentBlock, LlmMessage, LlmRequest, LlmResponse, LlmRole,
     LlmTransportError, Provider, ProviderComponents, ProviderFailureKind, ProviderHandle,
-    ProviderOptions, ProviderReliability,
+    ProviderOptions, ProviderReliability, TransportRetryVerdict,
 };
 
 pub(crate) const DEV_PROVIDER_SCENARIO_ENV: &str = "AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO";
@@ -314,7 +314,9 @@ impl Provider for DevFailureProvider {
                 "development provider rate limit; retry is safe",
             )
             .with_status(429)
-            .with_retry_after(std::time::Duration::ZERO)
+            .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
+                retry_after: Some(std::time::Duration::ZERO),
+            })
             .with_code("dev_rate_limited")),
             DevProviderScenario::RateLimitOnce => Ok(streamed_response(
                 &request,
@@ -327,7 +329,7 @@ impl Provider for DevFailureProvider {
                     LlmTransportError::new("development provider interrupted after paid output")
                         .with_kind(ProviderFailureKind::Stream)
                         .with_code("dev_paid_output_interrupted")
-                        .retryable(true)
+                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {
                             full_text: partial.to_string(),
@@ -363,7 +365,7 @@ impl Provider for DevFailureProvider {
                     LlmTransportError::new("FIG-1350 deterministic retry boundary")
                         .with_kind(ProviderFailureKind::Stream)
                         .with_code("fig1350_retry_reset")
-                        .retryable(true)
+                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {
                             full_text: partial.to_string(),

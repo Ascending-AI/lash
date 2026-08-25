@@ -250,7 +250,7 @@ impl Provider for PartialStreamFailureProvider {
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
             .with_code("stream_ended_before_terminal")
-            .retryable(true)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
                 full_text: "partial".to_string(),
                 usage: LlmUsage {
@@ -304,7 +304,7 @@ impl Provider for CountedPartialStreamFailureProvider {
         Err(LlmTransportError::new("stream truncated")
             .with_kind(ProviderFailureKind::Stream)
             .with_code("stream_ended_before_terminal")
-            .retryable(true)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
                 full_text: "paid partial".to_string(),
                 ..LlmResponse::default()
@@ -436,9 +436,14 @@ impl Provider for FailingProvider {
             } else {
                 ProviderFailureKind::Validation
             };
+            let retry_verdict = if self.retryable {
+                TransportRetryVerdict::RetryableTransient
+            } else {
+                TransportRetryVerdict::Forbidden
+            };
             return Err(LlmTransportError::new("temporary failure")
                 .with_kind(kind)
-                .retryable(self.retryable));
+                .with_retry_verdict(retry_verdict));
         }
         Ok(LlmResponse {
             full_text: "ok".to_string(),
@@ -513,10 +518,14 @@ impl Provider for StatusFailingProvider {
             if self.status == 413 {
                 failure = failure
                     .with_kind(ProviderFailureKind::Validation)
-                    .retryable(false);
+                    .with_retry_verdict(TransportRetryVerdict::Forbidden);
             }
-            if let Some(retry_after) = self.retry_after {
-                failure = failure.with_retry_after(retry_after);
+            if self.status == 429
+                && let Some(retry_after) = self.retry_after
+            {
+                failure = failure.with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
+                    retry_after: Some(retry_after),
+                });
             }
             if let Some(retry_after) = self.retry_after_header {
                 failure = failure.with_headers([("retry-after", retry_after)]);
@@ -782,7 +791,7 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
     let failure = LlmTransportError::new("internal task failed: cancelled")
         .with_kind(ProviderFailureKind::Unknown)
         .with_code("task_join_failed")
-        .retryable(false);
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable);
     let record = synthetic_terminal_call_record(
         7,
         Duration::from_millis(11),
@@ -824,7 +833,7 @@ async fn provider_handle_rejects_instead_of_recertifying_foreign_stamped_output(
         failure.error.code.as_deref(),
         Some("provider_replay_origin_conflict")
     );
-    assert!(!failure.error.retryable);
+    assert!(!failure.error.is_retryable());
     assert!(failure.error.message.contains("gateway-a.example"));
     assert!(failure.error.message.contains("gateway-b.example"));
 }
@@ -845,7 +854,7 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
         Some("provider_replay_origin_conflict")
     );
     assert_eq!(failure.error.kind, ProviderFailureKind::Validation);
-    assert!(!failure.error.retryable);
+    assert!(!failure.error.is_retryable());
     assert!(
         failure
             .error
@@ -1234,7 +1243,7 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
         failure.code.as_deref(),
         Some("unsafe_retry_after_output_started")
     );
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
     assert_eq!(
         failure.call_record.attempts[0]
             .retry_decision
@@ -1263,7 +1272,7 @@ fn raw_provider_usage_requires_a_reported_quantity() {
 fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
     let no_response = LlmTransportError::new("connect failed")
         .with_kind(ProviderFailureKind::Transport)
-        .retryable(true);
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient);
     assert_eq!(
         automatic_retry_class(
             &no_response,
@@ -1274,8 +1283,10 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
     );
 
     let rejected = LlmTransportError::new("throttled")
-        .with_status(429)
-        .with_retry_after(Duration::from_secs(1));
+        .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
+            retry_after: Some(Duration::from_secs(1)),
+        })
+        .with_status(429);
     let rejected = DefaultProviderFailureClassifier.classify(rejected);
     assert_eq!(
         automatic_retry_class(
@@ -1286,11 +1297,8 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
         Some(AutomaticRetryClass::RejectedHttpResponse)
     );
 
-    // The sole retained status-only class is a classified 429 carrying
-    // Retry-After: it explicitly says admission was throttled and when the
-    // rejected request may be resubmitted. Timeout, conflict, early-data, and
-    // server/gateway statuses cannot prove that an upstream generation never
-    // started, so they must not authorize another purchase.
+    // Response-observed transient statuses cannot prove that an upstream
+    // generation never started, so they must not authorize another purchase.
     for status in [408, 409, 425, 500, 502, 503, 504] {
         let failure = DefaultProviderFailureClassifier
             .classify(LlmTransportError::new("ambiguous rejection").with_status(status));
@@ -1312,13 +1320,13 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
             failure_protocol_position(&retry_after_absent),
             GenerationRetryGuarantee::None,
         ),
-        None,
-        "429 without Retry-After lacks the retained rejection proof"
+        Some(AutomaticRetryClass::RejectedHttpResponse),
+        "typed throttling is sufficient rejection proof without Retry-After"
     );
 
     let empty_partial = LlmTransportError::new("stream disconnected")
         .with_kind(ProviderFailureKind::Stream)
-        .retryable(true)
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
         .with_partial_response(LlmResponse::default());
     assert_eq!(
         automatic_retry_class(
@@ -1331,7 +1339,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
 
     let output_started = LlmTransportError::new("stream disconnected")
         .with_kind(ProviderFailureKind::Stream)
-        .retryable(true)
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
         .with_partial_response(LlmResponse {
             full_text: "paid output".to_string(),
             ..LlmResponse::default()
@@ -1345,7 +1353,7 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
 
     let usage_only = LlmTransportError::new("stream disconnected")
         .with_kind(ProviderFailureKind::Stream)
-        .retryable(true)
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
         .with_partial_response(LlmResponse {
             usage: LlmUsage {
                 output_tokens: 1,
@@ -1368,6 +1376,26 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
         Some(AutomaticRetryClass::ProviderGuarantee(
             GenerationRetryGuarantee::Idempotent
         ))
+    );
+}
+
+#[test]
+fn forbidden_is_terminal_even_with_retry_after_and_status_noise() {
+    let failure = LlmTransportError::new("content policy rejection")
+        .with_kind(ProviderFailureKind::Quota)
+        .with_terminal_reason(LlmTerminalReason::ContentFilter)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        .with_status(429)
+        .with_headers([("retry-after", "1")]);
+
+    assert_eq!(
+        automatic_retry_class(
+            &failure,
+            failure_protocol_position(&failure),
+            GenerationRetryGuarantee::None,
+        ),
+        None,
+        "content-policy failures must be terminal regardless of retry/status noise"
     );
 }
 
@@ -1541,7 +1569,7 @@ async fn provider_handle_stops_on_non_retryable_failure() {
         .await
         .expect_err("non retryable");
 
-    assert!(!err.retryable);
+    assert!(!err.is_retryable());
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
 }
 
@@ -1740,7 +1768,7 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
     // that still waits the provider-stated Retry-After before re-calling).
     assert_eq!(attempts.load(Ordering::SeqCst), 4);
     assert_eq!(clock.slept(), Duration::from_secs(12));
-    assert!(err.retryable);
+    assert!(err.is_retryable());
     assert_eq!(err.kind, ProviderFailureKind::Quota);
 }
 
@@ -1787,7 +1815,7 @@ async fn provider_handle_one_second_throttle_storm_has_a_total_call_bound() {
 }
 
 #[tokio::test]
-async fn provider_handle_throttle_without_retry_after_is_not_retried() {
+async fn provider_handle_throttle_without_retry_after_uses_counted_backoff_retry() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = StatusFailingProvider {
         options: ProviderOptions {
@@ -1810,17 +1838,14 @@ async fn provider_handle_throttle_without_retry_after_is_not_retried() {
         .await
         .expect_err("no server-stated wait, so the normal ladder applies");
 
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(err.kind, ProviderFailureKind::Quota);
-    assert_eq!(
-        err.code.as_deref(),
-        Some("unsafe_retry_after_response_observed")
-    );
-    assert!(!err.retryable);
+    assert_eq!(err.code.as_deref(), Some("429"));
+    assert!(err.is_retryable());
 }
 
 #[tokio::test]
-async fn provider_handle_throttle_with_malformed_retry_after_is_not_retried() {
+async fn provider_handle_throttle_with_malformed_retry_after_uses_counted_backoff_retry() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = StatusFailingProvider {
         options: ProviderOptions {
@@ -1843,13 +1868,10 @@ async fn provider_handle_throttle_with_malformed_retry_after_is_not_retried() {
         .await
         .expect_err("malformed Retry-After cannot prove safe resubmission");
 
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(err.kind, ProviderFailureKind::Quota);
-    assert_eq!(
-        err.code.as_deref(),
-        Some("unsafe_retry_after_response_observed")
-    );
-    assert!(!err.retryable);
+    assert_eq!(err.code.as_deref(), Some("429"));
+    assert!(err.is_retryable());
 }
 
 #[tokio::test]
@@ -1878,7 +1900,7 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
         .expect_err("5xx is a failure, not a throttle");
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert!(!err.retryable);
+    assert!(!err.is_retryable());
     assert_eq!(err.kind, ProviderFailureKind::Http);
     assert_eq!(
         err.code.as_deref(),
@@ -1909,7 +1931,7 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_eq!(error.kind, ProviderFailureKind::Validation);
-    assert!(!error.retryable);
+    assert!(!error.is_retryable());
     assert_eq!(error.code.as_deref(), Some("413"));
     assert_eq!(error.terminal_reason, LlmTerminalReason::ProviderError);
     assert_eq!(
@@ -1924,11 +1946,13 @@ fn default_failure_classifier_classifies_429_as_retryable_throttle() {
     let failure = classifier.classify(
         ProviderFailure::new("Rate limit reached for requests")
             .with_status(429)
-            .with_retry_after(Duration::from_secs(7)),
+            .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
+                retry_after: Some(Duration::from_secs(7)),
+            }),
     );
     assert_eq!(failure.kind, ProviderFailureKind::Quota);
-    assert!(failure.retryable);
-    assert_eq!(failure.retry_after, Some(Duration::from_secs(7)));
+    assert!(failure.is_retryable());
+    assert_eq!(failure.retry_after(), Some(Duration::from_secs(7)));
 }
 
 #[test]
@@ -1941,7 +1965,7 @@ fn default_failure_classifier_keeps_quota_exhaustion_non_retryable() {
     ] {
         let failure = classifier.classify(ProviderFailure::new(message).with_status(429));
         assert_eq!(failure.kind, ProviderFailureKind::Quota);
-        assert!(!failure.retryable);
+        assert!(!failure.is_retryable());
     }
 }
 
@@ -1965,7 +1989,7 @@ fn default_failure_classifier_keeps_rate_throttling_retryable() {
             "throttling stays Quota: {message}"
         );
         assert!(
-            failure.retryable,
+            failure.is_retryable(),
             "per-minute throttling must stay retryable: {message}"
         );
     }
@@ -2007,7 +2031,7 @@ fn default_failure_classifier_uses_context_overflow_text_for_unclassified_failur
             failure.terminal_reason,
             crate::LlmTerminalReason::ContextOverflow
         );
-        assert!(!failure.retryable);
+        assert!(!failure.is_retryable());
     }
 }
 
@@ -2026,7 +2050,7 @@ fn generic_anthropic_and_google_http_overflow_envelopes_use_the_text_fallback() 
         );
 
         assert_eq!(failure.kind, ProviderFailureKind::Validation, "{raw}");
-        assert!(!failure.retryable, "{raw}");
+        assert!(!failure.is_retryable(), "{raw}");
         assert_eq!(
             failure.terminal_reason,
             LlmTerminalReason::ContextOverflow,
@@ -2043,7 +2067,7 @@ fn default_failure_classifier_fails_open_when_unclassified_text_is_uncertain() {
     );
 
     assert_eq!(failure.kind, ProviderFailureKind::Unknown);
-    assert!(failure.retryable);
+    assert!(failure.is_retryable());
     assert_eq!(
         failure.terminal_reason,
         crate::LlmTerminalReason::ProviderError
@@ -2052,16 +2076,18 @@ fn default_failure_classifier_fails_open_when_unclassified_text_is_uncertain() {
 
 #[test]
 fn default_failure_classifier_preserves_explicit_non_retryability() {
-    let failure = DefaultProviderFailureClassifier
-        .classify(ProviderFailure::new("Anthropic stream error: invalid request").retryable(false));
+    let failure = DefaultProviderFailureClassifier.classify(
+        ProviderFailure::new("Anthropic stream error: invalid request")
+            .with_retry_verdict(TransportRetryVerdict::NotRetryable),
+    );
 
     assert_eq!(failure.kind, ProviderFailureKind::Unknown);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
 }
 
 #[test]
-fn default_failure_classifier_does_not_override_structured_user_echo() {
+fn default_failure_classifier_makes_structured_validation_forbidden_without_scraping_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
         ProviderFailure::new("request rejected")
             .with_kind(ProviderFailureKind::Validation)
@@ -2069,11 +2095,12 @@ fn default_failure_classifier_does_not_override_structured_user_echo() {
             .with_raw(
                 r#"{"error":{"message":"The user wrote: context length is a useful phrase"}}"#,
             )
-            .retryable(true),
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
     );
 
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
-    assert!(failure.retryable);
+    assert_eq!(failure.retry_verdict, TransportRetryVerdict::Forbidden);
+    assert!(!failure.is_retryable());
     assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
     assert_eq!(
         failure.terminal_reason,
@@ -2091,7 +2118,7 @@ fn default_failure_classifier_does_not_override_structured_hard_quota_echo() {
     );
 
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
     assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
 }
 
@@ -2117,7 +2144,7 @@ fn default_failure_classifier_does_not_override_structured_unsupported_model_ech
     );
 
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
     assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
 }
 

@@ -9,7 +9,9 @@
 //! wire-format parsing to these primitives directly.
 
 use lash_core::provider::ProviderOptions;
-use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
+use lash_core::{
+    ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,
+};
 use lash_sansio::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
 use serde_json::Value;
 
@@ -238,8 +240,8 @@ where
 /// `message` is the provider-specific human-readable summary (e.g.
 /// `"Anthropic request failed with 429"`). The provider's `error.message`, or
 /// a bounded raw-body fallback, is appended here so every caller gets the same
-/// detail extraction. Retryability is left to the central provider failure
-/// classifier, which reads the attached status.
+/// detail extraction. The HTTP builder records the adapter-owned retry verdict
+/// from the status and headers before the envelope crosses into core.
 ///
 /// The envelope is pre-labelled [`ProviderFailureKind::Http`] so it is
 /// self-describing even before classification. This matches what
@@ -264,10 +266,14 @@ pub fn http_error_envelope(
         .with_status(status)
         .with_headers(headers)
         .with_raw(raw_body.clone());
-    if err.retry_after.is_none()
-        && let Some(retry_after) = retry_after_from_error_body(&raw_body)
+    if matches!(
+        err.retry_verdict,
+        TransportRetryVerdict::RetryableThrottle { retry_after: None }
+    ) && let Some(retry_after) = retry_after_from_error_body(&raw_body)
     {
-        err = err.with_retry_after(retry_after);
+        err.retry_verdict = TransportRetryVerdict::RetryableThrottle {
+            retry_after: Some(retry_after),
+        };
     }
     if let Some(request_body) = request_body {
         err = err.with_request_body(request_body);
@@ -472,13 +478,30 @@ mod tests {
             Some(r#"{"model":"m"}"#)
         );
         assert_eq!(
-            err.retry_after,
+            err.retry_after(),
             Some(std::time::Duration::from_secs(7)),
             "with_headers must derive retry-after from the header pairs"
         );
 
         let without_request_body = http_error_envelope("failed", 500, Vec::new(), "boom", None);
         assert_eq!(without_request_body.request_body, None);
+    }
+
+    #[test]
+    fn http_error_envelope_marks_429_without_retry_after_retryable() {
+        let err = http_error_envelope(
+            "Provider request failed with 429",
+            429,
+            Vec::new(),
+            r#"{"error":"rate limited"}"#,
+            None,
+        );
+
+        assert_eq!(
+            err.retry_verdict,
+            TransportRetryVerdict::RetryableThrottle { retry_after: None },
+            "429 without Retry-After must remain retryable with computed backoff"
+        );
     }
 
     #[test]
@@ -490,7 +513,7 @@ mod tests {
             r#"{"error":{"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"55s"}]}}"#,
             None,
         );
-        assert_eq!(err.retry_after, Some(std::time::Duration::from_secs(55)));
+        assert_eq!(err.retry_after(), Some(std::time::Duration::from_secs(55)));
     }
 
     #[test]
@@ -502,7 +525,7 @@ mod tests {
             r#"{"error":{"details":[{"retryDelay":"1e300s"}]}}"#,
             None,
         );
-        assert_eq!(err.retry_after, None);
+        assert_eq!(err.retry_after(), None);
     }
 
     #[test]

@@ -9,7 +9,8 @@ pub(crate) use serde_json::{Value, json};
 
 pub(crate) use lash_core::llm::transport::{
     GOOGLE_FILE_MIMES, GOOGLE_IMAGE_MIMES, GOOGLE_MEDIA_FAMILIES, LlmTransportError,
-    ProviderFailureKind, known_attachment_acceptors, unsupported_attachment_capability,
+    ProviderFailureKind, TransportRetryVerdict, known_attachment_acceptors,
+    unsupported_attachment_capability,
 };
 pub(crate) use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt,

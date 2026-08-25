@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use lash_sansio::llm::types::ProviderFailureKind;
 
-use crate::HttpTransportError;
+use crate::{HttpTransportError, TransportRetryVerdict};
 
 #[async_trait]
 pub trait HttpTransport: Send + Sync + fmt::Debug {
@@ -227,7 +227,7 @@ impl HttpTransport for ReqwestHttpTransport {
                     .map_err(|err| {
                         let error = HttpTransportError::new(format!("HTTP request failed: {err}"))
                             .with_kind(ProviderFailureKind::Transport)
-                            .retryable(reqwest_error_is_retryable(&err));
+                            .with_retry_verdict(reqwest_error_retry_verdict(&err));
                         if let Some(body) = body_for_error {
                             error.with_request_body(body)
                         } else {
@@ -259,7 +259,7 @@ impl ByteStream for ReqwestByteStream {
         self.response.chunk().await.map_err(|err| {
             HttpTransportError::new(format!("HTTP response read failed: {err}"))
                 .with_kind(ProviderFailureKind::Transport)
-                .retryable(reqwest_error_is_retryable(&err))
+                .with_retry_verdict(reqwest_error_retry_verdict(&err))
         })
     }
 }
@@ -337,8 +337,12 @@ pub fn header_pairs(headers: &reqwest::header::HeaderMap) -> Vec<(String, String
         .collect()
 }
 
-fn reqwest_error_is_retryable(error: &reqwest::Error) -> bool {
-    error.is_timeout() || error.is_connect() || error.is_body() || error.is_decode()
+fn reqwest_error_retry_verdict(error: &reqwest::Error) -> TransportRetryVerdict {
+    if error.is_timeout() || error.is_connect() || error.is_body() {
+        TransportRetryVerdict::RetryableTransient
+    } else {
+        TransportRetryVerdict::NotRetryable
+    }
 }
 
 pub async fn run_with_timeout<T, F>(
@@ -353,7 +357,7 @@ where
         Some(duration) => tokio::time::timeout(duration, future).await.map_err(|_| {
             HttpTransportError::new(timeout_message)
                 .with_kind(ProviderFailureKind::Timeout)
-                .retryable(true)
+                .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                 .with_code("timeout")
         })?,
         None => future.await,
@@ -413,6 +417,6 @@ mod tests {
         let err = result.expect_err("expected timeout");
         assert_eq!(err.message, "request timed out");
         assert_eq!(err.code.as_deref(), Some("timeout"));
-        assert!(err.retryable);
+        assert_eq!(err.retry_verdict, TransportRetryVerdict::RetryableTransient);
     }
 }

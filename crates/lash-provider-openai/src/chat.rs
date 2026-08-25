@@ -573,16 +573,16 @@ impl OpenAiCompatibleProvider {
         let event: ChatSseEvent<'_> = serde_json::from_str(raw).map_err(|e| {
             LlmTransportError::new(format!("Invalid Chat Completions SSE payload: {e}"))
                 .with_raw(raw)
-                .retryable(false)
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         })?;
         if let Some(error) = event.error.as_ref() {
-            let retryable = responses_error_is_retryable(error);
+            let retry_verdict = responses_error_retry_verdict(error);
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("OpenAI-compatible chat stream error");
             return Err(LlmTransportError::new(message)
-                .retryable(retryable)
+                .with_retry_verdict(retry_verdict)
                 .with_raw(raw));
         }
         // Identity is the monotonic boundary for all other event evidence.

@@ -376,7 +376,9 @@ impl RuntimeTurnDriver<'_> {
                     .with_kind(crate::ProviderFailureKind::Unknown)
                     .with_code("cancelled")
                     .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
-                    .retryable(false);
+                    .with_retry_verdict(
+                        crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                    );
                     call_record = Some(crate::provider::synthetic_terminal_call_record(
                         attempt_started_at,
                         self.host
@@ -489,9 +491,10 @@ impl RuntimeTurnDriver<'_> {
                         let mut resp = resp;
                         if let Err(error) = completion_sideband.fence_response(&mut resp) {
                             call_record = Some(aborted_call_record);
+                            let retryable = error.is_retryable();
                             break Err(LlmCallError {
                                 message: error.message,
-                                retryable: error.retryable,
+                                retryable,
                                 kind: error.kind,
                                 raw: error.raw.map(|raw| *raw),
                                 code: error.code,
@@ -562,7 +565,9 @@ impl RuntimeTurnDriver<'_> {
                             ))
                             .with_kind(crate::ProviderFailureKind::Unknown)
                             .with_code("task_join_failed")
-                            .retryable(false);
+                            .with_retry_verdict(
+                                crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                            );
                             call_record = Some(crate::provider::synthetic_terminal_call_record(
                                 attempt_started_at,
                                 self.host
@@ -615,9 +620,10 @@ impl RuntimeTurnDriver<'_> {
                                 call_record: failed_call_record,
                             } = e;
                             call_record = Some(failed_call_record);
+                            let retryable = e.is_retryable();
                             break Err(LlmCallError {
                                 message: e.message,
-                                retryable: e.retryable,
+                                retryable,
                                 kind: e.kind,
                                 raw: e.raw.map(|raw| *raw),
                                 code: e.code,

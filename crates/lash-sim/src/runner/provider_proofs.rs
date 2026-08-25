@@ -201,9 +201,9 @@ pub(super) async fn prove_codex_responses_rate_limit() -> Result<ProofRun, Fixed
             "status": err.status,
             "headers": redacted_headers(&err.headers),
             "raw_body_bytes": err.raw.as_ref().map(|body| body.len()),
-            "retry_after_ms": err.retry_after.map(|duration| duration.as_millis() as u64),
+            "retry_after_ms": err.retry_after().map(|duration| duration.as_millis() as u64),
             "request_body_snapshot": err.request_body.is_some(),
-            "provider_error_retryable": err.retryable,
+            "provider_error_retryable": err.is_retryable(),
             "classification": failure_classification(&classified),
         }),
     )
@@ -216,7 +216,7 @@ pub(super) async fn prove_codex_responses_disconnect() -> Result<ProofRun, Fixed
         .await
         .expect_err("codex disconnect script should fail");
     require(
-        err.kind == ProviderFailureKind::Stream && err.retryable,
+        err.kind == ProviderFailureKind::Stream && err.is_retryable(),
         "Codex disconnect script did not surface retryable stream failure",
     )?;
     let classified = DefaultProviderFailureClassifier.classify(err.clone());
@@ -228,7 +228,7 @@ pub(super) async fn prove_codex_responses_disconnect() -> Result<ProofRun, Fixed
         error_terminal(&err),
         json!({
             "kind": format!("{:?}", err.kind),
-            "retryable": err.retryable,
+            "retryable": err.is_retryable(),
             "classification": failure_classification(&classified),
         }),
     )
@@ -383,9 +383,9 @@ pub(super) async fn prove_openai_compatible_rate_limit() -> Result<ProofRun, Fix
             "status": err.status,
             "headers": redacted_headers(&err.headers),
             "raw_body_bytes": err.raw.as_ref().map(|body| body.len()),
-            "retry_after_ms": err.retry_after.map(|duration| duration.as_millis() as u64),
+            "retry_after_ms": err.retry_after().map(|duration| duration.as_millis() as u64),
             "request_body_snapshot": err.request_body.is_some(),
-            "provider_error_retryable": err.retryable,
+            "provider_error_retryable": err.is_retryable(),
             "classification": failure_classification(&classified),
         }),
     )
@@ -414,7 +414,7 @@ pub(super) async fn prove_openai_compatible_validation() -> Result<ProofRun, Fix
             "headers": redacted_headers(&err.headers),
             "raw_body_bytes": err.raw.as_ref().map(|body| body.len()),
             "request_body_snapshot": err.request_body.is_some(),
-            "provider_error_retryable": err.retryable,
+            "provider_error_retryable": err.is_retryable(),
             "classification": failure_classification(&classified),
         }),
     )
@@ -428,7 +428,7 @@ pub(super) async fn prove_openai_compatible_disconnect() -> Result<ProofRun, Fix
         .await
         .expect_err("disconnect script should fail");
     require(
-        err.kind == ProviderFailureKind::Stream && err.retryable,
+        err.kind == ProviderFailureKind::Stream && err.is_retryable(),
         "OpenAI-compatible disconnect script did not surface retryable stream failure",
     )?;
     let classified = DefaultProviderFailureClassifier.classify(err.clone());
@@ -440,7 +440,7 @@ pub(super) async fn prove_openai_compatible_disconnect() -> Result<ProofRun, Fix
         error_terminal(&err),
         json!({
             "kind": format!("{:?}", err.kind),
-            "retryable": err.retryable,
+            "retryable": err.is_retryable(),
             "classification": failure_classification(&classified),
         }),
     )
@@ -457,7 +457,7 @@ pub(super) async fn prove_openai_compatible_response_start_timeout()
     require(
         err.kind == ProviderFailureKind::Timeout
             && err.code.as_deref() == Some("timeout")
-            && err.retryable
+            && err.is_retryable()
             && err.status.is_none(),
         "OpenAI-compatible response-start timeout did not match production timeout envelope",
     )?;
@@ -492,7 +492,7 @@ pub(super) async fn prove_openai_compatible_stream_chunk_timeout()
     require(
         err.kind == ProviderFailureKind::Timeout
             && err.code.as_deref() == Some("timeout")
-            && err.retryable
+            && err.is_retryable()
             && err.status.is_none(),
         "OpenAI-compatible stream chunk timeout did not match production timeout envelope",
     )?;
@@ -588,10 +588,14 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
         .await
         .expect_err("retry exhaustion should fail");
     require(
-        err.status == Some(429) && err.retryable,
+        err.status == Some(429) && err.is_retryable(),
         format!(
             "retry exhaustion did not return classified retryable 429: status={:?} retryable={} kind={:?} code={:?} message={}",
-            err.status, err.retryable, err.kind, err.code, err.message
+            err.status,
+            err.is_retryable(),
+            err.kind,
+            err.code,
+            err.message
         ),
     )?;
     require(
@@ -620,7 +624,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
         error_terminal(&err),
         json!({
             "status": err.status,
-            "retryable": err.retryable,
+            "retryable": err.is_retryable(),
             "classification": failure_classification(&err),
             "attempts_consumed": attempt_budget,
         }),
@@ -685,12 +689,12 @@ fn error_terminal(error: &LlmTransportError) -> TranscriptTerminal {
             kind: format!("{:?}", error.kind),
             code: error.code.clone(),
             status: error.status,
-            retryable: error.retryable,
+            retryable: error.is_retryable(),
             terminal_reason: error.terminal_reason.code().to_string(),
             raw_body_bytes: error.raw.as_ref().map(|body| body.len()),
             headers: transcript_headers_from_pairs(&error.headers),
             retry_after_ms: error
-                .retry_after
+                .retry_after()
                 .map(|duration| duration.as_millis() as u64),
             request_body_snapshot: error.request_body.is_some(),
         }),
@@ -710,7 +714,7 @@ fn provider_transport(transport: &Arc<ScriptedLlmHttpTransport>) -> Arc<dyn LlmH
 fn failure_classification(failure: &LlmTransportError) -> serde_json::Value {
     json!({
         "kind": format!("{:?}", failure.kind),
-        "retryable": failure.retryable,
+        "retryable": failure.is_retryable(),
         "status": failure.status,
         "terminal_reason": failure.terminal_reason.code(),
     })

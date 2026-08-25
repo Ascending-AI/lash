@@ -824,6 +824,7 @@ pub mod provider {
     /// selection. The snake_case [`ModelEffortValidationCategory`] codes are a
     /// stable contract a capability catalog can branch on.
     pub use lash_core::facade_support::ModelEffortValidationCategory;
+    pub use lash_core::llm::transport::TransportRetryVerdict;
     pub use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmOutputSpec, LlmRole};
     pub use lash_core::provider::ModelEffortValidationError;
     /// Provider completion, caching, failure, retry, and rate-limiting contracts.

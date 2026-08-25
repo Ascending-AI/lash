@@ -1,5 +1,39 @@
 use lash_sansio::llm::types::{LlmResponse, LlmTerminalReason, ProviderFailureKind};
 
+/// Adapter-owned retry classification for a transport failure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TransportRetryVerdict {
+    /// The provider rejected admission because of throttling or capacity.
+    /// `retry_after` is the provider's requested delay when one was supplied.
+    RetryableThrottle {
+        retry_after: Option<std::time::Duration>,
+    },
+    /// A connect, timeout, or server-shaped transient failure.
+    RetryableTransient,
+    /// The failure is not retryable, but future policy is not structurally barred.
+    #[default]
+    NotRetryable,
+    /// Authentication, request validation, or content policy rejected the request.
+    /// No retry policy may override this verdict.
+    Forbidden,
+}
+
+impl TransportRetryVerdict {
+    pub const fn is_retryable(self) -> bool {
+        matches!(
+            self,
+            Self::RetryableThrottle { .. } | Self::RetryableTransient
+        )
+    }
+
+    pub const fn retry_after(self) -> Option<std::time::Duration> {
+        match self {
+            Self::RetryableThrottle { retry_after } => retry_after,
+            Self::RetryableTransient | Self::NotRetryable | Self::Forbidden => None,
+        }
+    }
+}
+
 /// Failure crossing the host-configurable HTTP transport boundary.
 ///
 /// The provider-oriented aliases retain the richer diagnostic fields because
@@ -9,8 +43,8 @@ use lash_sansio::llm::types::{LlmResponse, LlmTerminalReason, ProviderFailureKin
 pub struct HttpTransportError {
     pub kind: ProviderFailureKind,
     pub message: String,
-    pub retryable: bool,
-    retryability_classified: bool,
+    pub retry_verdict: TransportRetryVerdict,
+    retry_verdict_classified: bool,
     pub status: Option<u16>,
     /// Cold raw provider evidence stays off the inline `Result` error path.
     pub raw: Option<Box<String>>,
@@ -18,7 +52,6 @@ pub struct HttpTransportError {
     pub terminal_reason: LlmTerminalReason,
     /// Cold diagnostic metadata stays off the inline `Result` error path.
     pub headers: Box<Vec<(String, String)>>,
-    pub retry_after: Option<std::time::Duration>,
     /// Cold request evidence stays off the inline `Result` error path.
     pub request_body: Option<Box<String>>,
     /// The adapter observed provider-generated output before this failure,
@@ -35,14 +68,13 @@ impl HttpTransportError {
         Self {
             kind: ProviderFailureKind::Unknown,
             message: message.into(),
-            retryable: false,
-            retryability_classified: false,
+            retry_verdict: TransportRetryVerdict::NotRetryable,
+            retry_verdict_classified: false,
             status: None,
             raw: None,
             code: None,
             terminal_reason: LlmTerminalReason::ProviderError,
             headers: Box::default(),
-            retry_after: None,
             request_body: None,
             output_started: false,
             partial_response: None,
@@ -54,22 +86,33 @@ impl HttpTransportError {
         self
     }
 
-    pub fn retryable(mut self, retryable: bool) -> Self {
-        self.retryable = retryable;
-        self.retryability_classified = true;
+    pub fn with_retry_verdict(mut self, retry_verdict: TransportRetryVerdict) -> Self {
+        self.retry_verdict = retry_verdict;
+        self.retry_verdict_classified = true;
         self
     }
 
-    /// Whether the driver explicitly classified retryability at the transport
-    /// boundary, including an explicit non-retryable verdict.
-    pub fn retryability_is_classified(&self) -> bool {
-        self.retryability_classified
+    /// Whether the driver explicitly supplied the typed transport verdict.
+    pub fn retry_verdict_is_classified(&self) -> bool {
+        self.retry_verdict_classified
+    }
+
+    pub const fn is_retryable(&self) -> bool {
+        self.retry_verdict.is_retryable()
+    }
+
+    pub const fn retry_after(&self) -> Option<std::time::Duration> {
+        self.retry_verdict.retry_after()
     }
 
     pub fn with_status(mut self, status: u16) -> Self {
         self.status = Some(status);
         if self.code.is_none() {
             self.code = Some(status.to_string());
+        }
+        if !self.retry_verdict_classified {
+            self.retry_verdict =
+                retry_verdict_for_status(status, retry_after_from_headers(self.headers.as_slice()));
         }
         self
     }
@@ -101,12 +144,9 @@ impl HttpTransportError {
                 .map(|(name, value)| (name.into(), value.into()))
                 .collect(),
         );
-        self.retry_after = retry_after_from_headers(&self.headers);
-        self
-    }
-
-    pub fn with_retry_after(mut self, retry_after: std::time::Duration) -> Self {
-        self.retry_after = Some(retry_after);
+        if let TransportRetryVerdict::RetryableThrottle { retry_after } = &mut self.retry_verdict {
+            *retry_after = retry_after_from_headers(&self.headers);
+        }
         self
     }
 
@@ -123,6 +163,18 @@ impl HttpTransportError {
     pub fn with_partial_response(mut self, response: LlmResponse) -> Self {
         self.partial_response = Some(Box::new(response));
         self
+    }
+}
+
+fn retry_verdict_for_status(
+    status: u16,
+    retry_after: Option<std::time::Duration>,
+) -> TransportRetryVerdict {
+    match status {
+        429 => TransportRetryVerdict::RetryableThrottle { retry_after },
+        408 | 500..=599 => TransportRetryVerdict::RetryableTransient,
+        400 | 401 | 403 | 422 => TransportRetryVerdict::Forbidden,
+        _ => TransportRetryVerdict::NotRetryable,
     }
 }
 

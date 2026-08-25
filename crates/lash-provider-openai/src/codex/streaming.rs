@@ -16,7 +16,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
+use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
     ExecutionEvidence, LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence,
     LlmTerminalReason, LlmUsage, ProviderRouteIdentity,
@@ -122,7 +122,7 @@ impl CodexProvider {
             "Codex returned HTTP {status} with non-SSE body{content_type_detail} but it could not be read: {}",
             err.message
         ))
-        .retryable(err.retryable)
+        .with_retry_verdict(err.retry_verdict)
         .with_code(code)
     }
 
@@ -248,7 +248,7 @@ impl CodexProvider {
             return Err(CodexWebSocketAttemptError::during_stream(
                 LlmTransportError::new(format!("Codex WebSocket send failed: {error}"))
                     .with_request_body(request_body.clone())
-                    .retryable(true)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_code("websocket_send"),
                 events_seen,
                 &state,
@@ -266,7 +266,7 @@ impl CodexProvider {
                         LlmTransportError::new("Codex WebSocket stream chunk timed out")
                             .with_kind(ProviderFailureKind::Timeout)
                             .with_request_body(request_body.clone())
-                            .retryable(true)
+                            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                             .with_code("websocket_idle_timeout"),
                         events_seen,
                         &state,
@@ -281,7 +281,7 @@ impl CodexProvider {
                     return Err(CodexWebSocketAttemptError::during_stream(
                         LlmTransportError::new(format!("Codex WebSocket receive failed: {error}"))
                             .with_request_body(request_body.clone())
-                            .retryable(true)
+                            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                             .with_code("websocket_receive"),
                         events_seen,
                         &state,
@@ -392,7 +392,7 @@ impl CodexProvider {
                 LlmTransportError::new("Codex WebSocket ended before response.completed")
                     .with_request_body(request_body)
                     .with_kind(ProviderFailureKind::Stream)
-                    .retryable(true)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_code("websocket_closed_before_completed")
                     .with_partial_response(partial),
                 events_seen,
@@ -491,7 +491,7 @@ fn codex_replay_origin_conflict(
     }
     error.kind = ProviderFailureKind::Validation;
     error.code = Some("provider_replay_origin_conflict".to_string());
-    error.retryable = false;
+    error.retry_verdict = TransportRetryVerdict::Forbidden;
     error
 }
 
@@ -1017,7 +1017,7 @@ impl Provider for CodexProvider {
             )
             .with_kind(ProviderFailureKind::Stream)
             .with_code("stream_ended_before_terminal_response")
-            .retryable(true)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_output_started(output_started)
             .with_partial_response(partial));
         }
@@ -1034,7 +1034,7 @@ impl Provider for CodexProvider {
                     .map(|ct| format!(", content-type {ct}"))
                     .unwrap_or_else(|| ", missing content-type".to_string())
             ))
-            .retryable(true)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_code("empty_stream"));
         }
 

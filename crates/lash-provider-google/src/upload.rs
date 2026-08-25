@@ -18,7 +18,7 @@ fn upload_http_error_envelope(
     if status == 413 {
         failure
             .with_kind(ProviderFailureKind::Validation)
-            .retryable(false)
+            .with_retry_verdict(TransportRetryVerdict::Forbidden)
     } else {
         failure
     }
@@ -162,7 +162,7 @@ impl GoogleOAuthProvider {
                 LlmTransportError::new(
                     "Gemini Files upload start response missing x-goog-upload-url header",
                 )
-                .retryable(false)
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
             })?
             .to_string();
 
@@ -360,10 +360,10 @@ mod error_detail_tests {
     async fn upload_missing_url_is_explicitly_non_retryable() {
         let error = upload_with(vec![response(200, Vec::new(), "")]).await;
 
-        assert!(!error.retryable);
-        assert!(error.retryability_is_classified());
+        assert!(!error.is_retryable());
+        assert!(error.retry_verdict_is_classified());
         let failure = DefaultProviderFailureClassifier.classify(error);
-        assert!(!failure.retryable);
+        assert!(!failure.is_retryable());
     }
 
     #[tokio::test]
@@ -399,7 +399,7 @@ mod error_detail_tests {
         let failure = DefaultProviderFailureClassifier.classify(error);
 
         assert_eq!(failure.kind, ProviderFailureKind::Validation);
-        assert!(!failure.retryable);
+        assert!(!failure.is_retryable());
         assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
     }
 }

@@ -508,7 +508,7 @@ fn response_failed_server_error_is_retryable() {
             None,
         )
         .unwrap_err();
-    assert!(err.retryable);
+    assert!(err.is_retryable());
     assert_eq!(err.message, "internal stream ended unexpectedly");
 }
 
@@ -1889,7 +1889,7 @@ async fn codex_websocket_output_started_error_stops_provider_handle_retry() {
         failure.code.as_deref(),
         Some("unsafe_retry_after_output_started")
     );
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
     assert_eq!(http.captured_len(), 0);
 }
 
@@ -1941,7 +1941,7 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
         failure.code.as_deref(),
         Some("unsafe_retry_after_output_started")
     );
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
     assert_eq!(http.captured_len(), 0);
 }
 

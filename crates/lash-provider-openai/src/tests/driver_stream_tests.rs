@@ -110,7 +110,7 @@ async fn aborted_chat_stream_emits_the_completed_tool_call_through_the_driver() 
         ScriptedByteEvent::Abort(
             LlmTransportError::new("Stream read failed: scripted disconnect")
                 .with_kind(ProviderFailureKind::Stream)
-                .retryable(true),
+                .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
         ),
     ]);
     let mut provider = openrouter_provider().with_transport(transport);
@@ -167,7 +167,7 @@ async fn aborted_responses_stream_emits_the_completed_tool_call_through_the_driv
         ScriptedByteEvent::Abort(
             LlmTransportError::new("Stream read failed: scripted disconnect")
                 .with_kind(ProviderFailureKind::Stream)
-                .retryable(true),
+                .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
         ),
     ]);
     let mut provider = OpenAiProvider::new("key").with_transport(transport);

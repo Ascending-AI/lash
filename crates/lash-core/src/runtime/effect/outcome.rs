@@ -100,7 +100,7 @@ impl From<&LlmTransportError> for LlmTraceFailure {
     fn from(err: &LlmTransportError) -> Self {
         Self {
             message: err.message.clone(),
-            retryable: err.retryable,
+            retryable: err.is_retryable(),
             terminal_reason: err.terminal_reason,
             code: err.code.clone(),
             raw: err.raw.as_deref().cloned(),
@@ -199,9 +199,10 @@ pub(crate) fn emit_provider_replay_drops(
 }
 
 pub(crate) fn llm_call_error_from_transport(err: LlmTransportError) -> LlmCallError {
+    let retryable = err.is_retryable();
     LlmCallError {
         message: err.message,
-        retryable: err.retryable,
+        retryable,
         kind: err.kind,
         raw: err.raw.map(|raw| *raw),
         code: err.code,

@@ -91,7 +91,7 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
         // Driver-owned semantic evidence is conclusive. `Http`, a bare status,
         // and its mirrored numeric code are the generic wire envelope, not a
         // provider classification, so text fallbacks remain available there.
-        let retryability_classified = failure.retryability_is_classified();
+        let retry_verdict_classified = failure.retry_verdict_is_classified();
         let structurally_classified = !matches!(
             failure.kind,
             ProviderFailureKind::Unknown | ProviderFailureKind::Http
@@ -101,7 +101,7 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
                 .code
                 .as_deref()
                 .is_some_and(|code| code.parse::<u16>().is_err())
-            || retryability_classified;
+            || retry_verdict_classified;
         if let Some(status) = failure.status.or_else(|| {
             failure
                 .code
@@ -116,14 +116,10 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
             if failure.kind == ProviderFailureKind::Unknown {
                 failure.kind = ProviderFailureKind::Http;
             }
-            if !retryability_classified {
-                failure.retryable = matches!(status, 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504);
-            }
             if status == 429 && generic_kind {
-                // Provider-side throttling. `Quota` + `retryable: true` is the
-                // combination `ProviderHandle`'s retry ladder defers to as a
-                // throttle; hard quota exhaustion (the text markers below)
-                // downgrades to `retryable: false`.
+                // Provider-side throttling. The transport's typed throttle
+                // verdict carries any server-supplied delay; hard quota
+                // exhaustion below downgrades it to `NotRetryable`.
                 failure.kind = ProviderFailureKind::Quota;
             } else if matches!(status, 401 | 403) && generic_kind {
                 failure.kind = ProviderFailureKind::Auth;
@@ -133,9 +129,9 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
         } else if matches!(
             failure.kind,
             ProviderFailureKind::Transport | ProviderFailureKind::Timeout
-        ) && !retryability_classified
+        ) && !retry_verdict_classified
         {
-            failure.retryable = true;
+            failure.retry_verdict = TransportRetryVerdict::RetryableTransient;
         }
 
         let haystack = format!(
@@ -154,14 +150,14 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
         // structured provider evidence.
         if !structurally_classified && is_context_overflow_text(&haystack) {
             failure.kind = ProviderFailureKind::Validation;
-            failure.retryable = false;
+            failure.retry_verdict = TransportRetryVerdict::Forbidden;
             failure.terminal_reason = LlmTerminalReason::ContextOverflow;
         }
         // Hard exhaustion only. A bare "quota" match is too broad: Google
         // phrases ordinary per-minute throttling as "Quota exceeded for quota
         // metric ... per minute", which arrives as a retryable 429 and must
         // stay retryable — downgrading it also loses the throttle-deference
-        // path, which requires `Quota` + `retryable: true`.
+        // path, which requires `Quota` + `RetryableThrottle`.
         // A transient Google 429 with none of the RetryInfo, per-metric, or
         // textual retry markers is indistinguishable here and will therefore
         // be classified as terminal by this heuristic.
@@ -177,7 +173,7 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
                 || google_hard_quota
             {
                 failure.kind = ProviderFailureKind::Quota;
-                failure.retryable = false;
+                failure.retry_verdict = TransportRetryVerdict::NotRetryable;
             }
             if haystack.contains("content_filter")
                 || haystack.contains("prohibited_content")
@@ -185,21 +181,30 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
                 || haystack.contains("sensitive")
             {
                 failure.terminal_reason = LlmTerminalReason::ContentFilter;
+                failure.retry_verdict = TransportRetryVerdict::Forbidden;
             }
             if haystack.contains("model_not_found")
                 || haystack.contains("unsupported model")
                 || haystack.contains("does not exist")
             {
                 failure.kind = ProviderFailureKind::Unsupported;
-                failure.retryable = false;
+                failure.retry_verdict = TransportRetryVerdict::NotRetryable;
             }
         }
-        if !structurally_classified
+        if matches!(
+            failure.kind,
+            ProviderFailureKind::Auth | ProviderFailureKind::Validation
+        ) || failure.terminal_reason == LlmTerminalReason::ContentFilter
+        {
+            failure.retry_verdict = TransportRetryVerdict::Forbidden;
+        } else if !structurally_classified
             && failure.kind == ProviderFailureKind::Unknown
             && failure.terminal_reason == LlmTerminalReason::ProviderError
         {
-            // Ambiguous text is not enough evidence to terminate the turn.
-            failure.retryable = true;
+            // `Unknown` is the existing forward-compatible fail-open class.
+            // Concrete parse and malformed-response sites classify themselves
+            // as `NotRetryable` before reaching this fallback.
+            failure.retry_verdict = TransportRetryVerdict::RetryableTransient;
         }
         failure
     }

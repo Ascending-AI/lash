@@ -7,7 +7,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
+use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_provider_auth::{
     Credential, CredentialError, CredentialErrorKind, CredentialRefresher, RefreshCause,
     classify_oauth_refresh_error,
@@ -83,5 +83,5 @@ pub(super) fn credential_transport_error(error: CredentialError) -> LlmTransport
     LlmTransportError::new(error.to_string())
         .with_kind(ProviderFailureKind::Auth)
         .with_code(code)
-        .retryable(error.retryable)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }

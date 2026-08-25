@@ -2239,7 +2239,9 @@ fn retry_once_provider() -> ProviderHandle {
             let attempts = Arc::clone(&attempts);
             async move {
                 if attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                    return Err(LlmTransportError::new("retry me").retryable(true));
+                    return Err(LlmTransportError::new("retry me").with_retry_verdict(
+                        lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                    ));
                 }
                 Ok(LlmResponse {
                     full_text: "retried".to_string(),

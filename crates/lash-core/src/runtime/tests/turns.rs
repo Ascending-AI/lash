@@ -2692,7 +2692,9 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
             stream_events: Vec::new(),
             response: Err(
                 crate::llm::transport::LlmTransportError::new("provider unavailable")
-                    .retryable(true)
+                    .with_retry_verdict(
+                        crate::llm::transport::TransportRetryVerdict::RetryableTransient,
+                    )
                     .with_code("http_500"),
             ),
         },
@@ -2700,7 +2702,9 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
             stream_events: Vec::new(),
             response: Err(
                 crate::llm::transport::LlmTransportError::new("provider unavailable")
-                    .retryable(true)
+                    .with_retry_verdict(
+                        crate::llm::transport::TransportRetryVerdict::RetryableTransient,
+                    )
                     .with_code("http_500"),
             ),
         },
@@ -2708,7 +2712,9 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
             stream_events: Vec::new(),
             response: Err(
                 crate::llm::transport::LlmTransportError::new("provider unavailable")
-                    .retryable(true)
+                    .with_retry_verdict(
+                        crate::llm::transport::TransportRetryVerdict::RetryableTransient,
+                    )
                     .with_code("http_500"),
             ),
         },
@@ -2716,7 +2722,9 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
             stream_events: Vec::new(),
             response: Err(
                 crate::llm::transport::LlmTransportError::new("provider unavailable")
-                    .retryable(true)
+                    .with_retry_verdict(
+                        crate::llm::transport::TransportRetryVerdict::RetryableTransient,
+                    )
                     .with_code("http_500"),
             ),
         },
@@ -6192,7 +6200,9 @@ async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_us
                         return Err(LlmTransportError::new("Stream ended without finish_reason")
                             .with_kind(crate::ProviderFailureKind::Stream)
                             .with_code("stream_ended_before_finish_reason")
-                            .retryable(true)
+                            .with_retry_verdict(
+                                crate::llm::transport::TransportRetryVerdict::RetryableTransient,
+                            )
                             .with_partial_response(LlmResponse {
                                 parts: vec![LlmOutputPart::ToolCall {
                                     call_id: "partial-call".to_string(),
@@ -6279,7 +6289,9 @@ async fn counted_provider_regeneration_emits_one_host_visible_attempt_reset() {
                     if call == 0 {
                         return Err(LlmTransportError::new("connection failed before response")
                             .with_kind(crate::ProviderFailureKind::Transport)
-                            .retryable(true));
+                            .with_retry_verdict(
+                                crate::llm::transport::TransportRetryVerdict::RetryableTransient,
+                            ));
                     }
 
                     request
@@ -6362,7 +6374,11 @@ async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset(
                     if call == 0 {
                         return Err(LlmTransportError::new("provider requested a retry delay")
                             .with_status(429)
-                            .with_retry_after(std::time::Duration::from_secs(1)));
+                            .with_retry_verdict(
+                                crate::llm::transport::TransportRetryVerdict::RetryableThrottle {
+                                    retry_after: Some(std::time::Duration::from_secs(1)),
+                                },
+                            ));
                     }
 
                     request
@@ -6455,7 +6471,9 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
                         )
                         .with_kind(crate::ProviderFailureKind::Stream)
                         .with_code("stream_ended_before_terminal_response")
-                        .retryable(true)
+                        .with_retry_verdict(
+                            crate::llm::transport::TransportRetryVerdict::RetryableTransient,
+                        )
                         .with_partial_response(LlmResponse {
                             full_text: lost_text,
                             usage,

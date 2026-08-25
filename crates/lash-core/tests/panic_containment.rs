@@ -469,7 +469,7 @@ async fn provider_panic_is_typed_and_non_retryable() {
 
     assert_eq!(failure.error.code.as_deref(), Some("provider_panicked"));
     assert_eq!(failure.error.message, "provider payload only");
-    assert!(!failure.error.retryable);
+    assert!(!failure.error.is_retryable());
     assert_eq!(failure.call_record.attempts.len(), 1);
     assert_eq!(
         failure.call_record.attempts[0]
@@ -494,7 +494,7 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
 
     assert_eq!(failure.error.code.as_deref(), Some("provider_panicked"));
     assert_eq!(failure.error.kind, lash_core::ProviderFailureKind::Unknown);
-    assert!(!failure.error.retryable);
+    assert!(!failure.error.is_retryable());
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@ fn replay_origin_conflict_error(conflict: ProviderReplayOriginConflict) -> LlmTr
     LlmTransportError::new(conflict.to_string())
         .with_kind(ProviderFailureKind::Validation)
         .with_code("provider_replay_origin_conflict")
-        .retryable(false)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
 fn replay_origin_conflict_with_provider_error(
@@ -18,7 +18,7 @@ fn replay_origin_conflict_with_provider_error(
     );
     provider_error.kind = ProviderFailureKind::Validation;
     provider_error.code = Some("provider_replay_origin_conflict".to_string());
-    provider_error.retryable = false;
+    provider_error.retry_verdict = TransportRetryVerdict::Forbidden;
     provider_error
 }
 
@@ -299,7 +299,7 @@ impl ProviderHandle {
             let error = LlmTransportError::new(error.to_string())
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("invalid_provider_endpoint")
-                .retryable(false);
+                .with_retry_verdict(TransportRetryVerdict::Forbidden);
             return Err(ProviderCompletionError {
                 call_record: synthetic_terminal_call_record(
                     self.components.rate_limiter.clock().timestamp_ms(),
@@ -341,7 +341,7 @@ impl ProviderHandle {
                         Err(LlmTransportError::new(message)
                             .with_kind(ProviderFailureKind::Unknown)
                             .with_code("provider_panicked")
-                            .retryable(false)),
+                            .with_retry_verdict(TransportRetryVerdict::NotRetryable)),
                         Some(payload),
                     )
                 }
@@ -404,9 +404,9 @@ impl ProviderHandle {
                         .generation_retry_guarantee(&request);
                     let retry_class =
                         automatic_retry_class(&failure, protocol_position, retry_guarantee);
-                    let throttle_wait = if failure.retryable
-                        && failure.kind == ProviderFailureKind::Quota
-                        && let Some(retry_after) = failure.retry_after
+                    let throttle_wait = if let TransportRetryVerdict::RetryableThrottle {
+                        retry_after: Some(retry_after),
+                    } = failure.retry_verdict
                     {
                         let wait = reliability.retry.cap_retry_after(retry_after);
                         let charge = wait;
@@ -442,7 +442,7 @@ impl ProviderHandle {
                     // In particular, `OutputStarted` never qualifies through
                     // position or emptiness. It requires the provider guarantee
                     // above; none of Lash's bundled providers declares one.
-                    if failure.retryable && retry_class.is_none() {
+                    if failure.is_retryable() && retry_class.is_none() {
                         let refusal_reason = retry_refusal_reason(protocol_position);
                         let retry_after_header_present = failure
                             .headers
@@ -459,7 +459,7 @@ impl ProviderHandle {
                             http_status = ?failure.status,
                             retry_after_header_present,
                             retry_after_parsed_ms = ?failure
-                                .retry_after
+                                .retry_after()
                                 .map(|duration| duration.as_millis() as u64),
                             partial_response_present,
                             partial_response_empty = ?partial_response_empty,
@@ -469,7 +469,7 @@ impl ProviderHandle {
                             protocol_position = ?protocol_position,
                             provider_retry_guarantee = ?retry_guarantee,
                             retry_class = ?retry_class,
-                            transport_retryable = failure.retryable,
+                            transport_retryable = failure.is_retryable(),
                             throttle_retry_available = throttle_wait.is_some(),
                             counted_retry_available,
                             decision = "deny",
@@ -499,10 +499,9 @@ impl ProviderHandle {
                             },
                         });
                     }
-                    // Throttle deference: when the provider signals a throttle
-                    // (retryable `Quota`) AND states how long to back off
-                    // (`Retry-After`), honor the wait without consuming a
-                    // retry attempt — the provider is asking us to come back,
+                    // Throttle deference: when the adapter's typed throttle
+                    // verdict states how long to back off, honor the wait
+                    // without consuming a retry attempt — the provider is asking us to come back,
                     // not failing. The courtesy is bounded: each deferred wait
                     // requires at least `MIN_FREE_THROTTLE_WAIT`, charges the
                     // actual delay against `throttle_wait_budget_ms`, and is
@@ -551,8 +550,8 @@ impl ProviderHandle {
                         self.components.rate_limiter.clock().sleep(wait).await;
                         continue;
                     }
-                    if attempt + 1 >= attempts || !failure.retryable {
-                        let reason = if !failure.retryable {
+                    if attempt + 1 >= attempts || !failure.is_retryable() {
+                        let reason = if !failure.is_retryable() {
                             "not_retryable"
                         } else {
                             "retry_budget_exhausted"
@@ -586,7 +585,7 @@ impl ProviderHandle {
                     }
                     let delay = reliability
                         .retry
-                        .delay_for_attempt(attempt, failure.retry_after);
+                        .delay_for_attempt(attempt, failure.retry_after());
                     records.push(failure_attempt_record(
                         records.len() as u32 + 1,
                         started_at,
@@ -649,7 +648,7 @@ fn provider_close_panicked(
     let failure = Err(LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Unknown)
         .with_code("provider_panicked")
-        .retryable(false));
+        .with_retry_verdict(TransportRetryVerdict::NotRetryable));
     crate::panic_containment::enforce_loudness(payload);
     failure
 }
@@ -734,6 +733,12 @@ pub(super) fn automatic_retry_class(
     position: ProtocolPosition,
     guarantee: GenerationRetryGuarantee,
 ) -> Option<AutomaticRetryClass> {
+    if matches!(
+        failure.retry_verdict,
+        TransportRetryVerdict::NotRetryable | TransportRetryVerdict::Forbidden
+    ) {
+        return None;
+    }
     if guarantee != GenerationRetryGuarantee::None {
         return Some(AutomaticRetryClass::ProviderGuarantee(guarantee));
     }
@@ -754,10 +759,10 @@ pub(super) fn automatic_retry_class(
 
 fn retryable_http_rejection(failure: &LlmTransportError) -> bool {
     failure.partial_response.is_none()
-        && failure.retryable
-        && failure.kind == ProviderFailureKind::Quota
-        && failure.status == Some(429)
-        && failure.retry_after.is_some()
+        && matches!(
+            failure.retry_verdict,
+            TransportRetryVerdict::RetryableThrottle { .. }
+        )
 }
 
 pub(super) fn response_has_output_evidence(response: &LlmResponse) -> bool {
@@ -830,7 +835,7 @@ fn unsafe_retry_refusal(
     };
     failure.message = message;
     failure.code = Some(code.to_string());
-    failure.retryable = false;
+    failure.retry_verdict = TransportRetryVerdict::Forbidden;
     failure
 }
 
@@ -900,7 +905,7 @@ fn failure_attempt_record(
             provider_code: failure.code.clone(),
             http_status: failure.status,
             provider_request_id,
-            retry_after: failure.retry_after,
+            retry_after: failure.retry_after(),
             diagnostic: bounded_redacted_diagnostic(&failure.message),
         }),
         evidence,
