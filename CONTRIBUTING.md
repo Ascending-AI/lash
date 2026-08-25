@@ -9,7 +9,8 @@ implementation and agree on the shape first.
 
 To understand how the runtime fits together, start at <https://lash.run/>. The
 architecture chapters cover the crate layout, turn/effect boundary, and plugin
-model.
+model. Before changing a crate boundary, check its
+[per-crate architecture invariants](docs/architecture/crate-invariants.html).
 
 ## Development workflow
 

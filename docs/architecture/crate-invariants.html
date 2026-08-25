@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<style>html,body{background:#141412}@media(prefers-color-scheme:light){html,body{background:#f5efe0}}</style>
+<title>crate invariants - lash architecture</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700;800&family=Chivo+Mono:wght@400;500&family=Spectral:wght@400;500;600;ital,400&display=swap">
+<link rel="stylesheet" href="../styles.css?v=11">
+<script src="../theme.js"></script>
+<script src="../docs.js?v=7" defer></script>
+<script src="../syntax.js" defer></script>
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#content">skip to content</a>
+  <section class="opener">
+    <h1 class="opener__title">crates<span class="slash">/</span>invariants</h1>
+    <p class="opener__lede">The checkable boundaries for every workspace crate below <code>crates/</code>. Entries use crate directory and Rust library names, even when the crates.io package name differs.</p>
+  </section>
+
+  <main class="body" id="content">
+    <div class="section">
+      <div class="section-header">
+        <h2>How To Read This Page</h2>
+        <p>An invariant says what a crate must never know, own, or depend on. A cited gate or test is executable enforcement; <code>(unenforced)</code> means review is currently the only guard. The workspace manifest is the source of the 32-crate inventory; examples and runbooks are intentionally excluded.</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h2>Kernel And Shared Contracts</h2>
+        <p>Dependency direction begins with protocol-neutral data and moves outward toward runtime integration.</p>
+      </div>
+      <div class="module-grid">
+        <article class="panel" id="lash-sansio">
+          <h3><code>lash-sansio</code></h3>
+          <p>Must remain a synchronous state machine and shared data-contract crate: it must not perform I/O, require an async runtime, know any provider wire protocol, or depend on <code>lash-core</code>, Lashlang, a protocol plugin, or a host application <code>(unenforced)</code>. Runtime and integration crates may depend on it; the dependency must never point back upward. Anchors: <code>crates/lash-sansio/Cargo.toml</code>, <code>crates/lash-sansio/src/lib.rs</code>, <code>docs/architecture/modules.html</code>.</p>
+        </article>
+        <article class="panel" id="lash-trace">
+          <h3><code>lash-trace</code></h3>
+          <p>Must define diagnostics records and sinks only; a trace record must never become authoritative session state, the app-facing <code>TurnActivity</code> stream, or the low-level <code>SessionStreamEvent</code> stream <code>(unenforced)</code>. It may depend on <code>lash-sansio</code> vocabulary but must not depend on <code>lash-core</code> or a provider, protocol, store, or host. Anchors: <code>crates/lash-trace/src/lib.rs</code>, <code>crates/lash-trace/Cargo.toml</code>, <code>docs/reporting.html</code>.</p>
+        </article>
+        <article class="panel" id="lash-rlm-types">
+          <h3><code>lash-rlm-types</code></h3>
+          <p>Must contain serializable RLM trajectory and history vocabulary, not protocol execution, Lashlang evaluation, provider calls, or durable writes <code>(unenforced)</code>; its only Lash dependency may point down to <code>lash-sansio</code>. The shared serialized fields of <code>RlmTrajectoryEntry</code> and <code>RlmHistoryItem::LashlangStep</code> must remain congruent, enforced by <code>trajectory_and_history_step_serde_shapes_stay_in_parity</code>. Anchors: <code>crates/lash-rlm-types/src/lib.rs</code>, <code>crates/lash-rlm-types/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-core">
+          <h3><code>lash-core</code></h3>
+          <p>May know only runtime mechanisms and integrator seams: it must not depend on or name Standard, RLM, <code>lash-lashlang-runtime</code>, or <code>lashlang</code>; <code>crates/lash-core/tests/integration_boundary.rs</code> enforces that rule by source scan and Cargo metadata. MCP, concrete provider credentials, user configuration, and host UI policy must also remain outside core <code>(unenforced)</code>. Anchors: <code>crates/lash-core/src/lib.rs</code>, ADR 0051, <code>docs/architecture/kernel-surface.html</code>.</p>
+        </article>
+        <article class="panel" id="lash-lashlang-runtime">
+          <h3><code>lash-lashlang-runtime</code></h3>
+          <p>May bridge <code>lash-core</code> mechanisms to <code>lashlang</code>, but neither lower crate may depend back on this integration crate <code>(unenforced)</code>. Durable Lashlang work must enter core as opaque <code>ProcessInput::Engine</code> data under <code>LASHLANG_ENGINE_KIND</code>; adding a Lashlang-specific process variant to core is forbidden by the core integration-boundary test. Anchors: <code>crates/lash-lashlang-runtime/src/lib.rs</code>, <code>crates/lash-lashlang-runtime/src/process.rs</code>, ADR 0037.</p>
+        </article>
+        <article class="panel" id="lash-remote-protocol">
+          <h3><code>lash-remote-protocol</code></h3>
+          <p>Must own versioned wire DTOs and optional core conversions only; it must not run a turn, execute a remote tool, or depend on the <code>lash</code> facade, which already depends on it <code>(unenforced)</code>. Every accepted wire version must pass the explicit-version decoding cases in <code>crates/lash-remote-protocol/src/versioned_decode_tests.rs</code>. Anchors: <code>crates/lash-remote-protocol/src/lib.rs</code>, <code>crates/lash-remote-protocol/Cargo.toml</code>, ADR 0051.</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h2>Transport, Providers, And Credentials</h2>
+        <p>Generic transport flows downward; provider-specific policy stays at the provider edge.</p>
+      </div>
+      <div class="module-grid">
+        <article class="panel" id="lash-http-transport">
+          <h3><code>lash-http-transport</code></h3>
+          <p>Must expose host-configurable HTTP request, response, body, timeout, and streaming primitives without encoding LLM or provider semantics <code>(unenforced)</code>. It may depend on <code>lash-sansio</code> for shared async abstractions, but must not depend on <code>lash-core</code>, an LLM transport, or a provider crate. Anchors: <code>crates/lash-http-transport/src/lib.rs</code>, <code>crates/lash-http-transport/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-llm-transport">
+          <h3><code>lash-llm-transport</code></h3>
+          <p>May normalize HTTP/SSE framing, timeouts, usage, response metadata, and provider trace plumbing shared by LLM providers; it must not own provider endpoints, authentication flows, model policy, or runtime turn state <code>(unenforced)</code>. Provider crates may depend on it; it must never depend on a provider crate. Anchors: <code>crates/lash-llm-transport/src/lib.rs</code>, <code>crates/lash-llm-transport/Cargo.toml</code>, <code>docs/architecture/providers.html</code>.</p>
+        </article>
+        <article class="panel" id="lash-provider-auth">
+          <h3><code>lash-provider-auth</code></h3>
+          <p>May own shared credential leasing, refresh policy, PKCE, and generic OAuth error classification; provider-specific endpoints, device-code exchanges, and refresh requests must remain in the provider crates, while API-key providers must bypass this crate <code>(unenforced)</code>. It must not choose models or issue LLM completions. Anchors: <code>crates/lash-provider-auth/src/lib.rs</code>, <code>crates/lash-provider-auth/src/credential.rs</code>.</p>
+        </article>
+        <article class="panel" id="lash-provider-anthropic">
+          <h3><code>lash-provider-anthropic</code></h3>
+          <p>Must translate Lash provider contracts to Anthropic request, stream, cache-breakpoint, attachment, usage, and error semantics only; it must not implement generic HTTP transport, runtime persistence, protocol behavior, or host admission policy <code>(unenforced)</code>. Shared transport must flow through <code>lash-llm-transport</code>, and deterministic wire behavior must remain exercisable through the crate's testing transport and conformance fixtures. Anchors: <code>crates/lash-provider-anthropic/src/lib.rs</code>, <code>crates/lash-provider-anthropic/Cargo.toml</code>, ADR 0015.</p>
+        </article>
+        <article class="panel" id="lash-provider-google">
+          <h3><code>lash-provider-google</code></h3>
+          <p>Must contain Google Code Assist/Gemini wire mapping and provider-specific OAuth flow only; shared credential lifecycle belongs to <code>lash-provider-auth</code>, shared HTTP/SSE behavior belongs to <code>lash-llm-transport</code>, and runtime/protocol/storage policy must not move here <code>(unenforced)</code>. Provider request and stream behavior must remain runnable through <code>crates/lash-provider-google/src/tests/conformance.rs</code>. Anchors: <code>crates/lash-provider-google/src/lib.rs</code>, <code>crates/lash-provider-google/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-provider-openai">
+          <h3><code>lash-provider-openai</code></h3>
+          <p>May own OpenAI Responses, OpenAI-compatible Chat Completions, Codex-specific OAuth/session behavior, and OpenAI schema projection; it must not duplicate shared credential leasing, generic LLM transport, runtime persistence, or protocol execution <code>(unenforced)</code>. Its distinct API routes must continue to satisfy the route-specific conformance tests under <code>crates/lash-provider-openai/src/tests/</code>. Anchors: <code>crates/lash-provider-openai/src/lib.rs</code>, <code>crates/lash-provider-openai/Cargo.toml</code>, <code>docs/architecture/providers.html</code>.</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h2>Persistence And Durable Execution</h2>
+        <p>Core defines contracts; adapters implement them without creating rival runtime semantics.</p>
+      </div>
+      <div class="module-grid">
+        <article class="panel" id="lash-sqlite-store">
+          <h3><code>lash-sqlite-store</code></h3>
+          <p>Must implement core persistence, registry, trigger, artifact, effect-replay, and attachment-manifest contracts over one SQLite durable-core database; it must not redefine their semantics or store S3 attachment bytes <code>(unenforced)</code>. Opening an obsolete schema must reject rather than migrate it, and SQLite/Postgres shape differences must be declared in <code>crates/lash-sim/tests/schema_congruence.rs</code>, which enforces the cross-backend registry. Anchors: <code>crates/lash-sqlite-store/src/lib.rs</code>, <code>crates/lash-sqlite-store/src/schema.rs</code>.</p>
+        </article>
+        <article class="panel" id="lash-postgres-store">
+          <h3><code>lash-postgres-store</code></h3>
+          <p>Must implement the same core durable contracts over PostgreSQL without inventing host or protocol policy <code>(unenforced)</code>. <code>schema.sql</code> is the published DDL authority and open/verification must compare the live catalog structurally rather than trust a version stamp; ADR 0052 and store tests enforce that check. Any intentional SQLite divergence must also be registered in the schema-congruence gate. Anchors: <code>crates/lash-postgres-store/src/lib.rs</code>, <code>crates/lash-postgres-store/src/postgres/schema.rs</code>.</p>
+        </article>
+        <article class="panel" id="lash-s3-store">
+          <h3><code>lash-s3-store</code></h3>
+          <p>May store and retrieve attachment bytes through the core attachment-store contract; it must never become the authority for attachment metadata, manifests, reference counts, session state, or runtime commits, all of which remain in <code>RuntimePersistence</code> <code>(unenforced)</code>. It may depend on <code>lash-core</code> but not on a SQL store, protocol, provider, or facade. Anchors: <code>crates/lash-s3-store/src/lib.rs</code>, <code>crates/lash-s3-store/Cargo.toml</code>, ADR 0028.</p>
+        </article>
+        <article class="panel" id="lash-restate">
+          <h3><code>lash-restate</code></h3>
+          <p>Must adapt the core effect-controller and process-driver seams to Restate; it must not become a second turn machine, session store, or protocol implementation <code>(unenforced)</code>. Restate owns in-flight continuation through stable journal keys and durable waits, while Lash commits final session state through turn-commit idempotency; endpoint, replay-corpus, and tool-context conformance tests exercise that split. Anchors: <code>crates/lash-restate/src/lib.rs</code>, <code>crates/lash-restate/src/controller/</code>, ADR 0045.</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h2>Facade And Protocols</h2>
+        <p>The facade is the supported host surface; protocol crates plug behavior into core.</p>
+      </div>
+      <div class="module-grid">
+        <article class="panel" id="lash">
+          <h3><code>lash</code></h3>
+          <p>Must remain the single promised host package and the only path examples use for runtime embedding; it may compose and re-export internal crates but must not create a second home for any public name. <code>scripts/check_facade_only_examples.py</code> rejects facade bypasses, <code>scripts/check_facade_external_types.py</code> rejects unreviewed third-party signature leaks, and the facade UI tests gate deliberately absent paths. Anchors: <code>crates/lash/src/lib.rs</code>, ADR 0051, ADR 0079.</p>
+        </article>
+        <article class="panel" id="lash-protocol-rlm">
+          <h3><code>lash-protocol-rlm</code></h3>
+          <p>May own RLM response classification, trajectory history, prompt rendering, stream masking, repair/stall policy, dialect selection, and the protocol driver; it must not own durable commit, provider transport, generic process lifecycle, or Lashlang VM semantics <code>(unenforced)</code>. Standard and TypeScript/Lashlang RLM behavior must remain expressed through the protocol scenario and cell-conformance suites. Anchors: <code>crates/lash-protocol-rlm/src/lib.rs</code>, <code>crates/lash-protocol-rlm/src/scenario_contracts.rs</code>, ADR 0061.</p>
+        </article>
+        <article class="panel" id="lash-protocol-standard">
+          <h3><code>lash-protocol-standard</code></h3>
+          <p>May own native provider tool-call driving, assistant-message weaving, and the Standard-only <code>batch</code> tool; it must not own provider wire formats, tool implementations, persistence, or final turn commit <code>(unenforced)</code>. Its deterministic protocol contract must remain in <code>crates/lash-protocol-standard/src/scenario_contracts.rs</code>, not in core or the simulation harness. Anchors: <code>crates/lash-protocol-standard/src/lib.rs</code>, <code>crates/lash-protocol-standard/Cargo.toml</code>, ADR 0050.</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h2>Plugins And Tools</h2>
+        <p>These crates register behavior through core contracts; none may take ownership of the runtime that invokes it.</p>
+      </div>
+      <div class="module-grid">
+        <article class="panel" id="lash-plugin-mcp">
+          <h3><code>lash-plugin-mcp</code></h3>
+          <p>Must expose MCP servers as ordinary Lash tool providers and keep one connection pool per <code>LashCore</code>; it must not add an alternate tool-execution path, session persistence, or per-session stdio process pool <code>(unenforced)</code>. Streamable HTTP credentials are static host-supplied headers: this crate must not silently enable rmcp OAuth or token refresh, and its lifecycle/policy tests exercise those boundaries. Anchors: <code>crates/lash-plugin-mcp/src/lib.rs</code>, <code>crates/lash-plugin-mcp/src/pool.rs</code>.</p>
+        </article>
+        <article class="panel" id="lash-plugin-process-controls">
+          <h3><code>lash-plugin-process-controls</code></h3>
+          <p>May register only the session process-list and process-cancel control tools over core/tool-support contracts; it must not implement process scheduling, leases, persistence, or protocol-specific copies of those controls <code>(unenforced)</code>. Protocol crates consume the registered tools and must not absorb their behavior. Anchors: <code>crates/lash-plugin-process-controls/src/lib.rs</code>, <code>crates/lash-plugin-process-controls/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-plugin-tool-output-budget">
+          <h3><code>lash-plugin-tool-output-budget</code></h3>
+          <p>May project a truncated model-visible result and spill the full text to its non-durable temporary directory; it must not change the underlying tool outcome, execute tools, write durable session state, or own general context compaction <code>(unenforced)</code>. Budget behavior must remain a plugin contribution, not a branch in core or a concrete tool. Anchors: <code>crates/lash-plugin-tool-output-budget/src/lib.rs</code>, <code>crates/lash-plugin-tool-output-budget/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-llm-tools">
+          <h3><code>lash-llm-tools</code></h3>
+          <p>May implement focused LLM-backed tools through core's direct-completion seam; <code>llm_query</code> must not use tools, inspect files, or acquire context beyond its explicit task and inputs, and this crate must not construct a provider transport or child runtime <code>(unenforced)</code>. Model and generation policy come from the current session unless the host supplies an explicit override. Anchors: <code>crates/lash-llm-tools/src/lib.rs</code>, <code>crates/lash-llm-tools/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-tool-support">
+          <h3><code>lash-tool-support</code></h3>
+          <p>Must remain shared scaffolding for tool schemas, bindings, and static providers; it must not contain a concrete user-visible tool, tool-catalog policy, provider client, or runtime orchestration <code>(unenforced)</code>. Concrete tool crates may depend on it; it must not depend on them. Anchors: <code>crates/lash-tool-support/src/lib.rs</code>, <code>crates/lash-tool-support/src/static_provider.rs</code>, <code>crates/lash-tool-support/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-tools">
+          <h3><code>lash-tools</code></h3>
+          <p>May implement the built-in shell and web tool families over <code>lash-tool-support</code>; local grep, file indexing, product filesystem policy, provider selection, and runtime persistence must remain outside this crate <code>(unenforced)</code>. The standard-stack tests additionally enforce that the shipped bundle contains neither <code>grep</code> nor host filesystem tools. Anchors: <code>crates/lash-tools/src/lib.rs</code>, <code>crates/lash-standard-plugins/src/lib.rs</code>, <code>docs/architecture/modules.html</code>.</p>
+        </article>
+        <article class="panel" id="lash-standard-plugins">
+          <h3><code>lash-standard-plugins</code></h3>
+          <p>Must compose existing plugin/tool factories rather than implement runtime, protocol, provider, or store mechanisms <code>(unenforced)</code>. Web tools must remain opt-in on an explicit Tavily key, and <code>standard_stack_does_not_install_cli_local_grep</code> plus <code>standard_stack_does_not_install_host_filesystem_tools</code> enforce that host-local capabilities do not leak into the default stack. Anchors: <code>crates/lash-standard-plugins/src/lib.rs</code>, <code>crates/lash-standard-plugins/Cargo.toml</code>.</p>
+        </article>
+        <article class="panel" id="lash-subagents">
+          <h3><code>lash-subagents</code></h3>
+          <p>May define subagent capability selection and register orchestration/leaf tools, but child execution must use core session and tool-access contracts; this crate must not create an independent runtime, provider client, persistence model, or protocol implementation <code>(unenforced)</code>. Capability and parent authority must remain explicit inputs to the plugin factory. Anchors: <code>crates/lash-subagents/src/lib.rs</code>, <code>crates/lash-subagents/src/capability.rs</code>, <code>crates/lash-subagents/Cargo.toml</code>.</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h2>Language And Dialect</h2>
+        <p>The language owns deterministic compile/execute semantics; the dialect front-end lowers into that shared model.</p>
+      </div>
+      <div class="module-grid">
+        <article class="panel" id="lash-regress">
+          <h3><code>lash-regress</code></h3>
+          <p>Must remain the maintained <code>regress</code> fork with deterministic fuel/step-budget instrumentation and anchored matching; it must not depend on any Lash runtime, protocol, provider, store, or tool crate <code>(unenforced)</code>. Upstream license, attribution, source notices, and the pinned provenance commit must remain intact. Anchors: <code>crates/lash-regress/PROVENANCE.md</code>, <code>crates/lash-regress/Cargo.toml</code>, <code>crates/lash-regress/src/lib.rs</code>.</p>
+        </article>
+        <article class="panel" id="lashlang">
+          <h3><code>lashlang</code></h3>
+          <p>May own the Lashlang AST, parser, linker, compiler, VM, continuation/value semantics, artifacts, and workflow graph; external work must cross <code>ExecutionHost::perform</code>, so the crate must not call providers, tools, SQL/S3 stores, or host UI directly <code>(unenforced)</code>. Protocol trajectory and core process scheduling must remain outside the language. Anchors: <code>crates/lashlang/src/lib.rs</code>, <code>crates/lashlang/src/runtime/</code>, ADR 0060.</p>
+        </article>
+        <article class="panel" id="lash-typescript">
+          <h3><code>lash-typescript</code></h3>
+          <p>Must remain a TypeScript dialect front-end whose only Lash workspace dependency is <code>lashlang</code>, lowers into the shared Lash AST/program model, and returns stable named diagnostics; SWC must stay confined to <code>adapter</code> and must not leak into the public contract <code>(unenforced)</code>. Runtime effects, protocol policy, providers, and persistence must not enter this crate. Anchors: <code>crates/lash-typescript/src/lib.rs</code>, <code>crates/lash-typescript/Cargo.toml</code>, ADR 0062 and ADR 0064.</p>
+        </article>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <h2>Verification Harnesses</h2>
+        <p>Harnesses may depend broadly to test production crates; production crates must never depend on harness behavior.</p>
+      </div>
+      <div class="module-grid">
+        <article class="panel" id="lash-sim">
+          <h3><code>lash-sim</code></h3>
+          <p>Must remain a deterministic, non-published verification harness: it may compose production crates, scripted provider wires, generated schedules, faults, oracles, and replay artifacts, but it must not define runtime semantics that production code consumes. <code>publish = false</code> enforces the shipping boundary, and <code>schema_congruence_registry_matches_both_backends</code> makes this crate the gate site for declared SQLite/Postgres shape parity. Anchors: <code>crates/lash-sim/Cargo.toml</code>, <code>crates/lash-sim/src/lib.rs</code>, ADR 0009.</p>
+        </article>
+        <article class="panel" id="lash-perf">
+          <h3><code>lash-perf</code></h3>
+          <p>Must remain a developer-only measurement harness: it may depend broadly on production crates, but production crates must not depend on it or change semantics to satisfy a benchmark <code>(unenforced)</code>. It must never ship as a runtime library; <code>publish = false</code> enforces the package boundary. Anchors: <code>crates/lash-perf/src/lib.rs</code>, <code>crates/lash-perf/Cargo.toml</code>, <code>CONTEXT.md</code>.</p>
+        </article>
+      </div>
+    </div>
+  </main>
+
+  <section class="pager" aria-label="chapter navigation">
+    <div class="pager__rail">read on &middot;</div>
+    <div class="pager__main">
+    </div>
+  </section>
+</body>
+</html>

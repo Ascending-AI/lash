@@ -289,6 +289,12 @@
           kind: "internal",
         },
         {
+          title: "Crate invariants",
+          href: "architecture/crate-invariants.html",
+          summary: "Falsifiable dependency and ownership boundaries for every workspace crate.",
+          kind: "internal",
+        },
+        {
           title: "Data flow",
           href: "architecture/flow.html",
           summary: "How input, prompts, LLM effects, tool effects, graph commits, and projections move through a turn.",
