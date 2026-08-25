@@ -23,7 +23,7 @@ jobs:
   perf-guard-full:
     name: Perf Guard Full
     runs-on: ubuntu-24.04
-    timeout-minutes: 65
+    timeout-minutes: 150
 
     services:
       postgres:

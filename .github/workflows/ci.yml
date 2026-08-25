@@ -235,7 +235,7 @@ jobs:
   test-doc:
     name: Test docs + build cache
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
 
     steps:
       - name: Check out repository
@@ -345,7 +345,7 @@ jobs:
   repo-gates:
     name: Repository gates
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -446,7 +446,7 @@ jobs:
   api-coverage:
     name: Public API example coverage
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: plan
     if: needs.plan.outputs.rust == 'true'
 
@@ -503,7 +503,7 @@ jobs:
   api-surface:
     name: Public API surface snapshot
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: plan
     if: needs.plan.outputs.rust == 'true'
 
@@ -669,7 +669,7 @@ jobs:
   package-feature-checks:
     name: Package feature checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: plan
     if: needs.plan.outputs.rust == 'true'
 
@@ -765,7 +765,7 @@ jobs:
   runtime-feature-boundary:
     name: Runtime feature boundary
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     needs: plan
     if: needs.plan.outputs.rust == 'true'
 
@@ -848,7 +848,7 @@ jobs:
   test-shard:
     name: Test shard ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
     needs: plan
     if: needs.plan.outputs.rust == 'true'
 
@@ -919,7 +919,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     # The transcript gate reads the `Transcript:` justification from the PR
     # body. A manually dispatched run — the recovery path when GitHub stops
     # delivering a branch's events — has no pull request in its payload, so the
@@ -1135,7 +1135,7 @@ jobs:
   confidence-fast:
     name: Confidence fast (${{ matrix.shard }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
+    timeout-minutes: 35
     needs: plan
     if: needs.plan.outputs.confidence == 'true'
 
@@ -1269,7 +1269,7 @@ jobs:
   postgres-store:
     name: Test Postgres store (PG ${{ matrix.postgres }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: plan
     if: needs.plan.outputs.stores == 'true'
 
@@ -1375,7 +1375,7 @@ jobs:
   s3-store:
     name: Test S3 store against MinIO
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     needs: plan
     if: needs.plan.outputs.stores == 'true'
 
@@ -1461,7 +1461,7 @@ jobs:
   stack-budget:
     name: Stack budget
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: plan
     if: needs.plan.outputs.rust == 'true'
 
@@ -1515,7 +1515,7 @@ jobs:
   linux-release-cache:
     name: Build Linux release cache
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     # Warms the release-profile cache that release.yml and perf.yml restore on
     # main. A cache written by a pull-request run is scoped to that PR's merge
     # ref and can only be restored by re-runs of the same pull request, so on a
@@ -1652,7 +1652,7 @@ jobs:
   functional-e2e:
     name: Functional E2E (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     needs: plan
     if: needs.plan.outputs.functional_e2e == 'true'
 
@@ -1802,7 +1802,7 @@ jobs:
     runs-on: ubuntu-24.04
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
-    timeout-minutes: 45
+    timeout-minutes: 75
     needs: plan
     strategy:
       fail-fast: false

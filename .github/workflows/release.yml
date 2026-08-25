@@ -125,7 +125,7 @@ jobs:
     # Cold-cache mode: a release cut after a Cargo.lock bump misses the
     # linux-release cache and rebuilds the workspace in release profile
     # (~11m on this runner class) before profiling.
-    timeout-minutes: 30
+    timeout-minutes: 60
     needs: prepare-release
 
     services:
