@@ -30,6 +30,7 @@ impl ToolCatalogView {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("tool `{name}` is not available in this catalog")]
 pub struct ToolCatalogMiss {
+    /// Name of the tool that was absent from the catalog.
     pub name: String,
 }
 

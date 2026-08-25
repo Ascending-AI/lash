@@ -200,6 +200,7 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
 }
 
 #[derive(Clone)]
+/// Manages durable processes through a configured Lash core.
 pub struct Processes {
     pub(crate) core: LashCore,
 }
@@ -335,6 +336,7 @@ impl Processes {
         Ok(*record)
     }
 
+    /// Lists processes matching the supplied filter.
     pub async fn list(
         &self,
         filter: &lash_core::ProcessListFilter,
@@ -373,6 +375,7 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Returns the identified process handle, if it exists.
     pub async fn get(
         &self,
         process_id: &str,
@@ -383,6 +386,7 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Returns the process event stream from the requested offset.
     pub async fn events(
         &self,
         process_id: &str,
@@ -394,6 +398,7 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Waits for the identified process to produce terminal output.
     pub async fn await_output(&self, process_id: &str) -> Result<lash_core::ProcessAwaitOutput> {
         if let Some(driver) = self.core.env.process_work_driver.as_ref() {
             return driver.await_terminal(process_id).await.map_err(Into::into);
@@ -404,6 +409,7 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Requests cancellation of the identified process.
     pub async fn cancel(
         &self,
         process_id: &str,
@@ -425,6 +431,7 @@ impl Processes {
         Ok(lash_core::ProcessCancelReceipt::from_record(*record))
     }
 
+    /// Delivers a signal to the identified process.
     pub async fn signal(
         &self,
         process_id: &str,
@@ -450,6 +457,7 @@ impl Processes {
         Ok(*event)
     }
 
+    /// Returns the current process-session snapshot.
     pub async fn session_snapshot(
         &self,
         session_id: impl Into<String>,
@@ -460,6 +468,7 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Returns an observer for the selected process.
     pub fn observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
         self.make_observer()
     }

@@ -24,6 +24,7 @@ use work_drivers::{
     QueuedWorkDriverSetup, QueuedWorkSource, WakeDeliveryDriverSetup,
 };
 #[derive(Clone)]
+/// Owns the configured runtime services used to create and resume Lash sessions.
 pub struct LashCore {
     pub(crate) session_execution_owner: lash_core::LeaseOwnerIdentity,
     pub(crate) env: RuntimeEnvironment,
@@ -52,13 +53,18 @@ pub struct LashCore {
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+/// Report produced by session delete.
 pub struct SessionDeleteReport {
+    /// Identifier of the deleted session.
     pub session_id: String,
+    /// Storage reclaimed while deleting the session.
     pub storage: lash_core::SessionBlobReclaimReport,
+    /// Process-state deletion report, when a process registry was configured.
     pub process: Option<lash_core::ProcessSessionDeleteReport>,
 }
 
 impl LashCore {
+    /// Creates a core builder with the supplied turn budget.
     pub fn builder(turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
         LashCoreBuilder::new(turn_budget)
     }
@@ -110,6 +116,7 @@ impl LashCore {
             .plugins(default_runtime_stack())
     }
 
+    /// Creates a builder for the identified session.
     pub fn session(&self, session_id: impl Into<String>) -> SessionBuilder {
         SessionBuilder {
             core: self.clone(),
@@ -323,18 +330,22 @@ impl LashCore {
         Ok(())
     }
 
+    /// Returns the trigger administration facade.
     pub fn triggers(&self) -> crate::admin::CoreTriggerAdmin {
         crate::admin::CoreTriggerAdmin { core: self.clone() }
     }
 
+    /// Returns the process administration facade.
     pub fn processes(&self) -> crate::process_admin::Processes {
         crate::process_admin::Processes { core: self.clone() }
     }
 
+    /// Returns the completion facade for this core.
     pub fn completions(&self) -> crate::admin::Completions {
         crate::admin::Completions { core: self.clone() }
     }
 
+    /// Returns the effect host used by this runtime.
     pub fn effect_host(&self) -> Arc<dyn EffectHost> {
         Arc::clone(&self.env.core.control.effect_host)
     }
@@ -458,6 +469,7 @@ impl LashCore {
         .await
     }
 
+    /// Forks a session at the requested point while preserving observer inheritance.
     pub async fn fork_at_with_observer_inheritance(
         &self,
         node_id: impl Into<String>,
@@ -548,6 +560,7 @@ impl LashCore {
         Ok(fork)
     }
 
+    /// Deletes the session and reports reclaimed storage and process state.
     pub async fn delete_session(
         &self,
         session_id: impl AsRef<str>,
@@ -655,14 +668,17 @@ impl LashCore {
         })
     }
 
+    /// Returns the configured process registry, if present.
     pub fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
         self.env.process_registry.as_ref().cloned()
     }
 
+    /// Builds the durable process-worker configuration for this core.
     pub fn durable_process_worker_config(&self) -> Result<DurableProcessWorkerConfig> {
         self.durable_process_worker_config_with_plugins(std::iter::empty::<Arc<dyn PluginFactory>>())
     }
 
+    /// Builds the durable process-worker configuration with additional plugins.
     pub fn durable_process_worker_config_with_plugins(
         &self,
         extra_plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
@@ -750,6 +766,7 @@ fn default_runtime_stack() -> PluginStack {
     lash_plugin_tool_output_budget::tool_output_budget_stack()
 }
 
+/// Builder for configuring lash core.
 pub struct LashCoreBuilder {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     session_spec: SessionSpec,
@@ -833,11 +850,13 @@ impl LashCoreBuilder {
         }
     }
 
+    /// Configures the protocol plugin and returns the updated builder.
     pub fn protocol_plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.protocol_factory = Some(plugin);
         self
     }
 
+    /// Configures the provider and returns the updated builder.
     pub fn provider(mut self, provider: ProviderHandle) -> Self {
         self.session_spec = self.session_spec.provider_id(provider.kind());
         self.provider = Some(provider);
@@ -876,11 +895,13 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Configures the attachment store and returns the updated builder.
     pub fn attachment_store(mut self, attachment_store: Arc<dyn AttachmentStore>) -> Self {
         self.attachment_store = Some(attachment_store);
         self
     }
 
+    /// Configures the process env store and returns the updated builder.
     pub fn process_env_store(
         mut self,
         process_env_store: Arc<dyn ProcessExecutionEnvStore>,
@@ -933,46 +954,55 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Adds a tool provider to the built core.
     pub fn tools(mut self, tools: Arc<dyn ToolProvider>) -> Self {
         self.tool_providers.push(tools);
         self
     }
 
+    /// Configures the plugin and returns the updated builder.
     pub fn plugin(mut self, plugin: Arc<dyn PluginFactory>) -> Self {
         self.plugin_stack.push(plugin);
         self
     }
 
+    /// Configures the plugins and returns the updated builder.
     pub fn plugins(mut self, stack: PluginStack) -> Self {
         self.plugin_stack = stack;
         self
     }
 
+    /// Applies a callback to configure the plugin stack.
     pub fn configure_plugins(mut self, configure: impl FnOnce(&mut PluginStack)) -> Self {
         configure(&mut self.plugin_stack);
         self
     }
 
+    /// Configures the trace sink and returns the updated builder.
     pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
         self.trace_sink = Some(trace_sink);
         self
     }
 
+    /// Configures the trace jsonl path and returns the updated builder.
     pub fn trace_jsonl_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path.into())));
         self
     }
 
+    /// Configures the trace level and returns the updated builder.
     pub fn trace_level(mut self, trace_level: lash_trace::TraceLevel) -> Self {
         self.trace_level = Some(trace_level);
         self
     }
 
+    /// Configures the trace context and returns the updated builder.
     pub fn trace_context(mut self, trace_context: lash_trace::TraceContext) -> Self {
         self.trace_context = Some(trace_context);
         self
     }
 
+    /// Configures the termination and returns the updated builder.
     pub fn termination(mut self, termination: TerminationPolicy) -> Self {
         self.termination = Some(termination);
         self
@@ -1292,10 +1322,12 @@ impl LashCoreBuilder {
         }
     }
 
+    /// Converts this builder into its advanced configuration facade.
     pub fn advanced(self) -> AdvancedLashCoreBuilder {
         AdvancedLashCoreBuilder { builder: self }
     }
 
+    /// Configures the process registry used by the built core.
     pub fn process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
         self.process_work_source = ProcessWorkSource::Inline {
             registry: process_registry,
@@ -1333,6 +1365,7 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Configures the trigger store and returns the updated builder.
     pub fn trigger_store(mut self, store: Arc<dyn lash_core::TriggerStore>) -> Self {
         self.trigger_store = Some(store);
         self
@@ -1355,6 +1388,7 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Disables automatic queued-work execution for the built core.
     pub fn disable_queued_work_driver(mut self) -> Self {
         self.queued_work_source = QueuedWorkSource::None;
         self

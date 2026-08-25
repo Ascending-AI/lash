@@ -64,11 +64,13 @@ pub mod conformance {
     /// [`runtime_rebuild_and_worker_recovery`] must return a fresh backend
     /// (fresh stores) on each call.
     pub struct RuntimeRebuildBackend {
+        /// Process registry shared with the core under test.
         pub process_registry: Arc<dyn lash_core::ProcessRegistry>,
         /// The Lashlang artifact store, now a construction-time input to the RLM
         /// protocol factory. The backend supplies it here so `base_builder` can
         /// seed a tier-consistent factory.
         pub artifact_store: Arc<dyn LashlangArtifactStore>,
+        /// Callback that completes backend-specific core construction.
         pub build_core: Box<dyn Fn(LashCoreBuilder) -> LashCore + Send + Sync>,
     }
 

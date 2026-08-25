@@ -2,9 +2,13 @@ use crate::support::*;
 use lash_core::facade_support::ProtocolTurnOptionsFacadeOps;
 
 #[cfg(feature = "rlm")]
+/// Adds RLM-specific completion constraints to turn builders.
 pub trait RlmTurnBuilderExt: Sized {
+    /// Requires the RLM turn to finish through the finish tool.
     fn require_finish(self) -> Result<Self>;
+    /// Requires the RLM finish tool to produce a value matching the schema.
     fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self>;
+    /// Allows an RLM turn to return prose or invoke the finish tool.
     fn allow_prose_or_finish(self) -> Result<Self>;
 }
 

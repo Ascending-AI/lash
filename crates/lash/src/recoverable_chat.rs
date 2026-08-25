@@ -27,8 +27,11 @@ use crate::session::{ObservableSession, SessionObservationStream, SessionObserva
 /// bounded applied-identity window.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RecoverableChatEventId {
+    /// Session that produced the observation event.
     pub session_id: String,
+    /// Replay-store incarnation that produced the observation event.
     pub replay_incarnation_id: String,
+    /// Replay cursor of the observation event.
     pub cursor: String,
 }
 
@@ -80,11 +83,14 @@ impl AppliedEventIds {
 /// captured.
 #[derive(Clone, Debug)]
 pub struct RecoverableChatSnapshot {
+    /// Authoritative session read model captured by the snapshot.
     pub read_view: SessionReadView,
+    /// Replay cursor at which the read model was captured.
     pub cursor: SessionCursor,
 }
 
 impl RecoverableChatSnapshot {
+    /// Captures a recoverable snapshot from the observable session.
     pub fn capture(observable: &ObservableSession) -> Self {
         let observation = observable.current_observation();
         Self {
@@ -99,29 +105,39 @@ impl RecoverableChatSnapshot {
 pub enum RecoverableChatUpdate {
     /// A provisional or lifecycle observation with stable redelivery identity.
     Event {
+        /// Stable replay identity for this observation event.
         id: RecoverableChatEventId,
+        /// Observation event delivered by this update.
         event: std::sync::Arc<SessionObservationEvent>,
     },
     /// The requested cursor fell outside bounded replay. Replace the
     /// projection from `snapshot`, persist `gap.latest_cursor`, and continue
     /// consuming this same stream.
     ReplayGap {
+        /// Authoritative session snapshot for recovering the read model.
         snapshot: RecoverableChatSnapshot,
+        /// Replay gap that required snapshot replacement.
         gap: LiveReplayGap,
     },
     /// A terminal commit replaces provisional state with this authoritative
     /// snapshot. The committed event is retained for remote encoding and
     /// tracing, but the snapshot is the transcript authority.
     TerminalReplacement {
+        /// Stable replay identity for this observation event.
         id: RecoverableChatEventId,
+        /// Observation event delivered by this update.
         event: std::sync::Arc<SessionObservationEvent>,
+        /// Authoritative session snapshot for recovering the read model.
         snapshot: RecoverableChatSnapshot,
     },
     /// A revision-stable authoritative replacement. Refresh the resident
     /// projection without settling provisional transcript rows.
     ResidentReplacement {
+        /// Stable replay identity for this observation event.
         id: RecoverableChatEventId,
+        /// Observation event delivered by this update.
         event: std::sync::Arc<SessionObservationEvent>,
+        /// Authoritative session snapshot for recovering the read model.
         snapshot: RecoverableChatSnapshot,
     },
 }
@@ -161,6 +177,7 @@ impl RecoverableChatSubscription {
         self
     }
 
+    /// Returns the stream's current replay cursor.
     pub fn cursor(&self) -> &SessionCursor {
         self.inner.cursor()
     }

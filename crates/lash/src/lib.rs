@@ -10,6 +10,9 @@
 //! [`plugins`], [`observe`], [`triggers`], [`attachments`], ...) carries its own
 //! vocabulary. [`prelude`] is the curated daily-use subset of that root.
 
+#![deny(missing_docs)]
+
+/// Administrative facade handles and operations.
 pub mod admin;
 mod core;
 mod error;
@@ -20,7 +23,9 @@ pub(crate) mod process_admin;
 mod prompt_layer;
 pub mod recoverable_chat;
 #[cfg(feature = "rlm")]
+/// RLM-specific turn-builder extensions.
 pub mod rlm;
+/// Reusable contracts for agent scenarios.
 pub mod scenario_contracts;
 /// Standard-lock poison recovery traits for application code.
 pub mod sync {
@@ -33,6 +38,7 @@ mod support;
 mod tests;
 mod tool_catalog;
 mod tool_intent_ingress;
+/// Turn builders, streams, activities, and output types.
 pub mod turn;
 pub mod usage;
 
@@ -160,6 +166,7 @@ pub mod triggers {
     pub use lash_core::{TriggerCommand, TriggerStore};
 }
 
+/// Tool definitions, providers, and execution types.
 pub mod tools {
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
@@ -212,6 +219,7 @@ pub mod tools {
     pub use lash_tool_support::{StaticToolExecute, StaticToolProvider};
 }
 
+/// Direct protocol transport types.
 pub mod direct {
     pub use lash_core::llm::types::{
         AttachmentSource, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
@@ -229,6 +237,7 @@ pub mod direct {
     };
 }
 
+/// Session persistence types and services.
 pub mod persistence {
     /// Diagnostic read over a session's execution lease: holder identity,
     /// generation, expiry, and renewal state. Snapshot only: the commit CAS is
@@ -252,6 +261,7 @@ pub mod persistence {
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     pub use lash_core::{QueuedWorkClaimOutcome, SelectedQueuedWorkClaimOutcome};
+    /// Queued-work state, leases, and execution types.
     pub mod queued_work {
         pub use lash_core::store::queued_work::{
             QueuedWorkClass, claim_scan_limit, derive_batch_id,
@@ -301,6 +311,7 @@ pub mod persistence {
     pub use lash_lashlang_runtime::{InMemoryLashlangArtifactStore, LashlangArtifactStore};
 }
 
+/// Plugin contracts, manifests, and operation types.
 pub mod plugins {
     pub use lash_core::PluginOptions;
     /// Durable session-lifecycle operations a hook context carries, alongside
@@ -390,6 +401,7 @@ pub mod plugins {
     };
 }
 
+/// Protocol message and content types.
 pub mod messages {
     pub use lash_core::{
         Message, MessageOrigin, MessageRole, Part, PartKind, facade_support::MessageSequence,
@@ -552,6 +564,7 @@ pub mod remote {
     }
 }
 
+/// Durable process definitions, handles, and events.
 pub mod process {
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::process_admin::Processes;
@@ -600,6 +613,7 @@ pub mod process {
     };
 }
 
+/// Durability configuration and backend contracts.
 pub mod durability {
     /// Reject a [`TurnInput`](crate::TurnInput) that a durable
     /// [`EffectHost`] cannot replay — live protocol extensions and live plugin
@@ -619,6 +633,7 @@ pub mod durability {
     };
 }
 
+/// Runtime events, errors, and execution controls.
 pub mod runtime {
     pub use crate::core::AdvancedLashCoreBuilder;
     /// Prompt-token accounting a [`TurnContextTransform`](crate::plugins::TurnContextTransform)
@@ -656,6 +671,7 @@ pub mod runtime {
     };
 }
 
+/// Prompt templates, layers, and contributions.
 pub mod prompt {
     pub use lash_core::{
         PromptBuiltin, PromptContribution, PromptContributionGate, PromptLayer, PromptSlot,
@@ -664,6 +680,7 @@ pub mod prompt {
     };
 }
 
+/// Trace context, events, and sink configuration.
 pub mod tracing {
     #[cfg(feature = "otel-trace")]
     pub use lash_core::{OtelTraceOptions, OtelTraceSink};
@@ -694,6 +711,7 @@ pub mod tracing {
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+/// Model-provider configuration and request types.
 pub mod provider {
     /// Typed provider-failure classification surfaced on
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.

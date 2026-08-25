@@ -6,11 +6,13 @@ use super::*;
 /// against it at build time and again per session, so they live together and
 /// away from the builder's dependency wiring.
 impl LashCoreBuilder {
+    /// Configures the model and returns the updated builder.
     pub fn model(mut self, model: lash_core::ModelSpec) -> Self {
         self.session_spec = self.session_spec.model(model);
         self
     }
 
+    /// Configures the turn budget and returns the updated builder.
     pub fn turn_budget(mut self, turn_budget: lash_core::TurnBudget) -> Self {
         self.session_spec = self.session_spec.turn_budget(turn_budget);
         self
@@ -34,6 +36,7 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Configures the session spec and returns the updated builder.
     pub fn session_spec(mut self, spec: SessionSpec) -> Self {
         self.session_spec = spec;
         self

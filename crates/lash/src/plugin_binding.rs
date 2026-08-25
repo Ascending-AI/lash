@@ -23,12 +23,17 @@ use crate::support::*;
 /// }
 /// ```
 pub trait PluginBinding: Send + Sync + 'static {
+    /// Stable identifier used to register and address this plugin binding.
     const ID: &'static str;
+    /// Session-scoped configuration used to construct the plugin.
     type SessionConfig: Clone + Send + Sync + 'static;
+    /// Turn input accepted by the bound plugin.
     type Input: Clone + Send + Sync + 'static;
 
+    /// Creates the plugin factory for this binding configuration.
     fn factory(config: &Self::SessionConfig) -> Arc<dyn PluginFactory>;
 
+    /// Reports whether this binding requires input on every turn.
     fn requires_turn_input(_config: &Self::SessionConfig) -> bool {
         false
     }

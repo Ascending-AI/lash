@@ -77,11 +77,17 @@ pub enum SessionLeaseRenewal {
     /// was alive. A turn that is not progressing under this reading is stuck
     /// somewhere inside itself (a provider hang, a tool, a wait), not on the
     /// lane.
-    Current { expires_in_ms: u64 },
+    Current {
+        /// Milliseconds remaining before the holder's lease expires.
+        expires_in_ms: u64,
+    },
     /// A holder's expiry is already behind the observation: its renewals
     /// stopped, and a peer may claim the lane with a higher generation. The
     /// holder may nonetheless still be running and may still win the commit CAS.
-    Lapsed { expired_for_ms: u64 },
+    Lapsed {
+        /// Milliseconds elapsed since the holder's lease expired.
+        expired_for_ms: u64,
+    },
 }
 
 impl SessionLeaseDiagnostics {

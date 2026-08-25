@@ -173,6 +173,7 @@ impl Drop for TurnCancelGuard {
     }
 }
 
+/// Builder for configuring turn.
 pub struct TurnBuilder {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) effect_host: Arc<dyn EffectHost>,
@@ -211,26 +212,31 @@ impl TurnBuilder {
         self
     }
 
+    /// Configures the protocol turn options and returns the updated builder.
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
         self.protocol_turn_options = Some(options);
         self
     }
 
+    /// Configures the provider and returns the updated builder.
     pub fn provider(mut self, provider: ProviderHandle) -> Self {
         self.provider = Some(provider);
         self
     }
 
+    /// Configures the turn id and returns the updated builder.
     pub fn turn_id(mut self, id: impl Into<String>) -> Self {
         self.turn_id = Some(id.into());
         self
     }
 
+    /// Configures the prompt template and returns the updated builder.
     pub fn prompt_template(mut self, template: PromptTemplate) -> Self {
         self.input.turn_context.set_prompt_template(template);
         self
     }
 
+    /// Configures the prompt contribution and returns the updated builder.
     pub fn prompt_contribution(mut self, contribution: PromptContribution) -> Self {
         self.input
             .turn_context
@@ -238,6 +244,7 @@ impl TurnBuilder {
         self
     }
 
+    /// Replaces prompt slot.
     pub fn replace_prompt_slot(
         mut self,
         slot: PromptSlot,
@@ -249,11 +256,13 @@ impl TurnBuilder {
         self
     }
 
+    /// Clears prompt slot.
     pub fn clear_prompt_slot(mut self, slot: PromptSlot) -> Self {
         self.input.turn_context.clear_prompt_slot(slot);
         self
     }
 
+    /// Configures the prompt layer and returns the updated builder.
     pub fn prompt_layer(mut self, layer: PromptLayer) -> Self {
         self.input.turn_context.set_prompt_layer(layer);
         self
@@ -269,6 +278,7 @@ impl TurnBuilder {
         self
     }
 
+    /// Returns the configured effect receiver.
     pub fn effects(self, controller: &dyn RuntimeEffectController) -> ScopedTurnBuilder<'_> {
         ScopedTurnBuilder {
             builder: self,
@@ -312,6 +322,7 @@ impl TurnBuilder {
             .await
     }
 
+    /// Starts streaming the configured operation.
     pub fn stream(self) -> Result<TurnStream> {
         let effect_host = Arc::clone(&self.effect_host);
         self.stream_with_effect_host(effect_host.as_ref())
@@ -436,6 +447,7 @@ impl TurnBuilder {
     }
 }
 
+/// Builder for configuring scoped turn.
 pub struct ScopedTurnBuilder<'run> {
     builder: TurnBuilder,
     controller: &'run dyn RuntimeEffectController,
@@ -448,36 +460,43 @@ impl<'run> ScopedTurnBuilder<'run> {
         self
     }
 
+    /// Installs a cancellation token with an optional host-defined origin.
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
         self.builder = self.builder.cancel_with_origin(cancel, origin);
         self
     }
 
+    /// Configures the protocol turn options and returns the updated builder.
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
         self.builder = self.builder.protocol_turn_options(options);
         self
     }
 
+    /// Configures the provider and returns the updated builder.
     pub fn provider(mut self, provider: ProviderHandle) -> Self {
         self.builder = self.builder.provider(provider);
         self
     }
 
+    /// Configures the turn id and returns the updated builder.
     pub fn turn_id(mut self, id: impl Into<String>) -> Self {
         self.builder = self.builder.turn_id(id);
         self
     }
 
+    /// Configures the prompt template and returns the updated builder.
     pub fn prompt_template(mut self, template: PromptTemplate) -> Self {
         self.builder = self.builder.prompt_template(template);
         self
     }
 
+    /// Configures the prompt contribution and returns the updated builder.
     pub fn prompt_contribution(mut self, contribution: PromptContribution) -> Self {
         self.builder = self.builder.prompt_contribution(contribution);
         self
     }
 
+    /// Replaces prompt slot.
     pub fn replace_prompt_slot(
         mut self,
         slot: PromptSlot,
@@ -487,21 +506,25 @@ impl<'run> ScopedTurnBuilder<'run> {
         self
     }
 
+    /// Clears prompt slot.
     pub fn clear_prompt_slot(mut self, slot: PromptSlot) -> Self {
         self.builder = self.builder.clear_prompt_slot(slot);
         self
     }
 
+    /// Configures the prompt layer and returns the updated builder.
     pub fn prompt_layer(mut self, layer: PromptLayer) -> Self {
         self.builder = self.builder.prompt_layer(layer);
         self
     }
 
+    /// Supplies typed turn input for a bound plugin.
     pub fn with_plugin_input<P: PluginBinding>(mut self, input: P::Input) -> Self {
         self.builder = self.builder.with_plugin_input::<P>(input);
         self
     }
 
+    /// Runs the turn and collects its activity and final report.
     pub async fn run(self) -> Result<TurnOutput> {
         let collector = RunActivityCollector::default();
         let result = self.stream_to(&collector).await?;
@@ -511,6 +534,7 @@ impl<'run> ScopedTurnBuilder<'run> {
         })
     }
 
+    /// Runs the turn while sending semantic activity to the supplied sink.
     pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
         self.builder
             .stream_to_with_effect_controller(events, self.controller)
@@ -529,6 +553,7 @@ pub struct AdvancedTurn {
 }
 
 impl AdvancedTurn {
+    /// Runs the turn with an explicit replay-aware effect scope.
     pub async fn run_with_scope(
         self,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -543,6 +568,7 @@ impl AdvancedTurn {
         })
     }
 
+    /// Collects the scoped turn stream into its final output.
     pub async fn collect_with_scope(
         self,
         events: &dyn TurnActivitySink,
@@ -562,6 +588,7 @@ impl AdvancedTurn {
         })
     }
 
+    /// Runs the turn in an explicit effect scope while streaming semantic activity.
     pub async fn stream_to_with_scope(
         self,
         events: &dyn TurnActivitySink,
@@ -575,6 +602,7 @@ impl AdvancedTurn {
             .await
     }
 
+    /// Starts a raw runtime event stream in an explicit effect scope.
     pub fn stream_with_scope(
         self,
         scoped_effect_controller: ScopedEffectController<'static>,
@@ -607,16 +635,19 @@ impl AdvancedTurn {
     }
 }
 
+/// Stream of turn activity.
 pub struct TurnStream {
     activities: mpsc::Receiver<Result<TurnActivity>>,
     completion: JoinHandle<Result<TurnReport>>,
 }
 
 impl TurnStream {
+    /// Waits for and returns the next turn activity.
     pub async fn next_activity(&mut self) -> Option<Result<TurnActivity>> {
         self.activities.recv().await
     }
 
+    /// Consumes the stream and waits for its final turn output.
     pub async fn finish(self) -> Result<TurnReport> {
         match self.completion.await {
             Ok(result) => result,
@@ -654,6 +685,7 @@ impl Stream for TurnStream {
     }
 }
 
+/// Builder for configuring queued turn.
 pub struct QueuedTurnBuilder {
     pub(crate) runtime: RuntimeHandle,
     pub(crate) effect_host: Arc<dyn EffectHost>,
@@ -696,11 +728,13 @@ impl QueuedTurnBuilder {
         }
     }
 
+    /// Sets the queued-work drain identifier.
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.drain_id = Some(drain_id.into());
         self
     }
 
+    /// Binds the queued turn to a borrowed effect controller.
     pub fn effects(self, controller: &dyn RuntimeEffectController) -> ScopedQueuedTurnBuilder<'_> {
         ScopedQueuedTurnBuilder {
             builder: self,
@@ -720,6 +754,7 @@ impl QueuedTurnBuilder {
         }))
     }
 
+    /// Drains queued work while sending semantic activity to the supplied sink.
     pub async fn stream_to(
         self,
         events: &dyn TurnActivitySink,
@@ -729,6 +764,7 @@ impl QueuedTurnBuilder {
             .await
     }
 
+    /// Converts this builder into its advanced queued-turn facade.
     pub fn advanced(self) -> AdvancedQueuedTurn {
         AdvancedQueuedTurn { builder: self }
     }
@@ -944,17 +980,20 @@ impl SelectedQueuedTurnBuilder {
     }
 }
 
+/// Builder for configuring scoped queued turn.
 pub struct ScopedQueuedTurnBuilder<'run> {
     builder: QueuedTurnBuilder,
     controller: &'run dyn RuntimeEffectController,
 }
 
 impl<'run> ScopedQueuedTurnBuilder<'run> {
+    /// Installs the cancellation token for this scoped queued turn.
     pub fn cancel(mut self, cancel: CancellationToken) -> Self {
         self.builder = self.builder.cancel(cancel);
         self
     }
 
+    /// Installs a cancellation token with an optional host-defined origin.
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
         self.builder = self.builder.cancel_with_origin(cancel, origin);
         self
@@ -975,11 +1014,13 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
         }
     }
 
+    /// Sets the queued-work drain identifier.
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.builder = self.builder.drain_id(drain_id);
         self
     }
 
+    /// Drains queued work and collects its activity and final report.
     pub async fn run(self) -> Result<QueuedTurnDrain<TurnOutput>> {
         let collector = RunActivityCollector::default();
         Ok(self.stream_to(&collector).await?.map(|result| TurnOutput {
@@ -988,6 +1029,7 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
         }))
     }
 
+    /// Drains queued work while sending semantic activity to the supplied sink.
     pub async fn stream_to(
         self,
         events: &dyn TurnActivitySink,
@@ -1052,6 +1094,7 @@ impl<'run> ScopedSelectedQueuedTurnBuilder<'run> {
     }
 }
 
+/// Exposes advanced execution controls for a queued turn.
 pub struct AdvancedQueuedTurn {
     builder: QueuedTurnBuilder,
 }
@@ -1080,6 +1123,7 @@ impl AdvancedSelectedQueuedTurn {
 }
 
 impl AdvancedQueuedTurn {
+    /// Drains queued work in an explicit effect scope while streaming activity.
     pub async fn stream_to_with_scope(
         self,
         events: &dyn TurnActivitySink,
@@ -1342,11 +1386,14 @@ pub(crate) async fn stream_prepared_agent_frame_run(
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+/// Report produced by turn.
 pub struct TurnReport {
+    /// Final runtime state for the turn.
     pub state: SessionSnapshot,
     /// Cancellation evidence, when the turn was cancelled, rides this outcome
     /// — read it with [`TurnReport::cancellation`].
     pub outcome: TurnOutcome,
+    /// Assistant output committed by the turn.
     pub assistant_output: AssistantOutput,
     /// Parent's own LLM tokens for this turn. Does **not** include child
     /// sessions; see [`children_usage`](Self::children_usage) and
@@ -1365,8 +1412,11 @@ pub struct TurnReport {
     /// composes any higher-level view from it (ADR 0033).
     #[serde(default)]
     pub llm_calls: Vec<LlmCallRecord>,
+    /// Tool calls issued by the turn in protocol order.
     pub tool_calls: Vec<ToolCallRecord>,
+    /// Execution metadata collected for the turn.
     pub execution: TurnExecutionMetrics,
+    /// Errors captured while settling the turn.
     pub errors: Vec<TurnIssue>,
     /// Durable acceptance identity of the input this turn was driven from.
     ///
@@ -1460,6 +1510,7 @@ impl TurnReport {
         std::time::Duration::from_millis(self.execution.duration_ms)
     }
 
+    /// Returns the final assistant message when one was produced.
     pub fn assistant_message(&self) -> Option<&str> {
         match &self.outcome {
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage {
@@ -1469,6 +1520,7 @@ impl TurnReport {
         }
     }
 
+    /// Deserializes and returns the final structured value.
     pub fn final_value(&self) -> Option<&serde_json::Value> {
         match &self.outcome {
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { value }) => {
@@ -1478,6 +1530,7 @@ impl TurnReport {
         }
     }
 
+    /// Deserializes and returns a tool result by call identifier.
     pub fn tool_value(&self) -> Option<(&str, &serde_json::Value)> {
         match &self.outcome {
             TurnOutcome::Finished(lash_core::facade_support::TurnFinish::ToolValue {
@@ -1488,6 +1541,7 @@ impl TurnReport {
         }
     }
 
+    /// Returns whether the turn reached a successful terminal outcome.
     pub fn is_success(&self) -> bool {
         matches!(
             self.outcome,
@@ -1497,24 +1551,31 @@ impl TurnReport {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+/// Output produced by turn.
 pub struct TurnOutput {
+    /// Final settled report for the turn.
     pub result: TurnReport,
+    /// Ordered activities observed while executing the turn.
     pub activities: Vec<TurnActivity>,
 }
 
 impl TurnOutput {
+    /// Returns the final assistant message when one was produced.
     pub fn assistant_message(&self) -> Option<&str> {
         self.result.assistant_message()
     }
 
+    /// Deserializes and returns the final structured value.
     pub fn final_value(&self) -> Option<&serde_json::Value> {
         self.result.final_value()
     }
 
+    /// Deserializes and returns a tool result by call identifier.
     pub fn tool_value(&self) -> Option<(&str, &serde_json::Value)> {
         self.result.tool_value()
     }
 
+    /// Returns whether the underlying turn reached a successful terminal outcome.
     pub fn is_success(&self) -> bool {
         self.result.is_success()
     }
@@ -1556,11 +1617,13 @@ impl TurnActivitySink for RunActivityCollector {
     }
 }
 
+/// Fans a turn's activity stream out to multiple consumers.
 pub struct TurnActivityFanout {
     sinks: Vec<Arc<dyn TurnActivitySink>>,
 }
 
 impl TurnActivityFanout {
+    /// Creates a fanout that forwards each activity to every supplied sink.
     pub fn new(sinks: impl IntoIterator<Item = Arc<dyn TurnActivitySink>>) -> Self {
         Self {
             sinks: sinks.into_iter().collect(),
@@ -1577,6 +1640,7 @@ impl TurnActivitySink for TurnActivityFanout {
     }
 }
 
+/// Returns the textual content of a message when it contains text.
 pub fn message_text(message: &Message) -> String {
     message
         .parts
@@ -1586,6 +1650,7 @@ pub fn message_text(message: &Message) -> String {
         .join("\n")
 }
 
+/// Returns the protocol role associated with a message.
 pub fn message_role(message: &Message) -> &'static str {
     match message.role {
         MessageRole::User => "user",

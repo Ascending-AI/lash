@@ -45,37 +45,52 @@ pub enum SelectedQueuedWorkDrainRefusalCause {
 }
 
 #[derive(Debug, thiserror::Error)]
+/// Errors returned while configuring or operating the embedded Lash runtime.
 pub enum EmbedError {
     #[error(
         "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(lash::TurnBudget::bounded(...))/LashCore::rlm_builder(lash::TurnBudget::bounded(...), ...)"
     )]
+    /// Returned when no protocol plugin was configured.
     MissingProtocolPlugin,
     #[error("model spec is required; hosts must supply explicit model metadata")]
+    /// Returned when the session has no explicit model specification.
     MissingModelSpec,
     #[error(
         "turn budget is required; SessionSpec must carry TurnBudget::Bounded(...) or TurnBudget::Unbounded"
     )]
+    /// Returned when the session has no explicit turn budget.
     MissingTurnBudget,
     #[error("effect host is required; provide an explicit effect host with .effect_host(...)")]
+    /// Returned when the runtime has no effect host.
     MissingEffectHost,
     #[error(
         "attachment store is required; provide an explicit attachment store with .attachment_store(...)"
     )]
+    /// Returned when the runtime has no attachment store.
     MissingAttachmentStore,
     #[error(
         "process execution environment store is required; provide an explicit process env store with .process_env_store(...)"
     )]
+    /// Returned when the runtime has no process-environment store.
     MissingProcessEnvStore,
     #[error(
         "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
     )]
+    /// Returned when the runtime has no commit budget.
     MissingCommitBudget,
     #[error(
         "queued-work batching policy is required; provide an explicit model-action reserve with .queued_work_batching(...)"
     )]
+    /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
     #[error("failed to create store for session `{session_id}`: {message}")]
-    StoreFactory { session_id: String, message: String },
+    /// Store creation failed for the identified session.
+    StoreFactory {
+        /// Session whose store could not be created.
+        session_id: String,
+        /// Store-factory failure detail suitable for diagnostics.
+        message: String,
+    },
     /// Session-store deletion stopped after witnessing some reclaim progress.
     ///
     /// The typed failure preserves the partial storage report required by ADR
@@ -88,62 +103,101 @@ pub enum EmbedError {
         failure: Box<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
     },
     #[error("session store operation failed: {0}")]
+    /// Wraps the store failure.
     Store(#[from] lash_core::StoreError),
     #[error(
         "store-less session id `{session_id}` was already used by this LashCore; store-less sessions require distinct ids per process"
     )]
-    EphemeralSessionIdReused { session_id: String },
+    /// A store-less session identifier was reused by this core.
+    EphemeralSessionIdReused {
+        /// Store-less session identifier that was reused.
+        session_id: String,
+    },
     #[error("store is bound to session `{loaded}` but builder requested `{requested}`")]
-    StoreSessionMismatch { loaded: String, requested: String },
+    /// A loaded store belongs to a different session than requested.
+    StoreSessionMismatch {
+        /// Session identifier bound to the loaded store.
+        loaded: String,
+        /// Session identifier requested by the builder.
+        requested: String,
+    },
     #[error("durable process worker requires a LashCore store factory")]
+    /// Returned when a durable process worker has no store factory.
     MissingProcessWorkerStoreFactory,
     #[error(
         "a process registry is configured for the default inline process work runner but no session store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) - InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory - or use .process_work_driver(...) for an externally driven durable runner."
     )]
+    /// Returned when the inline process runner cannot rebuild sessions without a store factory.
     ProcessRegistryRequiresStoreFactory,
     #[error("durable process worker config requires a LashCore process registry")]
+    /// Returned when durable process-worker configuration has no process registry.
     MissingProcessRegistry,
     #[error("invalid process execution configuration: {0}")]
+    /// Wraps the process execution concurrency failure.
     ProcessExecutionConcurrency(
         #[from] lash_core::facade_support::ProcessExecutionConcurrencyError,
     ),
     #[error("invalid queued-work execution configuration: {0}")]
+    /// Wraps the queued work execution concurrency failure.
     QueuedWorkExecutionConcurrency(
         #[from] lash_core::facade_support::QueuedWorkExecutionConcurrencyError,
     ),
     #[error("this operation requires a LashCore store factory")]
+    /// Returned when an operation requiring durable session state has no store factory.
     MissingSessionStoreFactory,
     #[error("failed to delete process state for session `{session_id}`: {message}")]
-    SessionDeleteProcess { session_id: String, message: String },
+    /// Process-state deletion failed for the identified session.
+    SessionDeleteProcess {
+        /// Session whose process state could not be deleted.
+        session_id: String,
+        /// Process-state deletion failure detail suitable for diagnostics.
+        message: String,
+    },
     #[error("missing required turn input for plugin `{plugin_id}`")]
-    MissingPluginTurnInput { plugin_id: &'static str },
+    /// A plugin did not receive its required turn input.
+    MissingPluginTurnInput {
+        /// Identifier of the plugin whose required turn input is absent.
+        plugin_id: &'static str,
+    },
     #[error(
         "session is still in use: park()/close() consume the session and require exclusive ownership; drop any cloned handles and finish or cancel in-flight turns first"
     )]
+    /// Returned when an operation requires exclusive ownership of a session that is still in use.
     SessionStillInUse,
     #[error("failed to flush trace sink: {0}")]
+    /// Wraps the trace flush failure.
     TraceFlush(#[from] lash_trace::TraceSinkError),
     #[error(
         "pull-style turn streams require an effect host that can create a static scoped controller; use stream_to(...) inside the handler context"
     )]
+    /// Returned when a pull-style turn stream cannot obtain a static effect host.
     StaticTurnStreamRequiresStaticEffectHost,
     #[error("runtime session error: {0}")]
+    /// Wraps the session failure.
     Session(#[from] SessionError),
     #[error("selected queued-work drain refused: {cause:?}")]
+    /// Wraps the selected queued work drain refused failure.
     SelectedQueuedWorkDrainRefused {
+        /// Reason the selected queued-work drain was refused.
         cause: SelectedQueuedWorkDrainRefusalCause,
     },
     #[error("runtime turn error: {0}")]
+    /// Wraps the runtime failure.
     Runtime(#[from] lash_core::RuntimeError),
     #[error("runtime plugin/control error: {0}")]
+    /// Wraps the plugin failure.
     Plugin(#[from] lash_core::PluginError),
     #[error("remote protocol error: {0}")]
+    /// Wraps the remote protocol failure.
     RemoteProtocol(#[from] lash_remote_protocol::RemoteProtocolError),
     #[error("failed to encode protocol turn options: {0}")]
+    /// Wraps the protocol turn options failure.
     ProtocolTurnOptions(#[from] serde_json::Error),
     #[error("failed to decode protocol turn options: {0}")]
+    /// Wraps the decode protocol turn options failure.
     DecodeProtocolTurnOptions(#[from] lash_core::ProtocolTurnOptionsError),
     #[error("runtime control unavailable: {0}")]
+    /// Wraps the control failure.
     Control(#[from] lash_core::facade_support::PluginOperationInvokeError),
 }
 
@@ -256,6 +310,7 @@ impl EmbedError {
     }
 }
 
+/// Result type returned by Lash facade operations.
 pub type Result<T> = std::result::Result<T, EmbedError>;
 
 #[cfg(test)]
