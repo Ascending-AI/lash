@@ -669,9 +669,7 @@ impl SqliteSessionStoreFactory {
         let store = Store::open_bound_readonly(&path, session_id)
             .await
             .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
-        Ok(lash_core::store::load_persisted_session_state(&store)
-            .await?
-            .map(|state| state.read_view()))
+        lash_core::store::load_persisted_session_read_view(&store).await
     }
 }
 
@@ -820,21 +818,30 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                         .transpose()?,
                     head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(3)?)?,
                     relation,
+                    full_relation: None,
                     parent_session_id: row.get(5)?,
                     deleted: row.get::<_, i64>(6)? != 0,
                 })
             })?;
             let mut summaries = Vec::new();
             for row in rows {
-                let summary = row?;
-                if filter
+                summaries.push(row?);
+            }
+            drop(stmt);
+            summaries.retain(|summary| {
+                filter
                     .relation
                     .is_none_or(|relation| relation == summary.relation)
                     && filter
                         .deleted
                         .is_none_or(|deleted| deleted == summary.deleted)
-                {
-                    summaries.push(summary);
+            });
+            for summary in &mut summaries {
+                if !summary.deleted {
+                    summary.full_relation =
+                        crate::session_meta::load_session_meta(conn, Some(&summary.session_id))
+                            .map_err(sqlite_conversion_error)?
+                            .map(|meta| meta.relation);
                 }
             }
             Ok(summaries)

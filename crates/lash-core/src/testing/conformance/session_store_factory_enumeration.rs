@@ -22,7 +22,10 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         "enumeration-model",
         crate::SessionRelation::Child {
             parent_session_id: root_request.session_id.clone(),
-            caused_by: None,
+            caused_by: Some(crate::CausalRef::Turn {
+                session_id: root_request.session_id.clone(),
+                turn_id: "enumeration-parent-turn".to_string(),
+            }),
         },
     );
     let root = factory
@@ -55,6 +58,10 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         .find(|summary| summary.session_id == child_request.session_id)
         .expect("child summary is listed");
     assert_eq!(child_initial.relation, crate::SessionRelationKind::Child);
+    assert_eq!(
+        child_initial.full_relation.as_ref(),
+        Some(&child_request.relation)
+    );
     assert_eq!(
         child_initial.parent_session_id.as_deref(),
         Some(root_request.session_id.as_str())
@@ -138,6 +145,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
     assert_eq!(tombstones.len(), 1);
     assert_eq!(tombstones[0].session_id, root_request.session_id);
     assert!(tombstones[0].deleted);
+    assert_eq!(tombstones[0].full_relation, None);
     assert_eq!(tombstones[0].head_revision, head_before.head_revision);
     root.vacuum()
         .await

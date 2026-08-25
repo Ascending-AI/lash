@@ -5,13 +5,19 @@ async fn inspect_session(
     core.read_session(session_id).await
 }
 
+fn session_relation(
+    view: &lash::persistence::SessionReadView,
+) -> Option<lash::persistence::SessionRelation> {
+    view.relation().cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use lash::persistence::SessionStoreFactory as _;
 
-    use super::inspect_session;
+    use super::{inspect_session, session_relation};
 
     const SESSION_ID: &str = "docs-read-session";
 
@@ -45,10 +51,17 @@ mod tests {
     async fn inspection_reads_the_settled_view_without_opening_a_session() -> anyhow::Result<()> {
         let factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
         let policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
+        let relation = lash::persistence::SessionRelation::Child {
+            parent_session_id: "docs-read-session-parent".to_string(),
+            caused_by: Some(lash::process::CausalRef::Turn {
+                session_id: "docs-read-session-parent".to_string(),
+                turn_id: "docs-read-session-parent-turn".to_string(),
+            }),
+        };
         let store = factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
                 session_id: SESSION_ID.to_string(),
-                relation: lash::persistence::SessionRelation::Root,
+                relation: relation.clone(),
                 policy: policy.clone(),
             })
             .await?;
@@ -78,6 +91,7 @@ mod tests {
             .await?
             .expect("committed session has a read view");
         assert_eq!(view.session_id(), SESSION_ID);
+        assert_eq!(session_relation(&view), Some(relation));
         assert_eq!(view.messages().len(), 1);
         assert_eq!(view.message_tree().len(), 1);
         Ok(())

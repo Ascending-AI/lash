@@ -34,7 +34,8 @@ pub(crate) async fn list_sessions(
                 });
             }
         };
-        let summary = SessionSummary {
+        let deleted = row.get(6);
+        let mut summary = SessionSummary {
             session_id: row.get(0),
             created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(1))?,
             last_commit_at_ms: row
@@ -43,18 +44,26 @@ pub(crate) async fn list_sessions(
                 .transpose()?,
             head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(3))?,
             relation,
+            full_relation: None,
             parent_session_id: row.get(5),
-            deleted: row.get(6),
+            deleted,
         };
-        if filter
+        if !filter
             .relation
             .is_none_or(|relation| relation == summary.relation)
-            && filter
+            || !filter
                 .deleted
                 .is_none_or(|deleted| deleted == summary.deleted)
         {
-            summaries.push(summary);
+            continue;
         }
+        if !deleted {
+            summary.full_relation =
+                crate::session_meta::load_session_meta(pool, Some(&summary.session_id))
+                    .await?
+                    .map(|meta| meta.relation);
+        }
+        summaries.push(summary);
     }
     Ok(summaries)
 }

@@ -26,26 +26,50 @@ pub struct LoadedPersistedSession {
 }
 
 #[doc(hidden)]
-pub async fn load_persisted_session(
+async fn load_persisted_session_with_relation(
     store: &(dyn RuntimePersistence + '_),
-) -> Result<Option<LoadedPersistedSession>, StoreError> {
+) -> Result<Option<(LoadedPersistedSession, crate::SessionRelation)>, StoreError> {
     let read = store.load_session().await?;
     let Some(read) = read else {
         return Ok(None);
     };
     // Defend against third-party stores that do not use SessionGraph::from_nodes after reading.
     read.graph.validate_resident_integrity()?;
-    store.load_session_meta().await?.ok_or_else(|| {
+    let meta = store.load_session_meta().await?.ok_or_else(|| {
         StoreError::Backend(format!(
             "session `{}` has durable head state but no session metadata",
             read.session_id
         ))
     })?;
     let config = read.config.clone();
-    Ok(Some(LoadedPersistedSession {
-        state: persisted_session_state_from_read(read)?,
-        config,
-    }))
+    Ok(Some((
+        LoadedPersistedSession {
+            state: persisted_session_state_from_read(read)?,
+            config,
+        },
+        meta.relation,
+    )))
+}
+
+#[doc(hidden)]
+pub async fn load_persisted_session(
+    store: &(dyn RuntimePersistence + '_),
+) -> Result<Option<LoadedPersistedSession>, StoreError> {
+    Ok(load_persisted_session_with_relation(store)
+        .await?
+        .map(|(loaded, _relation)| loaded))
+}
+
+/// Load the canonical read-only view together with its durable session relation.
+#[doc(hidden)]
+pub async fn load_persisted_session_read_view(
+    store: &(dyn RuntimePersistence + '_),
+) -> Result<Option<crate::SessionReadView>, StoreError> {
+    Ok(load_persisted_session_with_relation(store)
+        .await?
+        .map(|(loaded, relation)| {
+            crate::SessionReadView::from_persisted_state_with_relation(&loaded.state, relation)
+        }))
 }
 
 /// Recover a session only after completing lease-fenced state admission.

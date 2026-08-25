@@ -2469,3 +2469,16 @@ include!("conformance/append_identity.rs");
 mod direct_turn_acceptance;
 #[path = "conformance/injectors.rs"]
 mod injectors;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_session_read_view_satisfies_conformance_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres read-session conformance: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    lash_core::testing::conformance::session_store_factory_read_session(Arc::new(
+        storage.session_store_factory(),
+    ))
+    .await;
+}

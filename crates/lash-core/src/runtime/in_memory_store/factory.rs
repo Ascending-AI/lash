@@ -153,6 +153,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 last_commit_at_ms: None,
                 head_revision: 0,
                 relation: crate::SessionRelationKind::from_relation(&binding.relation),
+                full_relation: Some(binding.relation.clone()),
                 parent_session_id: binding.relation.parent_session_id().map(ToOwned::to_owned),
                 deleted: false,
             });
@@ -179,9 +180,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         let Some(store) = store else {
             return Ok(None);
         };
-        Ok(crate::store::load_persisted_session_state(store.as_ref())
-            .await?
-            .map(|state| state.read_view()))
+        crate::store::load_persisted_session_read_view(store.as_ref()).await
     }
 
     async fn list_sessions(
@@ -309,6 +308,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 .insert(session_id.to_string());
             if let Some(summary) = self.session_catalog.lock_recover().get_mut(session_id) {
                 summary.deleted = true;
+                summary.full_relation = None;
             }
             // Sever exactly this session's component edges, then delete only
             // candidates with no surviving session or anchor edge.
@@ -633,6 +633,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 last_commit_at_ms: None,
                 head_revision: 0,
                 relation: crate::SessionRelationKind::from_relation(&request.relation),
+                full_relation: Some(request.relation.clone()),
                 parent_session_id: request.relation.parent_session_id().map(ToOwned::to_owned),
                 deleted: false,
             },

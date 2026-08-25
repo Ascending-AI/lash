@@ -516,6 +516,15 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     ) -> Result<Vec<SessionSummary>, StoreError> {
         crate::session_catalog::list_sessions(&self.pool, filter).await
     }
+
+    async fn read_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<lash_core::SessionReadView>, StoreError> {
+        lash_core::store::validate_session_id(session_id)?;
+        let store = self.store_for(session_id.to_string());
+        lash_core::store::load_persisted_session_read_view(&store).await
+    }
 }
 
 impl PostgresSessionStoreFactory {

@@ -1507,6 +1507,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 last_commit_at_ms: Some(transaction_now),
                 head_revision,
                 relation: crate::SessionRelationKind::from_relation(&relation),
+                full_relation: Some(relation.clone()),
                 parent_session_id: relation.parent_session_id().map(ToOwned::to_owned),
                 deleted: false,
             });
@@ -1572,6 +1573,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .get_mut(&meta.session_id)
         {
             summary.relation = crate::SessionRelationKind::from_relation(&meta.relation);
+            summary.full_relation = Some(meta.relation.clone());
             summary.parent_session_id = meta.relation.parent_session_id().map(ToOwned::to_owned);
         }
         Ok(())

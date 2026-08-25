@@ -78,10 +78,17 @@ pub async fn session_store_factory<F>(
 /// read disposition as the ordinary live-open surface.
 pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionStoreFactory>) {
     const SESSION_ID: &str = "read-only-session-view";
+    let expected_relation = crate::SessionRelation::Child {
+        parent_session_id: "read-only-session-parent".to_string(),
+        caused_by: Some(crate::CausalRef::Turn {
+            session_id: "read-only-session-parent".to_string(),
+            turn_id: "read-only-session-parent-turn".to_string(),
+        }),
+    };
     let request = session_store_request(
         SESSION_ID,
         "read-only-session-model",
-        crate::SessionRelation::Root,
+        expected_relation.clone(),
     );
     assert!(
         factory
@@ -138,6 +145,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         .expect("read alongside live writer")
         .expect("committed session has a read view");
     assert_eq!(view.session_id(), SESSION_ID);
+    assert_eq!(view.relation(), Some(&expected_relation));
     assert_eq!(view.messages().len(), 1, "history is projected");
     assert_eq!(view.message_tree().len(), 1, "tree is projected");
     assert_eq!(
