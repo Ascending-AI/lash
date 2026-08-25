@@ -218,7 +218,9 @@ async fn rlm_terminal_contracts(
 
 async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<()> {
     // docs:start:cancel-turn
-    use lash::{TurnAddress, TurnCancellationEvidence, TurnOutcome, TurnStop};
+    use lash::{
+        TurnAddress, TurnCancelDisposition, TurnCancellationEvidence, TurnOutcome, TurnStop,
+    };
 
     let turn_id = "incident-summary-42";
     let stream = session
@@ -230,13 +232,15 @@ async fn cancel_turn(core: &LashCore, session: &LashSession) -> anyhow::Result<(
     // authorize the caller before forwarding them to Lash. The default inline
     // driver is same-process; cross-process cancellation requires a durable
     // engine deployment. "user" is this host's vocabulary; Lash carries it
-    // opaquely without assigning semantics.
+    // opaquely without assigning semantics. Choose Drop when undelivered input
+    // should return to the host instead of being deferred to the next turn.
     let receipt = session
-        .request_turn_cancel(
+        .request_turn_cancel_with_disposition(
             turn_id,
             "stop-button-7",
             Some("user".to_string()),
             Some("operator pressed Stop".to_string()),
+            TurnCancelDisposition::Drop,
         )
         .await?;
     let _receipt = receipt;
