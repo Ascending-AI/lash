@@ -48,7 +48,7 @@ impl RuntimeExecutionContext<'_> {
             let mut launches = Vec::with_capacity(indexed_tools.len());
             let mut triggers = Vec::new();
             let mut context = self.clone().with_cancellation_token(tool_cancel.clone());
-            for (index, child) in indexed_tools {
+            for (_, child) in indexed_tools {
                 if cancellation.is_cancelled() {
                     tool_cancel.cancel();
                     launches.push(cancelled_runtime_tool_call_launch(
@@ -64,7 +64,6 @@ impl RuntimeExecutionContext<'_> {
                 let outcome = context
                     .execute_prepared_tool_batch_child(
                         child,
-                        index,
                         parent_invocation.clone(),
                         child_execution_trace_hook,
                         None,
@@ -107,7 +106,6 @@ impl RuntimeExecutionContext<'_> {
                 async move {
                     let tool_call = context.execute_prepared_tool_batch_child(
                         child,
-                        index,
                         parent_invocation,
                         child_execution_trace_hook,
                         Some(intent_drain_slot),
@@ -176,7 +174,6 @@ impl RuntimeExecutionContext<'_> {
     async fn execute_prepared_tool_batch_child(
         &self,
         child: crate::PreparedToolBatchCall,
-        index: usize,
         parent_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
         intent_drain_slot: Option<crate::tool_dispatch::IntentDrainGuard>,
@@ -189,7 +186,7 @@ impl RuntimeExecutionContext<'_> {
         let tool_name = child.call.tool_name.clone();
         let args = child.call.args.clone();
         let replay = child.call.replay.clone();
-        let activity_id = TurnActivityId::new(format!("tool:{call_id}"));
+        let activity_id = tool_activity_id(&call_id);
         self.emit_tool_call_started(&call_id, &tool_name, args.clone(), activity_id.clone())
             .await;
 
@@ -217,9 +214,7 @@ impl RuntimeExecutionContext<'_> {
             // rather than at the end of this function keeps the release point
             // where the former hand-written discharge stood.
             drop(intent_drain_slot);
-            let completed = self
-                .complete_tool_call(index, call_id, replay, outcome, activity_id)
-                .await;
+            let completed = self.complete_tool_call(call_id, replay, outcome).await;
             return CoordinatedToolLaunch {
                 launch: crate::runtime::ToolCallLaunch::Done {
                     result: Box::new(completed.completed),
@@ -275,9 +270,7 @@ impl RuntimeExecutionContext<'_> {
                 .await
             }
         };
-        let completed = self
-            .complete_tool_call(index, call_id, replay, outcome, activity_id)
-            .await;
+        let completed = self.complete_tool_call(call_id, replay, outcome).await;
         CoordinatedToolLaunch {
             launch: crate::runtime::ToolCallLaunch::Done {
                 result: Box::new(completed.completed),
@@ -337,15 +330,7 @@ impl RuntimeExecutionContext<'_> {
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
                 };
-                let completed = self
-                    .complete_tool_call(
-                        index,
-                        call.id,
-                        None,
-                        outcome,
-                        TurnActivityId::new(format!("tool:{}", batch_id)),
-                    )
-                    .await;
+                let completed = self.complete_tool_call(call.id, None, outcome).await;
                 replies[index] = Some(
                     ToolInvocationReply::from_output(completed.completed.output)
                         .with_record(completed.record),
@@ -372,15 +357,7 @@ impl RuntimeExecutionContext<'_> {
                     ));
                 }
                 ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = self
-                        .complete_tool_call(
-                            index,
-                            call.id,
-                            None,
-                            *outcome,
-                            TurnActivityId::new(format!("tool:{}", batch_id)),
-                        )
-                        .await;
+                    let completed = self.complete_tool_call(call.id, None, *outcome).await;
                     replies[index] = Some(
                         ToolInvocationReply::from_output(completed.completed.output)
                             .with_record(completed.record),
@@ -520,11 +497,9 @@ impl RuntimeExecutionContext<'_> {
                             .await;
                         let completed = self
                             .complete_tool_call(
-                                index,
                                 call_id.clone(),
                                 prepared.replay.clone(),
                                 dispatch_outcome,
-                                TurnActivityId::new(format!("tool:{call_id}")),
                             )
                             .await;
                         ToolInvocationReply::from_output(completed.completed.output)
@@ -748,6 +723,75 @@ mod tests {
         assert_eq!(
             replies.replies[0].output.value_for_projection(),
             serde_json::json!("granted leaf")
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_with_unresolvable_tool_ids_emits_per_call_completion_correlations() {
+        let (turn_tx, mut turn_rx) = tokio::sync::mpsc::channel(8);
+        let context = batch_failure_context(Arc::new(BatchFailureEffectController::new(
+            BatchFailureResponse::EffectDecodeError,
+        )))
+        .with_turn_event_sender(turn_tx);
+
+        context
+            .call_tool_batch(vec![
+                ToolInvocation::new(
+                    "missing-call-a",
+                    crate::ToolId::from("tool:missing-a"),
+                    serde_json::json!({}),
+                ),
+                ToolInvocation::new(
+                    "missing-call-b",
+                    crate::ToolId::from("tool:missing-b"),
+                    serde_json::json!({}),
+                ),
+                ToolInvocation::new(
+                    "invalid-prepared",
+                    crate::ToolId::from("tool:batch_failure"),
+                    serde_json::Value::Null,
+                ),
+            ])
+            .await;
+
+        let first = turn_rx.recv().await.expect("first completion activity");
+        let second = turn_rx.recv().await.expect("second completion activity");
+        let third = turn_rx.recv().await.expect("third completion activity");
+        assert_ne!(first.correlation_id, second.correlation_id);
+        assert_ne!(second.correlation_id, third.correlation_id);
+        assert_ne!(first.correlation_id, third.correlation_id);
+        assert!(matches!(
+            first.event,
+            crate::TurnEvent::ToolCallCompleted {
+                call_id: Some(ref call_id),
+                ..
+            } if call_id == "missing-call-a"
+        ));
+        assert!(matches!(
+            second.event,
+            crate::TurnEvent::ToolCallCompleted {
+                call_id: Some(ref call_id),
+                ..
+            } if call_id == "missing-call-b"
+        ));
+        assert_eq!(
+            first.correlation_id,
+            crate::TurnActivityId::new("tool:missing-call-a")
+        );
+        assert_eq!(
+            second.correlation_id,
+            crate::TurnActivityId::new("tool:missing-call-b")
+        );
+        assert!(matches!(
+            third.event,
+            crate::TurnEvent::ToolCallCompleted {
+                call_id: Some(ref call_id),
+                ..
+            } if call_id == "invalid-prepared"
+        ));
+        assert_eq!(
+            third.correlation_id,
+            crate::TurnActivityId::new("tool:invalid-prepared")
         );
     }
 
