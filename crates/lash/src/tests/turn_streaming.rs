@@ -7,6 +7,26 @@ use lash_core::SessionExecutionLeaseStore as _;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::collections::BTreeSet;
 
+#[derive(Default)]
+struct RecordingTurnIds {
+    turn_ids: TokioMutex<Vec<String>>,
+}
+
+impl RecordingTurnIds {
+    async fn snapshot(&self) -> Vec<String> {
+        self.turn_ids.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl TurnActivitySink for RecordingTurnIds {
+    async fn emit(&self, _activity: TurnActivity) {}
+
+    async fn emit_for_turn(&self, turn_id: &str, _activity: TurnActivity) {
+        self.turn_ids.lock().await.push(turn_id.to_string());
+    }
+}
+
 struct QueuedWorkHydrationProbeFactory {
     builds: Arc<AtomicUsize>,
 }
@@ -1189,6 +1209,171 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
         );
     }
     assert!(session.queued_turn().run().await?.ran().is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<()> {
+    let recorder = Arc::new(RecordingInlineEffectController::default());
+    let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+            effect_controller,
+        )))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("host-identified-queued-turn").open().await?;
+    session
+        .enqueue(TurnInput::text("host identified queued work"))
+        .id("host-identified-input")
+        .send()
+        .await?;
+    let events = RecordingTurnIds::default();
+
+    let output = session
+        .queued_turn()
+        .turn_id("host-queued-turn-id")
+        .stream_to(&events)
+        .await?
+        .expect("queued turn should run");
+
+    assert_eq!(
+        output.assistant_message(),
+        Some("echo: host identified queued work")
+    );
+    let activity_turn_ids = events.snapshot().await;
+    assert!(!activity_turn_ids.is_empty());
+    assert!(
+        activity_turn_ids
+            .iter()
+            .all(|turn_id| turn_id == "host-queued-turn-id")
+    );
+    let llm_invocation = recorder
+        .invocations()
+        .into_iter()
+        .find(|record| record.kind == lash_core::RuntimeEffectKind::LlmCall)
+        .expect("llm effect");
+    assert_eq!(
+        llm_invocation.turn_id.as_deref(),
+        Some("host-queued-turn-id")
+    );
+    assert!(
+        llm_invocation
+            .replay_key
+            .as_deref()
+            .is_some_and(|key| key.contains("host-queued-turn-id"))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Result<()> {
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("queued-turn-id-pre-dispatch-cancel")
+        .complete(move |_| {
+            let observed_provider_calls = Arc::clone(&observed_provider_calls);
+            async move {
+                observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(text_response("cancel arrived too late"))
+            }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("pre-cancelled-queued-turn").open().await?;
+    session
+        .enqueue(TurnInput::text(
+            "must be cancelled before provider dispatch",
+        ))
+        .id("pre-cancelled-input")
+        .send()
+        .await?;
+
+    let receipt = session
+        .request_turn_cancel(
+            "pre-cancelled-queued-turn-id",
+            "pre-dispatch-cancel-request",
+            Some("test-host".to_string()),
+            Some("cancel before queued dispatch".to_string()),
+        )
+        .await?;
+    assert!(matches!(
+        receipt.outcome,
+        crate::TurnCancelOutcome::Requested(ref evidence)
+            if evidence.request_id == "pre-dispatch-cancel-request"
+    ));
+
+    let output = session
+        .queued_turn()
+        .turn_id("pre-cancelled-queued-turn-id")
+        .run()
+        .await?
+        .expect("cancelled queued turn should settle");
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        output.result.cancellation(),
+        Some(lash_core::facade_support::TurnCancellationEvidence {
+            request_id,
+            origin: Some(origin),
+            reason: Some(reason),
+            ..
+        }) if request_id == "pre-dispatch-cancel-request"
+            && origin == "test-host"
+            && reason == "cancel before queued dispatch"
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn queued_turn_rejects_drain_id_with_turn_id_at_dispatch() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("conflicting-queued-turn-scope-ids")
+        .open()
+        .await?;
+
+    let error = match session
+        .queued_turn()
+        .drain_id("durable-drain-id")
+        .turn_id("physical-turn-id")
+        .run()
+        .await
+    {
+        Err(error) => error,
+        Ok(_) => panic!("dispatch must reject conflicting queued-turn scope identities"),
+    };
+    let EmbedError::Runtime(error) = error else {
+        panic!("expected a runtime error, got {error}");
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::ExecutionScopeTurnIdMismatch
+    );
+    assert_eq!(
+        error.message,
+        "`drain_id(...)` and `turn_id(...)` are mutually exclusive; keep `drain_id(...)` as the durable idempotency key for retried drains, or keep `turn_id(...)` as the host-minted physical turn identity"
+    );
     Ok(())
 }
 

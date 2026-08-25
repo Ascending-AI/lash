@@ -589,6 +589,7 @@ impl LashSession {
             cancel: CancellationToken::new(),
             cancel_origin_hint: lash_core::TurnCancelOriginHint::default(),
             cancels: self.turn_cancels.clone(),
+            turn_id: None,
             drain_id: None,
         }
     }
