@@ -67014,7 +67014,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TokenUsage::reasoning_output_tokens"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-sim/src/runtime_contracts.rs:498#usage.reasoning_output_tokens = usage"
+usage = "crates/lash-sim/src/runtime_contracts.rs:561#usage.reasoning_output_tokens,"
 
 [[api]]
 symbol = "lash::usage::TokenUsage::total"
