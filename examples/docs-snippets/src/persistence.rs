@@ -410,6 +410,7 @@ fn initial_session_state_generation() -> (u32, u32) {
 
 async fn enumerate_sessions() -> anyhow::Result<()> {
     // docs:start:enumerate-sessions
+    use lash::persistence::SessionRelation;
     use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
 
     let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
@@ -454,6 +455,7 @@ async fn enumerate_sessions() -> anyhow::Result<()> {
     assert_eq!(root_summary.head_revision, 0);
     assert_eq!(root_summary.last_commit_at_ms, None);
     assert_eq!(root_summary.relation, SessionRelationKind::Root);
+    assert_eq!(root_summary.durable_relation, Some(SessionRelation::Root));
     assert_eq!(root_summary.parent_session_id, None);
     assert!(!root_summary.deleted);
 
@@ -467,6 +469,13 @@ async fn enumerate_sessions() -> anyhow::Result<()> {
     let children = core.sessions_filtered(child_filter).await?;
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].relation, SessionRelationKind::Child);
+    assert_eq!(
+        children[0].durable_relation,
+        Some(SessionRelation::Child {
+            parent_session_id: "catalog-root".to_string(),
+            caused_by: None,
+        })
+    );
     assert_eq!(
         children[0].parent_session_id.as_deref(),
         Some("catalog-root")

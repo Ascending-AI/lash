@@ -614,6 +614,7 @@ lash::SessionStartPoint::Snapshot::snapshot
 lash::SessionSummary
 lash::SessionSummary::created_at_ms
 lash::SessionSummary::deleted
+lash::SessionSummary::durable_relation
 lash::SessionSummary::head_revision
 lash::SessionSummary::last_commit_at_ms
 lash::SessionSummary::parent_session_id
@@ -2450,6 +2451,7 @@ lash::persistence::SessionNodeRecord::timestamp
 lash::persistence::SessionReadView
 lash::persistence::SessionReadView::active_events
 lash::persistence::SessionReadView::chronological_projection
+lash::persistence::SessionReadView::durable_relation
 lash::persistence::SessionReadView::from_persisted_state
 lash::persistence::SessionReadView::from_snapshot
 lash::persistence::SessionReadView::last_prompt_usage
@@ -4193,6 +4195,7 @@ lash::prelude::SessionStartPoint::Snapshot::snapshot
 lash::prelude::SessionSummary
 lash::prelude::SessionSummary::created_at_ms
 lash::prelude::SessionSummary::deleted
+lash::prelude::SessionSummary::durable_relation
 lash::prelude::SessionSummary::head_revision
 lash::prelude::SessionSummary::last_commit_at_ms
 lash::prelude::SessionSummary::parent_session_id

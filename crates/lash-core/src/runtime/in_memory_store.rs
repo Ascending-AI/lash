@@ -1062,11 +1062,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         let mut meta = self.session_head_meta.lock_recover();
         let actual = meta.as_ref().map_or(0, |meta| meta.head_revision);
         planner.validate_session_binding(meta.as_ref().map(|meta| meta.session_id.as_str()))?;
-        #[cfg(test)]
         let session_meta_before_commit = self.session_meta.lock_recover().clone();
         self.ensure_session_metadata_for_commit(commit)?;
         #[cfg(test)]
-        self.fail_after_first_runtime_commit_mutation_if_requested(session_meta_before_commit)?;
+        self.fail_after_first_runtime_commit_mutation_if_requested(
+            session_meta_before_commit.clone(),
+        )?;
         planner.validate_node_derivation()?;
         let key = (session_id.clone(), planner.operation_key().to_string());
         if let Some(stored) = self.runtime_turn_commits.lock_recover().get(&key).cloned() {
@@ -1488,26 +1489,29 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .as_ref()
             .expect("fresh commit publishes session head metadata")
             .head_revision;
-        let relation = self
-            .session_meta
-            .lock_recover()
-            .as_ref()
-            .map(|meta| meta.relation.clone())
-            .unwrap_or(crate::SessionRelation::Root);
+        let durable_relation = session_meta_before_commit.map(|meta| meta.relation);
         self.session_catalog
             .lock_recover()
             .entry(session_id.clone())
             .and_modify(|summary| {
                 summary.last_commit_at_ms = Some(transaction_now);
                 summary.head_revision = head_revision;
+                summary.durable_relation = durable_relation.clone();
             })
             .or_insert_with(|| crate::SessionSummary {
                 session_id: session_id.clone(),
                 created_at_ms: transaction_now,
                 last_commit_at_ms: Some(transaction_now),
                 head_revision,
-                relation: crate::SessionRelationKind::from_relation(&relation),
-                parent_session_id: relation.parent_session_id().map(ToOwned::to_owned),
+                relation: durable_relation
+                    .as_ref()
+                    .map(crate::SessionRelationKind::from_relation)
+                    .unwrap_or(crate::SessionRelationKind::Root),
+                durable_relation: durable_relation.clone(),
+                parent_session_id: durable_relation
+                    .as_ref()
+                    .and_then(crate::SessionRelation::parent_session_id)
+                    .map(ToOwned::to_owned),
                 deleted: false,
             });
         *self.runtime_commit_count.lock_recover() += 1;
@@ -1572,6 +1576,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .get_mut(&meta.session_id)
         {
             summary.relation = crate::SessionRelationKind::from_relation(&meta.relation);
+            summary.durable_relation = Some(meta.relation.clone());
             summary.parent_session_id = meta.relation.parent_session_id().map(ToOwned::to_owned);
         }
         Ok(())

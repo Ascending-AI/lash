@@ -46,7 +46,16 @@ pub struct SessionSummary {
     /// first commit.
     pub last_commit_at_ms: Option<u64>,
     pub head_revision: u64,
+    /// Coarse relation shape retained for filtering and deletion tombstones.
     pub relation: SessionRelationKind,
+    /// Complete relation from durable session metadata, when that metadata was
+    /// available to this catalog projection.
+    ///
+    /// `None` means the projection had no durable session metadata. Deletion
+    /// tombstones retain only [`Self::relation`] and
+    /// [`Self::parent_session_id`], so they always return `None` here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_relation: Option<SessionRelation>,
     pub parent_session_id: Option<String>,
     pub deleted: bool,
 }

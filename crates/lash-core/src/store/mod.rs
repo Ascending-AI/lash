@@ -40,7 +40,8 @@ pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{
     LoadedPersistedSession, load_persisted_session, load_persisted_session_admitted,
-    load_persisted_session_state, refresh_persisted_session_state,
+    load_persisted_session_read_view, load_persisted_session_state,
+    refresh_persisted_session_state,
 };
 pub use maintenance::{
     GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,

@@ -669,9 +669,7 @@ impl SqliteSessionStoreFactory {
         let store = Store::open_bound_readonly(&path, session_id)
             .await
             .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
-        Ok(lash_core::store::load_persisted_session_state(&store)
-            .await?
-            .map(|state| state.read_view()))
+        lash_core::store::load_persisted_session_read_view(&store).await
     }
 }
 
@@ -785,62 +783,9 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .await
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         let filter = filter.clone();
-        conn.call(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT meta.session_id, meta.created_at_ms,
-                            meta.last_commit_at_ms, COALESCE(head.head_revision, 0),
-                            meta.relation_kind, meta.parent_session_id, 0
-                     FROM session_meta AS meta
-                     LEFT JOIN session_head AS head ON head.session_id = meta.session_id
-                     UNION ALL
-                     SELECT session_id, created_at_ms, last_commit_at_ms,
-                            head_revision, relation_kind, parent_session_id, 1
-                     FROM deleted_sessions
-                     ORDER BY created_at_ms ASC, session_id ASC",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                let relation_label = row.get::<_, String>(4)?;
-                let relation = match relation_label.as_str() {
-                    "root" => SessionRelationKind::Root,
-                    "child" => SessionRelationKind::Child,
-                    "fork" => SessionRelationKind::Fork,
-                    other => {
-                        return Err(sqlite_conversion_error(stored_data_corrupt(
-                            "SessionSummary",
-                            format!("unknown relation_kind `{other}`"),
-                        )));
-                    }
-                };
-                Ok(SessionSummary {
-                    session_id: row.get(0)?,
-                    created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(1)?)?,
-                    last_commit_at_ms: row
-                        .get::<_, Option<i64>>(2)?
-                        .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
-                        .transpose()?,
-                    head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(3)?)?,
-                    relation,
-                    parent_session_id: row.get(5)?,
-                    deleted: row.get::<_, i64>(6)? != 0,
-                })
-            })?;
-            let mut summaries = Vec::new();
-            for row in rows {
-                let summary = row?;
-                if filter
-                    .relation
-                    .is_none_or(|relation| relation == summary.relation)
-                    && filter
-                        .deleted
-                        .is_none_or(|deleted| deleted == summary.deleted)
-                {
-                    summaries.push(summary);
-                }
-            }
-            Ok(summaries)
-        })
-        .await
-        .map_err(sqlite_error)
+        conn.call(move |conn| list_session_summaries(conn, &filter))
+            .await
+            .map_err(sqlite_error)
     }
 
     async fn open_existing_store_by_id(
@@ -973,6 +918,121 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     ) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
         fork_at_in_catalog(&self.root, request, self.clock.timestamp_ms()).await
     }
+}
+
+fn list_session_summaries(
+    conn: &Connection,
+    filter: &SessionListFilter,
+) -> rusqlite::Result<Vec<SessionSummary>> {
+    let mut stmt = conn.prepare(
+        "WITH catalog AS (
+             SELECT meta.session_id, meta.relation_kind, meta.observer_intent_depth,
+                    meta.parent_session_id, meta.caused_by_kind,
+                    meta.caused_by_session_id, meta.caused_by_turn_id,
+                    meta.caused_by_effect_id, meta.caused_by_call_id,
+                    meta.caused_by_process_id, meta.caused_by_process_event_sequence,
+                    meta.caused_by_occurrence_id, meta.caused_by_subscription_id,
+                    meta.caused_by_subscription_incarnation,
+                    meta.caused_by_subscription_revision, meta.caused_by_node_id,
+                    meta.source_session_id, meta.source_node_id,
+                    meta.observer_inheritance_kind, meta.created_at_ms,
+                    meta.last_commit_at_ms, COALESCE(head.head_revision, 0), 0 AS deleted
+             FROM session_meta AS meta
+             LEFT JOIN session_head AS head ON head.session_id = meta.session_id
+             UNION ALL
+             SELECT session_id, COALESCE(relation_kind, 'root'), 0,
+                    parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    created_at_ms, last_commit_at_ms, head_revision, 1
+             FROM deleted_sessions
+         )
+         SELECT catalog.*,
+                CASE WHEN deleted = 1 THEN '[]' ELSE (
+                    SELECT json_group_array(json_array(layer_index, process_index, process_id))
+                    FROM (
+                        SELECT layer_index, process_index, process_id
+                        FROM session_meta_observer_intent_processes
+                        WHERE session_id = catalog.session_id
+                        ORDER BY layer_index, process_index
+                    )
+                ) END,
+                CASE WHEN deleted = 1 THEN '[]' ELSE (
+                    SELECT json_group_array(json_array(process_index, process_id))
+                    FROM (
+                        SELECT process_index, process_id
+                        FROM session_meta_fork_pending_observer_processes
+                        WHERE session_id = catalog.session_id
+                        ORDER BY process_index
+                    )
+                ) END,
+                CASE WHEN deleted = 1 THEN '[]' ELSE (
+                    SELECT json_group_array(json_array(process_index, process_id))
+                    FROM (
+                        SELECT process_index, process_id
+                        FROM session_meta_fork_inheritance_processes
+                        WHERE session_id = catalog.session_id
+                        ORDER BY process_index
+                    )
+                ) END
+         FROM catalog
+         ORDER BY created_at_ms ASC, session_id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let stored = crate::session_meta::stored_relation_from_row(row)?;
+        let relation = match stored.relation_kind.as_str() {
+            "root" => SessionRelationKind::Root,
+            "child" => SessionRelationKind::Child,
+            "fork" => SessionRelationKind::Fork,
+            other => {
+                return Err(sqlite_conversion_error(stored_data_corrupt(
+                    "SessionSummary",
+                    format!("unknown relation_kind `{other}`"),
+                )));
+            }
+        };
+        let parent_session_id = stored.parent_session_id.clone();
+        let deleted = row.get::<_, i64>(22)? != 0;
+        let durable_relation = if deleted {
+            None
+        } else {
+            Some(
+                crate::session_meta::decode_catalog_relation(
+                    stored,
+                    &row.get::<_, String>(23)?,
+                    &row.get::<_, String>(24)?,
+                    &row.get::<_, String>(25)?,
+                )
+                .map_err(sqlite_conversion_error)?,
+            )
+        };
+        Ok(SessionSummary {
+            session_id: row.get(0)?,
+            created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(19)?)?,
+            last_commit_at_ms: row
+                .get::<_, Option<i64>>(20)?
+                .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
+                .transpose()?,
+            head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(21)?)?,
+            relation,
+            durable_relation,
+            parent_session_id,
+            deleted,
+        })
+    })?;
+    let mut summaries = Vec::new();
+    for row in rows {
+        let summary = row?;
+        if filter
+            .relation
+            .is_none_or(|relation| relation == summary.relation)
+            && filter
+                .deleted
+                .is_none_or(|deleted| deleted == summary.deleted)
+        {
+            summaries.push(summary);
+        }
+    }
+    Ok(summaries)
 }
 
 #[async_trait::async_trait]
