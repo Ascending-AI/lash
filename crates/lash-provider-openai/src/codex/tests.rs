@@ -1,6 +1,6 @@
 use super::session::{
-    CodexWebsocketSessionEntry, CodexWebsocketSessions, MAX_SESSION_WEBSOCKET_CACHE_ENTRIES,
-    SESSION_WEBSOCKET_CACHE_TTL,
+    CodexWebsocketLease, CodexWebsocketSessionEntry, CodexWebsocketSessions,
+    MAX_SESSION_WEBSOCKET_CACHE_ENTRIES, SESSION_WEBSOCKET_CACHE_TTL,
 };
 use super::*;
 use lash_core::llm::transport::ProviderFailureKind;
@@ -672,27 +672,26 @@ fn codex_websocket_request_keeps_cached_previous_response_id() {
     assert_eq!(websocket_body["input"], json!([]));
 }
 
-#[test]
-fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
+#[tokio::test]
+async fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
+    let ws = spawn_scripted_websocket(Vec::new()).await;
     let now = Instant::now();
     let mut sessions = CodexWebsocketSessions::default();
+    let (idle_connection, _) = tokio_tungstenite::connect_async(&ws.url)
+        .await
+        .expect("connect idle websocket");
     sessions.by_scope.insert(
         "idle".to_string(),
-        CodexWebsocketSessionEntry {
-            connection: None,
+        CodexWebsocketSessionEntry::Idle {
+            connection: Box::new(idle_connection),
             continuation: None,
-            busy: false,
             last_used: now - SESSION_WEBSOCKET_CACHE_TTL - Duration::from_secs(1),
             credential_generation: 0,
         },
     );
     sessions.by_scope.insert(
         "busy".to_string(),
-        CodexWebsocketSessionEntry {
-            connection: None,
-            continuation: None,
-            busy: true,
-            last_used: now - SESSION_WEBSOCKET_CACHE_TTL - Duration::from_secs(1),
+        CodexWebsocketSessionEntry::Reserved {
             credential_generation: 0,
         },
     );
@@ -704,12 +703,14 @@ fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
 
     sessions.by_scope.clear();
     for index in 0..(MAX_SESSION_WEBSOCKET_CACHE_ENTRIES + 3) {
+        let (connection, _) = tokio_tungstenite::connect_async(&ws.url)
+            .await
+            .expect("connect capacity-test websocket");
         sessions.by_scope.insert(
             format!("scope-{index}"),
-            CodexWebsocketSessionEntry {
-                connection: None,
+            CodexWebsocketSessionEntry::Idle {
+                connection: Box::new(connection),
                 continuation: None,
-                busy: false,
                 last_used: now - Duration::from_secs((100 - index) as u64),
                 credential_generation: 0,
             },
@@ -726,25 +727,30 @@ fn codex_websocket_scope_cache_prunes_idle_entries_and_caps_oldest() {
     )));
 }
 
-#[test]
-fn codex_websocket_scope_cache_evicts_rotated_credentials() {
+#[tokio::test]
+async fn codex_websocket_scope_cache_evicts_rotated_credentials() {
+    let ws = spawn_scripted_websocket(Vec::new()).await;
     let mut sessions = CodexWebsocketSessions::default();
+    let (old_connection, _) = tokio_tungstenite::connect_async(&ws.url)
+        .await
+        .expect("connect old-generation websocket");
     sessions.by_scope.insert(
         "old".to_string(),
-        CodexWebsocketSessionEntry {
-            connection: None,
+        CodexWebsocketSessionEntry::Idle {
+            connection: Box::new(old_connection),
             continuation: None,
-            busy: false,
             last_used: Instant::now(),
             credential_generation: 4,
         },
     );
+    let (current_connection, _) = tokio_tungstenite::connect_async(&ws.url)
+        .await
+        .expect("connect current-generation websocket");
     sessions.by_scope.insert(
         "current".to_string(),
-        CodexWebsocketSessionEntry {
-            connection: None,
+        CodexWebsocketSessionEntry::Idle {
+            connection: Box::new(current_connection),
             continuation: None,
-            busy: false,
             last_used: Instant::now(),
             credential_generation: 5,
         },
@@ -754,6 +760,67 @@ fn codex_websocket_scope_cache_evicts_rotated_credentials() {
 
     assert!(!sessions.by_scope.contains_key("old"));
     assert!(sessions.by_scope.contains_key("current"));
+}
+
+#[test]
+fn codex_websocket_scope_cache_generation_eviction_preserves_leased_slot() {
+    let mut sessions = CodexWebsocketSessions::default();
+    sessions.by_scope.insert(
+        "leased".to_string(),
+        CodexWebsocketSessionEntry::Reserved {
+            credential_generation: 4,
+        },
+    );
+
+    CodexProvider::evict_websocket_sessions_for_generation(&mut sessions, 5);
+
+    assert!(sessions.by_scope.contains_key("leased"));
+}
+
+#[tokio::test]
+async fn codex_websocket_release_preserves_newer_generation_reservation() {
+    let ws = spawn_scripted_websocket(Vec::new()).await;
+    let (websocket, _) = tokio_tungstenite::connect_async(&ws.url)
+        .await
+        .expect("connect old-generation websocket");
+    let provider = CodexProvider::new("access", "refresh", 0);
+    let scope_key = "rotated".to_string();
+    provider
+        .websocket_sessions
+        .inner
+        .lock_recover()
+        .by_scope
+        .insert(
+            scope_key.clone(),
+            CodexWebsocketSessionEntry::Reserved {
+                credential_generation: 5,
+            },
+        );
+
+    provider.release_websocket_lease(
+        CodexWebsocketLease {
+            websocket,
+            scope_key: Some(scope_key.clone()),
+            reusable: true,
+            reused: false,
+            continuation: None,
+            credential_generation: 4,
+        },
+        true,
+        None,
+    );
+
+    let sessions = provider.websocket_sessions.inner.lock_recover();
+    let entry = sessions
+        .by_scope
+        .get(&scope_key)
+        .expect("new-generation reservation remains");
+    assert!(matches!(
+        entry,
+        CodexWebsocketSessionEntry::Reserved {
+            credential_generation: 5
+        }
+    ));
 }
 
 async fn assert_trace_cached_delta_for_transport(transport: CodexTransport) {

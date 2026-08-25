@@ -64,22 +64,54 @@ pub(super) struct CodexWebsocketFallbackState {
     reason: String,
 }
 
-pub(super) struct CodexWebsocketSessionEntry {
-    pub(super) connection: Option<CodexWsStream>,
-    pub(super) continuation: Option<CodexContinuation>,
-    pub(super) busy: bool,
-    pub(super) last_used: Instant,
-    pub(super) credential_generation: u64,
+pub(super) enum CodexWebsocketSessionEntry {
+    Reserved {
+        credential_generation: u64,
+    },
+    Idle {
+        connection: Box<CodexWsStream>,
+        continuation: Option<CodexContinuation>,
+        last_used: Instant,
+        credential_generation: u64,
+    },
+}
+
+#[derive(Clone, Copy)]
+struct PrunableWebsocketSession {
+    last_used: Instant,
+    credential_generation: u64,
 }
 
 impl CodexWebsocketSessionEntry {
     fn reserved(credential_generation: u64) -> Self {
-        Self {
-            connection: None,
-            continuation: None,
-            busy: true,
-            last_used: Instant::now(),
+        Self::Reserved {
             credential_generation,
+        }
+    }
+
+    fn credential_generation(&self) -> u64 {
+        match self {
+            Self::Reserved {
+                credential_generation,
+            }
+            | Self::Idle {
+                credential_generation,
+                ..
+            } => *credential_generation,
+        }
+    }
+
+    fn prunable(&self) -> Option<PrunableWebsocketSession> {
+        match self {
+            Self::Reserved { .. } => None,
+            Self::Idle {
+                last_used,
+                credential_generation,
+                ..
+            } => Some(PrunableWebsocketSession {
+                last_used: *last_used,
+                credential_generation: *credential_generation,
+            }),
         }
     }
 }
@@ -112,7 +144,9 @@ impl CodexProvider {
         // Dropping a cached WebSocketStream closes the socket. This prune path is
         // deliberately synchronous because the cache lock is provider-local.
         sessions.by_scope.retain(|_, entry| {
-            entry.busy || now.duration_since(entry.last_used) <= SESSION_WEBSOCKET_CACHE_TTL
+            entry.prunable().is_none_or(|idle| {
+                now.duration_since(idle.last_used) <= SESSION_WEBSOCKET_CACHE_TTL
+            })
         });
     }
 
@@ -134,8 +168,11 @@ impl CodexProvider {
         let mut removable = sessions
             .by_scope
             .iter()
-            .filter(|(_, entry)| !entry.busy)
-            .map(|(scope_key, entry)| (scope_key.clone(), entry.last_used))
+            .filter_map(|(scope_key, entry)| {
+                entry
+                    .prunable()
+                    .map(|idle| (scope_key.clone(), idle.last_used))
+            })
             .collect::<Vec<_>>();
         removable.sort_by_key(|(_, last_used)| *last_used);
         for (scope_key, _) in removable.into_iter().take(excess) {
@@ -147,9 +184,11 @@ impl CodexProvider {
         sessions: &mut CodexWebsocketSessions,
         credential_generation: u64,
     ) {
-        sessions
-            .by_scope
-            .retain(|_, entry| entry.credential_generation == credential_generation);
+        sessions.by_scope.retain(|_, entry| {
+            entry
+                .prunable()
+                .is_none_or(|idle| idle.credential_generation == credential_generation)
+        });
     }
 
     /// Drain the WebSocket session cache, sending a proper Close frame on every
@@ -169,7 +208,10 @@ impl CodexProvider {
             let drained = sessions
                 .by_scope
                 .drain()
-                .filter_map(|(_, entry)| entry.connection)
+                .filter_map(|(_, entry)| match entry {
+                    CodexWebsocketSessionEntry::Reserved { .. } => None,
+                    CodexWebsocketSessionEntry::Idle { connection, .. } => Some(*connection),
+                })
                 .collect();
             sessions.fallback_by_scope.clear();
             drained
@@ -187,8 +229,10 @@ impl CodexProvider {
     pub(super) fn clear_continuation(&self, req: &LlmRequest) {
         let scope_key = req.continuation_key();
         let mut sessions = self.websocket_sessions.inner.lock_recover();
-        if let Some(entry) = sessions.by_scope.get_mut(&scope_key) {
-            entry.continuation = None;
+        if let Some(CodexWebsocketSessionEntry::Idle { continuation, .. }) =
+            sessions.by_scope.get_mut(&scope_key)
+        {
+            *continuation = None;
         }
     }
 
@@ -370,30 +414,48 @@ impl CodexProvider {
             Self::prune_idle_websocket_sessions(&mut sessions);
             Self::enforce_websocket_session_cache_cap(&mut sessions);
             Self::evict_websocket_sessions_for_generation(&mut sessions, credential_generation);
-            if let Some(entry) = sessions.by_scope.get_mut(&scope_key) {
-                if entry.busy {
+            match sessions.by_scope.remove(&scope_key) {
+                Some(CodexWebsocketSessionEntry::Reserved {
+                    credential_generation: reserved_generation,
+                }) if reserved_generation == credential_generation => {
+                    sessions.by_scope.insert(
+                        scope_key,
+                        CodexWebsocketSessionEntry::reserved(reserved_generation),
+                    );
                     AcquireDecision::ConnectEphemeral
-                } else if let Some(websocket) = entry.connection.take() {
-                    entry.busy = true;
-                    entry.last_used = Instant::now();
+                }
+                Some(CodexWebsocketSessionEntry::Reserved { .. }) => {
+                    sessions.by_scope.insert(
+                        scope_key.clone(),
+                        CodexWebsocketSessionEntry::reserved(credential_generation),
+                    );
+                    AcquireDecision::ConnectReusable(scope_key)
+                }
+                Some(CodexWebsocketSessionEntry::Idle {
+                    connection,
+                    continuation,
+                    ..
+                }) => {
+                    sessions.by_scope.insert(
+                        scope_key.clone(),
+                        CodexWebsocketSessionEntry::reserved(credential_generation),
+                    );
                     AcquireDecision::Reuse(Box::new(CodexWebsocketLease {
-                        websocket,
+                        websocket: *connection,
                         scope_key: Some(scope_key),
                         reusable: true,
                         reused: true,
-                        continuation: entry.continuation.clone(),
+                        continuation,
                         credential_generation,
                     }))
-                } else {
-                    *entry = CodexWebsocketSessionEntry::reserved(credential_generation);
-                    AcquireDecision::ConnectReusable(scope_key.clone())
                 }
-            } else {
-                sessions.by_scope.insert(
-                    scope_key.clone(),
-                    CodexWebsocketSessionEntry::reserved(credential_generation),
-                );
-                AcquireDecision::ConnectReusable(scope_key.clone())
+                None => {
+                    sessions.by_scope.insert(
+                        scope_key.clone(),
+                        CodexWebsocketSessionEntry::reserved(credential_generation),
+                    );
+                    AcquireDecision::ConnectReusable(scope_key)
+                }
             }
         };
 
@@ -444,17 +506,23 @@ impl CodexProvider {
         let Some(scope_key) = lease.scope_key else {
             return;
         };
-        if !lease.reusable || !keep_connection {
-            self.remove_websocket_scope(&scope_key);
+        let mut sessions = self.websocket_sessions.inner.lock_recover();
+        if sessions
+            .by_scope
+            .get(&scope_key)
+            .is_none_or(|entry| entry.credential_generation() != lease.credential_generation)
+        {
             return;
         }
-        let mut sessions = self.websocket_sessions.inner.lock_recover();
+        if !lease.reusable || !keep_connection {
+            sessions.by_scope.remove(&scope_key);
+            return;
+        }
         sessions.by_scope.insert(
             scope_key,
-            CodexWebsocketSessionEntry {
-                connection: Some(lease.websocket),
+            CodexWebsocketSessionEntry::Idle {
+                connection: Box::new(lease.websocket),
                 continuation,
-                busy: false,
                 last_used: Instant::now(),
                 credential_generation: lease.credential_generation,
             },
