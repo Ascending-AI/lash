@@ -135,9 +135,7 @@ mod tests {
         factories.extend(protocol_factories);
         let host = lash_core::facade_support::PluginHost::new(factories);
         let session_id = "test".to_string();
-        let session = host
-            .build_session(session_id.clone(), None)
-            .expect("session");
+        let session = host.build_session(session_id.clone()).expect("session");
         session
             .resolved_tool_catalog(&session_id)
             .expect("tool catalog")

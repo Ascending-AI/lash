@@ -410,7 +410,7 @@ mod tests {
             prepares: Arc::clone(&prepares),
         });
         let plugins = PluginHost::empty()
-            .build_session("root", None)
+            .build_session("root")
             .expect("plugin session");
         let tools = Arc::clone(&provider);
         let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
@@ -536,7 +536,7 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = PluginHost::empty()
-            .build_session("root", None)
+            .build_session("root")
             .expect("plugin session");
         let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
             provider.tool_manifests(),
@@ -649,7 +649,7 @@ mod tests {
             prepares: Arc::new(AtomicUsize::new(0)),
         });
         let plugins = PluginHost::empty()
-            .build_session("root", None)
+            .build_session("root")
             .expect("plugin session");
         let tool_catalog = Arc::new(crate::ToolCatalog::from_tools(
             provider.tool_manifests(),

@@ -270,12 +270,15 @@ pub mod facade_support {
     pub use crate::plugin::PluginRegistrar;
     pub use crate::plugin::PluginSession;
     pub use crate::plugin::PluginSessionContext;
+    pub use crate::plugin::PluginSessionMaterialization;
     pub use crate::plugin::PluginSpec;
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PromptHookContext;
+    pub use crate::plugin::RecordedSessionConfig;
     pub use crate::plugin::ReplaceToolArgsDirective;
     pub use crate::plugin::SessionConfigChangedContext;
+    pub use crate::plugin::SessionCreationConfig;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
     pub use crate::plugin::SessionParam;

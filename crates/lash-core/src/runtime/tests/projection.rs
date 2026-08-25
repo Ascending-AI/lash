@@ -414,7 +414,7 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
         fail_restore: Arc::new(AtomicBool::new(false)),
         advance_store_head: true,
     })]);
-    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let plugins = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),
@@ -470,7 +470,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
         fail_restore: Arc::new(AtomicBool::new(false)),
         advance_store_head: false,
     })]);
-    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let plugins = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_embedded_state(
         standard_test_policy(),
         test_host_config(),
@@ -539,7 +539,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         fail_restore: Arc::new(AtomicBool::new(false)),
         advance_store_head: false,
     })]);
-    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let plugins = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),
@@ -656,7 +656,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
         fail_restore: Arc::new(AtomicBool::new(false)),
         advance_store_head: false,
     })]);
-    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let plugins = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),
@@ -723,7 +723,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
         fail_restore: Arc::clone(&fail_restore),
         advance_store_head: false,
     })]);
-    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let plugins = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),
@@ -820,7 +820,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
         "base_tools",
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&base_provider_factory)),
     ))]);
-    let plugins = plugin_host.build_session("root", None).expect("plugins");
+    let plugins = plugin_host.build_session("root").expect("plugins");
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),

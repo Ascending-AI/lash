@@ -18,6 +18,45 @@ fn stating_dialect(builder: crate::SessionBuilder, dialect: RlmDialect) -> crate
 }
 
 #[cfg(feature = "rlm")]
+struct RefreshableDialectTool {
+    name: std::sync::Mutex<String>,
+}
+
+#[cfg(feature = "rlm")]
+impl RefreshableDialectTool {
+    fn new(name: &str) -> Self {
+        Self {
+            name: std::sync::Mutex::new(name.to_string()),
+        }
+    }
+
+    fn replace(&self, name: &str) {
+        *self.name.lock_recover() = name.to_string();
+    }
+
+    fn definition(&self) -> lash_core::ToolDefinition {
+        compile_surface_tool_definition(&self.name.lock_recover())
+    }
+}
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl lash_core::ToolProvider for RefreshableDialectTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![self.definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        let definition = self.definition();
+        (definition.manifest.name == name).then(|| Arc::new(definition.contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+    }
+}
+
+#[cfg(feature = "rlm")]
 #[tokio::test]
 async fn typescript_dialect_is_selected_on_the_production_session_path_and_survives_resume()
 -> Result<()> {
@@ -69,6 +108,18 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
         }) if number.as_u64() == Some(42)
     ));
 
+    let execution_snapshot = session
+        .admin()
+        .state()
+        .snapshot_execution()
+        .await?
+        .expect("the completed RLM turn records an execution snapshot");
+    session
+        .admin()
+        .state()
+        .restore_execution(&execution_snapshot)
+        .await?;
+
     let parked = session.park().await?;
     let resumed = Box::pin(core.resume(parked)).await?;
     let second = resumed
@@ -89,6 +140,76 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
     assert!(prompts.iter().all(|prompt| prompt.contains("## TypeScript execution")));
     assert!(prompts.iter().all(|prompt| prompt.contains("<typescript>")));
     assert!(prompts.iter().all(|prompt| !prompt.contains("<lashlang>")));
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Result<()> {
+    let tools = Arc::new(RefreshableDialectTool::new("before_refresh"));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("rlm-typescript-queued-session-command")
+        .complete(|_| async {
+            Ok(text_response(
+                "<typescript>\nfinish(42);\n</typescript>",
+            ))
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(rlm_core_builder())
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let session = stating_dialect(
+        core.session("rlm-typescript-queued-session-command"),
+        RlmDialect::Typescript,
+    )
+    .open()
+    .await?;
+    session
+        .turn(TurnInput::text("create a typescript execution snapshot"))
+        .require_finish()?
+        .run()
+        .await?;
+    assert!(
+        session
+            .admin()
+            .tools()
+            .state()
+            .await?
+            .contains(&lash_core::ToolId::from("tool:before_refresh"))
+    );
+    tools.replace("after_refresh");
+
+    let receipt = session
+        .commands()
+        .refresh_tool_catalog(
+            "restore the recorded typescript dialect",
+            "typescript-dialect-refresh",
+        )
+        .await?;
+
+    session.await_queued_work_batch(&receipt.batch_id).await?;
+    drop(session);
+    let reopened = core
+        .session("rlm-typescript-queued-session-command")
+        .open()
+        .await?;
+    assert!(
+        reopened
+            .admin()
+            .tools()
+            .state()
+            .await?
+            .contains(&lash_core::ToolId::from("tool:after_refresh")),
+        "queued catalog refresh must apply the source's replacement manifest"
+    );
+    assert!(reopened.queued_work().await?.is_empty());
     Ok(())
 }
 

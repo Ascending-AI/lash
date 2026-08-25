@@ -368,7 +368,7 @@ mod tests {
             .chain(lash_core::testing::test_standard_protocol_factories())
             .collect(),
         )
-        .build_session("standard", None)
+        .build_session("standard")
         .expect("standard session");
         let standard_names = standard_session
             .resolved_tool_catalog("standard")
@@ -385,7 +385,7 @@ mod tests {
             .chain(lash_core::testing::test_code_protocol_factories())
             .collect(),
         )
-        .build_session("rlm", None)
+        .build_session("rlm")
         .expect("rlm session");
         let rlm_names = rlm_session
             .resolved_tool_catalog("rlm")

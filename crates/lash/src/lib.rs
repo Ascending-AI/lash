@@ -365,8 +365,9 @@ pub mod plugins {
         AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform,
         BeforeToolCallHook, BeforeTurnHook, CheckpointHook, CheckpointHookContext,
         CompactionContext, ContextCompaction, ContextCompactor, ContextError,
-        PluginExtensionContribution, PluginSpecBuilder, StaticPluginFactory, ToolCallHookContext,
-        ToolCatalogContext, ToolResultHookContext, ToolResultProjectionContext, TurnHookReport,
+        PluginExtensionContribution, PluginSessionMaterialization, PluginSpecBuilder,
+        StaticPluginFactory, ToolCallHookContext, ToolCatalogContext, ToolResultHookContext,
+        ToolResultProjectionContext, TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
@@ -375,7 +376,8 @@ pub mod plugins {
         PluginSnapshotArtifact, PluginSnapshotEntry, PrepareTurnRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
-        ProtocolSessionPlugin, SessionAuthorityContext, TurnFinalization, TurnPreparation,
+        ProtocolSessionPlugin, RecordedSessionConfig, SessionAuthorityContext,
+        SessionCreationConfig, TurnFinalization, TurnPreparation,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus

@@ -101,9 +101,11 @@ impl InlineQueuedWorkRunHandle {
         )
         .await
         .map_err(|error| {
-            facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                error.to_string(),
-            ))
+            let error = match error {
+                lash_core::SessionError::Plugin(error) => error,
+                error => lash_core::PluginError::Session(error.to_string()),
+            };
+            facade_support::QueuedWorkRunError::terminal(error)
         })?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,

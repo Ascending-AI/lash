@@ -375,7 +375,7 @@ pub(crate) async fn append_receipt_mixed_usage_envelope_conformance(
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session("root", None)
+        .build_session("root")
         .expect("mixed-envelope plugin session");
     let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy.clone(),
@@ -689,7 +689,7 @@ pub(crate) async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session("root", None)
+        .build_session("root")
         .expect("cancelled usage plugin session");
     let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy.clone(),

@@ -112,6 +112,8 @@ pub enum SessionError {
     SessionCommandPending(crate::SessionCommandReceipt),
     #[error("session config command was cancelled before settlement: {0}")]
     SessionCommandCancelled(crate::SessionCommandReceipt),
+    #[error(transparent)]
+    Plugin(#[from] crate::PluginError),
     #[error("protocol error: {0}")]
     Protocol(String),
 }

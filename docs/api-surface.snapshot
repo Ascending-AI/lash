@@ -566,6 +566,8 @@ lash::SessionError::Io
 lash::SessionError::Io::0
 lash::SessionError::Json
 lash::SessionError::Json::0
+lash::SessionError::Plugin
+lash::SessionError::Plugin::0
 lash::SessionError::Protocol
 lash::SessionError::Protocol::0
 lash::SessionError::ProviderMismatch
@@ -3054,6 +3056,9 @@ lash::plugins::PluginError::InvalidProcessWakeIdentity
 lash::plugins::PluginError::InvalidProcessWakeIdentity::wake_id
 lash::plugins::PluginError::Invoke
 lash::plugins::PluginError::Invoke::0
+lash::plugins::PluginError::MissingRecordedSessionConfig
+lash::plugins::PluginError::MissingRecordedSessionConfig::field
+lash::plugins::PluginError::MissingRecordedSessionConfig::plugin_id
 lash::plugins::PluginError::MonotonicCounterOverflow
 lash::plugins::PluginError::MonotonicCounterOverflow::counter
 lash::plugins::PluginError::MonotonicCounterOverflow::current
@@ -3135,6 +3140,10 @@ lash::plugins::PluginHost::factories
 lash::plugins::PluginHost::install_process_engine_contributions
 lash::plugins::PluginHost::isolated_registry
 lash::plugins::PluginHost::new
+lash::plugins::PluginHost::rematerialize_session
+lash::plugins::PluginHost::rematerialize_session_with_overlay
+lash::plugins::PluginHost::rematerialize_session_with_parent
+lash::plugins::PluginHost::rematerialize_session_with_parent_and_overlay
 lash::plugins::PluginHost::session
 lash::plugins::PluginHost::unregister_session
 lash::plugins::PluginHost::with_extensions
@@ -3285,12 +3294,16 @@ lash::plugins::PluginSession::triggers
 lash::plugins::PluginSessionContext
 lash::plugins::PluginSessionContext::extensions
 lash::plugins::PluginSessionContext::is_root_session
+lash::plugins::PluginSessionContext::materialization
 lash::plugins::PluginSessionContext::parent_session_id
 lash::plugins::PluginSessionContext::plugin_options
 lash::plugins::PluginSessionContext::protocol_turn_options
 lash::plugins::PluginSessionContext::session_id
 lash::plugins::PluginSessionContext::subagent
 lash::plugins::PluginSessionContext::tool_access
+lash::plugins::PluginSessionMaterialization
+lash::plugins::PluginSessionMaterialization::Creation
+lash::plugins::PluginSessionMaterialization::Rematerialization
 lash::plugins::PluginSessionSnapshot
 lash::plugins::PluginSessionSnapshot::plugins
 lash::plugins::PluginSnapshotArtifact
@@ -3495,6 +3508,10 @@ lash::plugins::ProtocolTurnOptionsError::MissingSchemaVersion::expected
 lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion
 lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion::actual
 lash::plugins::ProtocolTurnOptionsError::UnsupportedSchemaVersion::expected
+lash::plugins::RecordedSessionConfig
+lash::plugins::RecordedSessionConfig::authority
+lash::plugins::RecordedSessionConfig::new
+lash::plugins::RecordedSessionConfig::protocol_turn_options
 lash::plugins::ReplaceToolArgsDirective
 lash::plugins::ReplaceToolArgsDirective::args
 lash::plugins::RuntimeExecutionContext
@@ -3548,7 +3565,6 @@ lash::plugins::SessionAppendNode::plugin
 lash::plugins::SessionAppendNode::protocol_event
 lash::plugins::SessionAuthorityContext
 lash::plugins::SessionAuthorityContext::plugin_options
-lash::plugins::SessionAuthorityContext::protocol_turn_options
 lash::plugins::SessionAuthorityContext::subagent
 lash::plugins::SessionAuthorityContext::tool_access
 lash::plugins::SessionConfigChangedContext
@@ -3560,6 +3576,9 @@ lash::plugins::SessionContextOverlay
 lash::plugins::SessionContextOverlay::include_base_tools
 lash::plugins::SessionContextOverlay::prompt_contributions
 lash::plugins::SessionContextOverlay::tool_providers
+lash::plugins::SessionCreationConfig
+lash::plugins::SessionCreationConfig::authority
+lash::plugins::SessionCreationConfig::protocol_turn_options
 lash::plugins::SessionGraphService
 lash::plugins::SessionGraphService::append_session_nodes
 lash::plugins::SessionGraphService::emit_trace_event

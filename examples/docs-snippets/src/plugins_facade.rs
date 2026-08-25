@@ -668,21 +668,21 @@ pub(crate) fn plugin_area_facade_witnesses() {
     // FIG-2104-WITNESS-0146: lash::plugins::PluginHost
     type_witness::<lash::plugins::PluginHost>();
     // FIG-2104-WITNESS-0147: lash::plugins::PluginHost::build_session
-    member_witness(
-        |host: &lash::plugins::PluginHost,
-         session_id: String,
-         snapshot: Option<&lash::plugins::PluginSessionSnapshot>| {
-            host.build_session(session_id, snapshot)
-        },
-    );
+    member_witness(|host: &lash::plugins::PluginHost, session_id: String| {
+        host.build_session(session_id)
+    });
     // FIG-2104-WITNESS-0148: lash::plugins::PluginHost::build_session_with_overlay
     member_witness(
         |host: &lash::plugins::PluginHost,
          session_id: String,
-         snapshot: Option<&lash::plugins::PluginSessionSnapshot>,
          overlay: lash::plugins::ToolCatalogContribution,
          tool_snapshot: Option<lash::tools::ToolState>| {
-            host.build_session_with_overlay(session_id, snapshot, overlay, tool_snapshot)
+            host.build_session_with_overlay(
+                session_id,
+                overlay,
+                tool_snapshot,
+                lash::plugins::SessionCreationConfig::default(),
+            )
         },
     );
     // FIG-2104-WITNESS-0149: lash::plugins::PluginHost::build_session_with_parent
@@ -690,9 +690,15 @@ pub(crate) fn plugin_area_facade_witnesses() {
         |host: &lash::plugins::PluginHost,
          session_id: String,
          parent_session_id: Option<String>,
-         snapshot: Option<&lash::plugins::PluginSessionSnapshot>,
          authority: lash::plugins::SessionAuthorityContext| {
-            host.build_session_with_parent(session_id, parent_session_id, snapshot, authority)
+            host.build_session_with_parent(
+                session_id,
+                parent_session_id,
+                lash::plugins::SessionCreationConfig {
+                    authority,
+                    ..Default::default()
+                },
+            )
         },
     );
     // FIG-2104-WITNESS-0150: lash::plugins::PluginHost::build_session_with_parent_and_overlay
@@ -700,17 +706,18 @@ pub(crate) fn plugin_area_facade_witnesses() {
         |host: &lash::plugins::PluginHost,
          session_id: String,
          parent_session_id: Option<String>,
-         snapshot: Option<&lash::plugins::PluginSessionSnapshot>,
          overlay: lash::plugins::ToolCatalogContribution,
          tool_snapshot: Option<lash::tools::ToolState>,
          authority: lash::plugins::SessionAuthorityContext| {
             host.build_session_with_parent_and_overlay(
                 session_id,
                 parent_session_id,
-                snapshot,
                 overlay,
                 tool_snapshot,
-                authority,
+                lash::plugins::SessionCreationConfig {
+                    authority,
+                    ..Default::default()
+                },
             )
         },
     );
@@ -868,13 +875,20 @@ pub(crate) fn plugin_area_facade_witnesses() {
          session_id: String,
          parent_session_id: Option<String>,
          authority: lash::plugins::SessionAuthorityContext| {
-            session.fork_for_child_session(session_id, parent_session_id, authority)
+            session.fork_for_child_session(
+                session_id,
+                parent_session_id,
+                lash::plugins::SessionCreationConfig {
+                    authority,
+                    ..Default::default()
+                },
+            )
         },
     );
     // FIG-2104-WITNESS-0195: lash::plugins::PluginSession::fork_for_session
     member_witness(
         |session: &lash::plugins::PluginSession, session_id: String| {
-            session.fork_for_session(session_id)
+            session.fork_for_session(session_id, lash::plugins::SessionCreationConfig::default())
         },
     );
     // FIG-2104-WITNESS-0196: lash::plugins::PluginSession::fork_for_session_with_tool_catalog
@@ -882,7 +896,11 @@ pub(crate) fn plugin_area_facade_witnesses() {
         |session: &lash::plugins::PluginSession,
          session_id: String,
          overlay: lash::plugins::ToolCatalogContribution| {
-            session.fork_for_session_with_tool_catalog(session_id, overlay)
+            session.fork_for_session_with_tool_catalog(
+                session_id,
+                overlay,
+                lash::plugins::SessionCreationConfig::default(),
+            )
         },
     );
     // FIG-2104-WITNESS-0197: lash::plugins::PluginSession::has_assistant_stream_finished_hooks

@@ -1101,7 +1101,7 @@ async fn dirty_execution_state_capture_failure_aborts_commit_and_cold_reopens_pr
         Some(reopen_executor),
     );
     let plugins = crate::PluginHost::new(vec![reopen_factory])
-        .build_session("root", None)
+        .build_session("root")
         .expect("reopen plugins");
     let _reopened = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
@@ -1228,7 +1228,7 @@ async fn caller_supplied_key_colliding_with_existing_frame_preserves_execution_s
         Some(reopen_code_executor),
     );
     let plugins = crate::PluginHost::new(vec![reopen_factory])
-        .build_session("root", None)
+        .build_session("root")
         .expect("cold-reopen plugins");
     let _reopened = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
@@ -1696,13 +1696,15 @@ async fn continue_as_frame_rotation_reconciles_newly_advertised_tool() {
         .build_session_with_parent(
             "root",
             Some("parent".to_string()),
-            None,
-            crate::plugin::SessionAuthorityContext {
-                tool_access: crate::SessionToolAccess {
-                    tools: Vec::new(),
-                    hidden_tools: ["hidden_after_rotation".to_string()].into_iter().collect(),
+            crate::plugin::SessionCreationConfig {
+                authority: crate::plugin::SessionAuthorityContext {
+                    tool_access: crate::SessionToolAccess {
+                        tools: Vec::new(),
+                        hidden_tools: ["hidden_after_rotation".to_string()].into_iter().collect(),
+                    },
+                    ..crate::plugin::SessionAuthorityContext::default()
                 },
-                ..crate::plugin::SessionAuthorityContext::default()
+                ..Default::default()
             },
         )
         .expect("frame child plugins");
@@ -2345,9 +2347,16 @@ async fn plugin_turn_budget_mutation_survives_park_and_reload() {
         .await
         .expect("load parked session")
         .expect("parked session exists");
-    let plugins = crate::PluginHost::new(vec![turn_budget_config_mutator(persisted_budget)])
-        .build_session("root", reloaded_state.plugin_snapshot())
-        .expect("reloaded plugins");
+    let plugin_host = crate::PluginHost::new(vec![turn_budget_config_mutator(persisted_budget)]);
+    let plugins = match reloaded_state.plugin_snapshot() {
+        Some(snapshot) => plugin_host.rematerialize_session(
+            "root",
+            snapshot,
+            crate::plugin::RecordedSessionConfig::new(reloaded_state.protocol_turn_options.clone()),
+        ),
+        None => plugin_host.build_session("root"),
+    }
+    .expect("reloaded plugins");
     let reloaded = crate::LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
         test_host_config(),

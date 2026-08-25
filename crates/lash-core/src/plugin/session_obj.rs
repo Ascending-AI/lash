@@ -704,13 +704,16 @@ impl PluginSession {
     pub fn fork_for_session(
         &self,
         session_id: impl Into<String>,
+        config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let snapshot = self.snapshot()?;
-        self.host.build_session_with_overlay(
+        self.host.build_forked_session_with_parent_and_overlay(
             session_id,
-            Some(&snapshot),
+            None,
+            &snapshot,
             self.tool_catalog_overlay.clone(),
             Some(self.tool_registry.export_state()),
+            config,
         )
     }
 
@@ -718,16 +721,16 @@ impl PluginSession {
         &self,
         session_id: impl Into<String>,
         parent_session_id: Option<String>,
-        authority: super::SessionAuthorityContext,
+        config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let snapshot = self.snapshot()?;
-        self.host.build_session_with_parent_and_overlay(
+        self.host.build_forked_session_with_parent_and_overlay(
             session_id,
             parent_session_id,
-            Some(&snapshot),
+            &snapshot,
             self.tool_catalog_overlay.clone(),
             Some(self.tool_registry.export_state()),
-            authority,
+            config,
         )
     }
 
@@ -735,13 +738,16 @@ impl PluginSession {
         &self,
         session_id: impl Into<String>,
         tool_catalog_overlay: ToolCatalogContribution,
+        config: super::SessionCreationConfig,
     ) -> Result<Arc<PluginSession>, PluginError> {
         let snapshot = self.snapshot()?;
-        self.host.build_session_with_overlay(
+        self.host.build_forked_session_with_parent_and_overlay(
             session_id,
-            Some(&snapshot),
+            None,
+            &snapshot,
             tool_catalog_overlay,
             Some(self.tool_registry.export_state()),
+            config,
         )
     }
 

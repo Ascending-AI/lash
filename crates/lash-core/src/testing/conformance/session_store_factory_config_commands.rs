@@ -211,9 +211,16 @@ async fn runtime_for_config_settlement(
             ..crate::RuntimeSessionState::new(request.policy.clone())
         });
     state.ensure_agent_frame_initialized();
-    let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session(request.session_id.clone(), state.plugin_snapshot())
-        .expect("config-settlement plugins");
+    let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
+    let plugins = match state.plugin_snapshot() {
+        Some(snapshot) => host.rematerialize_session(
+            request.session_id.clone(),
+            snapshot,
+            crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+        ),
+        None => host.build_session(request.session_id.clone()),
+    }
+    .expect("config-settlement plugins");
     let host = crate::RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),

@@ -1024,7 +1024,7 @@ mod tests {
             crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
         );
         let plugins = crate::plugin::PluginHost::empty()
-            .build_session("session", None)
+            .build_session("session")
             .expect("plugin session");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
         let dispatch = Arc::new(ToolDispatchContext {
@@ -1085,7 +1085,7 @@ mod tests {
 
     fn test_execution_context() -> RuntimeExecutionContext<'static> {
         let plugins = crate::plugin::PluginHost::empty()
-            .build_session("session", None)
+            .build_session("session")
             .expect("plugin session");
         let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
         let dispatch = Arc::new(ToolDispatchContext {

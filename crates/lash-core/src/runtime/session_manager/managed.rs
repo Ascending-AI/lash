@@ -46,6 +46,7 @@ impl ManagedSessionCapability {
             persisted_state.apply_persisted_commit_result(result);
             persisted_state.mark_node_ids_persisted(persisted_node_ids);
             materialized.runtime.state = persisted_state;
+            materialized.runtime.materialized_protocol_config_dirty = false;
         }
         let observer_intent_source = match materialized.store_binding.as_deref() {
             Some(store) => crate::runtime::SessionObserverIntentSource::Persisted(store),

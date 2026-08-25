@@ -254,7 +254,7 @@ fn tool_context_with_provider<'run>(
 ) -> crate::ToolContext<'run> {
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(4);
     let plugins = crate::plugin::PluginHost::new(Vec::new())
-        .build_session(SESSION, None)
+        .build_session(SESSION)
         .expect("build attempt-atomicity plugin session");
     let processes = crate::testing::effect_backed_process_service(Arc::clone(&fixtures.registry));
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);

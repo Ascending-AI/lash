@@ -858,7 +858,7 @@ fn test_plugins(provider: Arc<dyn ToolProvider>) -> Arc<PluginSession> {
         "test_tools",
         crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
     ))])
-    .build_session("root", None)
+    .build_session("root")
     .expect("plugin session")
 }
 
@@ -957,7 +957,7 @@ fn projection_policy_dispatch_context(
             .with_tool_provider(Arc::clone(&provider))
             .with_before_tool_call(hook),
     ))])
-    .build_session("root", None)
+    .build_session("root")
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -1206,9 +1206,11 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
     .build_session_with_parent(
         "root",
         None,
-        None,
-        crate::plugin::SessionAuthorityContext {
-            tool_access,
+        crate::plugin::SessionCreationConfig {
+            authority: crate::plugin::SessionAuthorityContext {
+                tool_access,
+                ..Default::default()
+            },
             ..Default::default()
         },
     )
@@ -1350,7 +1352,7 @@ fn retry_dispatch_context_with_after_observations(
             .with_tool_provider(provider)
             .with_after_tool_call(hook),
     ))])
-    .build_session("root", None)
+    .build_session("root")
     .expect("plugin session");
     exact_dispatch_context_with_plugins(plugins)
 }
@@ -1386,7 +1388,7 @@ fn pending_dispatch_context(
         "pending_probe_tools",
         spec,
     ))])
-    .build_session("root", None)
+    .build_session("root")
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins

@@ -1063,7 +1063,7 @@ async fn run_seed_probe_inner(
     );
     let plugins = host_plugins
         .with_extensions(extensions)
-        .build_session("root", None)
+        .build_session("root")
         .expect("plugin session");
     let host = ProcessRuntimeHost::new(
         lash_core::facade_support::EmbeddedRuntimeHost::new({
@@ -1222,6 +1222,7 @@ async fn subagents_plugin_builds_without_mode_context() {
         extensions: Default::default(),
         plugin_options: Default::default(),
         protocol_turn_options: Default::default(),
+        materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
         parent_session_id: None,
     };
     let plugin = factory.build(&ctx).expect("plugin");
@@ -1253,6 +1254,7 @@ async fn rlm_provider_does_not_require_process_support() {
         extensions: Default::default(),
         plugin_options: Default::default(),
         protocol_turn_options: Default::default(),
+        materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
         parent_session_id: None,
     };
 

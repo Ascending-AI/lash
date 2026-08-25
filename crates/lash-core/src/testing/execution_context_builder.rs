@@ -177,7 +177,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             self.plugin_factories
                 .unwrap_or_else(test_code_protocol_factories),
         )
-        .build_session(&self.session_id, None)
+        .build_session(&self.session_id)
         .expect("test plugin session");
         let (sessions, session_lifecycle, session_graph): (
             Arc<dyn crate::plugin::SessionStateService>,

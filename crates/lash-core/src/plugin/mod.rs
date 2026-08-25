@@ -71,16 +71,18 @@ pub use registrar::{
 };
 pub(crate) use registrar::{PluginContributions, RegisteredHook};
 pub use registry::{
-    PluginExtensionContribution, PluginExtensions, PluginFactory, PluginSessionContext, PluginSpec,
-    PluginSpecBuilder, PluginSpecFactory, ProcessEngineContributionContext, SessionPlugin,
-    SessionReadyContext, StaticPluginFactory,
+    PluginExtensionContribution, PluginExtensions, PluginFactory, PluginSessionContext,
+    PluginSessionMaterialization, PluginSpec, PluginSpecBuilder, PluginSpecFactory,
+    ProcessEngineContributionContext, SessionPlugin, SessionReadyContext, StaticPluginFactory,
 };
 pub use runtime_host::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, DirectCompletion, DirectLlmCompletion,
     SessionGraphService, SessionLifecycleService, SessionStateService, SessionTurnInput,
     SessionTurnRequest,
 };
-pub use runtime_impl::{PluginHost, SessionAuthorityContext};
+pub use runtime_impl::{
+    PluginHost, RecordedSessionConfig, SessionAuthorityContext, SessionCreationConfig,
+};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use services::NoopSessionManager;
 pub use services::{PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices};
@@ -368,7 +370,7 @@ mod tests {
             host.extensions().payloads(TEST_EXTENSION_ID),
             &[json!({ "resource": "clock.alarm" })]
         );
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
         assert_eq!(
             session.extensions().payloads(TEST_EXTENSION_ID),
             &[json!({ "resource": "clock.alarm" })]
@@ -411,7 +413,7 @@ mod tests {
 
         let host = PluginHost::new(vec![Arc::new(TriggerEventOnlyFactory)]);
 
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
         assert!(
             session
                 .triggers()
@@ -428,7 +430,7 @@ mod tests {
     #[tokio::test]
     async fn session_collects_tools_and_prompts() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
         let tool_names = session
             .tools()
             .tool_manifests()
@@ -463,7 +465,7 @@ mod tests {
     #[tokio::test]
     async fn external_query_defaults_to_current_session_when_requested() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
         let (_plugin_id, result) = session
             .query_plugin(
                 "mock.echo",
@@ -484,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_query_generates_schema_and_invokes_typed_output() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
 
         let def = session
             .plugin_operations()
@@ -560,11 +562,10 @@ mod tests {
             }
         }
 
-        let err =
-            match PluginHost::new(vec![Arc::new(DuplicateFactory)]).build_session("root", None) {
-                Ok(_) => panic!("duplicate typed plugin operation should fail"),
-                Err(err) => err,
-            };
+        let err = match PluginHost::new(vec![Arc::new(DuplicateFactory)]).build_session("root") {
+            Ok(_) => panic!("duplicate typed plugin operation should fail"),
+            Err(err) => err,
+        };
         assert!(err.to_string().contains("duplicate plugin operation name"));
     }
 
@@ -694,11 +695,10 @@ mod tests {
             }
         }
 
-        let err =
-            match PluginHost::new(vec![Arc::new(CrossKindFactory)]).build_session("root", None) {
-                Ok(_) => panic!("a task may not reuse a registered query name"),
-                Err(err) => err,
-            };
+        let err = match PluginHost::new(vec![Arc::new(CrossKindFactory)]).build_session("root") {
+            Ok(_) => panic!("a task may not reuse a registered query name"),
+            Err(err) => err,
+        };
         assert!(
             err.to_string().contains(&format!(
                 "duplicate plugin operation name `{}`",
@@ -721,7 +721,7 @@ mod tests {
         impl PluginQuery for BadOp {}
 
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
         let (_plugin_id, output) = session
             .query_plugin(
                 BadOp::NAME,
@@ -744,7 +744,7 @@ mod tests {
     #[tokio::test]
     async fn plugin_session_queries_registered_session() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
 
         let (_plugin_id, result) = session
             .query_plugin(
@@ -770,8 +770,10 @@ mod tests {
     #[tokio::test]
     async fn plugin_session_queries_forked_session() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let root = host.build_session("root", None).expect("root");
-        let child = root.fork_for_session("child").expect("child");
+        let root = host.build_session("root").expect("root");
+        let child = root
+            .fork_for_session("child", SessionCreationConfig::default())
+            .expect("child");
 
         let (_plugin_id, result) = child
             .query_plugin(
@@ -799,7 +801,7 @@ mod tests {
     #[test]
     fn plugin_host_unregisters_sessions() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let _session = host.build_session("root", None).expect("session");
+        let _session = host.build_session("root").expect("session");
         assert!(host.session("root").is_ok());
         host.unregister_session("root").expect("unregister");
         match host.session("root") {
@@ -812,11 +814,15 @@ mod tests {
     #[test]
     fn snapshot_round_trip_preserves_plugin_entries() {
         let host = PluginHost::new(vec![Arc::new(MockPluginFactory)]);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
         let snapshot = session.snapshot().expect("snapshot");
         assert!(snapshot.plugins.contains_key("mock"));
         let restored = host
-            .build_session("child", Some(&snapshot))
+            .rematerialize_session(
+                "child",
+                &snapshot,
+                RecordedSessionConfig::new(ProtocolTurnOptions::default()),
+            )
             .expect("restored");
         let restored_snapshot = restored.snapshot().expect("snapshot");
         assert!(restored_snapshot.plugins.contains_key("mock"));
@@ -829,7 +835,7 @@ mod tests {
             PluginSpec::new()
                 .with_tool_provider(Arc::new(MockToolProvider) as Arc<dyn ToolProvider>),
         ))]);
-        let services = RuntimeServices::new(host.build_session("root", None).expect("session"));
+        let services = RuntimeServices::new(host.build_session("root").expect("session"));
         assert_eq!(services.plugins.session_id(), "root");
         assert!(
             services
@@ -892,7 +898,7 @@ mod tests {
                 plugin_id: "projector-b",
             }),
         ]);
-        let err = match host.build_session("root", None) {
+        let err = match host.build_session("root") {
             Ok(_) => panic!("duplicate projector"),
             Err(err) => err,
         };

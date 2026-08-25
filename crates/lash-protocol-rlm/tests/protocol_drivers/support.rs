@@ -534,7 +534,7 @@ impl RlmProtocolScenario {
         } else {
             Some(
                 PluginHost::new(self.plugin_factories.clone())
-                    .build_session("rlm-protocol-scenario-hooks", None)
+                    .build_session("rlm-protocol-scenario-hooks")
                     .unwrap_or_else(|err| {
                         panic!("{} failed to register plugin hooks: {err}", self.name)
                     }),

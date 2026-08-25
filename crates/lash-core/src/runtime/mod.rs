@@ -1423,4 +1423,7 @@ pub struct LashRuntime {
     /// Freshness state for live plugin/protocol resident state on this handle.
     /// Invalidation retains the initial incident decision identity until a successful reload.
     pub(in crate::runtime) resident_session_state: ResidentSessionState,
+    /// Materialization resolved protocol facts that must be durable before queued work may
+    /// reconstruct this session in another runtime.
+    pub(in crate::runtime) materialized_protocol_config_dirty: bool,
 }

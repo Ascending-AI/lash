@@ -137,10 +137,21 @@ Defaults are filled only on a session that has recorded nothing. That is what
 pins a session's dialect at its first open, exactly as before, while making a
 reopen incapable of re-defaulting — the mechanism behind both clobber fixes.
 
+Plugin construction enforces that distinction below the host-facing open API.
+A new plugin session uses the defaultable creation entry point; rebuilding a
+session with a plugin snapshot uses a separate rematerialization entry point
+that requires its recorded protocol-turn options. The RLM factory never
+defaults the dialect on rematerialization, and refuses a missing recorded
+dialect as a typed `MissingRecordedSessionConfig` error before snapshot restore.
+This construction split does not move the durable pin to open time: the fact
+still lands only with the session's next commit.
+
 ## Alternatives considered
 
-* **Pass the dialect only when creating.** Rejected: there is no create/resume
-  split in the API, and the pin lands at the first *commit*, not at open. This
+* **Pass the dialect only when creating.** Rejected: there is no host-facing
+  create/resume split for recording the fact, and the pin lands at the first
+  *commit*, not at open. The lower-level plugin-construction split described
+  above only requires the already-recorded bag when restoring a snapshot. This
   was already tried and reverted — the two call sites that "create" both open and
   drop without running a turn, so the pin evaporated with the handle and the
   first real turn committed the default permanently. A workbench told to serve

@@ -399,6 +399,12 @@ impl PluginSpec {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PluginSessionMaterialization {
+    Creation,
+    Rematerialization,
+}
+
 #[derive(Clone, Debug)]
 pub struct PluginSessionContext {
     pub session_id: String,
@@ -407,6 +413,9 @@ pub struct PluginSessionContext {
     pub plugin_options: PluginOptions,
     /// Protocol-owned options loaded from durable session state, when any.
     pub protocol_turn_options: crate::ProtocolTurnOptions,
+    /// Whether factories are constructing a new session or rebuilding one
+    /// whose plugin snapshot and protocol options were already recorded.
+    pub materialization: PluginSessionMaterialization,
     pub extensions: PluginExtensions,
     /// Session id of the caller that created this one. `None` identifies
     /// a root session; any subagent / compaction / forked-child session

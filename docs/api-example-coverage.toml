@@ -870,7 +870,7 @@ availability = "default+all-features"
 aliases = ["lash_core::runtime::turn_queue::QueuedWorkBatchDraft::validate_process_wake_source"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1695#.validate_process_wake_source()"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1690#.validate_process_wake_source()"
 [[api]]
 symbol = "lash::persistence::QueuedWorkStore::enqueue_queued_work_with_outcome"
 kind = "function"
@@ -878,7 +878,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkStore::enqueue_queued_work_with_outcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1704#async fn enqueue_queued_work_with_outcome("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1699#async fn enqueue_queued_work_with_outcome("
 [[api]]
 symbol = "lash::persistence::RuntimeCommit::MAX_COMMIT_BUDGET_BYTES"
 kind = "assoc_const"
@@ -950,7 +950,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2142#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2137#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 [[api]]
 symbol = "lash::persistence::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"
 kind = "field"
@@ -958,7 +958,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreError::SelectedQueuedWorkRequiresInterruptedComposition::required_batch_ids"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2142#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2137#StoreError::SelectedQueuedWorkRequiresInterruptedComposition { required_batch_ids }"
 [[api]]
 symbol = "lash::persistence::StoreError::checked_monotonic_increment"
 kind = "function"
@@ -975,7 +975,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::raw_session_owned_artifact_refs_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3026#async fn raw_session_owned_artifact_refs_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3021#async fn raw_session_owned_artifact_refs_for_testing("
 [[api]]
 symbol = "lash::persistence::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"
 kind = "function"
@@ -983,7 +983,7 @@ availability = "default+all-features"
 aliases = ["lash_core::StoreMaintenance::seed_session_trigger_manifest_ref_for_testing"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3007#async fn seed_session_trigger_manifest_ref_for_testing("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3002#async fn seed_session_trigger_manifest_ref_for_testing("
 [[api]]
 symbol = "lash::plugins::PluginSpec::orchestrating_tools"
 kind = "field"
@@ -1373,7 +1373,7 @@ kind = "function"
 availability = "all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2093#lash_core::testing::conformance::process_registry_pagination(registry).await;"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2114#lash_core::testing::conformance::process_registry_pagination(registry).await;"
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -1418,7 +1418,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-sqlite-store/tests/conformance.rs:1529#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
+usage = "crates/lash-sqlite-store/tests/conformance.rs:1549#lash_core::testing::conformance::public_signal_intent_wakes_parked_process("
 reason = "Only test code consumes this path, which is what the `testing` feature exists for; it already lives there (FIG-1223)."
 
 [[api]]
@@ -4145,7 +4145,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::outcome"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2786#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2781#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 [[api]]
 symbol = "lash::PendingTurnInputCancelReceipt::target"
 kind = "field"
@@ -4153,7 +4153,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputCancelReceipt::target"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2786#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2781#results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });"
 [[api]]
 symbol = "lash::PendingTurnInputCancelTarget"
 kind = "enum"
@@ -4241,7 +4241,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2804#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2799#return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });"
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes"
 kind = "variant"
@@ -4259,7 +4259,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes::anchor"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2829#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2824#Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })"
 [[api]]
 symbol = "lash::PendingTurnInputSuffixCancelOutcome::Outcomes::outcomes"
 kind = "field"
@@ -6081,7 +6081,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::event", "lash_core::TurnActivity::event"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1326#match &activity.event {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1325#match &activity.event {"
 
 [[api]]
 symbol = "lash::TurnActivity::id"
@@ -6100,8 +6100,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::independent", "lash_core::TurnActivity::independent"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1410#sink.emit(TurnActivity::independent("
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1429#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1409#sink.emit(TurnActivity::independent("
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1428#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnActivity::new"
@@ -6110,7 +6110,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivity::new", "lash_core::TurnActivity::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1396#sink.emit(TurnActivity::new("
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1395#sink.emit(TurnActivity::new("
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6140,7 +6140,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId", "lash_core::TurnActivityId"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1397#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1396#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6159,7 +6159,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnActivityId::new", "lash_core::TurnActivityId::new"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1397#lash::TurnActivityId::new(\"prior\"),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1396#lash::TurnActivityId::new(\"prior\"),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6747,7 +6747,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta", "lash_core::TurnEvent::AssistantProseDelta"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1327#TurnEvent::AssistantProseDelta { text } => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1326#TurnEvent::AssistantProseDelta { text } => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6757,8 +6757,8 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::AssistantProseDelta::text", "lash_core::TurnEvent::AssistantProseDelta::text"]
 area = "sessions-turns"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1399#text: \"kept \".into(),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1429#\"kept answer\""
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1398#text: \"kept \".into(),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1428#\"kept answer\""
 
 [[api]]
 symbol = "lash::TurnEvent::ChildUsage"
@@ -13975,7 +13975,7 @@ availability = "default+all-features"
 aliases = ["lash_core::GcReport::root_count"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3209#root_count,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3204#root_count,"
 [[api]]
 symbol = "lash::persistence::CheckpointComponentDescriptor"
 kind = "struct"
@@ -14810,7 +14810,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::ingress"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2622#let state = match draft.ingress {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2617#let state = match draft.ingress {"
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input"
 kind = "field"
@@ -14818,7 +14818,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::input"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2629#let input_json = encode_json(&draft.input)?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2624#let input_json = encode_json(&draft.input)?;"
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::input_id"
 kind = "field"
@@ -14844,7 +14844,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2602#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2597#ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;"
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::source_key"
 kind = "field"
@@ -14852,7 +14852,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::source_key"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2617#draft.source_key.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2612#draft.source_key.as_deref(),"
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::submitted_content_matches"
 kind = "function"
@@ -14860,7 +14860,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputDraft::submitted_content_matches"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2656#if !draft.submitted_content_matches(&input).map_err(|err| {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2651#if !draft.submitted_content_matches(&input).map_err(|err| {"
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft::with_input_id"
 kind = "function"
@@ -16728,7 +16728,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAdmission::Created"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1219#lash_core::SessionAdmission::Created"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1214#lash_core::SessionAdmission::Created"
 [[api]]
 symbol = "lash::persistence::SessionAdmission::Rebound"
 kind = "variant"
@@ -16736,7 +16736,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAdmission::Rebound"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1221#lash_core::SessionAdmission::Rebound"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1216#lash_core::SessionAdmission::Rebound"
 [[api]]
 symbol = "lash::persistence::SessionAttachmentStore"
 kind = "struct"
@@ -20248,7 +20248,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::mode"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2877#let restored_state = match claim.mode {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2872#let restored_state = match claim.mode {"
 [[api]]
 symbol = "lash::persistence::TurnInputCompletion"
 kind = "struct"
@@ -22807,7 +22807,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::build_session_with_parent_and_overlay", "lash_core::plugin::runtime_impl::PluginHost::build_session_with_parent_and_overlay"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:707#host.build_session_with_parent_and_overlay("
+usage = "examples/docs-snippets/src/plugins_facade.rs:712#host.build_session_with_parent_and_overlay("
 
 [[api]]
 symbol = "lash::plugins::PluginHost::empty"
@@ -22816,7 +22816,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::empty", "lash_core::plugin::runtime_impl::PluginHost::empty"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:718#member_witness(lash::plugins::PluginHost::empty);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:725#member_witness(lash::plugins::PluginHost::empty);"
 
 [[api]]
 symbol = "lash::plugins::PluginHost::extensions"
@@ -22825,7 +22825,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::extensions", "lash_core::plugin::runtime_impl::PluginHost::extensions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:720#member_witness(lash::plugins::PluginHost::extensions);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:727#member_witness(lash::plugins::PluginHost::extensions);"
 
 [[api]]
 symbol = "lash::plugins::PluginHost::factories"
@@ -22834,7 +22834,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::factories", "lash_core::plugin::runtime_impl::PluginHost::factories"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:722#member_witness(lash::plugins::PluginHost::factories);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:729#member_witness(lash::plugins::PluginHost::factories);"
 
 [[api]]
 symbol = "lash::plugins::PluginHost::install_process_engine_contributions"
@@ -22852,7 +22852,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::isolated_registry", "lash_core::plugin::runtime_impl::PluginHost::isolated_registry"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:724#member_witness(lash::plugins::PluginHost::isolated_registry);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:731#member_witness(lash::plugins::PluginHost::isolated_registry);"
 
 [[api]]
 symbol = "lash::plugins::PluginHost::new"
@@ -22861,7 +22861,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::new", "lash_core::plugin::runtime_impl::PluginHost::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:726#member_witness(lash::plugins::PluginHost::new);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:733#member_witness(lash::plugins::PluginHost::new);"
 
 [[api]]
 symbol = "lash::plugins::PluginHost::session"
@@ -22870,7 +22870,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::session", "lash_core::plugin::runtime_impl::PluginHost::session"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:728#member_witness(lash::plugins::PluginHost::session);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:735#member_witness(lash::plugins::PluginHost::session);"
 
 [[api]]
 symbol = "lash::plugins::PluginHost::unregister_session"
@@ -22879,7 +22879,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::unregister_session", "lash_core::plugin::runtime_impl::PluginHost::unregister_session"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:730#member_witness(lash::plugins::PluginHost::unregister_session);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:737#member_witness(lash::plugins::PluginHost::unregister_session);"
 
 [[api]]
 symbol = "lash::plugins::PluginHost::with_extensions"
@@ -22888,7 +22888,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginHost::with_extensions", "lash_core::plugin::runtime_impl::PluginHost::with_extensions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:732#member_witness(lash::plugins::PluginHost::with_extensions);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:739#member_witness(lash::plugins::PluginHost::with_extensions);"
 
 [[api]]
 symbol = "lash::plugins::PluginLifecycleEvent"
@@ -22927,7 +22927,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginLifecycleEvent::SessionRestored", "lash_core::plugin::hooks::PluginLifecycleEvent::SessionRestored"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:737#lash::plugins::PluginLifecycleEvent::SessionRestored(..)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:744#lash::plugins::PluginLifecycleEvent::SessionRestored(..)"
 
 [[api]]
 symbol = "lash::plugins::PluginLifecycleEvent::SessionRestored::0"
@@ -22936,7 +22936,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginLifecycleEvent::SessionRestored::0", "lash_core::plugin::hooks::PluginLifecycleEvent::SessionRestored::0"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:742#if let lash::plugins::PluginLifecycleEvent::SessionRestored(field, ..) = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:749#if let lash::plugins::PluginLifecycleEvent::SessionRestored(field, ..) = value {"
 
 [[api]]
 symbol = "lash::plugins::PluginLifecycleEvent::TurnFinalized"
@@ -22945,7 +22945,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginLifecycleEvent::TurnFinalized", "lash_core::plugin::hooks::PluginLifecycleEvent::TurnFinalized"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:750#lash::plugins::PluginLifecycleEvent::TurnFinalized(..)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:757#lash::plugins::PluginLifecycleEvent::TurnFinalized(..)"
 
 [[api]]
 symbol = "lash::plugins::PluginLifecycleEvent::TurnFinalized::0"
@@ -22954,7 +22954,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginLifecycleEvent::TurnFinalized::0", "lash_core::plugin::hooks::PluginLifecycleEvent::TurnFinalized::0"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:755#if let lash::plugins::PluginLifecycleEvent::TurnFinalized(field, ..) = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:762#if let lash::plugins::PluginLifecycleEvent::TurnFinalized(field, ..) = value {"
 
 [[api]]
 symbol = "lash::plugins::PluginLifecycleEvent::TurnPersisted"
@@ -23002,7 +23002,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::content"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:761#let _ = &value.content;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:768#let _ = &value.content;"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::first_text"
@@ -23011,7 +23011,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::first_text"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:764#member_witness(lash::plugins::PluginMessage::first_text);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:771#member_witness(lash::plugins::PluginMessage::first_text);"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::id"
@@ -23020,7 +23020,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:767#let _ = &value.id;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:774#let _ = &value.id;"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::origin"
@@ -23029,7 +23029,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::origin"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:771#let _ = &value.origin;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:778#let _ = &value.origin;"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::parts"
@@ -23038,7 +23038,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::parts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:775#let _ = &value.parts;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:782#let _ = &value.parts;"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::role"
@@ -23047,7 +23047,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::role"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:779#let _ = &value.role;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:786#let _ = &value.role;"
 
 [[api]]
 symbol = "lash::plugins::PluginMessage::text"
@@ -23077,7 +23077,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginMessage::with_origin"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:782#member_witness(lash::plugins::PluginMessage::with_origin);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:789#member_witness(lash::plugins::PluginMessage::with_origin);"
 
 [[api]]
 symbol = "lash::plugins::PluginOptions"
@@ -23086,7 +23086,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginOptions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:784#type_witness::<lash::plugins::PluginOptions>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:791#type_witness::<lash::plugins::PluginOptions>();"
 
 [[api]]
 symbol = "lash::plugins::PluginOptions::decode"
@@ -23095,7 +23095,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginOptions::decode"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:787#options.decode::<serde_json::Value>(plugin_id)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:794#options.decode::<serde_json::Value>(plugin_id)"
 
 [[api]]
 symbol = "lash::plugins::PluginOptions::empty"
@@ -23104,7 +23104,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginOptions::empty"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:790#member_witness(lash::plugins::PluginOptions::empty);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:797#member_witness(lash::plugins::PluginOptions::empty);"
 
 [[api]]
 symbol = "lash::plugins::PluginOptions::insert_typed"
@@ -23113,7 +23113,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginOptions::insert_typed"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:795#value: serde_json::Value| { options.insert_typed(plugin_id, value) },"
+usage = "examples/docs-snippets/src/plugins_facade.rs:802#value: serde_json::Value| { options.insert_typed(plugin_id, value) },"
 
 [[api]]
 symbol = "lash::plugins::PluginOptions::plugins"
@@ -23122,7 +23122,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginOptions::plugins"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:798#field_witness(|value: &lash::plugins::PluginOptions| {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:805#field_witness(|value: &lash::plugins::PluginOptions| {"
 
 [[api]]
 symbol = "lash::plugins::PluginOptions::typed"
@@ -23131,7 +23131,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginOptions::typed"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:803#lash::plugins::PluginOptions::typed(plugin_id, value)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:810#lash::plugins::PluginOptions::typed(plugin_id, value)"
 
 [[api]]
 symbol = "lash::plugins::PluginRegistrar"
@@ -23268,7 +23268,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:806#type_witness::<lash::plugins::PluginRuntimeEvent>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:813#type_witness::<lash::plugins::PluginRuntimeEvent>();"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeEvent::Custom"
@@ -23277,7 +23277,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent::Custom"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:809#matches!(value, lash::plugins::PluginRuntimeEvent::Custom { .. })"
+usage = "examples/docs-snippets/src/plugins_facade.rs:816#matches!(value, lash::plugins::PluginRuntimeEvent::Custom { .. })"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeEvent::Custom::name"
@@ -23286,7 +23286,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent::Custom::name"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:813#if let lash::plugins::PluginRuntimeEvent::Custom { name, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:820#if let lash::plugins::PluginRuntimeEvent::Custom { name, .. } = value {"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeEvent::Custom::payload"
@@ -23295,7 +23295,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent::Custom::payload"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:819#if let lash::plugins::PluginRuntimeEvent::Custom { payload, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:826#if let lash::plugins::PluginRuntimeEvent::Custom { payload, .. } = value {"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeEvent::Status"
@@ -23304,7 +23304,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent::Status"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:825#matches!(value, lash::plugins::PluginRuntimeEvent::Status { .. })"
+usage = "examples/docs-snippets/src/plugins_facade.rs:832#matches!(value, lash::plugins::PluginRuntimeEvent::Status { .. })"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeEvent::Status::detail"
@@ -23313,7 +23313,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent::Status::detail"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:829#if let lash::plugins::PluginRuntimeEvent::Status { detail, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:836#if let lash::plugins::PluginRuntimeEvent::Status { detail, .. } = value {"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeEvent::Status::key"
@@ -23322,7 +23322,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent::Status::key"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:835#if let lash::plugins::PluginRuntimeEvent::Status { key, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:842#if let lash::plugins::PluginRuntimeEvent::Status { key, .. } = value {"
 
 [[api]]
 symbol = "lash::plugins::PluginRuntimeEvent::Status::label"
@@ -23331,7 +23331,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PluginRuntimeEvent::Status::label"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:841#if let lash::plugins::PluginRuntimeEvent::Status { label, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:848#if let lash::plugins::PluginRuntimeEvent::Status { label, .. } = value {"
 
 [[api]]
 symbol = "lash::plugins::PluginSession"
@@ -23340,7 +23340,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession", "lash_core::plugin::session_obj::PluginSession"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:846#type_witness::<lash::plugins::PluginSession>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:853#type_witness::<lash::plugins::PluginSession>();"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::after_tool_call"
@@ -23367,7 +23367,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::apply_checkpoint", "lash_core::plugin::session_obj::PluginSession::apply_checkpoint"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:848#member_witness(lash::plugins::PluginSession::apply_checkpoint);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:855#member_witness(lash::plugins::PluginSession::apply_checkpoint);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::at_checkpoint"
@@ -23376,7 +23376,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::at_checkpoint", "lash_core::plugin::session_obj::PluginSession::at_checkpoint"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:850#member_witness(lash::plugins::PluginSession::at_checkpoint);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:857#member_witness(lash::plugins::PluginSession::at_checkpoint);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::before_tool_call"
@@ -23403,7 +23403,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::collect_prompt_contributions", "lash_core::plugin::session_obj::PluginSession::collect_prompt_contributions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:852#member_witness(lash::plugins::PluginSession::collect_prompt_contributions);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:859#member_witness(lash::plugins::PluginSession::collect_prompt_contributions);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::compact_context"
@@ -23412,7 +23412,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::compact_context", "lash_core::plugin::session_obj::PluginSession::compact_context"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:854#member_witness(lash::plugins::PluginSession::compact_context);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:861#member_witness(lash::plugins::PluginSession::compact_context);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::emit_runtime_event"
@@ -23421,7 +23421,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::emit_runtime_event", "lash_core::plugin::session_obj::PluginSession::emit_runtime_event"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:856#member_witness(lash::plugins::PluginSession::emit_runtime_event);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:863#member_witness(lash::plugins::PluginSession::emit_runtime_event);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::emit_runtime_event_with_phase_probe"
@@ -23430,7 +23430,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::emit_runtime_event_with_phase_probe", "lash_core::plugin::session_obj::PluginSession::emit_runtime_event_with_phase_probe"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:858#member_witness(lash::plugins::PluginSession::emit_runtime_event_with_phase_probe);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:865#member_witness(lash::plugins::PluginSession::emit_runtime_event_with_phase_probe);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::extensions"
@@ -23439,7 +23439,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::extensions", "lash_core::plugin::session_obj::PluginSession::extensions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:860#member_witness(lash::plugins::PluginSession::extensions);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:867#member_witness(lash::plugins::PluginSession::extensions);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::finalize_turn_with_phase_probe"
@@ -23448,7 +23448,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::finalize_turn_with_phase_probe", "lash_core::plugin::session_obj::PluginSession::finalize_turn_with_phase_probe"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:862#member_witness(lash::plugins::PluginSession::finalize_turn_with_phase_probe);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:869#member_witness(lash::plugins::PluginSession::finalize_turn_with_phase_probe);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::finish_assistant_stream"
@@ -23457,7 +23457,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::finish_assistant_stream", "lash_core::plugin::session_obj::PluginSession::finish_assistant_stream"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:864#member_witness(lash::plugins::PluginSession::finish_assistant_stream);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:871#member_witness(lash::plugins::PluginSession::finish_assistant_stream);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::fork_for_child_session"
@@ -23493,7 +23493,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::has_assistant_stream_finished_hooks", "lash_core::plugin::session_obj::PluginSession::has_assistant_stream_finished_hooks"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:889#member_witness(lash::plugins::PluginSession::has_assistant_stream_finished_hooks);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:907#member_witness(lash::plugins::PluginSession::has_assistant_stream_finished_hooks);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::has_assistant_stream_hooks"
@@ -23502,7 +23502,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::has_assistant_stream_hooks", "lash_core::plugin::session_obj::PluginSession::has_assistant_stream_hooks"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:891#member_witness(lash::plugins::PluginSession::has_assistant_stream_hooks);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:909#member_witness(lash::plugins::PluginSession::has_assistant_stream_hooks);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::has_runtime_event_hooks"
@@ -23511,7 +23511,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::has_runtime_event_hooks", "lash_core::plugin::session_obj::PluginSession::has_runtime_event_hooks"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:893#member_witness(lash::plugins::PluginSession::has_runtime_event_hooks);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:911#member_witness(lash::plugins::PluginSession::has_runtime_event_hooks);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::host"
@@ -23520,7 +23520,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::host", "lash_core::plugin::session_obj::PluginSession::host"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:895#member_witness(lash::plugins::PluginSession::host);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:913#member_witness(lash::plugins::PluginSession::host);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::mutate_session_config"
@@ -23529,7 +23529,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::mutate_session_config", "lash_core::plugin::session_obj::PluginSession::mutate_session_config"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:897#member_witness(lash::plugins::PluginSession::mutate_session_config);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:915#member_witness(lash::plugins::PluginSession::mutate_session_config);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::plugin_operations"
@@ -23538,7 +23538,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::plugin_operations", "lash_core::plugin::session_obj::PluginSession::plugin_operations"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:899#member_witness(lash::plugins::PluginSession::plugin_operations);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:917#member_witness(lash::plugins::PluginSession::plugin_operations);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::prepare_turn_context"
@@ -23547,7 +23547,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::prepare_turn_context", "lash_core::plugin::session_obj::PluginSession::prepare_turn_context"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:901#member_witness(lash::plugins::PluginSession::prepare_turn_context);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:919#member_witness(lash::plugins::PluginSession::prepare_turn_context);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::prepare_turn_with_phase_probe"
@@ -23556,7 +23556,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::prepare_turn_with_phase_probe", "lash_core::plugin::session_obj::PluginSession::prepare_turn_with_phase_probe"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:903#member_witness(lash::plugins::PluginSession::prepare_turn_with_phase_probe);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:921#member_witness(lash::plugins::PluginSession::prepare_turn_with_phase_probe);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::project_tool_result"
@@ -23565,7 +23565,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::project_tool_result", "lash_core::plugin::session_obj::PluginSession::project_tool_result"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:905#member_witness(lash::plugins::PluginSession::project_tool_result);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:923#member_witness(lash::plugins::PluginSession::project_tool_result);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::protocol_driver"
@@ -23574,7 +23574,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::protocol_driver", "lash_core::plugin::session_obj::PluginSession::protocol_driver"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:907#member_witness(lash::plugins::PluginSession::protocol_driver);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:925#member_witness(lash::plugins::PluginSession::protocol_driver);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::resolve_tool_catalog"
@@ -23583,7 +23583,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::resolve_tool_catalog", "lash_core::plugin::session_obj::PluginSession::resolve_tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:909#member_witness(lash::plugins::PluginSession::resolve_tool_catalog);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:927#member_witness(lash::plugins::PluginSession::resolve_tool_catalog);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::resolved_tool_catalog"
@@ -23592,7 +23592,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::resolved_tool_catalog", "lash_core::plugin::session_obj::PluginSession::resolved_tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:911#member_witness(lash::plugins::PluginSession::resolved_tool_catalog);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:929#member_witness(lash::plugins::PluginSession::resolved_tool_catalog);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::restore"
@@ -23601,7 +23601,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::restore", "lash_core::plugin::session_obj::PluginSession::restore"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:913#member_witness(lash::plugins::PluginSession::restore);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:931#member_witness(lash::plugins::PluginSession::restore);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::run_plugin_command_value"
@@ -23628,7 +23628,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::session_id", "lash_core::plugin::session_obj::PluginSession::session_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:915#member_witness(lash::plugins::PluginSession::session_id);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:933#member_witness(lash::plugins::PluginSession::session_id);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::snapshot"
@@ -23637,7 +23637,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::snapshot", "lash_core::plugin::session_obj::PluginSession::snapshot"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:917#member_witness(lash::plugins::PluginSession::snapshot);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:935#member_witness(lash::plugins::PluginSession::snapshot);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::snapshot_revision_fingerprint"
@@ -23646,7 +23646,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::snapshot_revision_fingerprint", "lash_core::plugin::session_obj::PluginSession::snapshot_revision_fingerprint"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:919#member_witness(lash::plugins::PluginSession::snapshot_revision_fingerprint);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:937#member_witness(lash::plugins::PluginSession::snapshot_revision_fingerprint);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::subagent_context"
@@ -23655,7 +23655,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::subagent_context", "lash_core::plugin::session_obj::PluginSession::subagent_context"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:921#member_witness(lash::plugins::PluginSession::subagent_context);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:939#member_witness(lash::plugins::PluginSession::subagent_context);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::tool_access"
@@ -23664,7 +23664,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::tool_access", "lash_core::plugin::session_obj::PluginSession::tool_access"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:923#member_witness(lash::plugins::PluginSession::tool_access);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:941#member_witness(lash::plugins::PluginSession::tool_access);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::tool_catalog"
@@ -23682,7 +23682,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PluginSession::tool_registry", "lash_core::plugin::session_obj::PluginSession::tool_registry"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:925#member_witness(lash::plugins::PluginSession::tool_registry);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:943#member_witness(lash::plugins::PluginSession::tool_registry);"
 
 [[api]]
 symbol = "lash::plugins::PluginSession::tools"
@@ -24224,7 +24224,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::PreparedContext::prompt_contributions", "lash_core::session_model::context::PreparedContext::prompt_contributions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:928#let _ = &value.prompt_contributions;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:946#let _ = &value.prompt_contributions;"
 
 [[api]]
 symbol = "lash::plugins::PreparedContext::tool_providers"
@@ -24327,7 +24327,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAppendNode::Plugin"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:936#matches!(value, lash::plugins::SessionAppendNode::Plugin { .. })"
+usage = "examples/docs-snippets/src/plugins_facade.rs:954#matches!(value, lash::plugins::SessionAppendNode::Plugin { .. })"
 
 [[api]]
 symbol = "lash::plugins::SessionAppendNode::Plugin::body"
@@ -24336,7 +24336,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAppendNode::Plugin::body"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:940#if let lash::plugins::SessionAppendNode::Plugin { body, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:958#if let lash::plugins::SessionAppendNode::Plugin { body, .. } = value {"
 
 [[api]]
 symbol = "lash::plugins::SessionAppendNode::Plugin::plugin_type"
@@ -24345,7 +24345,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionAppendNode::Plugin::plugin_type"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:946#if let lash::plugins::SessionAppendNode::Plugin { plugin_type, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:964#if let lash::plugins::SessionAppendNode::Plugin { plugin_type, .. } = value {"
 
 [[api]]
 symbol = "lash::plugins::SessionAppendNode::ProtocolEvent"
@@ -24652,7 +24652,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStateService::apply_tool_state"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:952#member_witness(T::apply_tool_state);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:970#member_witness(T::apply_tool_state);"
 
 [[api]]
 symbol = "lash::plugins::SessionStateService::set_tool_membership"
@@ -24661,7 +24661,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStateService::set_tool_membership"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:956#member_witness(T::set_tool_membership);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:974#member_witness(T::set_tool_membership);"
 
 [[api]]
 symbol = "lash::plugins::SessionStateService::shared_tool_catalog"
@@ -24670,7 +24670,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStateService::shared_tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:960#member_witness(T::shared_tool_catalog);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:978#member_witness(T::shared_tool_catalog);"
 
 [[api]]
 symbol = "lash::plugins::SessionStateService::snapshot_current"
@@ -24698,7 +24698,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStateService::tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:964#member_witness(T::tool_catalog);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:982#member_witness(T::tool_catalog);"
 
 [[api]]
 symbol = "lash::plugins::SessionStateService::tool_state"
@@ -24707,7 +24707,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionStateService::tool_state"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:968#member_witness(T::tool_state);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:986#member_witness(T::tool_state);"
 
 [[api]]
 symbol = "lash::plugins::SessionStateService::turn_scope"
@@ -24741,7 +24741,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:971#type_witness::<lash::plugins::ToolCallHookContext>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:989#type_witness::<lash::plugins::ToolCallHookContext>();"
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::args"
@@ -24750,7 +24750,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::args"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:974#let _ = &value.args;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:992#let _ = &value.args;"
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::argument_projection"
@@ -24759,7 +24759,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::argument_projection"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:978#let _ = &value.argument_projection;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:996#let _ = &value.argument_projection;"
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::new"
@@ -24768,7 +24768,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:981#member_witness(lash::plugins::ToolCallHookContext::new);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:999#member_witness(lash::plugins::ToolCallHookContext::new);"
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::session_id"
@@ -24786,7 +24786,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::session_snapshot"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:987#member_witness(lash::plugins::ToolCallHookContext::session_snapshot);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1005#member_witness(lash::plugins::ToolCallHookContext::session_snapshot);"
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::set_tool_membership"
@@ -24795,7 +24795,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::set_tool_membership"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:989#member_witness(lash::plugins::ToolCallHookContext::set_tool_membership);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1007#member_witness(lash::plugins::ToolCallHookContext::set_tool_membership);"
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::tool_name"
@@ -24804,7 +24804,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolCallHookContext::tool_name"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:992#let _ = &value.tool_name;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1010#let _ = &value.tool_name;"
 
 [[api]]
 symbol = "lash::plugins::ToolCallHookContext::turn_context"
@@ -24833,7 +24833,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::callable_tools"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:995#member_witness(lash::plugins::ToolCatalog::callable_tools);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1013#member_witness(lash::plugins::ToolCatalog::callable_tools);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::from_tool_definitions"
@@ -24842,7 +24842,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::from_tool_definitions"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:997#member_witness(lash::plugins::ToolCatalog::from_tool_definitions);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1015#member_witness(lash::plugins::ToolCatalog::from_tool_definitions);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::from_tools"
@@ -24851,7 +24851,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::from_tools"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:999#member_witness(lash::plugins::ToolCatalog::from_tools);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1017#member_witness(lash::plugins::ToolCatalog::from_tools);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::has_callable_tool"
@@ -24860,7 +24860,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::has_callable_tool"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1001#member_witness(lash::plugins::ToolCatalog::has_callable_tool);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1019#member_witness(lash::plugins::ToolCatalog::has_callable_tool);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::model_tool_specs"
@@ -24869,7 +24869,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::model_tool_specs"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1003#member_witness(lash::plugins::ToolCatalog::model_tool_specs);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1021#member_witness(lash::plugins::ToolCatalog::model_tool_specs);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::resolve_contract"
@@ -24878,7 +24878,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::resolve_contract"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1005#member_witness(lash::plugins::ToolCatalog::resolve_contract);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1023#member_witness(lash::plugins::ToolCatalog::resolve_contract);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::tool_names"
@@ -24887,7 +24887,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::tool_names"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1007#member_witness(lash::plugins::ToolCatalog::tool_names);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1025#member_witness(lash::plugins::ToolCatalog::tool_names);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::tool_names_fingerprint"
@@ -24896,7 +24896,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolCatalog::tool_names_fingerprint"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1009#member_witness(lash::plugins::ToolCatalog::tool_names_fingerprint);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1027#member_witness(lash::plugins::ToolCatalog::tool_names_fingerprint);"
 
 [[api]]
 symbol = "lash::plugins::ToolCatalog::tools"
@@ -25023,7 +25023,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1011#type_witness::<lash::plugins::ToolResultHookContext>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1029#type_witness::<lash::plugins::ToolResultHookContext>();"
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::args"
@@ -25032,7 +25032,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::args"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:974#let _ = &value.args;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:992#let _ = &value.args;"
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::duration_ms"
@@ -25041,7 +25041,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::duration_ms"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1018#let _ = &value.duration_ms;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1036#let _ = &value.duration_ms;"
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::new"
@@ -25050,7 +25050,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1021#member_witness(lash::plugins::ToolResultHookContext::new);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1039#member_witness(lash::plugins::ToolResultHookContext::new);"
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::result"
@@ -25077,7 +25077,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::session_snapshot"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1027#member_witness(lash::plugins::ToolResultHookContext::session_snapshot);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1045#member_witness(lash::plugins::ToolResultHookContext::session_snapshot);"
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::set_tool_membership"
@@ -25086,7 +25086,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::set_tool_membership"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1029#member_witness(lash::plugins::ToolResultHookContext::set_tool_membership);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1047#member_witness(lash::plugins::ToolResultHookContext::set_tool_membership);"
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::tool_name"
@@ -25095,7 +25095,7 @@ availability = "default+all-features"
 aliases = ["lash_core::plugin::hooks::ToolResultHookContext::tool_name"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:992#let _ = &value.tool_name;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1010#let _ = &value.tool_name;"
 
 [[api]]
 symbol = "lash::plugins::ToolResultHookContext::turn_context"
@@ -25186,7 +25186,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TurnResultHookContext", "lash_core::plugin::hooks::TurnResultHookContext"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1039#type_witness::<lash::plugins::TurnResultHookContext>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1057#type_witness::<lash::plugins::TurnResultHookContext>();"
 
 [[api]]
 symbol = "lash::plugins::TurnResultHookContext::session_id"
@@ -25213,7 +25213,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TurnResultHookContext::turn", "lash_core::plugin::hooks::TurnResultHookContext::turn"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1046#let _ = &value.turn;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1064#let _ = &value.turn;"
 
 [[api]]
 symbol = "lash::plugins::TurnTransformContext"
@@ -25251,7 +25251,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::TurnTransformContext::prompt_usage", "lash_core::plugin::history::TurnTransformContext::prompt_usage"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1050#let _ = &value.prompt_usage;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1068#let _ = &value.prompt_usage;"
 
 [[api]]
 symbol = "lash::plugins::TurnTransformContext::scoped_effect_controller"
@@ -26214,7 +26214,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessAwaitOutput::terminal_status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1144#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1143#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:216#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -27709,7 +27709,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessListFilter::status"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:903#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:902#status: lash::process::ProcessStatusFilter::Any,"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:216#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -29731,7 +29731,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ProcessStatusFilter"]
 area = "processes"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:903#status: lash::process::ProcessStatusFilter::Any,"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:902#status: lash::process::ProcessStatusFilter::Any,"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -30128,8 +30128,8 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver", "lash_core::runtime::process_work_driver::ProcessWorkDriver"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1144#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
-assertion = "examples/agent-workbench/src/main_sections/routes.rs:1144#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1143#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
+assertion = "examples/agent-workbench/src/main_sections/routes.rs:1143#\"terminal_state\": format!(\"{:?}\", outcome.terminal_status()),"
 
 [[api]]
 symbol = "lash::process::ProcessWorkDriver::await_event"
@@ -30147,7 +30147,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkDriver::await_terminal", "lash_core::runtime::process_work_driver::ProcessWorkDriver::await_terminal"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1114#lash::process::ProcessWorkDriver::await_terminal(&state.process_work_driver, &process_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1113#lash::process::ProcessWorkDriver::await_terminal(&state.process_work_driver, &process_id),"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:157#if output.is_success() && output.value_for_projection() == json!(\"done\")"
 
 [[api]]
@@ -30306,7 +30306,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProcessWorkObserver::snapshot_all"]
 area = "processes"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:902#.snapshot_all(&lash::process::ProcessListFilter {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:901#.snapshot_all(&lash::process::ProcessListFilter {"
 assertion = "examples/agent-workbench/src/main_sections/tests/process_work.rs:216#assert_eq!(failed.process.status_label, \"failed\");"
 
 [[api]]
@@ -31460,7 +31460,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptTemplate::render"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1053#member_witness(lash::prompt::PromptTemplate::render);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1071#member_witness(lash::prompt::PromptTemplate::render);"
 
 [[api]]
 symbol = "lash::prompt::PromptTemplate::sections"
@@ -31701,7 +31701,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1055#type_witness::<lash::provider::ExecutionEvidence>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1073#type_witness::<lash::provider::ExecutionEvidence>();"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::collection_interruption"
@@ -31710,7 +31710,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::collection_interruption"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1058#let _ = &value.collection_interruption;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1076#let _ = &value.collection_interruption;"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::merge"
@@ -31719,7 +31719,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::merge"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1061#member_witness(lash::provider::ExecutionEvidence::merge);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1079#member_witness(lash::provider::ExecutionEvidence::merge);"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::merge_optional"
@@ -31728,7 +31728,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::merge_optional"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1063#member_witness(lash::provider::ExecutionEvidence::merge_optional);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1081#member_witness(lash::provider::ExecutionEvidence::merge_optional);"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::provider_finish_reason"
@@ -31737,7 +31737,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::provider_finish_reason"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1066#let _ = &value.provider_finish_reason;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1084#let _ = &value.provider_finish_reason;"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::provider_request_id"
@@ -31746,7 +31746,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::provider_request_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1070#let _ = &value.provider_request_id;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1088#let _ = &value.provider_request_id;"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::provider_response_id"
@@ -31755,7 +31755,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::provider_response_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1074#let _ = &value.provider_response_id;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1092#let _ = &value.provider_response_id;"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::reasoning_output_tokens"
@@ -31773,7 +31773,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::served_model"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1078#let _ = &value.served_model;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1096#let _ = &value.served_model;"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceCollectionInterruption"
@@ -31782,7 +31782,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceCollectionInterruption"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1081#type_witness::<lash::provider::ExecutionEvidenceCollectionInterruption>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1099#type_witness::<lash::provider::ExecutionEvidenceCollectionInterruption>();"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceCollectionInterruption::ProtocolAbort"
@@ -31791,7 +31791,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceCollectionInterruption::ProtocolAbort"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1082#lash::provider::ExecutionEvidenceCollectionInterruption::ProtocolAbort"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1100#lash::provider::ExecutionEvidenceCollectionInterruption::ProtocolAbort"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceMergeError"
@@ -31800,7 +31800,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceMergeError"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1092#type_witness::<lash::provider::ExecutionEvidenceMergeError>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1110#type_witness::<lash::provider::ExecutionEvidenceMergeError>();"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceMergeError::BeforeResponseStart"
@@ -31809,7 +31809,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceMergeError::BeforeResponseStart"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1093#lash::provider::ExecutionEvidenceMergeError::BeforeResponseStart"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1111#lash::provider::ExecutionEvidenceMergeError::BeforeResponseStart"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceMergeError::IdentityConflict"
@@ -31818,7 +31818,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceMergeError::IdentityConflict"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1104#lash::provider::ExecutionEvidenceMergeError::IdentityConflict { .. }"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1122#lash::provider::ExecutionEvidenceMergeError::IdentityConflict { .. }"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceMergeError::IdentityConflict::current"
@@ -31827,7 +31827,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceMergeError::IdentityConflict::current"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1109#if let lash::provider::ExecutionEvidenceMergeError::IdentityConflict { current, .. } = value"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1127#if let lash::provider::ExecutionEvidenceMergeError::IdentityConflict { current, .. } = value"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceMergeError::IdentityConflict::field"
@@ -31836,7 +31836,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceMergeError::IdentityConflict::field"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1108#field_witness(|value: &lash::provider::ExecutionEvidenceMergeError| {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1126#field_witness(|value: &lash::provider::ExecutionEvidenceMergeError| {"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceMergeError::IdentityConflict::next"
@@ -31845,7 +31845,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceMergeError::IdentityConflict::next"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1122#if let lash::provider::ExecutionEvidenceMergeError::IdentityConflict { next, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1140#if let lash::provider::ExecutionEvidenceMergeError::IdentityConflict { next, .. } = value {"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidenceMergeError::code"
@@ -31854,7 +31854,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidenceMergeError::code"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1127#member_witness(lash::provider::ExecutionEvidenceMergeError::code);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1145#member_witness(lash::provider::ExecutionEvidenceMergeError::code);"
 
 [[api]]
 symbol = "lash::provider::LlmOutputSpec"
@@ -31907,7 +31907,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::agent_frame_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1129#member_witness(lash::provider::LlmRequest::agent_frame_id);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1147#member_witness(lash::provider::LlmRequest::agent_frame_id);"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::attachment_bytes"
@@ -31935,7 +31935,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::continuation_key"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1131#member_witness(lash::provider::LlmRequest::continuation_key);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1149#member_witness(lash::provider::LlmRequest::continuation_key);"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::generation"
@@ -31944,7 +31944,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::generation"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1134#let _ = &value.generation;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1152#let _ = &value.generation;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::messages"
@@ -31953,7 +31953,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::messages"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1138#let _ = &value.messages;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1156#let _ = &value.messages;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::model"
@@ -31962,7 +31962,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::model"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1142#let _ = &value.model;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1160#let _ = &value.model;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::model_capability"
@@ -31971,7 +31971,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::model_capability"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1146#let _ = &value.model_capability;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1164#let _ = &value.model_capability;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::model_variant"
@@ -31980,7 +31980,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::model_variant"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1150#let _ = &value.model_variant;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1168#let _ = &value.model_variant;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::output_spec"
@@ -31989,7 +31989,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::output_spec"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1154#let _ = &value.output_spec;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1172#let _ = &value.output_spec;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::provider_trace"
@@ -31998,7 +31998,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::provider_trace"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1158#let _ = &value.provider_trace;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1176#let _ = &value.provider_trace;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::request_id"
@@ -32007,7 +32007,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::request_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1161#member_witness(lash::provider::LlmRequest::request_id);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1179#member_witness(lash::provider::LlmRequest::request_id);"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::resolved_stored"
@@ -32016,7 +32016,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::resolved_stored"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1164#let _ = &value.resolved_stored;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1182#let _ = &value.resolved_stored;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::scope"
@@ -32025,7 +32025,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::scope"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1168#let _ = &value.scope;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1186#let _ = &value.scope;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::session_id"
@@ -32034,7 +32034,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::session_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1171#member_witness(lash::provider::LlmRequest::session_id);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1189#member_witness(lash::provider::LlmRequest::session_id);"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::stream_events"
@@ -32043,7 +32043,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::stream_events"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1174#let _ = &value.stream_events;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1192#let _ = &value.stream_events;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::tool_choice"
@@ -32052,7 +32052,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::tool_choice"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1178#let _ = &value.tool_choice;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1196#let _ = &value.tool_choice;"
 
 [[api]]
 symbol = "lash::provider::LlmRequest::tools"
@@ -32061,7 +32061,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequest::tools"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1182#let _ = &value.tools;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1200#let _ = &value.tools;"
 
 [[api]]
 symbol = "lash::provider::LlmRequestScope"
@@ -32070,7 +32070,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequestScope"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1185#type_witness::<lash::provider::LlmRequestScope>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1203#type_witness::<lash::provider::LlmRequestScope>();"
 
 [[api]]
 symbol = "lash::provider::LlmRequestScope::agent_frame_id"
@@ -32079,7 +32079,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequestScope::agent_frame_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1188#let _ = &value.agent_frame_id;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1206#let _ = &value.agent_frame_id;"
 
 [[api]]
 symbol = "lash::provider::LlmRequestScope::continuation_key"
@@ -32088,7 +32088,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequestScope::continuation_key"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1191#member_witness(lash::provider::LlmRequestScope::continuation_key);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1209#member_witness(lash::provider::LlmRequestScope::continuation_key);"
 
 [[api]]
 symbol = "lash::provider::LlmRequestScope::new"
@@ -32097,7 +32097,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequestScope::new"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1195#lash::provider::LlmRequestScope::new(session_id, agent_frame_id, request_id)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1213#lash::provider::LlmRequestScope::new(session_id, agent_frame_id, request_id)"
 
 [[api]]
 symbol = "lash::provider::LlmRequestScope::request_id"
@@ -32106,7 +32106,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequestScope::request_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1200#let _ = &value.request_id;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1218#let _ = &value.request_id;"
 
 [[api]]
 symbol = "lash::provider::LlmRequestScope::session_id"
@@ -32134,7 +32134,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::execution_evidence"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1208#let _ = &value.execution_evidence;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1226#let _ = &value.execution_evidence;"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::full_text"
@@ -32152,7 +32152,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::generation_disposition"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1212#let _ = &value.generation_disposition;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1230#let _ = &value.generation_disposition;"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::http_summary"
@@ -32161,7 +32161,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::http_summary"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1216#let _ = &value.http_summary;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1234#let _ = &value.http_summary;"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::parts"
@@ -32179,7 +32179,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::provider_usage"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1220#let _ = &value.provider_usage;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1238#let _ = &value.provider_usage;"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::request_body"
@@ -32188,7 +32188,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::request_body"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1224#let _ = &value.request_body;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1242#let _ = &value.request_body;"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::response_metadata"
@@ -32206,7 +32206,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::terminal_diagnostic"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1228#let _ = &value.terminal_diagnostic;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1246#let _ = &value.terminal_diagnostic;"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::terminal_reason"
@@ -32215,7 +32215,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmResponse::terminal_reason"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1232#let _ = &value.terminal_reason;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1250#let _ = &value.terminal_reason;"
 
 [[api]]
 symbol = "lash::provider::LlmResponse::usage"
@@ -32233,7 +32233,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1235#type_witness::<lash::provider::LlmStreamEvidence>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1253#type_witness::<lash::provider::LlmStreamEvidence>();"
 
 [[api]]
 symbol = "lash::provider::LlmStreamEvidence::execution_evidence"
@@ -32242,7 +32242,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::execution_evidence"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1208#let _ = &value.execution_evidence;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1226#let _ = &value.execution_evidence;"
 
 [[api]]
 symbol = "lash::provider::LlmStreamEvidence::generation_disposition"
@@ -32251,7 +32251,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::generation_disposition"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1212#let _ = &value.generation_disposition;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1230#let _ = &value.generation_disposition;"
 
 [[api]]
 symbol = "lash::provider::LlmStreamEvidence::http_summary"
@@ -32260,7 +32260,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::http_summary"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1216#let _ = &value.http_summary;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1234#let _ = &value.http_summary;"
 
 [[api]]
 symbol = "lash::provider::LlmStreamEvidence::merge"
@@ -32269,7 +32269,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::merge"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1249#member_witness(lash::provider::LlmStreamEvidence::merge);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1267#member_witness(lash::provider::LlmStreamEvidence::merge);"
 
 [[api]]
 symbol = "lash::provider::LlmStreamEvidence::provider_usage"
@@ -32278,7 +32278,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::provider_usage"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1220#let _ = &value.provider_usage;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1238#let _ = &value.provider_usage;"
 
 [[api]]
 symbol = "lash::provider::LlmStreamEvidence::request_body"
@@ -32287,7 +32287,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::request_body"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1224#let _ = &value.request_body;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1242#let _ = &value.request_body;"
 
 [[api]]
 symbol = "lash::provider::LlmStreamEvidence::response_metadata"
@@ -32296,7 +32296,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmStreamEvidence::response_metadata"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1260#let _ = &value.response_metadata;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1278#let _ = &value.response_metadata;"
 
 [[api]]
 symbol = "lash::provider::LlmTimeouts"
@@ -32338,7 +32338,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::LlmTransportError", "lash_core::llm::transport::LlmTransportError"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1263#type_witness::<lash::provider::LlmTransportError>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1281#type_witness::<lash::provider::LlmTransportError>();"
 
 [[api]]
 symbol = "lash::provider::ModelCapability"
@@ -32649,7 +32649,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderComponents", "lash_core::provider::handle::ProviderComponents"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1265#type_witness::<lash::provider::ProviderComponents>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1283#type_witness::<lash::provider::ProviderComponents>();"
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::failure_classifier"
@@ -32658,7 +32658,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderComponents::failure_classifier", "lash_core::provider::handle::ProviderComponents::failure_classifier"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1268#let _ = &value.failure_classifier;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1286#let _ = &value.failure_classifier;"
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::map_provider"
@@ -32667,7 +32667,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderComponents::map_provider", "lash_core::provider::handle::ProviderComponents::map_provider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1272#components.map_provider(|provider| provider)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1290#components.map_provider(|provider| provider)"
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::new"
@@ -32686,7 +32686,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderComponents::provider", "lash_core::provider::handle::ProviderComponents::provider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1267#field_witness(|value: &lash::provider::ProviderComponents| {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1285#field_witness(|value: &lash::provider::ProviderComponents| {"
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::rate_limiter"
@@ -32695,7 +32695,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderComponents::rate_limiter", "lash_core::provider::handle::ProviderComponents::rate_limiter"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1280#let _ = &value.rate_limiter;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1298#let _ = &value.rate_limiter;"
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::with_clock"
@@ -32704,7 +32704,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderComponents::with_clock", "lash_core::provider::handle::ProviderComponents::with_clock"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1283#member_witness(lash::provider::ProviderComponents::with_clock);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1301#member_witness(lash::provider::ProviderComponents::with_clock);"
 
 [[api]]
 symbol = "lash::provider::ProviderComponents::with_failure_classifier"
@@ -32713,7 +32713,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderComponents::with_failure_classifier", "lash_core::provider::handle::ProviderComponents::with_failure_classifier"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1285#member_witness(lash::provider::ProviderComponents::with_failure_classifier);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1303#member_witness(lash::provider::ProviderComponents::with_failure_classifier);"
 
 [[api]]
 symbol = "lash::provider::ProviderFailureClassifier"
@@ -32863,7 +32863,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle", "lash_core::provider::handle::ProviderHandle"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1287#type_witness::<lash::provider::ProviderHandle>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1305#type_witness::<lash::provider::ProviderHandle>();"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::close"
@@ -32881,7 +32881,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::complete", "lash_core::provider::handle::ProviderHandle::complete"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1289#member_witness(lash::provider::ProviderHandle::complete);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1307#member_witness(lash::provider::ProviderHandle::complete);"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::kind"
@@ -32890,7 +32890,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::kind", "lash_core::provider::handle::ProviderHandle::kind"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1291#member_witness(lash::provider::ProviderHandle::kind);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1309#member_witness(lash::provider::ProviderHandle::kind);"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::new"
@@ -32909,7 +32909,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::options", "lash_core::provider::handle::ProviderHandle::options"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1293#member_witness(lash::provider::ProviderHandle::options);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1311#member_witness(lash::provider::ProviderHandle::options);"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::requires_streaming"
@@ -32918,7 +32918,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::requires_streaming", "lash_core::provider::handle::ProviderHandle::requires_streaming"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1295#member_witness(lash::provider::ProviderHandle::requires_streaming);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1313#member_witness(lash::provider::ProviderHandle::requires_streaming);"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::set_options"
@@ -32927,7 +32927,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::set_options", "lash_core::provider::handle::ProviderHandle::set_options"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1297#member_witness(lash::provider::ProviderHandle::set_options);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1315#member_witness(lash::provider::ProviderHandle::set_options);"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::unconfigured"
@@ -32936,7 +32936,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::unconfigured", "lash_core::provider::handle::ProviderHandle::unconfigured"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1299#member_witness(lash::provider::ProviderHandle::unconfigured);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1317#member_witness(lash::provider::ProviderHandle::unconfigured);"
 
 [[api]]
 symbol = "lash::provider::ProviderHandle::with_clock"
@@ -32945,7 +32945,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderHandle::with_clock", "lash_core::provider::handle::ProviderHandle::with_clock"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1301#member_witness(lash::provider::ProviderHandle::with_clock);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1319#member_witness(lash::provider::ProviderHandle::with_clock);"
 
 [[api]]
 symbol = "lash::provider::ProviderOptions"
@@ -33051,7 +33051,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderOptions::sse_event_bytes", "lash_core::provider::options::ProviderOptions::sse_event_bytes"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1304#let _ = &value.sse_event_bytes;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1322#let _ = &value.sse_event_bytes;"
 
 [[api]]
 symbol = "lash::provider::ProviderOptions::sse_total_bytes"
@@ -33060,7 +33060,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ProviderOptions::sse_total_bytes", "lash_core::provider::options::ProviderOptions::sse_total_bytes"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1308#let _ = &value.sse_total_bytes;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1326#let _ = &value.sse_total_bytes;"
 
 [[api]]
 symbol = "lash::provider::ProviderRateLimitPolicy"
@@ -33960,7 +33960,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1228#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1227#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -33969,7 +33969,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1228#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1227#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -33978,7 +33978,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1228#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1227#Ok(RecoverableChatUpdate::Event { event, .. }) => {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::forward_session_observations#`let mut stream = session.observe().subscribe_recoverable_chat(cursor);`, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -34005,7 +34005,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1297#gap: Box::new(Envelope::new(gap)),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1296#gap: Box::new(Envelope::new(gap)),"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.body.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -34014,7 +34014,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1287#Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1286#Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
 assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.body.requested_cursor, requested_cursor);"
 
 [[api]]
@@ -34023,7 +34023,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1267#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1266#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
 reason = "Syntax-only evidence: the agent-workbench distinguishes resident replacement from terminal settlement; the browser projection test asserts the non-terminal behavior outside this Rust anchor."
 
 [[api]]
@@ -34032,7 +34032,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1267#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1266#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
 reason = "The agent-workbench forwards the resident signal, but the recorded Rust anchor is a variant pattern rather than an independent outcome assertion."
 
 [[api]]
@@ -34049,7 +34049,7 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1267#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1266#Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {"
 reason = "The agent-workbench forwards the resident snapshot cursor, but the recorded Rust anchor is a variant pattern rather than an independent outcome assertion."
 
 [[api]]
@@ -36883,7 +36883,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1229#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1228#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::forward_session_observations#`let mut sequence = 0;`, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 
@@ -46624,7 +46624,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::AssembledTurn::tool_calls", "lash_core::runtime::AssembledTurn::tool_calls"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1312#let _ = &value.tool_calls;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1330#let _ = &value.tool_calls;"
 
 [[api]]
 symbol = "lash::runtime::AssistantResponseHookEvents"
@@ -47866,7 +47866,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequestSpec::tool_choice"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1178#let _ = &value.tool_choice;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1196#let _ = &value.tool_choice;"
 
 [[api]]
 symbol = "lash::runtime::LlmRequestSpec::tools"
@@ -47875,7 +47875,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LlmRequestSpec::tools"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1182#let _ = &value.tools;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1200#let _ = &value.tools;"
 
 [[api]]
 symbol = "lash::runtime::NoopEventSink"
@@ -48292,7 +48292,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptUsage"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1323#type_witness::<lash::runtime::PromptUsage>();"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1341#type_witness::<lash::runtime::PromptUsage>();"
 
 [[api]]
 symbol = "lash::runtime::PromptUsage::cache_read_input_tokens"
@@ -48301,7 +48301,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptUsage::cache_read_input_tokens"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1326#let _ = &value.cache_read_input_tokens;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1344#let _ = &value.cache_read_input_tokens;"
 
 [[api]]
 symbol = "lash::runtime::PromptUsage::cache_write_input_tokens"
@@ -48310,7 +48310,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptUsage::cache_write_input_tokens"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1330#let _ = &value.cache_write_input_tokens;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1348#let _ = &value.cache_write_input_tokens;"
 
 [[api]]
 symbol = "lash::runtime::PromptUsage::context_budget_tokens"
@@ -48319,7 +48319,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptUsage::context_budget_tokens"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1334#let _ = &value.context_budget_tokens;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1352#let _ = &value.context_budget_tokens;"
 
 [[api]]
 symbol = "lash::runtime::PromptUsage::input_tokens"
@@ -48328,7 +48328,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptUsage::input_tokens"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1338#let _ = &value.input_tokens;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1356#let _ = &value.input_tokens;"
 
 [[api]]
 symbol = "lash::runtime::PromptUsage::prompt_context_tokens"
@@ -48337,7 +48337,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PromptUsage::prompt_context_tokens"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1342#let _ = &value.prompt_context_tokens;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1360#let _ = &value.prompt_context_tokens;"
 
 [[api]]
 symbol = "lash::runtime::ProtocolSessionExtensionHandle"
@@ -49191,7 +49191,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ToolAttempt"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1348#lash::runtime::RuntimeEffectCommand::ToolAttempt { .. }"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1366#lash::runtime::RuntimeEffectCommand::ToolAttempt { .. }"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::ToolAttempt::attempt"
@@ -49200,7 +49200,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ToolAttempt::attempt"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1353#if let lash::runtime::RuntimeEffectCommand::ToolAttempt { attempt, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1371#if let lash::runtime::RuntimeEffectCommand::ToolAttempt { attempt, .. } = value {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::ToolAttempt::call"
@@ -49209,7 +49209,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ToolAttempt::call"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1359#if let lash::runtime::RuntimeEffectCommand::ToolAttempt { call, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1377#if let lash::runtime::RuntimeEffectCommand::ToolAttempt { call, .. } = value {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::ToolAttempt::execution_grant"
@@ -49218,7 +49218,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ToolAttempt::execution_grant"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1366#execution_grant, .."
+usage = "examples/docs-snippets/src/plugins_facade.rs:1384#execution_grant, .."
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::ToolAttempt::max_attempts"
@@ -49227,7 +49227,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ToolAttempt::max_attempts"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1374#if let lash::runtime::RuntimeEffectCommand::ToolAttempt { max_attempts, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1392#if let lash::runtime::RuntimeEffectCommand::ToolAttempt { max_attempts, .. } = value {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::ToolBatch"
@@ -49236,7 +49236,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ToolBatch"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1380#matches!(value, lash::runtime::RuntimeEffectCommand::ToolBatch { .. })"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1398#matches!(value, lash::runtime::RuntimeEffectCommand::ToolBatch { .. })"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::ToolBatch::batch"
@@ -49245,7 +49245,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectCommand::ToolBatch::batch"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1384#if let lash::runtime::RuntimeEffectCommand::ToolBatch { batch, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1402#if let lash::runtime::RuntimeEffectCommand::ToolBatch { batch, .. } = value {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectCommand::Trigger"
@@ -49582,7 +49582,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::ToolAttempt"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1390#matches!(value, lash::runtime::RuntimeEffectKind::ToolAttempt)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1408#matches!(value, lash::runtime::RuntimeEffectKind::ToolAttempt)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::ToolBatch"
@@ -49591,7 +49591,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::ToolBatch"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1394#matches!(value, lash::runtime::RuntimeEffectKind::ToolBatch)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1412#matches!(value, lash::runtime::RuntimeEffectKind::ToolBatch)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::Trigger"
@@ -50064,7 +50064,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ToolAttempt"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1400#lash::runtime::RuntimeEffectOutcome::ToolAttempt { .. }"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1418#lash::runtime::RuntimeEffectOutcome::ToolAttempt { .. }"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::ToolAttempt::launch"
@@ -50073,7 +50073,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ToolAttempt::launch"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1405#if let lash::runtime::RuntimeEffectOutcome::ToolAttempt { launch, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1423#if let lash::runtime::RuntimeEffectOutcome::ToolAttempt { launch, .. } = value {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::ToolAttempt::triggers"
@@ -50091,7 +50091,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ToolBatch"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1411#matches!(value, lash::runtime::RuntimeEffectOutcome::ToolBatch { .. })"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1429#matches!(value, lash::runtime::RuntimeEffectOutcome::ToolBatch { .. })"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::ToolBatch::launches"
@@ -50100,7 +50100,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::ToolBatch::launches"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1415#if let lash::runtime::RuntimeEffectOutcome::ToolBatch { launches, .. } = value {"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1433#if let lash::runtime::RuntimeEffectOutcome::ToolBatch { launches, .. } = value {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectOutcome::ToolBatch::settlement_order"
@@ -51157,7 +51157,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::DurableEffectLivePluginInput"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1419#lash::runtime::RuntimeErrorCode::DurableEffectLivePluginInput"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1437#lash::runtime::RuntimeErrorCode::DurableEffectLivePluginInput"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::DurableEffectLiveProtocolExtension"
@@ -51303,7 +51303,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::PluginCheckpoint"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1428#matches!(value, lash::runtime::RuntimeErrorCode::PluginCheckpoint)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1446#matches!(value, lash::runtime::RuntimeErrorCode::PluginCheckpoint)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::PluginFinalizeTurn"
@@ -51312,7 +51312,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::PluginFinalizeTurn"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1432#matches!(value, lash::runtime::RuntimeErrorCode::PluginFinalizeTurn)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1450#matches!(value, lash::runtime::RuntimeErrorCode::PluginFinalizeTurn)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::PluginPrepareTurn"
@@ -51321,7 +51321,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::PluginPrepareTurn"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1436#matches!(value, lash::runtime::RuntimeErrorCode::PluginPrepareTurn)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1454#matches!(value, lash::runtime::RuntimeErrorCode::PluginPrepareTurn)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::PluginSessionManager"
@@ -51330,7 +51330,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeErrorCode::PluginSessionManager"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1440#matches!(value, lash::runtime::RuntimeErrorCode::PluginSessionManager)"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1458#matches!(value, lash::runtime::RuntimeErrorCode::PluginSessionManager)"
 
 [[api]]
 symbol = "lash::runtime::RuntimeErrorCode::PostgresAwaitEventDecode"
@@ -52770,7 +52770,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionPolicy::recorded_provider_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1451#member_witness(lash::runtime::SessionPolicy::recorded_provider_id);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1469#member_witness(lash::runtime::SessionPolicy::recorded_provider_id);"
 
 [[api]]
 symbol = "lash::runtime::SessionPolicy::session_id"
@@ -52870,7 +52870,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionSnapshot::plugin_snapshot_ref"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1458#let _ = &value.plugin_snapshot_ref;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1476#let _ = &value.plugin_snapshot_ref;"
 
 [[api]]
 symbol = "lash::runtime::SessionSnapshot::plugin_snapshot_revision"
@@ -52960,7 +52960,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionSnapshot::tool_state_generation"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1466#let _ = &value.tool_state_generation;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1484#let _ = &value.tool_state_generation;"
 
 [[api]]
 symbol = "lash::runtime::SessionSnapshot::tool_state_ref"
@@ -52969,7 +52969,7 @@ availability = "default+all-features"
 aliases = ["lash_core::SessionSnapshot::tool_state_ref"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1470#let _ = &value.tool_state_ref;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1488#let _ = &value.tool_state_ref;"
 
 [[api]]
 symbol = "lash::runtime::SessionSnapshot::turn_index"
@@ -53007,7 +53007,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::has_live_plugin_inputs"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1473#member_witness(lash::runtime::TurnContext::has_live_plugin_inputs);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1491#member_witness(lash::runtime::TurnContext::has_live_plugin_inputs);"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::insert_plugin_input"
@@ -53016,7 +53016,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::insert_plugin_input"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1478#input: serde_json::Value| { context.insert_plugin_input(plugin_id, input) },"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1496#input: serde_json::Value| { context.insert_plugin_input(plugin_id, input) },"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::live_plugin_input_ids"
@@ -53025,7 +53025,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::live_plugin_input_ids"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1481#member_witness(lash::runtime::TurnContext::live_plugin_input_ids);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1499#member_witness(lash::runtime::TurnContext::live_plugin_input_ids);"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::new"
@@ -53043,7 +53043,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::plugin_input"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1485#let _ = context.plugin_input::<serde_json::Value>(plugin_id);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1503#let _ = context.plugin_input::<serde_json::Value>(plugin_id);"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::prompt_layer"
@@ -53052,7 +53052,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::prompt_layer"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1489#member_witness(lash::runtime::TurnContext::prompt_layer);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1507#member_witness(lash::runtime::TurnContext::prompt_layer);"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::provider"
@@ -53061,7 +53061,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::provider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1491#member_witness(lash::runtime::TurnContext::provider);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1509#member_witness(lash::runtime::TurnContext::provider);"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::set_prompt_layer"
@@ -53070,7 +53070,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::set_prompt_layer"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1493#member_witness(lash::runtime::TurnContext::set_prompt_layer);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1511#member_witness(lash::runtime::TurnContext::set_prompt_layer);"
 
 [[api]]
 symbol = "lash::runtime::TurnContext::set_provider"
@@ -53079,7 +53079,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnContext::set_provider"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1495#member_witness(lash::runtime::TurnContext::set_provider);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1513#member_witness(lash::runtime::TurnContext::set_provider);"
 
 [[api]]
 symbol = "lash::runtime::render_turn_causes_prompt"
@@ -57676,7 +57676,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PreparedToolCall::args"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:974#let _ = &value.args;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:992#let _ = &value.args;"
 
 [[api]]
 symbol = "lash::tools::PreparedToolCall::call_id"
@@ -57685,7 +57685,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PreparedToolCall::call_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1502#let _ = &value.call_id;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1520#let _ = &value.call_id;"
 
 [[api]]
 symbol = "lash::tools::PreparedToolCall::from_parts"
@@ -57703,7 +57703,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PreparedToolCall::identity"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1505#member_witness(lash::tools::PreparedToolCall::identity);"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1523#member_witness(lash::tools::PreparedToolCall::identity);"
 
 [[api]]
 symbol = "lash::tools::PreparedToolCall::prepared_payload"
@@ -57712,7 +57712,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PreparedToolCall::prepared_payload"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade.rs:1508#let _ = &value.prepared_payload;"
+usage = "examples/docs-snippets/src/plugins_facade.rs:1526#let _ = &value.prepared_payload;"
 
 [[api]]
 symbol = "lash::tools::PreparedToolCall::replay"
@@ -62761,7 +62761,7 @@ kind = "function"
 availability = "all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1163#state.lashlang_execution.graphs(),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1162#state.lashlang_execution.graphs(),"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::list_lashlang_graphs#`let session_id = query.resolve(&state)?;`, inside `list_lashlang_graphs`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `list_lashlang_graphs` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -65348,7 +65348,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::for_session"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1526#.for_session(session_id),"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1525#.for_session(session_id),"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -66557,7 +66557,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::empty_trigger_source_key"]
 area = "triggers"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1501#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1500#let source_key = lash::triggers::empty_trigger_source_key(BUTTON_TRIGGER_SOURCE_TYPE)"
 reason = "Setup-only evidence: the example assigns the function result but no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -73205,7 +73205,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::OrchestrationContext::cancel_process"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:262#member_witness(lash::tools::OrchestrationContext::cancel_process);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:368#member_witness(lash::tools::OrchestrationContext::cancel_process);"
 
 [[api]]
 symbol = "lash::tools::OrchestrationContext::decode_prepared_payload"
@@ -73232,7 +73232,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::OrchestrationContext::prepared_payload"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:264#member_witness(lash::tools::OrchestrationContext::prepared_payload);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:370#member_witness(lash::tools::OrchestrationContext::prepared_payload);"
 
 [[api]]
 symbol = "lash::tools::OrchestrationContext::session_id"
@@ -73250,7 +73250,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::OrchestrationContext::signal_process"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:272#std::mem::drop(context.signal_process(process_id, signal_name, signal_id, payload));"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:378#std::mem::drop(context.signal_process(process_id, signal_name, signal_id, payload));"
 
 [[api]]
 symbol = "lash::tools::OrchestrationContext::start_process"
@@ -73284,7 +73284,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash/src/session.rs:426#pub(crate) inner: lash_core::facade_support::ParkedSession,"
+usage = "crates/lash/src/session.rs:428#pub(crate) inner: lash_core::facade_support::ParkedSession,"
 
 [[api]]
 symbol = "lash_core::facade_support::ParkedSession::session_id"
@@ -74319,7 +74319,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash/src/session.rs:531#lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope("
+usage = "crates/lash/src/session.rs:533#lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope("
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_state"
@@ -75701,7 +75701,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ToolStateFacadeOps::contains"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:277#member_witness(T::contains);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:383#member_witness(T::contains);"
 
 [[api]]
 symbol = "lash::tools::ToolStateFacadeOps::generation"
@@ -75710,7 +75710,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ToolStateFacadeOps::generation"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:278#member_witness(T::generation);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:384#member_witness(T::generation);"
 
 [[api]]
 symbol = "lash::tools::ToolStateFacadeOps::get"
@@ -75737,7 +75737,7 @@ availability = "default+all-features"
 aliases = ["lash_core::facade_support::ToolStateFacadeOps::tool_manifests"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:279#member_witness(T::tool_manifests);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:385#member_witness(T::tool_manifests);"
 
 [[api]]
 symbol = "lash_core::facade_support::TriggerManifestMembership"
@@ -77661,7 +77661,7 @@ kind = "constant"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/conformance.rs:2441#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
+usage = "crates/lash-postgres-store/tests/conformance.rs:2462#lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2). Renamed from NON_TERMINAL_PROCESS_STATUS_LABELS in FIG-1383: live is no longer the complement of terminal."
 
 [[api]]
@@ -80969,35 +80969,35 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1510#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1505#lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::executor_id"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1495#.zip(lease.executor_id.clone())"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1490#.zip(lease.executor_id.clone())"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::lease_token"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1438#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1433#.is_some_and(|lease| lease.lease_token.is_some() && lease.expires_at_ms > now)"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::owner"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1400#owner: &owner,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1395#owner: &owner,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity::session_id"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1399#session_id: &session_id,"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1394#session_id: &session_id,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts"
 kind = "struct"
@@ -81046,7 +81046,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1572#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1567#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::current_executor_id"
 kind = "field"
@@ -81093,7 +81093,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1572#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1567#lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::lifecycle("
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts::minimum_expires_at_epoch_ms"
 kind = "field"
@@ -81132,7 +81132,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1568#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1563#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::ExecutionFence"
 kind = "variant"
@@ -81147,14 +81147,14 @@ kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1648#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1643#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Release,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal"
 kind = "variant"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1568#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1563#lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::Renewal,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalOperation::RenewalInstall"
 kind = "variant"
@@ -81169,35 +81169,35 @@ kind = "function"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2615#lash_core::store_backend_support::derive_pending_turn_input_id("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2610#lash_core::store_backend_support::derive_pending_turn_input_id("
 [[api]]
 symbol = "lash_core::store_backend_support::admitted_min_boundary_sql"
 kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3236#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3231#let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql("
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_abandon_restore_claim_id"
 kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2312#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:2307#.bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))"
 [[api]]
 symbol = "lash_core::store_backend_support::queued_work_claim_data"
 kind = "function"
 availability = "default+all-features"
 area = "processes"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1819#data: lash_core::store_backend_support::queued_work_claim_data("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1814#data: lash_core::store_backend_support::queued_work_claim_data("
 [[api]]
 symbol = "lash_core::store_backend_support::session_command_batch_completion_key"
 kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1162#lash_core::store_backend_support::session_command_batch_completion_key("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1160#lash_core::store_backend_support::session_command_batch_completion_key("
 [[api]]
 symbol = "lash_core::store_backend_support::require_current_session_execution_lease"
 kind = "function"
@@ -81211,7 +81211,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1567#lash_core::store_backend_support::trace_session_execution_lease_refusal("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1562#lash_core::store_backend_support::trace_session_execution_lease_refusal("
 [[api]]
 symbol = "lash::tools::ToolTriggerEffectOutcome"
 kind = "struct"
@@ -90460,7 +90460,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolAttachmentClient::put"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:220#member_witness(lash::tools::ToolAttachmentClient::put);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:326#member_witness(lash::tools::ToolAttachmentClient::put);"
 
 [[api]]
 symbol = "lash::tools::ToolDirectCompletionClient::complete"
@@ -90469,7 +90469,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDirectCompletionClient::complete"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:222#member_witness(lash::tools::ToolDirectCompletionClient::complete);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:328#member_witness(lash::tools::ToolDirectCompletionClient::complete);"
 
 [[api]]
 symbol = "lash::tools::ToolDispatchClient::batch"
@@ -90478,7 +90478,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDispatchClient::batch"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:224#member_witness(lash::tools::ToolDispatchClient::batch);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:330#member_witness(lash::tools::ToolDispatchClient::batch);"
 
 [[api]]
 symbol = "lash::tools::ToolDispatchClient::callable_tool_manifest"
@@ -90487,7 +90487,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolDispatchClient::callable_tool_manifest"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:226#member_witness(lash::tools::ToolDispatchClient::callable_tool_manifest);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:332#member_witness(lash::tools::ToolDispatchClient::callable_tool_manifest);"
 
 [[api]]
 symbol = "lash::tools::ToolProcessEventClient::emit"
@@ -90496,7 +90496,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolProcessEventClient::emit"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:232#std::mem::drop(client.emit(event_type, payload));"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:338#std::mem::drop(client.emit(event_type, payload));"
 
 [[api]]
 symbol = "lash::tools::ToolProcessEventClient::emit_request"
@@ -90505,7 +90505,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolProcessEventClient::emit_request"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:236#member_witness(lash::tools::ToolProcessEventClient::emit_request);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:342#member_witness(lash::tools::ToolProcessEventClient::emit_request);"
 
 [[api]]
 symbol = "lash::tools::ToolProcessEventClient::wait_event_after"
@@ -90514,7 +90514,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolProcessEventClient::wait_event_after"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:238#member_witness(lash::tools::ToolProcessEventClient::wait_event_after);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:344#member_witness(lash::tools::ToolProcessEventClient::wait_event_after);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::close_session"
@@ -90523,7 +90523,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::close_session"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:240#member_witness(lash::tools::ToolSessionAdmin::close_session);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:346#member_witness(lash::tools::ToolSessionAdmin::close_session);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::create_session"
@@ -90532,7 +90532,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::create_session"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:242#member_witness(lash::tools::ToolSessionAdmin::create_session);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:348#member_witness(lash::tools::ToolSessionAdmin::create_session);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::model"
@@ -90541,7 +90541,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::model"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:244#member_witness(lash::tools::ToolSessionAdmin::model);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:350#member_witness(lash::tools::ToolSessionAdmin::model);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::set_tool_membership"
@@ -90550,7 +90550,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::set_tool_membership"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:246#member_witness(lash::tools::ToolSessionAdmin::set_tool_membership);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:352#member_witness(lash::tools::ToolSessionAdmin::set_tool_membership);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::shared_tool_catalog"
@@ -90559,7 +90559,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::shared_tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:248#member_witness(lash::tools::ToolSessionAdmin::shared_tool_catalog);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:354#member_witness(lash::tools::ToolSessionAdmin::shared_tool_catalog);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::snapshot"
@@ -90568,7 +90568,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::snapshot"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:252#std::mem::drop(sessions.snapshot(session_id));"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:358#std::mem::drop(sessions.snapshot(session_id));"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::snapshot_current"
@@ -90577,7 +90577,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::snapshot_current"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:256#member_witness(lash::tools::ToolSessionAdmin::snapshot_current);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:362#member_witness(lash::tools::ToolSessionAdmin::snapshot_current);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::start_turn"
@@ -90586,7 +90586,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::start_turn"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:258#member_witness(lash::tools::ToolSessionAdmin::start_turn);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:364#member_witness(lash::tools::ToolSessionAdmin::start_turn);"
 
 [[api]]
 symbol = "lash::tools::ToolSessionAdmin::tool_catalog"
@@ -90595,7 +90595,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolSessionAdmin::tool_catalog"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/plugins_facade_part3.rs:260#member_witness(lash::tools::ToolSessionAdmin::tool_catalog);"
+usage = "examples/docs-snippets/src/plugins_facade_part3.rs:366#member_witness(lash::tools::ToolSessionAdmin::tool_catalog);"
 
 [[removal_verdict]]
 symbol = "lash::AwaitEventKey::promise_key"
@@ -95392,7 +95392,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:4327#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
+usage = "crates/lash-sqlite-store/src/persistence.rs:4322#if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable("
 [[api]]
 symbol = "lash::EmptyQueuedDrainReason"
 kind = "enum"
@@ -95605,7 +95605,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:1817#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:1812#) -> Result<QueuedWorkClaimOutcome, StoreError> {"
 reason = "Internal seam: this is the contract every durable backend returns from an automatic claim, so its consumers are the backends themselves rather than an example."
 
 [[api]]
@@ -95615,7 +95615,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1936#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1931#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend reports the rows it claimed through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -95625,7 +95625,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Claimed::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1936#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1931#Ok(QueuedWorkClaimOutcome::Claimed(QueuedWorkClaim {"
 reason = "Internal seam: a backend carries the claim it took in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -95635,7 +95635,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1835#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1830#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend names why it claimed nothing through this variant, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -95645,7 +95645,7 @@ availability = "default+all-features"
 aliases = ["lash_core::QueuedWorkClaimOutcome::Refused::0"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1835#return Ok(QueuedWorkClaimOutcome::Refused("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1830#return Ok(QueuedWorkClaimOutcome::Refused("
 reason = "Internal seam: a backend carries the refusal it computed in this field, so the consumer is the backend rather than an example."
 
 [[api]]
@@ -95952,7 +95952,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceFailure::failed"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3068#lash_core::MaintenanceFailure::failed("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3063#lash_core::MaintenanceFailure::failed("
 reason = "FIG-1505: the Postgres vacuum reports the rows its first delete already committed when the second fails, which is the constructor's whole purpose; the consumer is a backend crate rather than an example."
 
 [[api]]
@@ -95990,7 +95990,7 @@ availability = "default+all-features"
 aliases = ["lash_core::MaintenanceResult"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/persistence.rs:3330#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
+usage = "crates/lash-sqlite-store/src/persistence.rs:3325#async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {"
 reason = "FIG-1505: every store backend spells the maintenance levers' return type with this alias; the consumers are backend crates rather than examples. Host-facing projection: `lash::persistence::MaintenanceResult`."
 
 [[api]]
