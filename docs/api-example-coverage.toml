@@ -35,7 +35,7 @@ removal_verdicts_recorded = 787
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2329
+prose_citations_recorded = 2297
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -12725,7 +12725,7 @@ aliases = ["lash_core::facade_support::SessionObservation"]
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:102#debug_assert_eq!(observation.cursor, cursor.to_string());"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:734#assert_eq!(observation.cursor, gap.latest_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:734#assert_eq!(observation.body.cursor, gap.body.latest_cursor);"
 
 [[api]]
 symbol = "lash::observe::SessionObservation::cursor"
@@ -12735,7 +12735,7 @@ aliases = ["lash_core::facade_support::SessionObservation::cursor"]
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:100#cursor: cursor.clone(),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:734#assert_eq!(observation.cursor, gap.latest_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:734#assert_eq!(observation.body.cursor, gap.body.latest_cursor);"
 
 [[api]]
 symbol = "lash::observe::SessionObservation::read_view"
@@ -34018,8 +34018,8 @@ kind = "variant"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
+usage = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.body.requested_cursor, requested_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.body.requested_cursor, requested_cursor);"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
 [[api]]
@@ -34028,8 +34028,8 @@ kind = "field"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/routes.rs:1297#gap: Box::new(gap),"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
+usage = "examples/agent-workbench/src/main_sections/routes.rs:1297#gap: Box::new(Envelope::new(gap)),"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.body.requested_cursor, requested_cursor);"
 
 [[api]]
 symbol = "lash::recoverable_chat::RecoverableChatUpdate::ReplayGap::snapshot"
@@ -34038,7 +34038,7 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:1287#Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {"
-assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.requested_cursor, requested_cursor);"
+assertion = "examples/agent-workbench/src/main_sections/tests.rs:729#assert_eq!(gap.body.requested_cursor, requested_cursor);"
 
 [[api]]
 symbol = "lash::recoverable_chat::RecoverableChatUpdate::ResidentReplacement"
@@ -34106,6 +34106,68 @@ availability = "default+all-features"
 area = "observation-admin"
 disposition = "unused-add"
 reason = "The current example use of lash::recoverable_chat::RecoverableChatUpdate::TerminalReplacement::snapshot is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::remote::Envelope"
+kind = "struct"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1484#assert_eq!(envelope.protocol_version(), REMOTE_PROTOCOL_VERSION);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1484#assert_eq!(envelope.protocol_version(), REMOTE_PROTOCOL_VERSION);"
+reason = "The docs example wraps a bare remote turn input and asserts the shared envelope stamps the negotiated protocol version."
+
+[[api]]
+symbol = "lash::remote::Envelope::body"
+kind = "field"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The generic envelope law exercises direct body access; the named facade example primarily uses the body through message-specific validation."
+
+[[api]]
+symbol = "lash::remote::Envelope::decode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1487#assert_eq!(decoded.body, input);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1487#assert_eq!(decoded.body, input);"
+reason = "The docs example decodes a versioned envelope and asserts its flattened body round-trips unchanged."
+
+[[api]]
+symbol = "lash::remote::Envelope::encode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1487#assert_eq!(decoded.body, input);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1487#assert_eq!(decoded.body, input);"
+reason = "The docs example encodes the envelope and observes the same body after decoding that wire representation."
+
+[[api]]
+symbol = "lash::remote::Envelope::into_body"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The generic envelope law covers consuming a decoded envelope; message-specific decoders expose bare bodies directly to facade consumers."
+
+[[api]]
+symbol = "lash::remote::Envelope::new"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "Envelope construction is covered by the generic envelope law and used throughout standalone transport projections; no separate example row is needed."
+
+[[api]]
+symbol = "lash::remote::Envelope::protocol_version"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The generic envelope law asserts this accessor equals REMOTE_PROTOCOL_VERSION; production consumers normally negotiate through decode_json."
 
 [[api]]
 symbol = "lash::remote::REMOTE_PROTOCOL_VERSION"
@@ -34337,45 +34399,10 @@ area = "protocol"
 disposition = "unused-justify"
 reason = "Protocol-integrator decode detail; consumers may inspect the underlying JSON error when a current-version remote message is corrupt."
 
-[[api]]
-symbol = "lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion"
-kind = "variant"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::child"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::child to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::child_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::child_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::parent"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::parent to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::parent_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::RemoteProtocolError::MismatchedNestedProtocolVersion::parent_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::RemoteProtocolError::MissingLlmCallActivity"
@@ -34531,13 +34558,6 @@ area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::RemoteProtocolError::UnsupportedProtocolVersion::expected to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::ensure_protocol_version"
-kind = "function"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::ensure_protocol_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteAttachmentRef"
@@ -35649,8 +35669,16 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1383#RemoteLlmRequest::decode_json(&request_wire).expect(\"current request decodes\");"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1384#assert_eq!(decoded.request_id, \"request-version-first\");"
 assertion = "examples/docs-snippets/src/remote_protocol.rs:1384#assert_eq!(decoded.request_id, \"request-version-first\");"
+
+[[api]]
+symbol = "lash::remote::llm::RemoteLlmRequest::encode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The generic streamed-message law verifies the LLM request convenience encoder emits exactly one version and round-trips through its decoder."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmRequest::attachments"
@@ -35708,13 +35736,6 @@ area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteLlmRequest::output_spec to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::llm::RemoteLlmRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::llm::RemoteLlmRequest::protocol_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmRequest::request_id"
@@ -35852,13 +35873,6 @@ area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::llm::RemoteLlmResponse::output_parts to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::llm::RemoteLlmResponse::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::llm::RemoteLlmResponse::protocol_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::llm::RemoteLlmResponse::provider_metadata"
@@ -36666,7 +36680,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/routes.rs:1066#gap: Box::new(RemoteLiveReplayGap {"
+usage = "examples/agent-service/src/routes.rs:1066#gap: Box::new(Envelope::new(RemoteLiveReplayGap {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -36687,14 +36701,6 @@ disposition = "used-asserted"
 usage = "examples/agent-service/src/routes.rs:1071#latest_revision: 7,"
 assertion = "examples/agent-service/src/routes.rs:1077#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
-[[api]]
-symbol = "lash::remote::observations::RemoteLiveReplayGap::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1060#protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/agent-service/src/routes.rs:1077#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteLiveReplayGap::reason"
@@ -36781,13 +36787,6 @@ area = "observation-admin"
 disposition = "unused-add"
 reason = "The current example use of lash::remote::observations::RemoteSessionCursor::new is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::observations::RemoteSessionCursor::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::remote::observations::RemoteSessionCursor::protocol_version to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionCursor::validate"
@@ -36803,7 +36802,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "observation-admin"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/routes.rs:1059#observation: Box::new(RemoteSessionObservation {"
+usage = "examples/agent-service/src/routes.rs:1059#observation: Box::new(Envelope::new(RemoteSessionObservation {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -36823,14 +36822,6 @@ area = "observation-admin"
 disposition = "unused-add"
 reason = "The current example use of lash::remote::observations::RemoteSessionObservation::from_core is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::observations::RemoteSessionObservation::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "observation-admin"
-disposition = "used-asserted"
-usage = "examples/agent-service/src/routes.rs:1060#protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/agent-service/src/routes.rs:1077#assert_eq!(value.pointer(\"/type\"), Some(&json!(\"replay_gap\")));"
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservation::session_id"
@@ -36884,6 +36875,14 @@ disposition = "unused-justify"
 reason = "Protocol-integrator decode seam; the remote-protocol law exercises its typed version-first refusal directly, while facade examples consume already-decoded observation events."
 
 [[api]]
+symbol = "lash::remote::observations::RemoteSessionObservationEvent::encode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add standalone session-observation envelope encoding to the streaming docs example and assert its externally observable wire result."
+
+[[api]]
 symbol = "lash::remote::observations::RemoteSessionObservationEvent::cursor"
 kind = "field"
 availability = "default+all-features"
@@ -36908,13 +36907,6 @@ disposition = "used-unasserted"
 usage = "examples/agent-workbench/src/main_sections/routes.rs:1229#let event = match RemoteSessionObservationEvent::from_core(sequence, event) {"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/main_sections/routes.rs::forward_session_observations#`let mut sequence = 0;`, inside `forward_session_observations`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests.rs::tests::reset_session_rotation_replaces_workbench_session_id#`assert_eq!(old, original);` asserts an unrelated expression in `reset_session_rotation_replaces_workbench_session_id`, and `forward_session_observations` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::observations::RemoteSessionObservationEvent::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::remote::observations::RemoteSessionObservationEvent::protocol_version to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::observations::RemoteSessionObservationEvent::replay_incarnation_id"
@@ -37636,15 +37628,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:462#let persist = RemoteP
 assertion = "examples/docs-snippets/src/remote_protocol.rs:363#assert_eq!(env_spec.policy.turn_budget, expected_budget);"
 reason = "The remote-process example persists the captured environment and asserts that its required turn budget is preserved."
 
-[[api]]
-symbol = "lash::remote::processes::RemotePersistProcessEnvRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:474#assert_eq!(persisted.env_ref, env_ref);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_turn_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`assert_eq!(persisted.env_ref, env_ref);` in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `persisted.env_ref` equals `env_ref`."
 
 [[api]]
 symbol = "lash::remote::processes::RemotePersistProcessEnvRequest::validate"
@@ -37676,15 +37659,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:470#env_ref: env_ref.clon
 assertion = "examples/docs-snippets/src/remote_protocol.rs:323#.starts_with(RemoteProcessExecutionEnvRef::PREFIX)"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`env_ref: env_ref.clone(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`.starts_with(RemoteProcessExecutionEnvRef::PREFIX)` in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `env_ref .as_str() .starts_with(RemoteProcessExecutionEnvRef::PREFIX)` holds."
 
-[[api]]
-symbol = "lash::remote::processes::RemotePersistProcessEnvReceipt::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:474#assert_eq!(persisted.env_ref, env_ref);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_turn_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`assert_eq!(persisted.env_ref, env_ref);` in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `persisted.env_ref` equals `env_ref`."
 
 [[api]]
 symbol = "lash::remote::processes::RemotePersistProcessEnvReceipt::validate"
@@ -37921,15 +37895,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`let list_response = RemoteProcessListResponse {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessAwaitRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:785#assert_eq!(await_json[\"output\"][\"type\"], \"success\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`assert_eq!(list_json[\"created_at_end_ms\"], 1_720_000_001_000_u64);`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`process_id: \"invoice-export\".to_string(),` in `remote_process_controls_cover_filters_terminal_outputs_and_inputs` observes that `await_json[\"output\"][\"type\"]` equals `\"success\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessAwaitRequest::validate"
@@ -37970,15 +37935,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`assert_eq!(list_response.records[0].process_id, \"invoice-export\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessAwaitOutcome::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:785#assert_eq!(await_json[\"output\"][\"type\"], \"success\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`RemoteProcessListResponse::validate(&list_response).expect(\"valid process list response\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`process_id: \"invoice-export\".to_string(),` in `remote_process_controls_cover_filters_terminal_outputs_and_inputs` observes that `await_json[\"output\"][\"type\"]` equals `\"success\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessAwaitOutcome::validate"
@@ -38009,15 +37965,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`process_id: \"invoice-export\".to_string(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessCancelRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:801#assert!(cancel_result.status.is_terminal());"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`let cancel_request = RemoteProcessCancelRequest {` in `remote_process_controls_cover_filters_terminal_outputs_and_inputs` observes that `cancel_result.status.is_terminal()` holds."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessCancelRequest::reason"
@@ -38059,15 +38006,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`RemoteProcessAwaitOutcome::validate(&await_result).expect(\"valid process await result\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessCancelReceipt::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:801#assert!(cancel_result.status.is_terminal());"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_turn_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`assert!(cancel_result.status.is_terminal());` in `remote_process_controls_cover_filters_terminal_outputs_and_inputs` observes that `cancel_result.status.is_terminal()` holds."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessCancelReceipt::record"
@@ -38373,15 +38311,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`2`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessEventsRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:720#assert_eq!(events_response.events[0].event_type, \"signal.approval\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_turn_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`assert_eq!(events_response.events[0].event_type, \"signal.approval\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `events_response.events[0].event_type` equals `\"signal.approval\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessEventsRequest::validate"
@@ -38423,15 +38352,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`assert_eq!(`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessEventsResponse::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:720#assert_eq!(events_response.events[0].event_type, \"signal.approval\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_turn_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`assert_eq!(events_response.events[0].event_type, \"signal.approval\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `events_response.events[0].event_type` equals `\"signal.approval\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessEventsResponse::validate"
@@ -38885,15 +38805,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:736#originator_id: Some(\
 assertion = "examples/docs-snippets/src/remote_protocol.rs:749#assert_eq!(list_json[\"originator_id\"], \"session-finance\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`originator_id: Some(\"session-finance\".to_string()),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`assert_eq!(list_json[\"originator_id\"], \"session-finance\");` in `remote_process_controls_cover_filters_terminal_outputs_and_inputs` observes that `list_json[\"originator_id\"]` equals `\"session-finance\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessListFilter::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:746#assert_eq!(list_json[\"status\"], \"waiting\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_turn_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`assert_eq!(list_json[\"status\"], \"waiting\");` in `remote_process_controls_cover_filters_terminal_outputs_and_inputs` observes that `list_json[\"status\"]` equals `\"waiting\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessListFilter::status"
@@ -38935,15 +38846,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:764#assert_eq!(list_respo
 assertion = "examples/docs-snippets/src/remote_protocol.rs:764#assert_eq!(list_response.records[0].process_id, \"invoice-export\");"
 reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessListResponse::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:764#assert_eq!(list_response.records[0].process_id, \"invoice-export\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`assert_eq!(list_json[\"waiting\"], true);`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_controls_cover_filters_terminal_outputs_and_inputs#`assert_eq!(list_json[\"identity_label\"], \"Nightly invoice export\");` in `remote_process_controls_cover_filters_terminal_outputs_and_inputs` observes that `list_response.records[0].process_id` equals `\"invoice-export\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessListResponse::records"
@@ -39206,15 +39108,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`assert_eq!(projected_process[\"wait\"][\"kind\"][\"ordinal\"], 1);`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessSignalRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:621#assert_eq!(signal.payload[\"approved\"], true);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`assert_eq!(projected_process[\"external_ref\"][\"id\"], \"invocation-778\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`8` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `signal.payload[\"approved\"]` equals `true`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessSignalRequest::replay_key"
@@ -39275,15 +39168,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:628#event: signal_event()
 assertion = "examples/docs-snippets/src/remote_protocol.rs:678#assert_eq!(signal_json[\"event\"][\"sequence\"], 3);"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`signal_name: \"approval\".to_string(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"wake projection\"),` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `signal_json[\"event\"][\"sequence\"]` equals `3`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessSignalReceipt::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:678#assert_eq!(signal_json[\"event\"][\"sequence\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`process_id: \"invoice-export\".to_string(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"wake projection\"),` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `signal_json[\"event\"][\"sequence\"]` equals `3`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessSignalReceipt::validate"
@@ -39342,7 +39226,7 @@ area = "processes"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:51#id: \"process-01\".to_string(),"
 assertion = "examples/docs-snippets/src/remote_protocol.rs:406#assert_eq!(request_json[\"id\"], \"invoice-export\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_process_start_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`.wake` in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `request_json[\"id\"]` equals `\"invoice-export\"`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_process_start_request#`id: \"process-01\".to_string(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`.wake` in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `request_json[\"id\"]` equals `\"invoice-export\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessStartRequest::identity"
@@ -39394,15 +39278,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:78#originator: RemoteProc
 assertion = "examples/docs-snippets/src/remote_protocol.rs:411#assert_eq!(request_json[\"originator\"][\"type\"], \"session\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_process_start_request#`originator: RemoteProcessOriginator::Host { scope: None },`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`assert_eq!(request_json[\"originator\"][\"type\"], \"session\");` in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `request_json[\"originator\"][\"type\"]` equals `\"session\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessStartRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:314#assert_eq!(scope.session_id, \"session-finance\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_process_start_request#`let request = RemoteProcessStartRequest {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `scope.session_id` equals `\"session-finance\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessStartRequest::validate"
@@ -39433,15 +39308,6 @@ disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:476#let start_result = RemoteProcessStartReceipt {"
 reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessStartReceipt::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:521#assert_eq!(start_json[\"record\"][\"status\"], \"waiting\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`env_spec,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`.record` in `remote_process_start_contract_validates_captured_environment_and_identity` observes that `start_json[\"record\"][\"status\"]` equals `\"waiting\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessStartReceipt::record"
@@ -39739,7 +39605,7 @@ area = "processes"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:140#process_id: \"invoice-export\".to_string(),"
 assertion = "examples/docs-snippets/src/remote_protocol.rs:566#assert_eq!(projected_process[\"process_id\"], \"invoice-export\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_start_contract_validates_captured_environment_and_identity#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::running_record#`process_id: \"invoice-export\".to_string(),`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"valid observed work item\");` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `projected_process[\"process_id\"]` equals `\"invoice-export\"`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessHandleView::status"
@@ -40190,15 +40056,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:533#items: vec![RemotePro
 assertion = "examples/docs-snippets/src/remote_protocol.rs:561#snapshot_json[\"items\"][0][\"process\"][\"status_label\"],"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`items: vec![RemoteProcessWorkItem {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`snapshot_json[\"items\"][0][\"process\"][\"status_label\"],` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `snapshot_json[\"items\"][0][\"process\"][\"status_label\"]` equals `\"waiting\"`."
 
-[[api]]
-symbol = "lash::remote::processes::RemoteProcessWorkSnapshot::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "processes"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:14#protocol_version: REMOTE_PROTOCOL_VERSION,"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:557#snapshot_json[\"visible_process_ids\"],"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::remote_turn_request#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`snapshot_json[\"visible_process_ids\"],` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `snapshot_json[\"visible_process_ids\"]` equals `json!([\"invoice-export\"])`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteProcessWorkSnapshot::session_id"
@@ -40693,7 +40550,7 @@ area = "processes"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:640#RemoteRuntimeSubject::validate("
 assertion = "examples/docs-snippets/src/remote_protocol.rs:678#assert_eq!(signal_json[\"event\"][\"sequence\"], 3);"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`protocol_version: REMOTE_PROTOCOL_VERSION,`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"wake projection\"),` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `signal_json[\"event\"][\"sequence\"]` equals `3`."
+reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`RemoteRuntimeSubject::validate(`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_process_examples::remote_process_work_projection_preserves_events_and_runtime_provenance#`.expect(\"wake projection\"),` in `remote_process_work_projection_preserves_events_and_runtime_provenance` observes that `signal_json[\"event\"][\"sequence\"]` equals `3`."
 
 [[api]]
 symbol = "lash::remote::processes::RemoteSessionScope"
@@ -41449,15 +41306,6 @@ usage = "examples/docs-snippets/src/remote_protocol.rs:1133#assert_eq!(grant.out
 assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
 reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_grant#`\"retry_policy\": {`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`.expect_err(\"missing authority must fail closed\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
-[[api]]
-symbol = "lash::remote::tools::RemoteToolGrant::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "plugins"
-disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1128#assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1223#assert_eq!(definition.id().as_str(), \"remote-tool:search_docs\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert!(message.contains(\"id cannot be empty\"));` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `definition.id().as_str()` equals `\"remote-tool:search_docs\"`."
 
 [[api]]
 symbol = "lash::remote::tools::RemoteToolGrant::retry_policy"
@@ -41774,13 +41622,6 @@ area = "triggers"
 disposition = "unused-add"
 reason = "Add lash::remote::triggers::RemoteTriggerEmitReport::occurrence_id to the agent-service trigger flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::triggers::RemoteTriggerEmitReport::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerEmitReport::protocol_version to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerEmitReport::validate"
@@ -41862,13 +41703,6 @@ area = "triggers"
 disposition = "unused-add"
 reason = "The current example use of lash::remote::triggers::RemoteTriggerListSubscriptionsResponse is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::triggers::RemoteTriggerListSubscriptionsResponse::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerListSubscriptionsResponse::protocol_version to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerListSubscriptionsResponse::subscriptions"
@@ -41998,13 +41832,6 @@ area = "triggers"
 disposition = "unused-add"
 reason = "Add lash::remote::triggers::RemoteTriggerOccurrenceRequest::payload to the agent-service trigger flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::triggers::RemoteTriggerOccurrenceRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerOccurrenceRequest::protocol_version to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerOccurrenceRequest::session_id"
@@ -42070,13 +41897,6 @@ area = "triggers"
 disposition = "unused-add"
 reason = "Add lash::remote::triggers::RemoteTriggerRegisterSubscriptionRequest::draft to the agent-service trigger flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::triggers::RemoteTriggerRegisterSubscriptionRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerRegisterSubscriptionRequest::protocol_version to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerRegisterSubscriptionRequest::validate"
@@ -42094,13 +41914,6 @@ area = "triggers"
 disposition = "unused-add"
 reason = "The current example use of lash::remote::triggers::RemoteTriggerRegisterSubscriptionReceipt is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::triggers::RemoteTriggerRegisterSubscriptionReceipt::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerRegisterSubscriptionReceipt::protocol_version to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerRegisterSubscriptionReceipt::record"
@@ -42270,13 +42083,6 @@ area = "triggers"
 disposition = "unused-add"
 reason = "Add lash::remote::triggers::RemoteTriggerSubscriptionDraft::payload_schema to the agent-service trigger flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::triggers::RemoteTriggerSubscriptionDraft::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerSubscriptionDraft::protocol_version to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionDraft::source"
@@ -42454,13 +42260,6 @@ area = "triggers"
 disposition = "unused-add"
 reason = "Add lash::remote::triggers::RemoteTriggerSubscriptionFilter::name to the agent-service trigger flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::triggers::RemoteTriggerSubscriptionFilter::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "triggers"
-disposition = "unused-add"
-reason = "Add lash::remote::triggers::RemoteTriggerSubscriptionFilter::protocol_version to the agent-service trigger flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::triggers::RemoteTriggerSubscriptionFilter::registrant_scope_id"
@@ -42848,13 +42647,6 @@ area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::turn_control::RemoteTurnCancelReceipt::outcome to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::turn_control::RemoteTurnCancelReceipt::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::turn_control::RemoteTurnCancelReceipt::protocol_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::turn_control::RemoteTurnCancelReceipt::session_id"
@@ -42896,13 +42688,6 @@ area = "protocol"
 disposition = "unused-add"
 reason = "Add lash::remote::turn_control::RemoteTurnCancelRequest::origin to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::turn_control::RemoteTurnCancelRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::turn_control::RemoteTurnCancelRequest::protocol_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::turn_control::RemoteTurnCancelRequest::reason"
@@ -43073,6 +42858,22 @@ disposition = "unused-add"
 reason = "The current example use of lash::remote::turn_input::RemoteTurnInput is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::remote::turn_input::RemoteTurnInput::decode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The generic streamed-message law verifies standalone turn-input decoding, including version-first refusal and body round-tripping."
+
+[[api]]
+symbol = "lash::remote::turn_input::RemoteTurnInput::encode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-justify"
+reason = "The generic streamed-message law verifies standalone turn-input encoding contributes exactly one top-level protocol version."
+
+[[api]]
 symbol = "lash::remote::turn_input::RemoteTurnInput::items"
 kind = "field"
 availability = "default+all-features"
@@ -43096,13 +42897,6 @@ area = "protocol"
 disposition = "unused-add"
 reason = "The current example use of lash::remote::turn_input::RemoteTurnInput::protocol_turn_options is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::turn_input::RemoteTurnInput::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "The current example use of lash::remote::turn_input::RemoteTurnInput::protocol_version is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
 symbol = "lash::remote::turn_input::RemoteTurnInput::text"
@@ -43137,6 +42931,22 @@ disposition = "unused-add"
 reason = "The current example use of lash::remote::turn_input::RemoteTurnRequest is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::remote::turn_input::RemoteTurnRequest::decode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add standalone turn-request envelope decoding to the remote protocol docs example and assert its externally observable result."
+
+[[api]]
+symbol = "lash::remote::turn_input::RemoteTurnRequest::encode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add standalone turn-request envelope encoding to the remote protocol docs example and assert its externally observable wire result."
+
+[[api]]
 symbol = "lash::remote::turn_input::RemoteTurnRequest::idempotency_key"
 kind = "field"
 availability = "default+all-features"
@@ -43160,13 +42970,6 @@ area = "protocol"
 disposition = "unused-add"
 reason = "The current example use of lash::remote::turn_input::RemoteTurnRequest::metadata is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
-[[api]]
-symbol = "lash::remote::turn_input::RemoteTurnRequest::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "The current example use of lash::remote::turn_input::RemoteTurnRequest::protocol_version is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
 symbol = "lash::remote::turn_input::RemoteTurnRequest::session_id"
@@ -43817,6 +43620,14 @@ disposition = "unused-justify"
 reason = "Protocol-integrator decode seam; the remote-protocol law exercises its typed version-first refusal directly, while facade examples consume already-decoded turn reports."
 
 [[api]]
+symbol = "lash::remote::turn_result::RemoteTurnReport::encode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add standalone turn-report envelope encoding to the reporting docs example and assert its externally observable wire result."
+
+[[api]]
 symbol = "lash::remote::turn_result::RemoteTurnReport::activities"
 kind = "field"
 availability = "default+all-features"
@@ -43888,13 +43699,6 @@ area = "protocol"
 disposition = "unused-justify"
 reason = "Concrete host class: remote clients that consume terminal turn results; the shipped workbench consumes the same typed LLM-call record from recoverable semantic activity so live evidence is visible before terminal result collection."
 
-[[api]]
-symbol = "lash::remote::turn_result::RemoteTurnReport::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "protocol"
-disposition = "unused-add"
-reason = "Add lash::remote::turn_result::RemoteTurnReport::protocol_version to the docs-snippets remote/direct protocol flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::turn_result::RemoteTurnReport::session_id"
@@ -44161,6 +43965,14 @@ disposition = "unused-add"
 reason = "Add lash::remote::usage::RemoteTurnActivity to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::remote::usage::RemoteTurnActivity::encode_json"
+kind = "function"
+availability = "default+all-features"
+area = "protocol"
+disposition = "unused-add"
+reason = "Add standalone turn-activity envelope encoding to the streaming docs example and assert its externally observable wire result."
+
+[[api]]
 symbol = "lash::remote::usage::RemoteTurnActivity::correlation_id"
 kind = "field"
 availability = "default+all-features"
@@ -44192,13 +44004,6 @@ area = "observation-admin"
 disposition = "unused-add"
 reason = "Add lash::remote::usage::RemoteTurnActivity::id to the agent-service recovery/operations flow example and assert its externally observable result."
 
-[[api]]
-symbol = "lash::remote::usage::RemoteTurnActivity::protocol_version"
-kind = "field"
-availability = "default+all-features"
-area = "observation-admin"
-disposition = "unused-add"
-reason = "Add lash::remote::usage::RemoteTurnActivity::protocol_version to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
 symbol = "lash::remote::usage::RemoteTurnActivity::sequence"
@@ -65334,7 +65139,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::payload"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:46#payload,"
+usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:45#payload,"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::session_id"
@@ -65361,7 +65166,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::source_key"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:45#source_key,"
+usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:44#source_key,"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::source_type"
@@ -65370,7 +65175,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerOccurrenceRequest::source_type"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:44#source_type,"
+usage = "crates/lash-remote-protocol/src/core_conversions/triggers.rs:43#source_type,"
 
 [[api]]
 symbol = "lash::triggers::TriggerOccurrenceRequest::with_source"
@@ -70481,7 +70286,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:607#reason,"
+usage = "crates/lash-remote-protocol/src/core_conversions/llm.rs:603#reason,"
 
 [[api]]
 symbol = "lash_core::RetryDecision::scheduled"

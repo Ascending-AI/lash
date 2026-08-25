@@ -152,7 +152,6 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
     fn try_from(value: &RemoteToolGrant) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteToolGrant {
-            protocol_version: _,
             id,
             name,
             description,

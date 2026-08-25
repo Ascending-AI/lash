@@ -1,16 +1,19 @@
 fn main() {
     let input = lash::remote::turn_input::RemoteTurnInput::text("hello");
-    let request = lash::remote::turn_input::RemoteTurnRequest {
-        protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
+    let request = lash::remote::Envelope::new(lash::remote::turn_input::RemoteTurnRequest {
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         idempotency_key: Some("session:turn".to_string()),
         input,
         tool_grants: Vec::new(),
         metadata: std::collections::HashMap::new(),
-    };
+    });
 
-    request.validate().unwrap();
+    assert_eq!(
+        request.protocol_version(),
+        lash::remote::REMOTE_PROTOCOL_VERSION
+    );
+    request.body.validate().unwrap();
 
     let trigger = lash::remote::triggers::RemoteTriggerOccurrenceRequest::new(
         "ui.button.pressed",
@@ -26,7 +29,6 @@ fn main() {
     filter.validate().unwrap();
 
     let report = lash::remote::triggers::RemoteTriggerEmitReport {
-        protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
         occurrence_id: "occurrence:1".to_string(),
         deliveries: vec![lash::remote::triggers::RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
@@ -58,7 +60,6 @@ fn main() {
         ),
     };
     let observation = lash::remote::observations::RemoteSessionObservation {
-        protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
         turn_index: 0,
@@ -68,7 +69,6 @@ fn main() {
     let _remote_stream_item = lash::observe::RemoteSessionObservationStreamItem::Gap {
         observation,
         gap: lash::remote::observations::RemoteLiveReplayGap {
-            protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
             session_id: "session".to_string(),
             requested_cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
             latest_cursor: "lashsc2:replay-incarnation:0:0:session".to_string(),
@@ -83,7 +83,6 @@ fn main() {
         };
 
     let process_start = lash::remote::processes::RemoteProcessStartRequest {
-        protocol_version: lash::remote::REMOTE_PROTOCOL_VERSION,
         id: "process".to_string(),
         input: lash::remote::processes::RemoteProcessInput::External {
             metadata: serde_json::json!({}),

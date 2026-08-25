@@ -12,7 +12,6 @@ use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::tools::RemoteToolOutputContract;
 use crate::turn_input::RemoteTurnInput;
 use crate::turn_result::RemoteCausalRef;
-use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionScope {
@@ -517,7 +516,6 @@ impl RemoteProcessRecord {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessWorkSnapshot {
-    pub protocol_version: u32,
     pub session_id: String,
     #[serde(default)]
     pub visible_process_ids: Vec<String>,
@@ -527,7 +525,6 @@ pub struct RemoteProcessWorkSnapshot {
 
 impl RemoteProcessWorkSnapshot {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessWorkSnapshot", "session_id", &self.session_id)?;
         for process_id in &self.visible_process_ids {
             require_non_empty(
@@ -1222,26 +1219,22 @@ impl RemoteProcessExecutionEnvSpec {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemotePersistProcessEnvRequest {
-    pub protocol_version: u32,
     pub env_spec: RemoteProcessExecutionEnvSpec,
 }
 
 impl RemotePersistProcessEnvRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         self.env_spec.validate("RemotePersistProcessEnvRequest")
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemotePersistProcessEnvReceipt {
-    pub protocol_version: u32,
     pub env_ref: RemoteProcessExecutionEnvRef,
 }
 
 impl RemotePersistProcessEnvReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         self.env_ref.validate("RemotePersistProcessEnvReceipt")
     }
 }
@@ -1285,7 +1278,6 @@ impl RemoteObserverInheritance {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStartRequest {
-    pub protocol_version: u32,
     pub id: String,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryContract,
@@ -1306,7 +1298,6 @@ pub struct RemoteProcessStartRequest {
 
 impl RemoteProcessStartRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessStartRequest", "id", &self.id)?;
         if self.max_attempts == Some(0) {
             return Err(RemoteProtocolError::InvalidEnvelope {
@@ -1320,16 +1311,6 @@ impl RemoteProcessStartRequest {
         }
         if let Some(identity) = &self.identity {
             identity.validate("RemoteProcessStartRequest")?;
-        }
-        if let RemoteProcessInput::SessionTurn { turn_input, .. } = &self.input
-            && turn_input.protocol_version != self.protocol_version
-        {
-            return Err(RemoteProtocolError::MismatchedNestedProtocolVersion {
-                parent: "RemoteProcessStartRequest",
-                child: "input.turn_input",
-                parent_version: self.protocol_version,
-                child_version: turn_input.protocol_version,
-            });
         }
         self.originator.validate("RemoteProcessStartRequest")?;
         if let Some(wake_session_id) = &self.wake_session_id {
@@ -1351,7 +1332,6 @@ impl RemoteProcessStartRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStartReceipt {
-    pub protocol_version: u32,
     pub record: RemoteProcessRecord,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<RemoteProcessHandleView>,
@@ -1359,7 +1339,6 @@ pub struct RemoteProcessStartReceipt {
 
 impl RemoteProcessStartReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         self.record.validate("RemoteProcessStartReceipt")?;
         if let Some(summary) = &self.summary {
             summary.validate("RemoteProcessStartReceipt")?;
@@ -1384,7 +1363,6 @@ pub enum RemoteProcessStatusFilter {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessListFilter {
-    pub protocol_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<RemoteProcessDefinitionIdentity>,
     #[serde(default)]
@@ -1410,7 +1388,6 @@ pub struct RemoteProcessListFilter {
 impl Default for RemoteProcessListFilter {
     fn default() -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             definition: None,
             status: RemoteProcessStatusFilter::Running,
             waiting: None,
@@ -1427,7 +1404,6 @@ impl Default for RemoteProcessListFilter {
 
 impl RemoteProcessListFilter {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         if let Some(definition) = &self.definition {
             definition.validate("RemoteProcessListFilter")?;
         }
@@ -1437,14 +1413,12 @@ impl RemoteProcessListFilter {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessListResponse {
-    pub protocol_version: u32,
     #[serde(default)]
     pub records: Vec<RemoteObservedProcess>,
 }
 
 impl RemoteProcessListResponse {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         for record in &self.records {
             record.validate("RemoteProcessListResponse")?;
         }
@@ -1454,7 +1428,6 @@ impl RemoteProcessListResponse {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessCancelRequest {
-    pub protocol_version: u32,
     pub process_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -1462,7 +1435,6 @@ pub struct RemoteProcessCancelRequest {
 
 impl RemoteProcessCancelRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessCancelRequest", "process_id", &self.process_id)?;
         if let Some(reason) = &self.reason {
             require_non_empty("RemoteProcessCancelRequest", "reason", reason)?;
@@ -1473,7 +1445,6 @@ impl RemoteProcessCancelRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessCancelReceipt {
-    pub protocol_version: u32,
     pub process_id: String,
     pub status: RemoteProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1482,7 +1453,6 @@ pub struct RemoteProcessCancelReceipt {
 
 impl RemoteProcessCancelReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessCancelReceipt", "process_id", &self.process_id)?;
         if let Some(record) = &self.record {
             record.validate("RemoteProcessCancelReceipt")?;
@@ -1493,7 +1463,6 @@ impl RemoteProcessCancelReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessSignalRequest {
-    pub protocol_version: u32,
     pub process_id: String,
     pub signal_name: String,
     pub signal_id: String,
@@ -1505,7 +1474,6 @@ pub struct RemoteProcessSignalRequest {
 
 impl RemoteProcessSignalRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessSignalRequest", "process_id", &self.process_id)?;
         require_non_empty(
             "RemoteProcessSignalRequest",
@@ -1522,40 +1490,34 @@ impl RemoteProcessSignalRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessSignalReceipt {
-    pub protocol_version: u32,
     pub event: RemoteProcessEvent,
 }
 
 impl RemoteProcessSignalReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         self.event.validate("RemoteProcessSignalReceipt")
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessAwaitRequest {
-    pub protocol_version: u32,
     pub process_id: String,
 }
 
 impl RemoteProcessAwaitRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessAwaitRequest", "process_id", &self.process_id)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessAwaitOutcome {
-    pub protocol_version: u32,
     pub process_id: String,
     pub output: RemoteProcessAwaitOutput,
 }
 
 impl RemoteProcessAwaitOutcome {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessAwaitOutcome", "process_id", &self.process_id)?;
         self.output.validate("RemoteProcessAwaitOutcome")
     }
@@ -1563,7 +1525,6 @@ impl RemoteProcessAwaitOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessEventsRequest {
-    pub protocol_version: u32,
     pub process_id: String,
     #[serde(default)]
     pub after_sequence: u64,
@@ -1571,14 +1532,12 @@ pub struct RemoteProcessEventsRequest {
 
 impl RemoteProcessEventsRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteProcessEventsRequest", "process_id", &self.process_id)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessEventsResponse {
-    pub protocol_version: u32,
     pub process_id: String,
     #[serde(default)]
     pub events: Vec<RemoteProcessEvent>,
@@ -1586,7 +1545,6 @@ pub struct RemoteProcessEventsResponse {
 
 impl RemoteProcessEventsResponse {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty(
             "RemoteProcessEventsResponse",
             "process_id",

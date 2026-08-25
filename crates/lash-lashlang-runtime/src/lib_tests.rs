@@ -669,7 +669,6 @@ fn plugin_extensions_return_typed_catalog_conflicts() {
 
 fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
     lash_remote_protocol::RemoteToolGrant {
-        protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,
         id: format!("remote-tool:{name}"),
         name: name.to_string(),
         description: String::new(),

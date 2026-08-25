@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ensure_protocol_version;
 use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::llm::{RemoteLlmTerminalReason, RemoteProviderFailureKind};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
@@ -16,7 +15,6 @@ use crate::usage_activity::{RemoteTokenLedgerEntry, RemoteTurnActivity, RemoteUs
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnReport {
-    pub protocol_version: u32,
     pub session_id: String,
     pub turn_id: String,
     /// Derived from `outcome` on encode and checked against it on decode.
@@ -44,6 +42,11 @@ pub struct RemoteTurnReport {
 }
 
 impl RemoteTurnReport {
+    /// Encodes one report inside the shared remote-protocol envelope.
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
     /// Decodes one JSON report after refusing a mismatched protocol version,
     /// before the report's versioned payload vocabulary is deserialized.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
@@ -54,13 +57,16 @@ impl RemoteTurnReport {
         bytes: &[u8],
         expected_version: u32,
     ) -> Result<Self, RemoteProtocolError> {
-        let report: Self = crate::decode_versioned_json(bytes, expected_version)?;
+        let report = crate::Envelope::<Self>::decode_json_expecting_protocol_version(
+            bytes,
+            expected_version,
+        )?
+        .into_body();
         report.validate()?;
         Ok(report)
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnReport", "session_id", &self.session_id)?;
         require_non_empty("RemoteTurnReport", "turn_id", &self.turn_id)?;
         if (self.status == RemoteTurnStatus::Cancelled) != self.cancellation.is_some() {
@@ -94,14 +100,6 @@ impl RemoteTurnReport {
         }
         let mut activity_records = HashMap::new();
         for activity in &self.activities {
-            if activity.protocol_version != self.protocol_version {
-                return Err(RemoteProtocolError::MismatchedNestedProtocolVersion {
-                    parent: "RemoteTurnReport",
-                    child: "activities",
-                    parent_version: self.protocol_version,
-                    child_version: activity.protocol_version,
-                });
-            }
             activity.validate()?;
             if let crate::usage_activity::RemoteTurnEvent::ModelCallRecorded { record } =
                 &activity.event

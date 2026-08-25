@@ -686,18 +686,18 @@ enum ObservationStreamItem {
         cursor: String,
     },
     Observation {
-        event: Box<RemoteSessionObservationEvent>,
+        event: Box<Envelope<RemoteSessionObservationEvent>>,
     },
     ReplayGap {
-        observation: Box<RemoteSessionObservation>,
-        gap: Box<RemoteLiveReplayGap>,
+        observation: Box<Envelope<RemoteSessionObservation>>,
+        gap: Box<Envelope<RemoteLiveReplayGap>>,
     },
     TerminalReplacement {
-        event: Box<RemoteSessionObservationEvent>,
+        event: Box<Envelope<RemoteSessionObservationEvent>>,
         cursor: String,
     },
     ResidentReplacement {
-        event: Box<RemoteSessionObservationEvent>,
+        event: Box<Envelope<RemoteSessionObservationEvent>>,
         cursor: String,
     },
 }

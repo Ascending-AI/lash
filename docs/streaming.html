@@ -246,6 +246,7 @@ async fn stream_turn_as_ndjson(session: &amp;LashSession) -&gt; anyhow::Result&l
 }</code></pre>
     <p>For session observation streams, use the DTO recovery helper at your service edge. It assigns per-response event sequence values, returns remote gap snapshots, and keeps clients on opaque persisted cursors.</p>
     <pre data-lang="rust" data-snippet="streaming#remote-session-event"><code>use lash::observe::RemoteSessionObservationStreamItem;
+use lash::remote::Envelope;
 
 async fn stream_remote_session_observations(
     session: &amp;LashSession,
@@ -268,13 +269,13 @@ async fn stream_remote_session_observations(
         match item? {
             RemoteSessionObservationStreamItem::Event(event) =&gt; {
                 cursor = lash::remote::observations::RemoteSessionCursor::new(event.cursor.clone());
-                send_remote_session_line(serde_json::to_string(&amp;event)?).await?;
+                send_remote_session_line(serde_json::to_string(&amp;Envelope::new(event))?).await?;
             }
             RemoteSessionObservationStreamItem::Gap { observation, gap } =&gt; {
                 cursor =
                     lash::remote::observations::RemoteSessionCursor::new(gap.latest_cursor.clone());
                 replace_from_remote_observation(&amp;observation).await?;
-                send_remote_session_line(serde_json::to_string(&amp;gap)?).await?;
+                send_remote_session_line(serde_json::to_string(&amp;Envelope::new(gap))?).await?;
             }
         }
         persist_remote_cursor(&amp;cursor).await?;

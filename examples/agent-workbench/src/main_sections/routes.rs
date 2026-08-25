@@ -1236,7 +1236,7 @@ async fn forward_session_observations(
                 sequence = sequence.saturating_add(1);
                 if tx
                     .send(ObservationStreamItem::Observation {
-                        event: Box::new(event),
+                        event: Box::new(Envelope::new(event)),
                     })
                     .await
                     .is_err()
@@ -1256,7 +1256,7 @@ async fn forward_session_observations(
                 if tx
                     .send(ObservationStreamItem::TerminalReplacement {
                         cursor: snapshot.cursor.to_string(),
-                        event: Box::new(event),
+                        event: Box::new(Envelope::new(event)),
                     })
                     .await
                     .is_err()
@@ -1276,7 +1276,7 @@ async fn forward_session_observations(
                 if tx
                     .send(ObservationStreamItem::ResidentReplacement {
                         cursor: snapshot.cursor.to_string(),
-                        event: Box::new(event),
+                        event: Box::new(Envelope::new(event)),
                     })
                     .await
                     .is_err()
@@ -1293,8 +1293,8 @@ async fn forward_session_observations(
                 let gap = RemoteLiveReplayGap::from(gap);
                 if tx
                     .send(ObservationStreamItem::ReplayGap {
-                        observation: Box::new(observation),
-                        gap: Box::new(gap),
+                        observation: Box::new(Envelope::new(observation)),
+                        gap: Box::new(Envelope::new(gap)),
                     })
                     .await
                     .is_err()

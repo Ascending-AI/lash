@@ -3310,10 +3310,6 @@ async fn session_observation_remote_subscription_replays_dto_events() -> Result<
                 .expect("timed out waiting for remote replayed event")
                 .expect("remote replayed event");
         if remote_observation_assistant_delta(&event).as_deref() == Some("echo: remote observed") {
-            assert_eq!(
-                event.protocol_version,
-                crate::remote::REMOTE_PROTOCOL_VERSION
-            );
             assert_eq!(event.session_id, "session-observation-remote-subscribe");
             break;
         }

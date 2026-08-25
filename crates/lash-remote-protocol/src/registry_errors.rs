@@ -60,15 +60,6 @@ pub(crate) fn require_non_empty(
 pub enum RemoteProtocolError {
     #[error("unsupported remote protocol version {actual}; expected {expected}")]
     UnsupportedProtocolVersion { actual: u32, expected: u32 },
-    #[error(
-        "mismatched protocol version in {parent}.{child}: got {child_version}, expected {parent_version}"
-    )]
-    MismatchedNestedProtocolVersion {
-        parent: &'static str,
-        child: &'static str,
-        parent_version: u32,
-        child_version: u32,
-    },
     #[error("{type_name}.{field} is required")]
     MissingRequiredField {
         type_name: &'static str,

@@ -503,15 +503,13 @@ pub mod attachments {
 }
 
 /// Wire-format DTOs for driving lash across a process boundary, sub-namespaced
-/// by protocol domain. Only the cross-cutting handshake
-/// ([`REMOTE_PROTOCOL_VERSION`](remote::REMOTE_PROTOCOL_VERSION),
-/// [`ensure_protocol_version`](remote::ensure_protocol_version)) and the
+/// by protocol domain. Only the cross-cutting envelope
+/// ([`Envelope`](remote::Envelope),
+/// [`REMOTE_PROTOCOL_VERSION`](remote::REMOTE_PROTOCOL_VERSION)) and the
 /// protocol error type live at this root; everything else has exactly one
 /// home in a domain sub-namespace.
 pub mod remote {
-    pub use lash_remote_protocol::{
-        REMOTE_PROTOCOL_VERSION, RemoteProtocolError, ensure_protocol_version,
-    };
+    pub use lash_remote_protocol::{Envelope, REMOTE_PROTOCOL_VERSION, RemoteProtocolError};
 
     /// LLM request/response envelopes: messages, attachments, tool specs,
     /// output specs, and provider metadata.

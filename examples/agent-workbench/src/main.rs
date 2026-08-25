@@ -50,7 +50,7 @@ fn test_core_owner() -> lash::persistence::LeaseOwnerIdentity {
 }
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash_remote_protocol::{
-    RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,
+    Envelope, RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,
 };
 use lash_standard_plugins::{
     ROLLING_HISTORY_COMPACTION_BUFFER_TOKENS, rolling_history::RollingHistoryPluginFactory,

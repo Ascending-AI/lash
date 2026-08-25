@@ -254,7 +254,6 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     let remote: RemoteLlmRequest =
         serde_json::from_value(remote_json).expect("deserialize remote request");
     remote.validate().expect("valid remote request");
-    assert_eq!(remote.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(remote.request_id, "request-1");
     assert_eq!(remote.scope.agent_frame_id, "session-1:frame:test");
     let core = core_llm::LlmRequest::try_from(remote).expect("core request");
@@ -523,7 +522,6 @@ fn trigger_subscription_dtos_round_trip_core_values() {
     );
 
     let request = RemoteTriggerRegisterSubscriptionRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         draft: RemoteTriggerSubscriptionDraft::try_from(draft).expect("remote request draft"),
     };
     let core = lash_core::TriggerSubscriptionDraft::try_from(request).expect("register request");
@@ -762,7 +760,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     assert!(core.definition.is_some());
 
     let cancel = RemoteProcessCancelRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:cancel".to_string(),
         reason: Some("host requested".to_string()),
     };
@@ -774,7 +771,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     ));
 
     let signal = RemoteProcessSignalRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:signal".to_string(),
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
@@ -794,7 +790,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     ));
 
     let await_request = RemoteProcessAwaitRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:await".to_string(),
     };
     await_request.validate().expect("valid await");
@@ -934,7 +929,6 @@ fn remote_turn_result_maps_core_semantics() {
         [
             result_activity,
             RemoteTurnActivity {
-                protocol_version: REMOTE_PROTOCOL_VERSION,
                 sequence: 1,
                 id: "intent-activity".to_string(),
                 correlation_id: "intent-correlation".to_string(),
@@ -1033,7 +1027,7 @@ fn assert_terminal_call_record_converts_and_validates(
     activity
         .validate()
         .expect("ModelCallRecorded conversion validates");
-    let activity_json = serde_json::to_vec(&activity).expect("encode activity");
+    let activity_json = activity.encode_json().expect("encode activity envelope");
     RemoteTurnActivity::decode_json(&activity_json).expect("activity decoder validates");
 
     let turn = lash_core::facade_support::AssembledTurn {
@@ -1391,10 +1385,10 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         .cloned()
         .enumerate()
         .map(|(sequence, activity)| {
-            serde_json::to_string(
-                &RemoteTurnActivity::from_core(sequence as u64, activity)
+            serde_json::to_string(&Envelope::new(
+                RemoteTurnActivity::from_core(sequence as u64, activity)
                     .expect("remote turn activity"),
-            )
+            ))
             .expect("serialize expected remote activity")
         })
         .collect::<Vec<_>>()
@@ -1434,9 +1428,10 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         .collect::<Vec<_>>();
     assert_eq!(lines.len(), 2);
     for line in lines {
-        let activity: RemoteTurnActivity =
-            serde_json::from_str(line).expect("each NDJSON line is one remote activity");
-        activity.validate().expect("valid remote activity");
+        let activity = Envelope::<RemoteTurnActivity>::decode_json(line.as_bytes())
+            .expect("each NDJSON line is one remote activity envelope")
+            .into_body();
+        activity.validate().expect("valid remote activity body");
     }
 }
 
@@ -1782,7 +1777,6 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
 
 fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
     RemoteToolGrant {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         id: format!("remote-tool:{name}"),
         name: name.to_string(),
         description: "demo".to_string(),

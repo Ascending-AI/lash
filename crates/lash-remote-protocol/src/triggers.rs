@@ -10,11 +10,9 @@ use crate::processes::{
     RemoteProcessIdentity, RemoteProcessInput, RemoteProcessOriginator, RemoteSessionScope,
 };
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
-use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerOccurrenceRequest {
-    pub protocol_version: u32,
     pub source_type: String,
     pub source_key: String,
     #[serde(default)]
@@ -34,7 +32,6 @@ impl RemoteTriggerOccurrenceRequest {
         idempotency_key: impl Into<String>,
     ) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             source_type: source_type.into(),
             source_key: source_key.into(),
             payload,
@@ -55,7 +52,6 @@ impl RemoteTriggerOccurrenceRequest {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty(
             "RemoteTriggerOccurrenceRequest",
             "source_type",
@@ -111,7 +107,6 @@ pub struct RemoteTriggerDeliveryEmitReceipt {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerEmitReport {
-    pub protocol_version: u32,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub occurrence_id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -120,13 +115,12 @@ pub struct RemoteTriggerEmitReport {
 
 impl RemoteTriggerEmitReport {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)
+        Ok(())
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerSubscriptionFilter {
-    pub protocol_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registrant_scope_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -145,26 +139,9 @@ pub struct RemoteTriggerSubscriptionFilter {
     pub enabled: Option<bool>,
 }
 
-impl Default for RemoteTriggerSubscriptionFilter {
-    fn default() -> Self {
-        Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
-            registrant_scope_id: None,
-            session_id: None,
-            subscription_key: None,
-            name: None,
-            source_type: None,
-            source_key: None,
-            target: None,
-            enabled: None,
-        }
-    }
-}
-
 impl RemoteTriggerSubscriptionFilter {
     pub fn for_session(session_id: impl Into<String>) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: Some(session_id.into()),
             ..Self::default()
         }
@@ -172,7 +149,6 @@ impl RemoteTriggerSubscriptionFilter {
 
     pub fn for_registrant_scope(scope_id: impl Into<String>) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             registrant_scope_id: Some(scope_id.into()),
             ..Self::default()
         }
@@ -180,14 +156,13 @@ impl RemoteTriggerSubscriptionFilter {
 
     pub fn for_source_type(source_type: impl Into<String>) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             source_type: Some(source_type.into()),
             ..Self::default()
         }
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)
+        Ok(())
     }
 }
 
@@ -268,7 +243,6 @@ pub enum RemoteTriggerOwnerScope {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerSubscriptionDraft {
-    pub protocol_version: u32,
     pub subscription_key: String,
     pub env_ref: RemoteProcessExecutionEnvRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -302,7 +276,6 @@ impl RemoteTriggerSubscriptionDraft {
     ) -> Self {
         let target_label = target_identity.label.clone();
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             subscription_key: subscription_key.into(),
             env_ref,
             wake_target: None,
@@ -358,7 +331,6 @@ impl RemoteTriggerSubscriptionDraft {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty(
             "RemoteTriggerSubscriptionDraft",
             "subscription_key",
@@ -482,34 +454,22 @@ fn validate_remote_trigger_target_label(
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerRegisterSubscriptionRequest {
-    pub protocol_version: u32,
     pub draft: RemoteTriggerSubscriptionDraft,
 }
 
 impl RemoteTriggerRegisterSubscriptionRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
-        if self.draft.protocol_version != self.protocol_version {
-            return Err(RemoteProtocolError::MismatchedNestedProtocolVersion {
-                parent: "RemoteTriggerRegisterSubscriptionRequest",
-                child: "draft",
-                parent_version: self.protocol_version,
-                child_version: self.draft.protocol_version,
-            });
-        }
         self.draft.validate()
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerRegisterSubscriptionReceipt {
-    pub protocol_version: u32,
     pub record: RemoteTriggerSubscriptionRecord,
 }
 
 impl RemoteTriggerRegisterSubscriptionReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         self.record
             .validate("RemoteTriggerRegisterSubscriptionReceipt")
     }
@@ -517,14 +477,12 @@ impl RemoteTriggerRegisterSubscriptionReceipt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerListSubscriptionsResponse {
-    pub protocol_version: u32,
     #[serde(default)]
     pub subscriptions: Vec<RemoteTriggerSubscriptionRecord>,
 }
 
 impl RemoteTriggerListSubscriptionsResponse {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         for record in &self.subscriptions {
             record.validate("RemoteTriggerListSubscriptionsResponse")?;
         }

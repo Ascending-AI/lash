@@ -18,7 +18,6 @@ impl TryFrom<RemoteTriggerOccurrenceRequest> for lash_core::TriggerOccurrenceReq
     fn try_from(value: RemoteTriggerOccurrenceRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTriggerOccurrenceRequest {
-            protocol_version: _,
             source_type,
             source_key,
             payload,
@@ -49,7 +48,6 @@ impl From<lash_core::TriggerOccurrenceRequest> for RemoteTriggerOccurrenceReques
             session_id,
         } = value;
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             source_type,
             source_key,
             payload,
@@ -117,7 +115,6 @@ impl From<lash_core::facade_support::TriggerEmitReport> for RemoteTriggerEmitRep
             deliveries,
         } = value;
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             occurrence_id,
             deliveries: deliveries.into_iter().map(Into::into).collect(),
         }
@@ -130,7 +127,6 @@ impl TryFrom<RemoteTriggerEmitReport> for lash_core::facade_support::TriggerEmit
     fn try_from(value: RemoteTriggerEmitReport) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTriggerEmitReport {
-            protocol_version: _,
             occurrence_id,
             deliveries,
         } = value;
@@ -201,7 +197,6 @@ impl TryFrom<RemoteTriggerSubscriptionFilter> for lash_core::TriggerSubscription
     fn try_from(value: RemoteTriggerSubscriptionFilter) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTriggerSubscriptionFilter {
-            protocol_version: _,
             registrant_scope_id,
             session_id,
             subscription_key,
@@ -237,7 +232,6 @@ impl From<lash_core::TriggerSubscriptionFilter> for RemoteTriggerSubscriptionFil
             enabled,
         } = value;
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             registrant_scope_id,
             session_id,
             subscription_key,
@@ -426,7 +420,6 @@ impl TryFrom<RemoteTriggerSubscriptionDraft> for lash_core::TriggerSubscriptionD
     fn try_from(value: RemoteTriggerSubscriptionDraft) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTriggerSubscriptionDraft {
-            protocol_version: _,
             subscription_key,
             env_ref,
             wake_target,
@@ -479,7 +472,6 @@ impl TryFrom<lash_core::TriggerSubscriptionDraft> for RemoteTriggerSubscriptionD
             target_label,
         } = value;
         Ok(Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             subscription_key,
             env_ref: env_ref.as_str().parse()?,
             wake_target: wake_target.map(Into::into),
@@ -626,7 +618,6 @@ impl TryFrom<RemoteTriggerRegisterSubscriptionRequest> for lash_core::TriggerSub
     fn try_from(value: RemoteTriggerRegisterSubscriptionRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTriggerRegisterSubscriptionRequest {
-            protocol_version: _,
             draft,
         } = value;
         draft.try_into()
@@ -638,7 +629,6 @@ impl TryFrom<lash_core::TriggerSubscriptionRecord> for RemoteTriggerRegisterSubs
 
     fn try_from(value: lash_core::TriggerSubscriptionRecord) -> Result<Self, Self::Error> {
         Ok(Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             record: value.try_into()?,
         })
     }
@@ -650,7 +640,6 @@ impl TryFrom<RemoteTriggerRegisterSubscriptionReceipt> for lash_core::TriggerSub
     fn try_from(value: RemoteTriggerRegisterSubscriptionReceipt) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTriggerRegisterSubscriptionReceipt {
-            protocol_version: _,
             record,
         } = value;
         record.try_into()
@@ -662,7 +651,6 @@ impl TryFrom<Vec<lash_core::TriggerSubscriptionRecord>> for RemoteTriggerListSub
 
     fn try_from(value: Vec<lash_core::TriggerSubscriptionRecord>) -> Result<Self, Self::Error> {
         Ok(Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             subscriptions: value
                 .into_iter()
                 .map(TryInto::try_into)
@@ -679,7 +667,6 @@ impl TryFrom<RemoteTriggerListSubscriptionsResponse>
     fn try_from(value: RemoteTriggerListSubscriptionsResponse) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTriggerListSubscriptionsResponse {
-            protocol_version: _,
             subscriptions,
         } = value;
         subscriptions.into_iter().map(TryInto::try_into).collect()

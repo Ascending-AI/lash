@@ -5,8 +5,8 @@
 //! [`prompt`], [`tools`], [`observations`], [`usage_activity`],
 //! [`registry_errors`]); the crate root re-exports all of them, which is the
 //! established public API for direct consumers of this crate. The
-//! cross-cutting protocol handshake ([`REMOTE_PROTOCOL_VERSION`],
-//! [`ensure_protocol_version`]) lives at the root itself.
+//! cross-cutting protocol envelope ([`Envelope`],
+//! [`REMOTE_PROTOCOL_VERSION`]) lives at the root itself.
 
 pub mod llm;
 pub mod observations;
@@ -104,39 +104,81 @@ pub use usage_activity::*;
 // wire (FIG-1671).
 // Bumped to 46: turn-cancel requests carry the typed undelivered-input
 // disposition. Older peers would silently apply the legacy defer policy.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 46;
+// Bumped to 47: one generic envelope owns the remote protocol version instead
+// of duplicating it across each request, response, and nested body.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 47;
 
-pub(crate) fn decode_versioned_json<T>(
-    bytes: &[u8],
-    expected_version: u32,
-) -> Result<T, RemoteProtocolError>
+/// One versioned remote-protocol message.
+///
+/// The body is flattened so moving the version to this shared envelope does
+/// not otherwise change the top-level JSON object. Nested DTOs remain bare.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct Envelope<T> {
+    protocol_version: u32,
+    #[serde(flatten)]
+    pub body: T,
+}
+
+impl<T> Envelope<T> {
+    /// Wraps a body with the current remote protocol version.
+    pub fn new(body: T) -> Self {
+        Self {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            body,
+        }
+    }
+
+    /// Returns the protocol version carried by this envelope.
+    pub fn protocol_version(&self) -> u32 {
+        self.protocol_version
+    }
+
+    /// Returns the bare message body.
+    pub fn into_body(self) -> T {
+        self.body
+    }
+}
+
+impl<T> Envelope<T>
 where
     T: serde::de::DeserializeOwned,
 {
-    #[derive(serde::Deserialize)]
-    struct VersionProbe {
-        protocol_version: u32,
+    /// Decodes a JSON envelope after refusing a mismatched version before its
+    /// flattened body is deserialized.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        Self::decode_json_expecting_protocol_version(bytes, REMOTE_PROTOCOL_VERSION)
     }
 
-    let probe: VersionProbe =
-        serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)?;
-    if probe.protocol_version != expected_version {
-        return Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: probe.protocol_version,
-            expected: expected_version,
-        });
+    pub(crate) fn decode_json_expecting_protocol_version(
+        bytes: &[u8],
+        expected_version: u32,
+    ) -> Result<Self, RemoteProtocolError> {
+        #[derive(serde::Deserialize)]
+        struct VersionProbe {
+            protocol_version: u32,
+        }
+
+        let probe: VersionProbe =
+            serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)?;
+        if probe.protocol_version != expected_version {
+            return Err(RemoteProtocolError::UnsupportedProtocolVersion {
+                actual: probe.protocol_version,
+                expected: expected_version,
+            });
+        }
+        serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)
     }
-    serde_json::from_slice(bytes).map_err(RemoteProtocolError::MessageDecode)
 }
 
-pub fn ensure_protocol_version(actual: u32) -> Result<(), RemoteProtocolError> {
-    if actual == REMOTE_PROTOCOL_VERSION {
-        Ok(())
-    } else {
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual,
-            expected: REMOTE_PROTOCOL_VERSION,
-        })
+impl<T> Envelope<T>
+where
+    T: serde::Serialize,
+{
+    /// Encodes this envelope as a flattened JSON object.
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(self)
     }
 }
 

@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
-use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
 // Wire mirror of the runtime usage counters. This is a deliberately versioned
 // protocol boundary, kept independent of the internal types so the wire format
@@ -47,7 +46,6 @@ pub struct RemoteTokenLedgerEntry {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnActivity {
-    pub protocol_version: u32,
     pub sequence: u64,
     pub id: String,
     pub correlation_id: String,
@@ -56,6 +54,12 @@ pub struct RemoteTurnActivity {
 }
 
 impl RemoteTurnActivity {
+    /// Encodes one standalone activity inside the shared protocol envelope.
+    /// Activities nested in reports or observations remain bare bodies.
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
     /// Decodes one JSON activity with the version gate ahead of the flattened
     /// event vocabulary.
     ///
@@ -64,20 +68,23 @@ impl RemoteTurnActivity {
     /// [`RemoteProtocolError::UnsupportedProtocolVersion`] instead of an
     /// opaque unknown-variant error.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        Self::decode_json_expecting_protocol_version(bytes, REMOTE_PROTOCOL_VERSION)
+        Self::decode_json_expecting_protocol_version(bytes, crate::REMOTE_PROTOCOL_VERSION)
     }
 
     pub(crate) fn decode_json_expecting_protocol_version(
         bytes: &[u8],
         expected_version: u32,
     ) -> Result<Self, RemoteProtocolError> {
-        let activity: Self = crate::decode_versioned_json(bytes, expected_version)?;
+        let activity = crate::Envelope::<Self>::decode_json_expecting_protocol_version(
+            bytes,
+            expected_version,
+        )?
+        .into_body();
         activity.validate()?;
         Ok(activity)
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnActivity", "id", &self.id)?;
         require_non_empty("RemoteTurnActivity", "correlation_id", &self.correlation_id)?;
         match &self.event {

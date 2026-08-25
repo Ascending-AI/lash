@@ -10,7 +10,6 @@ use crate::llm::RemoteAttachmentSource;
 use crate::prompt::RemotePromptLayer;
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::tools::RemoteToolGrant;
-use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProtocolTurnOptions {
@@ -45,7 +44,6 @@ impl RemoteProtocolTurnOptions {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnInput {
-    pub protocol_version: u32,
     #[serde(default)]
     pub items: Vec<RemoteInputItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,7 +57,6 @@ pub struct RemoteTurnInput {
 impl RemoteTurnInput {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             items: vec![RemoteInputItem::Text { text: text.into() }],
             protocol_turn_options: None,
             trace_turn_id: None,
@@ -67,8 +64,20 @@ impl RemoteTurnInput {
         }
     }
 
+    /// Encodes standalone turn input inside the shared protocol envelope.
+    /// Nested turn input remains a bare body.
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
+    /// Decodes standalone turn input from the shared protocol envelope.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        let input = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        input.validate()?;
+        Ok(input)
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         for (index, item) in self.items.iter().enumerate() {
             if let RemoteInputItem::Attachment { source } = item {
                 source.validate(index)?;
@@ -87,7 +96,6 @@ pub enum RemoteInputItem {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnRequest {
-    pub protocol_version: u32,
     pub session_id: String,
     pub turn_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,18 +108,21 @@ pub struct RemoteTurnRequest {
 }
 
 impl RemoteTurnRequest {
+    /// Encodes one turn request inside the shared remote-protocol envelope.
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
+    /// Decodes one turn request from the shared remote-protocol envelope.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        let request = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        request.validate()?;
+        Ok(request)
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnRequest", "session_id", &self.session_id)?;
         require_non_empty("RemoteTurnRequest", "turn_id", &self.turn_id)?;
-        if self.input.protocol_version != self.protocol_version {
-            return Err(RemoteProtocolError::MismatchedNestedProtocolVersion {
-                parent: "RemoteTurnRequest",
-                child: "input",
-                parent_version: self.protocol_version,
-                child_version: self.input.protocol_version,
-            });
-        }
         self.input.validate()?;
         RemoteToolGrant::validate_all(&self.tool_grants)?;
         Ok(())

@@ -6,6 +6,14 @@ use super::*;
 
 const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 
+#[derive(serde::Deserialize)]
+struct EmptyEnvelopeBody {}
+
+fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteProtocolError> {
+    let wire = serde_json::json!({ "protocol_version": protocol_version }).to_string();
+    Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
+}
+
 #[derive(Clone)]
 struct VecRegistry(Vec<RemoteToolGrant>);
 
@@ -18,7 +26,6 @@ impl RemoteToolRegistry for VecRegistry {
 #[test]
 fn remote_llm_request_json_round_trips() {
     let request = RemoteLlmRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         request_id: "request-1".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-1"),
         model_intent: RemoteModelIntent::new("gpt-test"),
@@ -47,9 +54,8 @@ fn remote_llm_request_json_round_trips() {
     };
 
     request.validate().expect("valid request");
-    let wire = serde_json::to_vec(&request).expect("serialize");
+    let wire = request.encode_json().expect("serialize envelope");
     let decoded = RemoteLlmRequest::decode_json(&wire).expect("version-first decode");
-    assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.request_id, request.request_id);
     assert_eq!(decoded.scope, request.scope);
     assert_eq!(decoded.messages, request.messages);
@@ -96,7 +102,6 @@ fn v37_llm_decode_refuses_v36_and_v35_before_new_or_malformed_vocabulary() {
 #[test]
 fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
     let request = RemoteLlmRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         request_id: "request-userinfo".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-userinfo"),
         model_intent: RemoteModelIntent::new("gpt-test"),
@@ -122,7 +127,9 @@ fn current_llm_envelope_rejects_userinfo_in_replay_route_without_echoing_it() {
         generation: RemoteGenerationOptions::default(),
         metadata: HashMap::new(),
     };
-    let wire = serde_json::to_vec(&request).expect("serialize adversarial request");
+    let wire = request
+        .encode_json()
+        .expect("serialize adversarial request envelope");
 
     let error = RemoteLlmRequest::decode_json(&wire)
         .expect_err("userinfo-bearing replay routes must fail closed");
@@ -151,7 +158,6 @@ fn removed_generation_options_are_rejected_rather_than_discarded() {
 #[test]
 fn remote_attachment_media_types_are_validated_syntactically() {
     let mut request = RemoteLlmRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         request_id: "request-invalid-mime".to_string(),
         scope: RemoteLlmRequestScope::new("session", "session:frame:test", "request-invalid-mime"),
         model_intent: RemoteModelIntent::new("gpt-test"),
@@ -229,7 +235,6 @@ fn remote_attachment_ref_rejects_a_peer_supplied_traversal_id() {
 #[test]
 fn remote_llm_response_json_round_trips() {
     let response = RemoteLlmResponse {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         request_id: "request-1".to_string(),
         full_text: "done".to_string(),
         output_parts: vec![RemoteLlmOutputPart::Text {
@@ -264,7 +269,7 @@ fn remote_llm_response_json_round_trips() {
     };
 
     response.validate().expect("valid response");
-    let value = serde_json::to_value(&response).expect("serialize");
+    let value = serde_json::to_value(Envelope::new(&response)).expect("serialize envelope");
     assert_eq!(
         value["generation_disposition"],
         serde_json::json!({
@@ -275,8 +280,9 @@ fn remote_llm_response_json_round_trips() {
             "cache": "applied",
         })
     );
-    let decoded: RemoteLlmResponse = serde_json::from_value(value).expect("deserialize");
-    assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
+    let decoded = serde_json::from_value::<Envelope<RemoteLlmResponse>>(value)
+        .expect("deserialize envelope")
+        .into_body();
     assert_eq!(decoded.full_text, "done");
     assert_eq!(
         decoded.generation_disposition,
@@ -287,12 +293,10 @@ fn remote_llm_response_json_round_trips() {
 #[test]
 fn remote_turn_request_json_round_trips() {
     let request = RemoteTurnRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         idempotency_key: Some("idem".to_string()),
         input: RemoteTurnInput {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             items: vec![
                 RemoteInputItem::Text {
                     text: "first".to_string(),
@@ -315,11 +319,18 @@ fn remote_turn_request_json_round_trips() {
     };
 
     request.validate().expect("valid request");
-    let value = serde_json::to_value(&request).expect("serialize");
+    let value: serde_json::Value = serde_json::from_slice(
+        &request
+            .encode_json()
+            .expect("serialize turn request envelope"),
+    )
+    .expect("envelope json");
     assert!(value.get("model_intent").is_none());
-    let decoded: RemoteTurnRequest = serde_json::from_value(value).expect("deserialize");
+    let decoded = RemoteTurnRequest::decode_json(
+        &serde_json::to_vec(&value).expect("serialize envelope value"),
+    )
+    .expect("deserialize turn request envelope");
 
-    assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.session_id, "session");
     assert!(matches!(
         &decoded.input.items[1],
@@ -368,7 +379,6 @@ fn remote_turn_result_json_round_trips() {
         }],
     };
     let result = RemoteTurnReport {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         status: RemoteTurnStatus::Completed,
@@ -395,7 +405,6 @@ fn remote_turn_result_json_round_trips() {
         llm_calls: vec![call_record.clone()],
         issues: Vec::new(),
         activities: vec![RemoteTurnActivity {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             sequence: 1,
             id: "event".to_string(),
             correlation_id: "corr".to_string(),
@@ -407,15 +416,22 @@ fn remote_turn_result_json_round_trips() {
     };
 
     result.validate().expect("valid result");
-    let value = serde_json::to_value(&result).expect("serialize");
+    let value: serde_json::Value = serde_json::from_slice(
+        &result
+            .encode_json()
+            .expect("serialize turn report envelope"),
+    )
+    .expect("envelope json");
     assert!(
         !value
             .to_string()
             .contains("stream ended before terminal evidence"),
         "remote result and activity payloads must not publish diagnostic prose"
     );
-    let decoded: RemoteTurnReport = serde_json::from_value(value.clone()).expect("deserialize");
-    assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
+    let decoded = RemoteTurnReport::decode_json(
+        &serde_json::to_vec(&value).expect("serialize envelope value"),
+    )
+    .expect("deserialize turn report envelope");
     assert_eq!(decoded.session_id, "session");
     assert_eq!(decoded.tool_calls.len(), 1);
     assert_eq!(decoded.llm_calls.len(), 1);
@@ -470,7 +486,6 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
         }],
     };
     let mut activity = RemoteTurnActivity {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         sequence: 1,
         id: "event".to_string(),
         correlation_id: "correlation".to_string(),
@@ -486,7 +501,6 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
     assert!(activity.validate().is_err());
 
     let mut result = RemoteTurnReport {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         status: RemoteTurnStatus::Completed,
@@ -503,7 +517,6 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
         llm_calls: vec![valid_record.clone()],
         issues: Vec::new(),
         activities: vec![RemoteTurnActivity {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             sequence: 1,
             id: "model-call".to_string(),
             correlation_id: "llm-call".to_string(),
@@ -577,7 +590,6 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
         ..summary.clone()
     };
     let result = RemoteTurnReport {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         status: RemoteTurnStatus::Completed,
@@ -594,7 +606,6 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
         llm_calls: vec![summary],
         issues: Vec::new(),
         activities: vec![RemoteTurnActivity {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             sequence: 1,
             id: "model-call".to_string(),
             correlation_id: "same-call".to_string(),
@@ -634,7 +645,6 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
             }],
         };
         RemoteTurnReport {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
             status: RemoteTurnStatus::Completed,
@@ -651,7 +661,6 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
             llm_calls: vec![record.clone()],
             issues: Vec::new(),
             activities: vec![RemoteTurnActivity {
-                protocol_version: REMOTE_PROTOCOL_VERSION,
                 sequence: 1,
                 id: "event".to_string(),
                 correlation_id: "call-1".to_string(),
@@ -720,7 +729,6 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
             attempts: vec![attempt],
         };
         let activity = RemoteTurnActivity {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             sequence: 1,
             id: "event".to_string(),
             correlation_id: "correlation".to_string(),
@@ -731,7 +739,6 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
         assert!(activity.validate().is_err(), "activity accepted {record:?}");
 
         let result = RemoteTurnReport {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
             status: RemoteTurnStatus::Completed,
@@ -803,7 +810,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
             attempts,
         };
         RemoteTurnActivity {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             sequence: 1,
             id: "event".to_string(),
             correlation_id: "correlation".to_string(),
@@ -814,7 +820,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         .validate()
         .expect("valid ledger in activity envelope");
         RemoteTurnReport {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: "session".to_string(),
             turn_id: "turn".to_string(),
             status: RemoteTurnStatus::Completed,
@@ -831,7 +836,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
             llm_calls: vec![record.clone()],
             issues: Vec::new(),
             activities: vec![RemoteTurnActivity {
-                protocol_version: REMOTE_PROTOCOL_VERSION,
                 sequence: 1,
                 id: "event".to_string(),
                 correlation_id: "correlation".to_string(),
@@ -911,7 +915,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
 #[test]
 fn model_attempt_reset_has_pinned_wire_shape() {
     let activity = RemoteTurnActivity {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         sequence: 3,
         id: "reset-event".to_string(),
         correlation_id: "reset-correlation".to_string(),
@@ -922,7 +925,7 @@ fn model_attempt_reset_has_pinned_wire_shape() {
     };
 
     assert_eq!(
-        serde_json::to_value(activity).expect("serialize model attempt reset"),
+        serde_json::to_value(Envelope::new(activity)).expect("serialize model attempt reset"),
         serde_json::json!({
             "protocol_version": REMOTE_PROTOCOL_VERSION,
             "sequence": 3,
@@ -938,7 +941,6 @@ fn model_attempt_reset_has_pinned_wire_shape() {
 #[test]
 fn remote_turn_result_rejects_contradictory_status_and_outcome() {
     let mut result = RemoteTurnReport {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         status: RemoteTurnStatus::Cancelled,
@@ -975,7 +977,6 @@ fn remote_turn_result_rejects_contradictory_status_and_outcome() {
 #[test]
 fn remote_turn_result_requires_cancellation_evidence_iff_cancelled() {
     let mut result = RemoteTurnReport {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         status: RemoteTurnStatus::Cancelled,
@@ -1022,7 +1023,6 @@ fn remote_turn_result_requires_cancellation_evidence_iff_cancelled() {
 #[test]
 fn remote_turn_cancel_envelopes_round_trip() {
     let request = RemoteTurnCancelRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         request_id: "request-1".to_string(),
@@ -1089,12 +1089,10 @@ fn remote_trigger_dtos_json_round_trip() {
     let decoded: RemoteTriggerOccurrenceRequest =
         serde_json::from_value(serde_json::to_value(&request).expect("serialize request"))
             .expect("deserialize request");
-    assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.source_type, "ui.button.pressed");
     assert_eq!(decoded.source.as_ref().unwrap()["id"], "blue");
 
     let report = RemoteTriggerEmitReport {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         occurrence_id: "occurrence:1".to_string(),
         deliveries: vec![RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
@@ -1174,7 +1172,8 @@ fn session_scoped_trigger_occurrence_has_pinned_wire_shape() {
     .for_session("session-blue");
 
     assert_eq!(
-        serde_json::to_value(request).expect("serialize session-scoped trigger occurrence"),
+        serde_json::to_value(Envelope::new(request))
+            .expect("serialize session-scoped trigger occurrence"),
         serde_json::json!({
             "protocol_version": REMOTE_PROTOCOL_VERSION,
             "source_type": "ui.button.pressed",
@@ -1190,7 +1189,6 @@ fn session_scoped_trigger_occurrence_has_pinned_wire_shape() {
 #[test]
 fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     let observation = RemoteSessionObservation {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         cursor: "lashsc2:replay-incarnation:3:7:session".to_string(),
         turn_index: 3,
@@ -1209,7 +1207,6 @@ fn remote_session_observation_dtos_json_round_trip_typed_kinds() {
     assert_eq!(decoded, observation);
 
     let event = RemoteSessionObservationEvent {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         replay_incarnation_id: "replay-incarnation".to_string(),
         turn_id: None,
@@ -1325,7 +1322,6 @@ enum Protocol41ObservationSignalShape {
 #[test]
 fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     let resident = RemoteSessionObservationEvent {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "resident-session".to_string(),
         replay_incarnation_id: "resident-incarnation".to_string(),
         turn_id: None,
@@ -1333,11 +1329,13 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
         cursor: "resident-cursor".to_string(),
         event: RemoteSessionObservationEventPayload::ResidentChanged,
     };
-    let wire = serde_json::to_vec(&resident).expect("serialize complete current-version envelope");
+    let wire = Envelope::new(resident)
+        .encode_json()
+        .expect("serialize complete current-version envelope");
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 46,
+            "protocol_version": 47,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1352,7 +1350,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 46,
+            actual: 47,
             expected: 41,
         }
     ));
@@ -1378,9 +1376,8 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 46, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 47, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         id: "process:1".to_string(),
         input: RemoteProcessInput::External {
             metadata: serde_json::json!({ "label": "Import" }),
@@ -1430,7 +1427,6 @@ fn remote_process_dtos_json_round_trip() {
     let decoded: RemoteProcessStartRequest =
         serde_json::from_value(serde_json::to_value(&start).expect("serialize start"))
             .expect("deserialize start");
-    assert_eq!(decoded.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(decoded.id, "process:1");
     assert_eq!(
         decoded.env_spec.as_ref().unwrap().plugin_options.plugins["snapshot-tools"]["snapshot_ref"],
@@ -1454,7 +1450,6 @@ fn remote_process_dtos_json_round_trip() {
     assert_eq!(decoded.event_type, "process.completed");
 
     let snapshot = RemoteProcessWorkSnapshot {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         session_id: "session".to_string(),
         visible_process_ids: vec!["process:1".to_string()],
         items: vec![RemoteProcessWorkItem {
@@ -1502,7 +1497,6 @@ fn remote_process_dtos_json_round_trip() {
     snapshot.validate().expect("valid process work snapshot");
 
     let list_filter = RemoteProcessListFilter {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         definition: Some(remote_process_definition_identity()),
         status: RemoteProcessStatusFilter::Any,
         waiting: Some(false),
@@ -1510,7 +1504,6 @@ fn remote_process_dtos_json_round_trip() {
     };
     list_filter.validate().expect("valid process list filter");
     let list_response = RemoteProcessListResponse {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         records: snapshot
             .items
             .iter()
@@ -1520,13 +1513,11 @@ fn remote_process_dtos_json_round_trip() {
     list_response.validate().expect("valid list response");
 
     let cancel = RemoteProcessCancelRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
         reason: Some("requested by host".to_string()),
     };
     cancel.validate().expect("valid cancel request");
     let cancel_result = RemoteProcessCancelReceipt {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
         status: RemoteProcessStatus::Cancelled,
         record: Some(remote_process_record()),
@@ -1534,7 +1525,6 @@ fn remote_process_dtos_json_round_trip() {
     cancel_result.validate().expect("valid cancel result");
 
     let signal = RemoteProcessSignalRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
@@ -1543,18 +1533,15 @@ fn remote_process_dtos_json_round_trip() {
     };
     signal.validate().expect("valid signal request");
     let signal_result = RemoteProcessSignalReceipt {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         event: remote_process_event(),
     };
     signal_result.validate().expect("valid signal result");
 
     let await_request = RemoteProcessAwaitRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
     };
     await_request.validate().expect("valid await request");
     let await_result = RemoteProcessAwaitOutcome {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
         output: RemoteProcessAwaitOutput::Success {
             value: serde_json::json!({ "done": true }),
@@ -1564,13 +1551,11 @@ fn remote_process_dtos_json_round_trip() {
     await_result.validate().expect("valid await result");
 
     let events_request = RemoteProcessEventsRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
         after_sequence: 0,
     };
     events_request.validate().expect("valid events request");
     let events_response = RemoteProcessEventsResponse {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:1".to_string(),
         events: vec![remote_process_event()],
     };
@@ -1606,7 +1591,6 @@ fn remote_process_env_spec_rejects_unknown_product_metadata_fields() {
 #[test]
 fn remote_trigger_subscription_dtos_json_round_trip() {
     let draft = RemoteTriggerSubscriptionDraft {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         subscription_key: "button-watcher".to_string(),
         env_ref:
             "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1674,18 +1658,13 @@ fn remote_trigger_subscription_dtos_json_round_trip() {
         .validate("RemoteTriggerSubscriptionRecord")
         .expect("valid trigger record");
 
-    let register = RemoteTriggerRegisterSubscriptionRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
-        draft,
-    };
+    let register = RemoteTriggerRegisterSubscriptionRequest { draft };
     register.validate().expect("valid register request");
     let register_result = RemoteTriggerRegisterSubscriptionReceipt {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         record: record.clone(),
     };
     register_result.validate().expect("valid register result");
     let list = RemoteTriggerListSubscriptionsResponse {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         subscriptions: vec![record],
     };
     list.validate().expect("valid trigger list");
@@ -1704,90 +1683,12 @@ fn remote_session_observation_schema_includes_typed_kind_enums() {
 }
 
 #[test]
-fn wrong_protocol_versions_are_rejected() {
-    let request = RemoteTurnRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION - 1,
-        session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
-        idempotency_key: None,
-        input: RemoteTurnInput::text("hello"),
-        tool_grants: Vec::new(),
-        metadata: HashMap::new(),
-    };
-    assert!(matches!(
-        request.validate(),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual,
-            expected,
-        }) if actual == REMOTE_PROTOCOL_VERSION - 1
-            && expected == REMOTE_PROTOCOL_VERSION
-    ));
-
-    let mut input = RemoteTurnInput::text("hello");
-    input.protocol_version = REMOTE_PROTOCOL_VERSION + 1;
-    assert!(matches!(
-        input.validate(),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
-    ));
-
-    let mut grant = demo_grant("one", "tools", "search");
-    grant.protocol_version = REMOTE_PROTOCOL_VERSION + 1;
-    assert!(matches!(
-        grant.validate(),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
-    ));
-
-    let activity = RemoteTurnActivity {
-        protocol_version: REMOTE_PROTOCOL_VERSION + 1,
-        sequence: 1,
-        id: "event".to_string(),
-        correlation_id: "corr".to_string(),
-        event: RemoteTurnEvent::AssistantProseDelta {
-            text: "hi".to_string(),
-        },
-    };
-    assert!(matches!(
-        activity.validate(),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
-    ));
-
-    let mut event = RemoteTriggerOccurrenceRequest::new(
-        "ui.button.pressed",
-        "source-key",
-        serde_json::Value::Null,
-        "idem",
-    );
-    event.protocol_version = REMOTE_PROTOCOL_VERSION + 1;
-    assert!(matches!(
-        event.validate(),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
-    ));
-
-    let mut filter = RemoteTriggerSubscriptionFilter::for_session("session");
-    filter.protocol_version = REMOTE_PROTOCOL_VERSION + 1;
-    assert!(matches!(
-        filter.validate(),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
-    ));
-
-    let report = RemoteTriggerEmitReport {
-        protocol_version: REMOTE_PROTOCOL_VERSION + 1,
-        occurrence_id: "occurrence:1".to_string(),
-        deliveries: Vec::new(),
-    };
-    assert!(matches!(
-        report.validate(),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
-    ));
-}
-
-#[test]
 fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
     assert!(matches!(
-        ensure_protocol_version(33),
+        decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 46,
+            expected: 47,
         })
     ));
 }
@@ -1824,10 +1725,10 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
 
     assert!(
         matches!(
-            ensure_protocol_version(37),
+            decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 46,
+                expected: 47,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1860,10 +1761,10 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
 
     assert!(
         matches!(
-            ensure_protocol_version(38),
+            decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 46,
+                expected: 47,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1916,10 +1817,10 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
 
     assert!(
         matches!(
-            ensure_protocol_version(39),
+            decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 46,
+                expected: 47,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1948,10 +1849,10 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
 
     assert!(
         matches!(
-            ensure_protocol_version(40),
+            decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 46,
+                expected: 47,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"
@@ -2003,24 +1904,6 @@ fn protocol_35_peer_rejects_protocol_36_tool_intent_activity_before_variant_deco
 }
 
 #[test]
-fn nested_protocol_versions_must_match_envelope() {
-    let mut request = RemoteTurnRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
-        session_id: "session".to_string(),
-        turn_id: "turn".to_string(),
-        idempotency_key: None,
-        input: RemoteTurnInput::text("hello"),
-        tool_grants: Vec::new(),
-        metadata: HashMap::new(),
-    };
-    request.input.protocol_version = REMOTE_PROTOCOL_VERSION + 1;
-    assert!(matches!(
-        request.validate(),
-        Err(RemoteProtocolError::MismatchedNestedProtocolVersion { .. })
-    ));
-}
-
-#[test]
 fn remote_process_env_ref_is_validated_but_serializes_as_string() {
     let env_ref: RemoteProcessExecutionEnvRef =
         canonical_env_ref().parse().expect("canonical env ref");
@@ -2052,13 +1935,11 @@ fn remote_process_env_ref_is_validated_but_serializes_as_string() {
 #[test]
 fn remote_process_env_persistence_dtos_validate() {
     let request = RemotePersistProcessEnvRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         env_spec: RemoteProcessExecutionEnvSpec::new(RemoteTurnBudget::Unbounded),
     };
     request.validate().expect("valid persist env request");
 
     let result = RemotePersistProcessEnvReceipt {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         env_ref: canonical_env_ref().parse().expect("canonical env ref"),
     };
     result.validate().expect("valid persist env result");
@@ -2158,40 +2039,48 @@ fn trigger_target_label_must_match_identity_label() {
 }
 
 #[test]
-fn top_level_protocol_schema_exports_include_versions() {
-    assert_schema_has_protocol_version::<RemoteLlmRequest>();
-    assert_schema_has_protocol_version::<RemoteLlmResponse>();
-    assert_schema_has_protocol_version::<RemoteTurnInput>();
-    assert_schema_has_protocol_version::<RemoteTurnRequest>();
-    assert_schema_has_protocol_version::<RemoteTurnReport>();
-    assert_schema_has_protocol_version::<RemoteSessionCursor>();
-    assert_schema_has_protocol_version::<RemoteSessionObservation>();
-    assert_schema_has_protocol_version::<RemoteSessionObservationEvent>();
-    assert_schema_has_protocol_version::<RemoteLiveReplayGap>();
-    assert_schema_has_protocol_version::<RemoteToolGrant>();
-    assert_schema_has_protocol_version::<RemoteTurnActivity>();
-    assert_schema_has_protocol_version::<RemoteTriggerOccurrenceRequest>();
-    assert_schema_has_protocol_version::<RemoteTriggerEmitReport>();
-    assert_schema_has_protocol_version::<RemoteTriggerSubscriptionFilter>();
-    assert_schema_has_protocol_version::<RemoteTriggerSubscriptionDraft>();
-    assert_schema_has_protocol_version::<RemoteTriggerRegisterSubscriptionRequest>();
-    assert_schema_has_protocol_version::<RemoteTriggerRegisterSubscriptionReceipt>();
-    assert_schema_has_protocol_version::<RemoteTriggerListSubscriptionsResponse>();
-    assert_schema_has_protocol_version::<RemoteProcessStartRequest>();
-    assert_schema_has_protocol_version::<RemoteProcessStartReceipt>();
-    assert_schema_has_protocol_version::<RemoteProcessWorkSnapshot>();
-    assert_schema_has_protocol_version::<RemoteProcessListFilter>();
-    assert_schema_has_protocol_version::<RemoteProcessListResponse>();
-    assert_schema_has_protocol_version::<RemoteProcessCancelRequest>();
-    assert_schema_has_protocol_version::<RemoteProcessCancelReceipt>();
-    assert_schema_has_protocol_version::<RemoteProcessSignalRequest>();
-    assert_schema_has_protocol_version::<RemoteProcessSignalReceipt>();
-    assert_schema_has_protocol_version::<RemoteProcessAwaitRequest>();
-    assert_schema_has_protocol_version::<RemoteProcessAwaitOutcome>();
-    assert_schema_has_protocol_version::<RemoteProcessEventsRequest>();
-    assert_schema_has_protocol_version::<RemoteProcessEventsResponse>();
-    assert_schema_has_protocol_version::<RemotePersistProcessEnvRequest>();
-    assert_schema_has_protocol_version::<RemotePersistProcessEnvReceipt>();
+fn protocol_body_schemas_exclude_versions() {
+    assert_schema_excludes_protocol_version::<RemoteLlmRequest>();
+    assert_schema_excludes_protocol_version::<RemoteLlmResponse>();
+    assert_schema_excludes_protocol_version::<RemoteTurnInput>();
+    assert_schema_excludes_protocol_version::<RemoteTurnRequest>();
+    assert_schema_excludes_protocol_version::<RemoteTurnCancelRequest>();
+    assert_schema_excludes_protocol_version::<RemoteTurnCancelReceipt>();
+    assert_schema_excludes_protocol_version::<RemoteTurnReport>();
+    assert_schema_excludes_protocol_version::<RemoteSessionCursor>();
+    assert_schema_excludes_protocol_version::<RemoteSessionObservation>();
+    assert_schema_excludes_protocol_version::<RemoteSessionObservationEvent>();
+    assert_schema_excludes_protocol_version::<RemoteLiveReplayGap>();
+    assert_schema_excludes_protocol_version::<RemoteToolGrant>();
+    assert_schema_excludes_protocol_version::<RemoteTurnActivity>();
+    assert_schema_excludes_protocol_version::<RemoteTriggerOccurrenceRequest>();
+    assert_schema_excludes_protocol_version::<RemoteTriggerEmitReport>();
+    assert_schema_excludes_protocol_version::<RemoteTriggerSubscriptionFilter>();
+    assert_schema_excludes_protocol_version::<RemoteTriggerSubscriptionDraft>();
+    assert_schema_excludes_protocol_version::<RemoteTriggerRegisterSubscriptionRequest>();
+    assert_schema_excludes_protocol_version::<RemoteTriggerRegisterSubscriptionReceipt>();
+    assert_schema_excludes_protocol_version::<RemoteTriggerListSubscriptionsResponse>();
+    assert_schema_excludes_protocol_version::<RemoteProcessStartRequest>();
+    assert_schema_excludes_protocol_version::<RemoteProcessStartReceipt>();
+    assert_schema_excludes_protocol_version::<RemoteProcessWorkSnapshot>();
+    assert_schema_excludes_protocol_version::<RemoteProcessListFilter>();
+    assert_schema_excludes_protocol_version::<RemoteProcessListResponse>();
+    assert_schema_excludes_protocol_version::<RemoteProcessCancelRequest>();
+    assert_schema_excludes_protocol_version::<RemoteProcessCancelReceipt>();
+    assert_schema_excludes_protocol_version::<RemoteProcessSignalRequest>();
+    assert_schema_excludes_protocol_version::<RemoteProcessSignalReceipt>();
+    assert_schema_excludes_protocol_version::<RemoteProcessAwaitRequest>();
+    assert_schema_excludes_protocol_version::<RemoteProcessAwaitOutcome>();
+    assert_schema_excludes_protocol_version::<RemoteProcessEventsRequest>();
+    assert_schema_excludes_protocol_version::<RemoteProcessEventsResponse>();
+    assert_schema_excludes_protocol_version::<RemotePersistProcessEnvRequest>();
+    assert_schema_excludes_protocol_version::<RemotePersistProcessEnvReceipt>();
+
+    let envelope = schemars::schema_for!(Envelope<RemoteTurnRequest>);
+    let envelope_text = serde_json::to_value(envelope)
+        .expect("envelope schema json")
+        .to_string();
+    assert!(envelope_text.contains("protocol_version"));
 }
 
 #[test]
@@ -2209,7 +2098,6 @@ fn remote_tool_registry_reopen_conformance_compares_call_paths() {
 
 fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
     RemoteToolGrant {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         id: format!("remote-tool:{name}"),
         name: name.to_string(),
         description: "demo".to_string(),
@@ -2230,13 +2118,13 @@ fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
     }
 }
 
-fn assert_schema_has_protocol_version<T: JsonSchema>() {
+fn assert_schema_excludes_protocol_version<T: JsonSchema>() {
     let schema = schemars::schema_for!(T);
     let schema_json = serde_json::to_value(&schema).expect("schema json");
     let schema_text = schema_json.to_string();
     assert!(
-        schema_text.contains("protocol_version"),
-        "schema did not include protocol_version: {schema_text}"
+        !schema_text.contains("\"protocol_version\""),
+        "body schema still includes protocol_version: {schema_text}"
     );
 }
 

@@ -6,7 +6,6 @@ use std::collections::{BTreeMap, HashMap};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ensure_protocol_version;
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::usage_activity::RemoteUsage;
 
@@ -89,7 +88,6 @@ pub(crate) fn default_remote_input_schema() -> RemoteSchemaContract {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLlmRequest {
-    pub protocol_version: u32,
     pub request_id: String,
     pub scope: RemoteLlmRequestScope,
     pub model_intent: RemoteModelIntent,
@@ -110,6 +108,11 @@ pub struct RemoteLlmRequest {
 }
 
 impl RemoteLlmRequest {
+    /// Encodes one request inside the shared remote-protocol envelope.
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
     /// Decode one JSON request with the protocol-version refusal ahead of the
     /// nested LLM vocabulary.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
@@ -120,13 +123,16 @@ impl RemoteLlmRequest {
         bytes: &[u8],
         expected_version: u32,
     ) -> Result<Self, RemoteProtocolError> {
-        let request: Self = crate::decode_versioned_json(bytes, expected_version)?;
+        let request = crate::Envelope::<Self>::decode_json_expecting_protocol_version(
+            bytes,
+            expected_version,
+        )?
+        .into_body();
         request.validate()?;
         Ok(request)
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteLlmRequest", "request_id", &self.request_id)?;
         self.scope.validate()?;
         self.model_intent.validate()?;
@@ -149,7 +155,6 @@ impl RemoteLlmRequest {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLlmResponse {
-    pub protocol_version: u32,
     pub request_id: String,
     #[serde(default)]
     pub full_text: String,
@@ -419,7 +424,6 @@ pub(crate) fn validate_llm_call_record(
 
 impl RemoteLlmResponse {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteLlmResponse", "request_id", &self.request_id)?;
         Ok(())
     }
