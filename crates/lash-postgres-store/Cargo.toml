@@ -1,5 +1,6 @@
 [package]
 name = "lash-postgres-store"
+autotests = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -51,3 +52,36 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tracing-subscriber = { workspace = true }
+
+[[bin]]
+name = "postgres-await-event-helper"
+path = "src/bin/postgres-await-event-helper.rs"
+test = false
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+[[test]]
+name = "conformance"
+path = "tests/conformance.rs"
+
+[[test]]
+name = "durable_read_fixture"
+path = "tests/durable_read_fixture.rs"
+
+[[test]]
+name = "checkpoint_projection_migration"
+path = "tests/checkpoint_projection_migration.rs"
+
+[[test]]
+name = "preflight_durable_walk"
+path = "tests/preflight_durable_walk.rs"
+
+[[test]]
+name = "preflight_schema_status"
+path = "tests/preflight_schema_status.rs"
+
+[[test]]
+name = "schema_drift"
+path = "tests/schema_drift.rs"

@@ -42,9 +42,7 @@ use lash_core::{
 };
 use lash_postgres_store::PostgresStorage;
 
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url};
 
 async fn connect() -> PostgresStorage {
     let url = database_url().expect("caller checked LASH_POSTGRES_DATABASE_URL is set");

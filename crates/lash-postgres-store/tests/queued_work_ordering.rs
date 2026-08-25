@@ -7,8 +7,6 @@
 use lash_core::{QueuedWorkStore, TurnInputStore};
 use lash_postgres_store::PostgresStorage;
 
-mod support;
-
 /// A `cancel` row is not an ingress family.
 ///
 /// Cancellation preempts on its own path, so the ordering projection must
@@ -18,11 +16,11 @@ mod support;
 /// `turn` from its payloads and can never assert `cancel`.
 #[tokio::test]
 async fn postgres_ordering_projection_ignores_cancel_rows() {
-    let Some(database_url) = support::database_url() else {
+    let Some(database_url) = crate::support::database_url() else {
         eprintln!("skipping cancel-ordering projection proof: database URL is not set");
         return;
     };
-    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
+    let _database_lock = crate::support::SharedDatabaseLock::acquire(&database_url).await;
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect cancel-ordering projection storage");

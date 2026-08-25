@@ -6,9 +6,7 @@ use lash_core::testing::conformance::{
 };
 use lash_postgres_store::PostgresStorage;
 
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url};
 
 struct PostgresSessionExecutionLeaseRenewalZeroRowInjector {
     storage: Arc<PostgresStorage>,

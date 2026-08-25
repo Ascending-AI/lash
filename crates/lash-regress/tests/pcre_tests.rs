@@ -2,6 +2,8 @@
 #![allow(clippy::needless_raw_string_hashes)]
 
 // Work around dead code warnings: rust-lang issue #46379
+#[allow(dead_code)]
+#[path = "common/mod.rs"]
 pub mod common;
 use common::*;
 

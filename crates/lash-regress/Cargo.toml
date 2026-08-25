@@ -1,6 +1,7 @@
 # Copyright (c) 2020 ridiculous_fish; https://github.com/ridiculousfish/regress @ 7e64ad5e6807b5503e5cc97a79e0f129b23c556b; MIT licensed; modified: fuel/step-budget instrumentation, Lash package manifest, and package lint policy.
 [package]
 name = "lash-regress"
+autotests = false
 version.workspace = true
 authors = ["ridiculousfish <corydoras@ridiculousfish.com>"]
 description = "Lash's fuel-metered fork of the regress ECMAScript regular expression engine"
@@ -41,3 +42,20 @@ pattern = []
 [dependencies]
 hashbrown = "0.16.0"
 memchr = { version = "2.4.0", default-features = false }
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+[[test]]
+name = "pattern_tests"
+path = "tests/pattern_tests.rs"
+required-features = ["pattern"]
+
+[[test]]
+name = "unicode_property_escapes"
+path = "tests/unicode_property_escapes.rs"
+
+[[test]]
+name = "unicodesets"
+path = "tests/unicodesets.rs"

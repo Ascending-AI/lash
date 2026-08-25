@@ -6,9 +6,6 @@
 //! lashlang semantics, the failing test tells you which line in the prompt
 //! is now a lie.
 
-#[path = "support/execute.rs"]
-mod execute_support;
-
 use lash_sansio::sync::MutexExt;
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, ParseError,
@@ -17,7 +14,7 @@ use lashlang::{
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use execute_support::ExecuteError;
+use crate::execute_support::{self, ExecuteError};
 
 // ─────────────────────────────────────────────────────────────────────
 // Test host: mirrors the real RLM runtime's tool-result wrapping

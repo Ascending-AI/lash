@@ -11,9 +11,7 @@ use lash_core::{
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaProvisioning};
 use sqlx::postgres::PgPoolOptions;
 
-mod support;
-
-use support::{SharedDatabaseLock, database_url};
+use crate::support::{SharedDatabaseLock, database_url};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_commit_waits_for_delete_then_refuses_missing_component_when_configured() {

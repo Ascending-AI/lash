@@ -10,10 +10,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-#[path = "support/execute.rs"]
-mod execute_support;
-
-use execute_support::ExecuteError;
+use crate::execute_support::{self, ExecuteError};
 
 #[derive(Default)]
 struct TestHost {

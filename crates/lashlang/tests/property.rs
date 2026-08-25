@@ -9,10 +9,7 @@ use lashlang::{
 };
 use proptest::prelude::*;
 
-#[path = "support/execute.rs"]
-mod execute_support;
-
-use execute_support::{ExecuteError, execute};
+use crate::execute_support::{ExecuteError, execute};
 
 #[derive(Default)]
 struct DeterministicHost;

@@ -511,7 +511,7 @@ fn fuzzed_token_sequences_never_abort_the_parser() {
     for batch in 0..BATCHES {
         let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([
-                "fuzzed_token_sequences_never_abort_the_parser",
+                "grammar_coverage::fuzzed_token_sequences_never_abort_the_parser",
                 "--exact",
                 "--nocapture",
             ])
