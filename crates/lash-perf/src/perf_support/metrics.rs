@@ -71,6 +71,13 @@ pub fn percentile_summary(mut values: Vec<f64>) -> PercentileMetricSummary {
     }
 }
 
+/// Returns a linearly interpolated percentile from sorted samples.
+///
+/// The percentile rank is the zero-based index `p * (n - 1)`. A fractional
+/// rank is interpolated between its two neighboring samples. Empty input
+/// returns zero, one sample returns that sample, and two samples interpolate
+/// directly between their endpoints. Runtime report p50/p95/p99 fields and
+/// `scripts/runtime_perf_percentiles.py` use this same definition.
 pub fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -92,6 +99,11 @@ pub fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rounding_uses_half_away_from_zero() {
+        assert_eq!(round3(1.5025), 1.503);
+    }
 
     #[test]
     fn percentiles_use_interpolation_for_odd_samples() {
@@ -124,5 +136,15 @@ mod tests {
         assert_eq!(single.p50, 7.25);
         assert_eq!(single.p95, 7.25);
         assert_eq!(single.p99, 7.25);
+    }
+
+    #[test]
+    fn percentiles_interpolate_two_sample_inputs() {
+        let summary = basic_summary(vec![10.0, 20.0]);
+
+        assert_eq!(summary.median, 15.0);
+        assert_eq!(summary.p50, 15.0);
+        assert_eq!(summary.p95, 19.5);
+        assert_eq!(summary.p99, 19.9);
     }
 }
