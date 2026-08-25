@@ -488,7 +488,11 @@ fn complete_buffered_chat(
     }
     let parts = parsed_parts.unwrap_or_else(|| state.parts());
     if stream_termination == Some(StreamTermination::RequireTerminalEvidence)
-        && state.provider_finish_reason.is_none()
+        && state
+            .execution_evidence
+            .as_ref()
+            .and_then(|evidence| evidence.provider_finish_reason.as_ref())
+            .is_none()
     {
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
@@ -502,7 +506,7 @@ fn complete_buffered_chat(
     if let Some(tx) = &stream_events {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
             provider_usage: state.provider_usage.clone(),
-            execution_evidence: state.execution_evidence(),
+            execution_evidence: state.execution_evidence.clone(),
             ..Default::default()
         }));
         if state.usage != LlmUsage::default() {
@@ -531,7 +535,7 @@ fn complete_buffered_chat(
     } else {
         state.terminal_reason
     };
-    let execution_evidence = state.execution_evidence();
+    let execution_evidence = state.execution_evidence;
     Ok(LlmResponse {
         full_text: state.full_text,
         parts,
@@ -742,11 +746,11 @@ async fn drive_streaming_chat(
             let prev_usage = state.usage.clone();
             OpenAiCompatibleProvider::process_chat_sse_event(raw, &mut state)?;
             if let Some(tx) = &stream_events
-                && (state.provider_usage.is_some() || state.execution_evidence().is_some())
+                && (state.provider_usage.is_some() || state.execution_evidence.is_some())
             {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     provider_usage: state.provider_usage.clone(),
-                    execution_evidence: state.execution_evidence(),
+                    execution_evidence: state.execution_evidence.clone(),
                     ..Default::default()
                 }));
             }
@@ -780,7 +784,11 @@ async fn drive_streaming_chat(
     }
 
     if stream_termination == StreamTermination::RequireTerminalEvidence
-        && state.provider_finish_reason.is_none()
+        && state
+            .execution_evidence
+            .as_ref()
+            .and_then(|evidence| evidence.provider_finish_reason.as_ref())
+            .is_none()
     {
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
@@ -805,7 +813,7 @@ async fn drive_streaming_chat(
     } else {
         state.terminal_reason
     };
-    let execution_evidence = state.execution_evidence();
+    let execution_evidence = state.execution_evidence;
     Ok(LlmResponse {
         full_text: state.full_text,
         parts,
@@ -827,7 +835,7 @@ fn shared_response_from_state(state: ResponsesStreamState, http_summary: String)
 
 fn chat_response_from_state(state: ChatStreamState, url: &str) -> LlmResponse {
     let parts = state.parts();
-    let execution_evidence = state.execution_evidence();
+    let execution_evidence = state.execution_evidence;
     LlmResponse {
         full_text: state.full_text,
         parts,

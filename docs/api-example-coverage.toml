@@ -31763,7 +31763,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecutionEvidence::reasoning_output_tokens"]
 area = "plugins"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-openai/src/chat.rs:797#reasoning_output_tokens: self.reasoning_output_tokens,"
+usage = "crates/lash-provider-openai/src/responses_shared.rs:922#reasoning_output_tokens: usage"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence::served_model"
