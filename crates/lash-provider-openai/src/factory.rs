@@ -9,6 +9,8 @@ struct OpenAiCompatibleProviderConfig {
     options: ProviderOptions,
     #[serde(default)]
     compat: OpenAiCompat,
+    #[serde(default)]
+    wire: OpenAiWireConfig,
 }
 
 #[derive(Deserialize)]
@@ -61,9 +63,31 @@ impl ProviderFactory for OpenAiCompatibleProviderFactory {
             base_url: cfg.base_url,
             options: cfg.options,
             compat: cfg.compat,
-            wire: OpenAiWireConfig::default(),
+            wire: cfg.wire,
             transport: DEFAULT_HTTP_TRANSPORT.clone(),
         }
         .into_components())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compatible_provider_wire_config_round_trips_through_factory() {
+        let provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1")
+            .with_wire_config(OpenAiWireConfig {
+                auth_header_name: "api-key".to_string(),
+                auth_value_prefix: "Token ".to_string(),
+                query_params: vec![("api-version".to_string(), "2026-08-25".to_string())],
+            });
+        let config = provider.serialize_config();
+
+        let round_trip = OpenAiCompatibleProviderFactory
+            .deserialize(config.clone())
+            .expect("non-default wire config round trip");
+
+        assert_eq!(round_trip.provider.serialize_config(), config);
     }
 }
