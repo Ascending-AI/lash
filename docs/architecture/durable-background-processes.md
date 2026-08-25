@@ -231,12 +231,12 @@ PostgreSQL tables. The operations runbook reset consequently clears
 `lash_process_wake_deliveries`, `lash_wake_allocation_floors`, and
 `lash_wake_redelivery_fences`.
 
-Figments coordination is one Lash revision. SQLite durable-core schema <span data-format-version="SQLITE_SCHEMA_VERSION">42</span> includes
+Figments coordination is one Lash revision. SQLite durable-core schema <span data-format-version="SQLITE_SCHEMA_VERSION">43</span> includes
 the read-only session-catalog projection and keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover, plus durable turn-cancel disposition and outcome records and the session-state admission marker; graph generation is the sole persisted ordering authority. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">61</span> includes those cutovers,
+immutable graph-generation cutover, plus durable turn-cancel disposition and outcome records, the session-state admission marker, and structural append receipt identities; graph generation is the sole persisted ordering authority. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">62</span> includes those cutovers,
 the indexed recovery worklist, the session-metadata payload cutover, the
 durable effect-group journal, and the loser drain's unsettled-children index
-over it, plus the same turn-cancel records and admission marker. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> adds atomic pending
+over it, plus the same turn-cancel records, admission marker, and structural append receipt identities. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> adds atomic pending
 process-parent teardown to the v3 process-environment reference cutover; trigger
 schema <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span> carries durable trigger-occurrence reclaim eligibility. Effect schema <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span> carries the
 agent-frame-key and recorded tool-intent cutovers plus the effect-group journal,

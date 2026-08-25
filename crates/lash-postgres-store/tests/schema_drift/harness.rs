@@ -113,6 +113,9 @@ impl ScratchSchema {
 /// columns takes the partial unique guard with them, and dropping the group
 /// table takes its two indexes.
 pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests;
+     ALTER TABLE lash_runtime_turn_commits
+         DROP CONSTRAINT lash_runtime_turn_commits_check,
+         ADD COLUMN requested_ancestor_node_id TEXT;
      DROP TABLE lash_checkpoint_blob_refs;
      DROP INDEX idx_lash_sessions_checkpoint_ref;
      DROP INDEX idx_lash_node_anchors_checkpoint_ref;
@@ -141,6 +144,9 @@ pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests
 /// and this build differ in the version stamp alone — which is exactly what the
 /// 54 -> 55 migration declares as its source shape.
 pub const REWIND_PAST_55_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests;
+     ALTER TABLE lash_runtime_turn_commits
+         DROP CONSTRAINT lash_runtime_turn_commits_check,
+         ADD COLUMN requested_ancestor_node_id TEXT;
      DROP TABLE lash_checkpoint_blob_refs;
      DROP INDEX idx_lash_sessions_checkpoint_ref;
      DROP INDEX idx_lash_node_anchors_checkpoint_ref;
@@ -160,6 +166,9 @@ pub const REWIND_PAST_55_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests
 
 /// Rewinds a freshly provisioned schema to the published component-56 shape.
 pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests;
+     ALTER TABLE lash_runtime_turn_commits
+         DROP CONSTRAINT lash_runtime_turn_commits_check,
+         ADD COLUMN requested_ancestor_node_id TEXT;
      DROP TABLE lash_checkpoint_blob_refs;
      DROP INDEX idx_lash_sessions_checkpoint_ref;
      DROP INDEX idx_lash_node_anchors_checkpoint_ref;

@@ -1676,10 +1676,12 @@ lash::observe::SessionRevision::0
 lash::observe::SessionRevision::as_u64
 lash::observe::SessionRevision::new
 lash::persistence::AppendRequestIdentity
-lash::persistence::AppendRequestIdentity::encoding_version
-lash::persistence::AppendRequestIdentity::request_hash
-lash::persistence::AppendRequestIdentity::requested_ancestor_node_id
-lash::persistence::AppendRequestIdentity::requested_node_count
+lash::persistence::AppendRequestIdentity::Append
+lash::persistence::AppendRequestIdentity::Append::encoding_version
+lash::persistence::AppendRequestIdentity::Append::request_hash
+lash::persistence::AppendRequestIdentity::Append::requested_ancestor_node_id
+lash::persistence::AppendRequestIdentity::Append::requested_node_count
+lash::persistence::AppendRequestIdentity::PlainCommit
 lash::persistence::AttachmentCondemnation
 lash::persistence::AttachmentCondemnation::AlreadyCondemned
 lash::persistence::AttachmentCondemnation::Condemned

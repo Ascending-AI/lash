@@ -53,37 +53,69 @@ pub enum RuntimeCommitReceiptDecision {
 pub fn decide_runtime_commit_receipt(
     stored_commit_hash: &str,
     attempted_commit_hash: &str,
-    stored_identity: Option<&AppendRequestIdentity>,
-    attempted_identity: Option<&AppendRequestIdentity>,
+    stored_identity: &AppendRequestIdentity,
+    attempted_identity: &AppendRequestIdentity,
 ) -> RuntimeCommitReceiptDecision {
     if stored_commit_hash == attempted_commit_hash {
-        if let (Some(stored), Some(attempted)) = (stored_identity, attempted_identity)
-            && stored.encoding_version == attempted.encoding_version
-            && stored.request_hash != attempted.request_hash
+        if let (
+            AppendRequestIdentity::Append {
+                encoding_version: stored_version,
+                request_hash: stored_hash,
+                ..
+            },
+            AppendRequestIdentity::Append {
+                encoding_version: attempted_version,
+                request_hash: attempted_hash,
+                ..
+            },
+        ) = (stored_identity, attempted_identity)
+            && stored_version == attempted_version
+            && stored_hash != attempted_hash
         {
             return RuntimeCommitReceiptDecision::AppendIdentityConflict;
-        }
-        if let (Some(stored), Some(attempted)) = (stored_identity, attempted_identity)
-            && stored.requested_node_count != attempted.requested_node_count
+        } else if let (
+            AppendRequestIdentity::Append {
+                requested_node_count: stored_count,
+                ..
+            },
+            AppendRequestIdentity::Append {
+                requested_node_count: attempted_count,
+                ..
+            },
+        ) = (stored_identity, attempted_identity)
+            && stored_count != attempted_count
         {
             return RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
-                stored: Some(stored.requested_node_count),
-                attempted: Some(attempted.requested_node_count),
+                stored: Some(*stored_count),
+                attempted: Some(*attempted_count),
             };
         }
         return RuntimeCommitReceiptDecision::Replay;
     }
 
-    if let (Some(stored), Some(attempted)) = (stored_identity, attempted_identity)
-        && stored.encoding_version == attempted.encoding_version
+    if let (
+        AppendRequestIdentity::Append {
+            encoding_version: stored_version,
+            request_hash: stored_hash,
+            requested_node_count: stored_count,
+            ..
+        },
+        AppendRequestIdentity::Append {
+            encoding_version: attempted_version,
+            request_hash: attempted_hash,
+            requested_node_count: attempted_count,
+            ..
+        },
+    ) = (stored_identity, attempted_identity)
+        && stored_version == attempted_version
     {
-        if stored.request_hash != attempted.request_hash {
+        if stored_hash != attempted_hash {
             return RuntimeCommitReceiptDecision::AppendIdentityConflict;
         }
-        if stored.requested_node_count != attempted.requested_node_count {
+        if stored_count != attempted_count {
             return RuntimeCommitReceiptDecision::CorruptRequestedNodeCount {
-                stored: Some(stored.requested_node_count),
-                attempted: Some(attempted.requested_node_count),
+                stored: Some(*stored_count),
+                attempted: Some(*attempted_count),
             };
         }
         return RuntimeCommitReceiptDecision::Replay;
@@ -95,10 +127,11 @@ pub fn decide_runtime_commit_receipt(
 pub(super) fn validate_append_receipt_identity(
     completed: &RuntimeTurnCommitStamp,
 ) -> Result<(), StoreError> {
-    if completed.append_request_identity.is_none() {
-        return Ok(());
-    }
-    if completed.operation.key != "append-session-nodes" {
+    if matches!(
+        completed.append_request_identity,
+        AppendRequestIdentity::Append { .. }
+    ) && completed.operation.key != "append-session-nodes"
+    {
         return Err(StoreError::Backend(format!(
             "append receipt identity metadata is invalid for operation `{}`",
             completed.operation.key
@@ -736,16 +769,18 @@ mod append_request_identity_tests {
             AppendIdentityConflict, CorruptRequestedNodeCount, Replay, RuntimeCommitConflict,
         };
 
-        let identity = |version, request_hash: &str, requested_node_count| AppendRequestIdentity {
-            encoding_version: version,
-            request_hash: request_hash.to_string(),
-            requested_node_count,
-            requested_ancestor_node_id: None,
-        };
+        let identity =
+            |version, request_hash: &str, requested_node_count| AppendRequestIdentity::Append {
+                encoding_version: version,
+                request_hash: request_hash.to_string(),
+                requested_node_count,
+                requested_ancestor_node_id: None,
+            };
+        let plain = AppendRequestIdentity::PlainCommit;
         let decide = |stored_hash,
                       attempted_hash,
-                      stored_identity: Option<&AppendRequestIdentity>,
-                      attempted_identity: Option<&AppendRequestIdentity>| {
+                      stored_identity: &AppendRequestIdentity,
+                      attempted_identity: &AppendRequestIdentity| {
             decide_runtime_commit_receipt(
                 stored_hash,
                 attempted_hash,
@@ -758,58 +793,43 @@ mod append_request_identity_tests {
             decide(
                 "same",
                 "same",
-                Some(&identity(1, "original-ancestor-identity", 1)),
-                Some(&identity(1, "changed-ancestor-identity", 1)),
+                &identity(1, "original-ancestor-identity", 1),
+                &identity(1, "changed-ancestor-identity", 1),
             ),
             AppendIdentityConflict,
             "exact commit hashes cannot conceal comparable append identity drift"
         );
         assert_eq!(
-            decide("same", "same", None, Some(&identity(1, "new", 2))),
+            decide("same", "same", &plain, &identity(1, "new", 2)),
             Replay,
             "legacy exact-hash replay tolerates absent legacy metadata"
         );
         assert_eq!(
-            decide(
-                "same",
-                "same",
-                Some(&identity(1, "id", 1)),
-                Some(&identity(1, "id", 2)),
-            ),
+            decide("same", "same", &identity(1, "id", 1), &identity(1, "id", 2),),
             CorruptRequestedNodeCount {
                 stored: Some(1),
                 attempted: Some(2),
             }
         );
         assert_eq!(
-            decide(
-                "old",
-                "new",
-                Some(&identity(1, "id", 2)),
-                Some(&identity(1, "id", 2)),
-            ),
+            decide("old", "new", &identity(1, "id", 2), &identity(1, "id", 2),),
             Replay
         );
         assert_eq!(
-            decide("old", "new", None, Some(&identity(1, "id", 2))),
+            decide("old", "new", &plain, &identity(1, "id", 2)),
             RuntimeCommitConflict
         );
         assert_eq!(
             decide(
                 "old",
                 "new",
-                Some(&identity(1, "old-id", 2)),
-                Some(&identity(1, "new-id", 2)),
+                &identity(1, "old-id", 2),
+                &identity(1, "new-id", 2),
             ),
             AppendIdentityConflict
         );
         assert_eq!(
-            decide(
-                "old",
-                "new",
-                Some(&identity(1, "id", 2)),
-                Some(&identity(2, "id", 2)),
-            ),
+            decide("old", "new", &identity(1, "id", 2), &identity(2, "id", 2),),
             RuntimeCommitConflict
         );
     }

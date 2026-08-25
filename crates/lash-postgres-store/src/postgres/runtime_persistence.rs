@@ -1135,10 +1135,9 @@ impl SessionCommitStore for PostgresSessionStore {
             sqlx::query(
                 "INSERT INTO lash_runtime_turn_commits (
                     session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                    request_identity_hash, requested_node_count,
-                    requested_ancestor_node_id, identity_encoding_version
+                    request_identity_hash, requested_node_count, identity_encoding_version
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
             )
             .bind(receipt.session_id)
             .bind(receipt.operation_key)
@@ -1148,7 +1147,6 @@ impl SessionCommitStore for PostgresSessionStore {
             .bind(columns.0)
             .bind(columns.1)
             .bind(columns.2)
-            .bind(columns.3)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1166,9 +1164,8 @@ impl SessionCommitStore for PostgresSessionStore {
                     sqlx::query(
                         "INSERT INTO lash_runtime_turn_commits (
                             session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                            request_identity_hash, requested_node_count,
-                            requested_ancestor_node_id, identity_encoding_version
-                         ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULL, NULL)",
+                            request_identity_hash, requested_node_count, identity_encoding_version
+                         ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULL)",
                     )
                     .bind(&commit.session_id)
                     .bind(marker)
@@ -1181,9 +1178,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
             }
         }
-        // Receipt SQL remains the same four nullable identity columns.
-        // The aggregate exists only in Rust; no durable layout moved.
-        // An absent aggregate still writes four NULL values for legacy receipts.
+        // A plain-commit receipt writes three NULL append-identity columns.
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 release_session_execution_lease_tx(&mut tx, completion).await?;
@@ -4271,32 +4266,40 @@ async fn release_session_execution_lease_tx(
 }
 
 fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Option<&str> {
-    stamp
-        .append_request_identity
-        .as_ref()
-        .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
+    match &stamp.append_request_identity {
+        lash_core::AppendRequestIdentity::Append {
+            requested_ancestor_node_id,
+            ..
+        } => requested_ancestor_node_id.as_deref(),
+        lash_core::AppendRequestIdentity::PlainCommit => None,
+    }
 }
 
-type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<&'a str>, Option<i32>);
+type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<i32>);
 
 fn append_identity_columns(
-    identity: Option<&lash_core::AppendRequestIdentity>,
+    identity: &lash_core::AppendRequestIdentity,
 ) -> Result<AppendIdentityColumns<'_>, StoreError> {
-    let Some(identity) = identity else {
-        return Ok((None, None, None, None));
+    let lash_core::AppendRequestIdentity::Append {
+        encoding_version,
+        request_hash,
+        requested_node_count,
+        ..
+    } = identity
+    else {
+        return Ok((None, None, None));
     };
     let encoding_version =
-        i32::try_from(identity.encoding_version).map_err(|_| StoreError::RecordEncodingFailed {
+        i32::try_from(*encoding_version).map_err(|_| StoreError::RecordEncodingFailed {
             record_kind: "RuntimeCommitReceipt append identity".to_string(),
             message: format!(
                 "identity_encoding_version `{}` does not fit PostgreSQL INTEGER",
-                identity.encoding_version
+                encoding_version
             ),
         })?;
     Ok((
-        Some(identity.request_hash.as_str()),
-        Some(identity.requested_node_count as i64),
-        identity.requested_ancestor_node_id.as_deref(),
+        Some(request_hash.as_str()),
+        Some(*requested_node_count as i64),
         Some(encoding_version),
     ))
 }
@@ -4307,14 +4310,14 @@ mod tests {
 
     #[test]
     fn append_identity_columns_refuse_encoding_versions_that_do_not_fit_postgres_integer() {
-        let identity = lash_core::AppendRequestIdentity {
+        let identity = lash_core::AppendRequestIdentity::Append {
             encoding_version: i32::MAX as u32 + 1,
             request_hash: "request-hash".to_string(),
             requested_node_count: 1,
             requested_ancestor_node_id: None,
         };
 
-        let error = append_identity_columns(Some(&identity))
+        let error = append_identity_columns(&identity)
             .expect_err("out-of-range encoding version must be refused");
         match error {
             StoreError::RecordEncodingFailed {

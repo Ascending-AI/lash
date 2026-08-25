@@ -68,6 +68,26 @@ fn intent_fixture() -> RuntimeCommit {
 }
 
 #[test]
+fn append_identity_refuses_non_append_operation_key() {
+    let mut commit = intent_fixture();
+    commit.turn_commit.append_request_identity = AppendRequestIdentity::Append {
+        encoding_version: 2,
+        request_hash: "request-hash".to_string(),
+        requested_node_count: 1,
+        requested_ancestor_node_id: None,
+    };
+
+    let error = commit
+        .validate_operation_session()
+        .expect_err("append identity on a plain commit operation must be refused");
+    assert!(matches!(
+        error,
+        StoreError::Backend(ref message)
+            if message == "append receipt identity metadata is invalid for operation `final`"
+    ));
+}
+
+#[test]
 fn claim_settlement_refuses_foreign_completions_in_both_directions() {
     let mut commit = intent_fixture();
     commit.completed_queue_claims = vec![crate::QueuedWorkCompletion {

@@ -569,35 +569,41 @@ pub struct RuntimeCommitReceipt {
     pub receipt_replayed: bool,
 }
 
-/// Versioned semantic identity of one append-session-nodes request.
+/// Replay identity carried by one runtime commit.
 ///
-/// The identity is stored as a unit so a receipt cannot carry only part of the
-/// version, hash, count, and ancestor tuple.
+/// A plain commit carries no append identity. An append carries its canonical
+/// version, hash, and node count as one variant; only the ancestor fence is
+/// genuinely optional.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AppendRequestIdentity {
-    /// Version of the canonical append-request encoding.
-    #[serde(rename = "identity_encoding_version")]
-    pub encoding_version: u32,
-    /// SHA-256 identity of the semantic append request.
-    #[serde(rename = "request_identity_hash")]
-    pub request_hash: String,
-    /// Number of semantic nodes supplied by the append caller.
-    pub requested_node_count: u64,
-    /// Branch ancestor named by the append caller, when one was required.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requested_ancestor_node_id: Option<String>,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AppendRequestIdentity {
+    /// A commit adjudicated only by its canonical runtime-commit hash.
+    PlainCommit,
+    /// A semantic append request with a comparable versioned identity.
+    Append {
+        /// Version of the canonical append-request encoding.
+        #[serde(rename = "identity_encoding_version")]
+        encoding_version: u32,
+        /// SHA-256 identity of the semantic append request.
+        #[serde(rename = "request_identity_hash")]
+        request_hash: String,
+        /// Number of semantic nodes supplied by the append caller.
+        requested_node_count: u64,
+        /// Branch ancestor named by the append caller, when one was required.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requested_ancestor_node_id: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeTurnCommitStamp {
     pub operation: OperationId,
-    /// Versioned append-request identity, or `None` for a non-append operation
-    /// or a legacy receipt.
+    /// Plain-commit or append-request replay identity.
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
     // No durable JSON path writes this stamp; the column path is the durable one.
-    #[serde(default, flatten)]
-    pub append_request_identity: Option<AppendRequestIdentity>,
+    pub append_request_identity: AppendRequestIdentity,
 }
 
 impl RuntimeTurnCommitStamp {
@@ -606,7 +612,7 @@ impl RuntimeTurnCommitStamp {
     pub fn new(operation: OperationId) -> Self {
         Self {
             operation,
-            append_request_identity: None,
+            append_request_identity: AppendRequestIdentity::PlainCommit,
         }
     }
 
@@ -622,14 +628,14 @@ impl RuntimeTurnCommitStamp {
         )?;
         Ok(Self {
             operation,
-            append_request_identity: Some(AppendRequestIdentity {
+            append_request_identity: AppendRequestIdentity::Append {
                 encoding_version: commit_identity::append_request_identity_encoding_version(nodes),
                 request_hash: request_identity_hash,
                 requested_node_count: u64::try_from(nodes.len()).map_err(|_| {
                     StoreError::Backend("append requested-node count does not fit u64".to_string())
                 })?,
                 requested_ancestor_node_id: requested_ancestor_node_id.map(str::to_string),
-            }),
+            },
         })
     }
 }
@@ -639,22 +645,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn partial_json_stamp_deserializes_as_absent_identity() {
+    fn append_identity_cannot_deserialize_half_populated() {
         let operation = OperationId::new(
             crate::ExecutionScope::runtime_operation("partial-json-stamp"),
             "append-session-nodes",
         );
-        let mut json =
-            serde_json::to_value(RuntimeTurnCommitStamp::new(operation)).expect("stamp serializes");
-        json.as_object_mut()
-            .expect("stamp serializes as an object")
-            .insert(
-                "identity_encoding_version".to_string(),
-                serde_json::json!(2),
-            );
+        let json = serde_json::json!({
+            "operation": operation,
+            "append_request_identity": {
+                "kind": "append",
+                "identity_encoding_version": 2,
+                "requested_node_count": 1
+            }
+        });
 
-        let stamp: RuntimeTurnCommitStamp =
-            serde_json::from_value(json).expect("partial JSON stamp remains lenient");
-        assert!(stamp.append_request_identity.is_none());
+        serde_json::from_value::<RuntimeTurnCommitStamp>(json)
+            .expect_err("append identity without its hash must be refused");
     }
 }

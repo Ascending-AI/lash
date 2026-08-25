@@ -16534,48 +16534,66 @@ reason = "The FIG-1223 sort found lines naming this member's name but none that 
 
 [[api]]
 symbol = "lash::persistence::AppendRequestIdentity"
-kind = "struct"
+kind = "enum"
 availability = "default+all-features"
 aliases = ["lash_core::AppendRequestIdentity"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors carry append receipt identity as one unit."
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors distinguish plain commits from append receipts without partial identity states."
 
 [[api]]
-symbol = "lash::persistence::AppendRequestIdentity::encoding_version"
+symbol = "lash::persistence::AppendRequestIdentity::Append"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AppendRequestIdentity::Append"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors carry complete append receipt identity in this variant."
+
+[[api]]
+symbol = "lash::persistence::AppendRequestIdentity::Append::encoding_version"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::AppendRequestIdentity::encoding_version"]
+aliases = ["lash_core::AppendRequestIdentity::Append::encoding_version"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: custom durable store implementors persist the append request encoding version."
 
 [[api]]
-symbol = "lash::persistence::AppendRequestIdentity::request_hash"
+symbol = "lash::persistence::AppendRequestIdentity::Append::request_hash"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::AppendRequestIdentity::request_hash"]
+aliases = ["lash_core::AppendRequestIdentity::Append::request_hash"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: custom durable store implementors persist the semantic append request hash."
 
 [[api]]
-symbol = "lash::persistence::AppendRequestIdentity::requested_ancestor_node_id"
+symbol = "lash::persistence::AppendRequestIdentity::Append::requested_ancestor_node_id"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::AppendRequestIdentity::requested_ancestor_node_id"]
+aliases = ["lash_core::AppendRequestIdentity::Append::requested_ancestor_node_id"]
 area = "stores"
 disposition = "unused-justify"
-reason = "Concrete integrator class under ADR 0051: custom durable store implementors enforce fresh append ancestor fences after receipt lookup."
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors enforce the optional ancestor fence only on the fresh in-memory append path; decoded receipts carry no ancestor."
 
 [[api]]
-symbol = "lash::persistence::AppendRequestIdentity::requested_node_count"
+symbol = "lash::persistence::AppendRequestIdentity::Append::requested_node_count"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::AppendRequestIdentity::requested_node_count"]
+aliases = ["lash_core::AppendRequestIdentity::Append::requested_node_count"]
 area = "stores"
 disposition = "unused-justify"
 reason = "Concrete integrator class under ADR 0051: custom durable store implementors persist the append receipt node-count cross-check."
+
+[[api]]
+symbol = "lash::persistence::AppendRequestIdentity::PlainCommit"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash_core::AppendRequestIdentity::PlainCommit"]
+area = "stores"
+disposition = "unused-justify"
+reason = "Concrete integrator class under ADR 0051: custom durable store implementors represent receipts that use exact commit-hash replay semantics."
 
 [[api]]
 symbol = "lash::persistence::RuntimeTurnCommitStamp"
@@ -20214,7 +20232,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::applications"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3865#applications: Vec::new(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3860#applications: Vec::new(),"
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::inputs"
 kind = "field"
@@ -20222,7 +20240,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3864#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3859#inputs,"
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
 kind = "field"
@@ -80912,42 +80930,42 @@ kind = "struct"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4229#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4224#lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::executor_id"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4231#executor_id: current.executor_id.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4226#executor_id: current.executor_id.as_deref(),"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::expires_at_epoch_ms"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4234#expires_at_epoch_ms: current.expires_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4229#expires_at_epoch_ms: current.expires_at_ms,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::fencing_token"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4233#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4228#fencing_token: current.fencing_token,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4232#lease_token: current.lease_token.as_deref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4227#lease_token: current.lease_token.as_deref(),"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::owner"
 kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4230#owner: current.owner.as_ref(),"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4225#owner: current.owner.as_ref(),"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseRefusalFacts"
 kind = "struct"
@@ -81112,7 +81130,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4226#lash_core::store_backend_support::require_current_session_execution_lease("
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4221#lash_core::store_backend_support::require_current_session_execution_lease("
 [[api]]
 symbol = "lash_core::store_backend_support::trace_session_execution_lease_refusal"
 kind = "function"

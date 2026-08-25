@@ -221,7 +221,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 61 removes the graph-node sequence column. Per-session generation is
 // the sole durable graph ordering authority. Older stores are rejected and
 // recreated; there is no migration for the removed column.
-const SCHEMA_VERSION: i32 = 61;
+// Version 62 makes runtime append receipt identity columns all-or-none and
+// removes the readerless requested-ancestor receipt column. Component-61 stores
+// are rejected and recreated; there is no 61 -> 62 compatibility read or migration path.
+const SCHEMA_VERSION: i32 = 62;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
@@ -479,11 +482,11 @@ impl PostgresStorage {
     /// The component schema version this build implements, as stamped in
     /// `lash_schema_versions`.
     ///
-    /// The component schema is normally a reject-and-recreate boundary. This
-    /// Component 61 is a hard cutover for every published older graph shape:
-    /// the removed graph-node sequence column is refused before any historical
-    /// creation-only migration DDL can run. Component 60 also has no applicable
-    /// migration. An older stamp over incompatible artifacts is refused with an
+    /// The component schema is normally a reject-and-recreate boundary.
+    /// Component 62 is a hard append-identity cutover from component 61. Every
+    /// pre-61 graph shape also carries the retired graph-node sequence column
+    /// and is refused before historical creation-only migration DDL can run.
+    /// An older stamp over incompatible artifacts is refused with an
     /// inspect-and-recreate remedy; other mismatches are rejected at open.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION

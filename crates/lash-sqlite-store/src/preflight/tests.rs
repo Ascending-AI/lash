@@ -49,14 +49,13 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
 }
 
 #[tokio::test]
-async fn preflight_reports_a_version_below_the_migration_boundary_that_open_would_refuse() {
+async fn preflight_reports_the_previous_recreate_only_version_that_open_would_refuse() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
-    // Versions 39 and 40 both have explicit forward migrations to 41. Rewind
-    // past that supported window so this remains a refusal fixture.
-    let unsupported = expected - 3;
+    // Version 43 is a reject-and-recreate boundary with no migration from 42.
+    let unsupported = expected - 1;
 
     rewind_user_version(&path, unsupported);
 

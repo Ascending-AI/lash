@@ -1485,11 +1485,31 @@ async fn sqlite_runtime_turn_receipt_identity_columns_are_nullable() {
     for column in [
         "request_identity_hash",
         "requested_node_count",
-        "requested_ancestor_node_id",
         "identity_encoding_version",
     ] {
         assert_eq!(columns.get(column), Some(&0), "{column} must allow NULL");
     }
+}
+
+#[tokio::test]
+async fn sqlite_runtime_turn_receipt_rejects_half_populated_append_identity() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("receipt-schema-check.db");
+    drop(Store::open(&path).await.expect("open store"));
+    let conn = rusqlite::Connection::open(path).expect("open raw sqlite");
+    let error = conn
+        .execute(
+            "INSERT INTO runtime_turn_commits (
+                session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+                request_identity_hash
+             ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash')",
+            [],
+        )
+        .expect_err("a half-populated append identity must violate the schema CHECK");
+    assert_eq!(
+        error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::ConstraintViolation)
+    );
 }
 
 fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {

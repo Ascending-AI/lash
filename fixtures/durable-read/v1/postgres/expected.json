@@ -1,5 +1,5 @@
 {
-  "fixture_schema_version": 29,
+  "fixture_schema_version": 30,
   "head_revision": 3,
   "node_ids_in_read_order": [
     "frame-node/v2/8122b826e3e24cc302f2bb25914f9a20a73562058f9cab31b0a09779ddccec2f",
@@ -124,9 +124,12 @@
         },
         "key": "append-session-nodes"
       },
-      "identity_encoding_version": 1,
-      "request_identity_hash": "0c1bfb2609965714df841751355e4060ab2ada9631a1ae90f81785aac931ae2e",
-      "requested_node_count": 2
+      "append_request_identity": {
+        "kind": "append",
+        "identity_encoding_version": 1,
+        "request_identity_hash": "0c1bfb2609965714df841751355e4060ab2ada9631a1ae90f81785aac931ae2e",
+        "requested_node_count": 2
+      }
     },
     "completed_queue_claims": [],
     "completed_turn_input_claims": [],
@@ -465,6 +468,9 @@
           "operation_id": "durable-read-legacy-commit"
         },
         "key": "commit"
+      },
+      "append_request_identity": {
+        "kind": "plain_commit"
       }
     },
     "completed_queue_claims": [],

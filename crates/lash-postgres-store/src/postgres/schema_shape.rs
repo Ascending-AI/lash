@@ -107,11 +107,11 @@ const ANCHOR_TABLE: &str = "lash_schema_versions";
 /// outside it:
 ///
 /// - **The component version stamp.** It is normally the reject-and-recreate
-///   boundary. Component 61 is a hard cutover for every published older graph
-///   shape: the removed sequence column is refused before any creation-only
-///   migration DDL can run. Component 60 also has no applicable migration. An
-///   older stamp over incompatible artifacts is refused with an
-///   inspect-and-recreate remedy. Other mismatches remain fatal, so a valve
+///   boundary. Component 62 is a hard append-identity cutover from component 61.
+///   Every pre-61 graph shape carries the removed sequence column and is refused
+///   before any creation-only migration DDL can run. An older stamp over
+///   incompatible artifacts is refused with an inspect-and-recreate remedy.
+///   Other mismatches remain fatal, so a valve
 ///   adopted for a structural false positive cannot silently run one build
 ///   against another schema generation.
 /// - **The await-event signing secret row.** Without it there is no key to
@@ -1047,9 +1047,9 @@ fn diff_paired_objects<T: PairedObject>(
 #[non_exhaustive]
 pub enum SchemaFinding {
     /// The component version stamp is absent or names another version. Ordinary
-    /// open treats it as fatal. Component 61 refuses every published older graph
-    /// shape before migration DDL because those shapes carry the removed
-    /// sequence column; component 60 also has no applicable migration.
+    /// open treats it as fatal. Component 62 refuses component 61 for the append-
+    /// identity cutover. Every pre-61 graph shape is refused before migration DDL
+    /// because those shapes carry the removed sequence column.
     VersionMismatch {
         /// Version this build implements.
         expected: i32,
@@ -1377,12 +1377,11 @@ impl fmt::Display for SchemaReport {
         if self.has_version_finding() {
             return write!(
                 formatter,
-                " The component schema is normally a reject-and-recreate boundary. Component 61 \
-                 refuses every published older graph shape before migration DDL because those \
-                 shapes carry the removed sequence column. Component 60 also has no applicable \
-                 migration. Refuse the mismatch with an inspect-and-recreate remedy; other \
-                 mismatches require \
-                 the same remedy. Drain affected sessions and recreate the whole Lash trust \
+                " The component schema is normally a reject-and-recreate boundary. Component 62 \
+                 refuses component 61 for the append-identity hard cutover, while every pre-61 \
+                 graph shape is refused before migration DDL because it carries the retired \
+                 sequence column. Refuse the mismatch with an inspect-and-recreate remedy. Drain \
+                 affected sessions and recreate the whole Lash trust \
                  domain with this version: reset the tombstones, await-event revocation ledger, \
                  effect journal, and Restate state together; see \
                  docs/persistence.html#delete-sessions. This gate is unconditional and no \
