@@ -63,7 +63,7 @@ def _is_docs_path(path: str) -> bool:
     return (
         path.startswith("docs/")
         or (path.startswith("runbooks/") and PurePosixPath(path).suffix.lower() in {".md", ".rst", ".txt"})
-        or name.startswith("readme")
+        or (name.startswith("readme") and PurePosixPath(name).suffix in {"", ".md", ".rst", ".txt"})
         or name in {"contributing.md", "context.md", "security.md", "license", "license.md"}
     )
 

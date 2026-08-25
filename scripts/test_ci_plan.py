@@ -43,6 +43,11 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("true", plan["rust_code"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
+    def test_readme_prefixed_rust_file_runs_every_expensive_family(self) -> None:
+        plan = ci_plan.classify([("A", "crates/x/src/readme_gen.rs")])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
     def test_each_global_invalidator_runs_everything(self) -> None:
         paths = [
             "Cargo.lock",
