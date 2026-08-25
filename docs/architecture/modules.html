@@ -29,7 +29,7 @@
 <div class="section">
           <div class="section-header">
             <h2>Crate Families</h2>
-            <p>The high-value responsibility groups to inspect before changing behavior.</p>
+            <p>The high-value responsibility groups to inspect before changing behavior. For reviewable dependency and ownership rules, see the <a href="./crate-invariants.html">per-crate invariants</a>.</p>
           </div>
           <div class="module-grid">
             <article class="panel"><small>Pure protocol</small><h3>lash-sansio</h3><p>Owns <code>TurnMachine</code>, <code>Effect</code>, <code>Response</code>, <code>TurnDriverPreamble</code>, prompt templates, messages, attachments, the <code>TurnOutcome::{Finished, AgentFrameSwitch, Stopped}</code> contract, canonical tool-call output, and tool definitions/output contracts. It does not depend on Lashlang; runtime-facing protocol build input lives in <code>lash-core</code>, while Lashlang host environments live in the RLM/Lashlang runtime path. Top-level files cover turn, prompt, plugin, attachment, session, turn drivers, tool contracts, tool output, and tool catalogs; the <code>sansio/</code>, <code>session_model/</code>, and <code>llm/</code> subdirectories hold the state machine, durable model, and provider request types.</p><code class="path">lash-sansio</code></article>
