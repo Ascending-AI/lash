@@ -1,0 +1,94 @@
+name: API example evidence (advisory)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - crates/**
+      - examples/**
+      - scripts/api_evidence.py
+      - scripts/check_api_example_coverage.py
+      - .github/workflows/api-evidence.yml
+  push:
+    branches:
+      - main
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - crates/**
+      - examples/**
+      - scripts/api_evidence.py
+      - scripts/check_api_example_coverage.py
+      - .github/workflows/api-evidence.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-evidence-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compiler-derived-call-index:
+    name: Compiler-derived call index (advisory)
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
+    # Advisory at the job level too: a timeout cancellation is not absorbed
+    # by step-level continue-on-error (ADR 0079: advisory until the cutover).
+    continue-on-error: true
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch --tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Install stable Rust
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install nightly rustdoc
+        run: rustup toolchain install nightly --profile minimal --no-self-update
+
+      - name: Restore evidence cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: api-evidence
+
+      - name: Derive compiled example call evidence
+        id: evidence
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 scripts/api_evidence.py | tee api-evidence.txt
+
+      - name: Publish advisory report
+        if: always()
+        run: |
+          {
+            if [[ -f api-evidence.txt ]]; then
+              echo '```text'
+              cat api-evidence.txt
+              echo '```'
+            else
+              echo "The evidence command failed before producing a report."
+            fi
+            if [[ "${EVIDENCE_OUTCOME}" != "success" ]]; then
+              echo
+              echo "Advisory only: compiler-derived evidence did not complete."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+        env:
+          EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
