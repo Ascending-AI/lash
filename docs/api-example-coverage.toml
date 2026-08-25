@@ -6707,7 +6707,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent", "lash_core::TurnEvent"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:564#event: TurnEvent,"
+usage = "examples/agent-service/src/db.rs:558#event: TurnEvent,"
 
 [[api]]
 symbol = "lash::TurnEvent::AssistantProseDelta"
@@ -6800,7 +6800,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted", "lash_core::TurnEvent::CodeBlockCompleted"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:621#TurnEvent::CodeBlockCompleted {"
+usage = "examples/agent-service/src/db.rs:615#TurnEvent::CodeBlockCompleted {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6810,7 +6810,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted::duration_ms", "lash_core::TurnEvent::CodeBlockCompleted::duration_ms"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:626#duration_ms,"
+usage = "examples/agent-service/src/db.rs:620#duration_ms,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockCompleted::error"
@@ -6819,7 +6819,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted::error", "lash_core::TurnEvent::CodeBlockCompleted::error"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:624#error,"
+usage = "examples/agent-service/src/db.rs:618#error,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockCompleted::graph_key"
@@ -6828,7 +6828,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted::graph_key", "lash_core::TurnEvent::CodeBlockCompleted::graph_key"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:628#graph_key,"
+usage = "examples/agent-service/src/db.rs:622#graph_key,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockCompleted::language"
@@ -6837,7 +6837,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted::language", "lash_core::TurnEvent::CodeBlockCompleted::language"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:622#language,"
+usage = "examples/agent-service/src/db.rs:616#language,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockCompleted::output"
@@ -6846,7 +6846,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted::output", "lash_core::TurnEvent::CodeBlockCompleted::output"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:623#output,"
+usage = "examples/agent-service/src/db.rs:617#output,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockCompleted::success"
@@ -6855,7 +6855,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted::success", "lash_core::TurnEvent::CodeBlockCompleted::success"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:625#success,"
+usage = "examples/agent-service/src/db.rs:619#success,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockCompleted::tool_call_ids"
@@ -6864,7 +6864,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockCompleted::tool_call_ids", "lash_core::TurnEvent::CodeBlockCompleted::tool_call_ids"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:627#tool_call_ids,"
+usage = "examples/agent-service/src/db.rs:621#tool_call_ids,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockStarted"
@@ -6873,7 +6873,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockStarted", "lash_core::TurnEvent::CodeBlockStarted"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:608#TurnEvent::CodeBlockStarted {"
+usage = "examples/agent-service/src/db.rs:602#TurnEvent::CodeBlockStarted {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -6883,7 +6883,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockStarted::code", "lash_core::TurnEvent::CodeBlockStarted::code"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:610#code,"
+usage = "examples/agent-service/src/db.rs:604#code,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockStarted::graph_key"
@@ -6892,7 +6892,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockStarted::graph_key", "lash_core::TurnEvent::CodeBlockStarted::graph_key"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:611#graph_key,"
+usage = "examples/agent-service/src/db.rs:605#graph_key,"
 
 [[api]]
 symbol = "lash::TurnEvent::CodeBlockStarted::language"
@@ -6901,7 +6901,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::CodeBlockStarted::language", "lash_core::TurnEvent::CodeBlockStarted::language"]
 area = "sessions-turns"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:609#language,"
+usage = "examples/agent-service/src/db.rs:603#language,"
 
 [[api]]
 symbol = "lash::TurnEvent::Error"
@@ -7191,7 +7191,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallCompleted", "lash_core::TurnEvent::ToolCallCompleted"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:852#TurnEvent::ToolCallCompleted {"
+usage = "examples/agent-service/src/db.rs:846#TurnEvent::ToolCallCompleted {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -7201,7 +7201,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallCompleted::args", "lash_core::TurnEvent::ToolCallCompleted::args"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:855#args,"
+usage = "examples/agent-service/src/db.rs:849#args,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallCompleted::call_id"
@@ -7210,7 +7210,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallCompleted::call_id", "lash_core::TurnEvent::ToolCallCompleted::call_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:853#call_id,"
+usage = "examples/agent-service/src/db.rs:847#call_id,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallCompleted::duration_ms"
@@ -7219,7 +7219,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallCompleted::duration_ms", "lash_core::TurnEvent::ToolCallCompleted::duration_ms"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:857#duration_ms,"
+usage = "examples/agent-service/src/db.rs:851#duration_ms,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallCompleted::graph_key"
@@ -7237,7 +7237,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallCompleted::name", "lash_core::TurnEvent::ToolCallCompleted::name"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:854#name,"
+usage = "examples/agent-service/src/db.rs:848#name,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallCompleted::output"
@@ -7246,7 +7246,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallCompleted::output", "lash_core::TurnEvent::ToolCallCompleted::output"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:856#output,"
+usage = "examples/agent-service/src/db.rs:850#output,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallCompleted::parent_call_id"
@@ -7264,7 +7264,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallStarted", "lash_core::TurnEvent::ToolCallStarted"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:841#TurnEvent::ToolCallStarted {"
+usage = "examples/agent-service/src/db.rs:835#TurnEvent::ToolCallStarted {"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -7274,7 +7274,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallStarted::args", "lash_core::TurnEvent::ToolCallStarted::args"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:844#args,"
+usage = "examples/agent-service/src/db.rs:838#args,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallStarted::call_id"
@@ -7283,7 +7283,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallStarted::call_id", "lash_core::TurnEvent::ToolCallStarted::call_id"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:842#call_id,"
+usage = "examples/agent-service/src/db.rs:836#call_id,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallStarted::graph_key"
@@ -7301,7 +7301,7 @@ availability = "default+all-features"
 aliases = ["lash::prelude::TurnEvent::ToolCallStarted::name", "lash_core::TurnEvent::ToolCallStarted::name"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-service/src/db.rs:843#name,"
+usage = "examples/agent-service/src/db.rs:837#name,"
 
 [[api]]
 symbol = "lash::TurnEvent::ToolCallStarted::parent_call_id"

@@ -125,9 +125,30 @@ impl AppDb {
         add_column_if_missing(&conn, "chats", "fork_pending", "INTEGER NOT NULL DEFAULT 0")?;
         add_column_if_missing(&conn, "messages", "kind", "TEXT NOT NULL DEFAULT 'message'")?;
         add_column_if_missing(&conn, "messages", "payload", "TEXT")?;
-        let mut db = Self { conn };
-        db.migrate_legacy_chat_model_labels()?;
-        Ok(db)
+        let legacy_model_label: Option<String> = conn
+            .query_row(
+                "SELECT model FROM chats
+                 WHERE model_variant IS NULL
+                   AND model GLOB '* (*)'
+                   AND substr(model, -1) = ')'
+                 LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(model) = legacy_model_label {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                4,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "legacy chat model label `{model}` requires separate model and model_variant columns"
+                    ),
+                )),
+            ));
+        }
+        Ok(Self { conn })
     }
 
     pub(crate) fn insert_turn_event<T: Serialize>(
@@ -376,33 +397,6 @@ impl AppDb {
                 },
             )
             .map_err(AppError::from)
-    }
-
-    fn migrate_legacy_chat_model_labels(&mut self) -> rusqlite::Result<()> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, model, model_variant FROM chats")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })?;
-        let updates = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(stmt);
-        for (id, model, variant) in updates {
-            if variant.is_some() {
-                continue;
-            }
-            if let Some((model, variant)) = split_legacy_model_label(&model) {
-                self.conn.execute(
-                    "UPDATE chats SET model = ?1, model_variant = ?2 WHERE id = ?3",
-                    params![model, variant, id],
-                )?;
-            }
-        }
-        Ok(())
     }
 
     pub(crate) fn maybe_title_from_first_message(
@@ -891,7 +885,17 @@ fn chat_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessag
         kind: row.get(2)?,
         role: row.get(3)?,
         text: row.get(4)?,
-        payload: payload.and_then(|value| serde_json::from_str(&value).ok()),
+        payload: payload
+            .map(|value| {
+                serde_json::from_str(&value).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        5,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })
+            })
+            .transpose()?,
         created_at: row.get(6)?,
     })
 }
@@ -937,17 +941,6 @@ fn model_label(model: &str, model_variant: Option<&str>) -> String {
         Some(variant) => format!("{model} ({variant})"),
         None => model.to_string(),
     }
-}
-
-fn split_legacy_model_label(label: &str) -> Option<(String, String)> {
-    let label = label.trim();
-    let (model, variant) = label.rsplit_once(" (")?;
-    let variant = variant.strip_suffix(')')?.trim();
-    let model = model.trim();
-    if model.is_empty() || variant.is_empty() {
-        return None;
-    }
-    Some((model.to_string(), variant.to_string()))
 }
 
 fn compact_title(text: &str) -> String {
@@ -1060,5 +1053,63 @@ mod tests {
             1,
             "a sibling chat must not overwrite the source projection"
         );
+    }
+
+    #[test]
+    fn list_messages_rejects_malformed_payload() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
+        let chat = db
+            .create_chat("malformed payload", "mock-model", None)
+            .expect("create chat");
+        db.conn
+            .execute(
+                "INSERT INTO messages (chat_id, role, text, payload, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![&chat.id, "assistant", "stored", "not-json", now()],
+            )
+            .expect("insert malformed payload");
+
+        let error = db
+            .list_messages(&chat.id)
+            .expect_err("malformed stored payload must be rejected");
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            error.message.contains("Conversion error from type Text"),
+            "unexpected decode error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn open_rejects_legacy_model_label_without_rewriting_it() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("app.db");
+        let db = AppDb::open(&path).expect("open db");
+        db.conn
+            .execute(
+                "INSERT INTO chats
+                 (id, title, created_at, updated_at, model, model_variant)
+                 VALUES (?1, ?2, ?3, ?3, ?4, NULL)",
+                params!["legacy", "Legacy", now(), "mock-model (low)"],
+            )
+            .expect("insert legacy model label");
+        drop(db);
+
+        let error = match AppDb::open(&path) {
+            Ok(_) => panic!("legacy model label must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("legacy chat model label"));
+
+        let conn = Connection::open(&path).expect("reopen raw db");
+        let row = conn
+            .query_row(
+                "SELECT model, model_variant FROM chats WHERE id = 'legacy'",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .expect("read legacy row");
+        assert_eq!(row, ("mock-model (low)".to_string(), None));
     }
 }
