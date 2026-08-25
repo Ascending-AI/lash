@@ -77,16 +77,18 @@ jobs:
       - name: Publish advisory report
         if: always()
         run: |
-          if [[ -f api-evidence.txt ]]; then
-            echo '```text' >> "${GITHUB_STEP_SUMMARY}"
-            cat api-evidence.txt >> "${GITHUB_STEP_SUMMARY}"
-            echo '```' >> "${GITHUB_STEP_SUMMARY}"
-          else
-            echo "The evidence command failed before producing a report." >> "${GITHUB_STEP_SUMMARY}"
-          fi
-          if [[ "${EVIDENCE_OUTCOME}" != "success" ]]; then
-            echo >> "${GITHUB_STEP_SUMMARY}"
-            echo "Advisory only: compiler-derived evidence did not complete." >> "${GITHUB_STEP_SUMMARY}"
-          fi
+          {
+            if [[ -f api-evidence.txt ]]; then
+              echo '```text'
+              cat api-evidence.txt
+              echo '```'
+            else
+              echo "The evidence command failed before producing a report."
+            fi
+            if [[ "${EVIDENCE_OUTCOME}" != "success" ]]; then
+              echo
+              echo "Advisory only: compiler-derived evidence did not complete."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
         env:
           EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
