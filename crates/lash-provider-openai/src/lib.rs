@@ -22,6 +22,7 @@ pub use codex::{CodexProvider, CodexProviderFactory};
 pub use common::{OPENAI_BASE_URL, OPENROUTER_BASE_URL};
 pub use config::{
     OpenAiCompat, OpenAiCompatMaxTokensField, OpenAiCompatibleProvider, OpenAiProvider,
+    OpenAiWireConfig,
 };
 pub use driver::CompletionEndpoint;
 pub use factory::{OpenAiCompatibleProviderFactory, OpenAiProviderFactory};

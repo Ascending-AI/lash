@@ -110,15 +110,26 @@ pub(crate) async fn complete(
         .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
     let request_body = bytes::Bytes::from(body_bytes);
     let request_body_for_error = String::from_utf8_lossy(&request_body).into_owned();
-    let url = format!(
-        "{}/{}",
-        provider.base_url.trim_end_matches('/'),
-        endpoint.path()
-    );
+    let base_url = provider.base_url.trim_end_matches('/');
+    let mut url = match base_url.split_once('?') {
+        Some((base_path, query)) => format!("{}/{}?{}", base_path, endpoint.path(), query),
+        None => format!("{}/{}", base_url, endpoint.path()),
+    };
+    if !provider.wire.query_params.is_empty() {
+        let mut parsed = reqwest::Url::parse(&url).map_err(|error| {
+            LlmTransportError::new(format!("Invalid OpenAI-compatible request URL: {error}"))
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("invalid_provider_endpoint")
+        })?;
+        parsed
+            .query_pairs_mut()
+            .extend_pairs(provider.wire.query_params.iter());
+        url = parsed.into();
+    }
     let mut headers = vec![
         (
-            "Authorization".to_string(),
-            format!("Bearer {}", provider.api_key),
+            provider.wire.auth_header_name.clone(),
+            format!("{}{}", provider.wire.auth_value_prefix, provider.api_key),
         ),
         ("Content-Type".to_string(), "application/json".to_string()),
         ("Accept".to_string(), "text/event-stream".to_string()),

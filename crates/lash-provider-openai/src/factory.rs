@@ -40,6 +40,7 @@ impl ProviderFactory for OpenAiProviderFactory {
                     prompt_cache_retention: Some(true),
                     ..OpenAiCompat::default()
                 },
+                wire: OpenAiWireConfig::default(),
                 transport: DEFAULT_HTTP_TRANSPORT.clone(),
             },
         }
@@ -60,6 +61,7 @@ impl ProviderFactory for OpenAiCompatibleProviderFactory {
             base_url: cfg.base_url,
             options: cfg.options,
             compat: cfg.compat,
+            wire: OpenAiWireConfig::default(),
             transport: DEFAULT_HTTP_TRANSPORT.clone(),
         }
         .into_components())
