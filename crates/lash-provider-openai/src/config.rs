@@ -9,6 +9,28 @@ pub enum OpenAiCompatMaxTokensField {
     Omit,
 }
 
+/// Endpoint-owned HTTP authentication and static request query parameters.
+///
+/// The default preserves the conventional OpenAI wire shape:
+/// `Authorization: Bearer <api key>` with no added query parameters.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OpenAiWireConfig {
+    pub auth_header_name: String,
+    pub auth_value_prefix: String,
+    pub query_params: Vec<(String, String)>,
+}
+
+impl Default for OpenAiWireConfig {
+    fn default() -> Self {
+        Self {
+            auth_header_name: "Authorization".to_string(),
+            auth_value_prefix: "Bearer ".to_string(),
+            query_params: Vec::new(),
+        }
+    }
+}
+
 /// Gateway provider-routing preferences, emitted as the request's top-level
 /// `provider` object. Endpoints that do not implement provider routing must
 /// leave this unset.
@@ -106,6 +128,7 @@ pub struct OpenAiCompatibleProvider {
     pub base_url: String,
     pub options: ProviderOptions,
     pub compat: OpenAiCompat,
+    pub wire: OpenAiWireConfig,
     pub(crate) transport: std::sync::Arc<dyn LlmHttpTransport>,
 }
 

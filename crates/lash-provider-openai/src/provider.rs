@@ -7,6 +7,7 @@ impl OpenAiCompatibleProvider {
             base_url: base_url.into(),
             options: ProviderOptions::default(),
             compat: OpenAiCompat::default(),
+            wire: OpenAiWireConfig::default(),
             transport: DEFAULT_HTTP_TRANSPORT.clone(),
         }
     }
@@ -18,6 +19,11 @@ impl OpenAiCompatibleProvider {
 
     pub fn with_compat(mut self, compat: OpenAiCompat) -> Self {
         self.compat = compat;
+        self
+    }
+
+    pub fn with_wire_config(mut self, wire: OpenAiWireConfig) -> Self {
+        self.wire = wire;
         self
     }
 
@@ -119,6 +125,12 @@ impl Provider for OpenAiCompatibleProvider {
             map.insert(
                 "compat".to_string(),
                 serde_json::to_value(&self.compat).unwrap_or(serde_json::Value::Null),
+            );
+        }
+        if self.wire != OpenAiWireConfig::default() {
+            map.insert(
+                "wire".to_string(),
+                serde_json::to_value(&self.wire).unwrap_or(serde_json::Value::Null),
             );
         }
         serde_json::Value::Object(map)

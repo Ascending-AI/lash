@@ -22,7 +22,7 @@ pub use codex::CodexProvider;
 pub use common::{OPENAI_BASE_URL, OPENROUTER_BASE_URL};
 pub use config::{
     OpenAiCompat, OpenAiCompatMaxTokensField, OpenAiCompatibleProvider, OpenAiProvider,
-    ProviderRoutingPrefs,
+    OpenAiWireConfig, ProviderRoutingPrefs,
 };
 pub use driver::CompletionEndpoint;
 pub use lash_core::llm::transport::{OPENAI_FILE_MIMES, OPENAI_IMAGE_MIMES};
