@@ -139,6 +139,8 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                     session_id: request.session_id.clone(),
                     relation: binding.relation.clone(),
                 });
+                *store.session_state_version.lock_recover() =
+                    Some(crate::store::CURRENT_SESSION_STATE_VERSION);
                 store
             })
             .clone();
@@ -621,6 +623,8 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
         });
+        *store.session_state_version.lock_recover() =
+            Some(crate::store::CURRENT_SESSION_STATE_VERSION);
         self.session_catalog.lock_recover().insert(
             request.session_id.clone(),
             crate::SessionSummary {

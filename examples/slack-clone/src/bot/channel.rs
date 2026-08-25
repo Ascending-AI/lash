@@ -591,6 +591,14 @@ impl ChannelBot {
                         reason: "thread_session_retired",
                     });
                 }
+                threads::ThreadSessionOpen::AdmissionContended => {
+                    Self::log_drain_deferral(record, EmptyQueuedDrainReason::ExecutionLaneBusy);
+                    return Ok(Disposition::Deferred {
+                        event_id: record.event_id.clone(),
+                        channel: record.channel_id.clone(),
+                        reason: "drain_did_not_reach_admission",
+                    });
+                }
                 threads::ThreadSessionOpen::RootNotProcessed => {
                     return self
                         .fail_missing_thread_root(record, is_mention, THREAD_ROOT_NOT_PROCESSED)
@@ -603,7 +611,18 @@ impl ChannelBot {
                 }
             }
         } else {
-            self.open_session(&record.channel_id).await?
+            match self.open_session(&record.channel_id).await {
+                Ok(session) => session,
+                Err(error) if threads::anyhow_session_admission_contended(&error) => {
+                    Self::log_drain_deferral(record, EmptyQueuedDrainReason::ExecutionLaneBusy);
+                    return Ok(Disposition::Deferred {
+                        event_id: record.event_id.clone(),
+                        channel: record.channel_id.clone(),
+                        reason: "drain_did_not_reach_admission",
+                    });
+                }
+                Err(error) => return Err(error),
+            }
         };
         // The source key is derived from the message's `ts`, not the `event_id`:
         // `ts` *is* the message's identity, so a redelivery — or the same message
@@ -815,12 +834,7 @@ impl ChannelBot {
             // non-terminal stage: terminalizing here is what made an interrupted
             // mention permanently unanswered, because no redelivery and no later
             // boot ever revisits a terminal row.
-            log_err!(
-                "slack-clone-bot deferring event {}: the drain never reached its \
-                 admission ({})",
-                record.event_id,
-                reason.as_str()
-            );
+            Self::log_drain_deferral(record, reason);
             return Ok(Disposition::Deferred {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
@@ -852,6 +866,15 @@ impl ChannelBot {
                 })
             }
         }
+    }
+
+    fn log_drain_deferral(record: &EventRecord, reason: EmptyQueuedDrainReason) {
+        log_err!(
+            "slack-clone-bot deferring event {}: the drain never reached its \
+             admission ({})",
+            record.event_id,
+            reason.as_str()
+        );
     }
 
     /// Record the reply debt, post it, and mark the event replied.

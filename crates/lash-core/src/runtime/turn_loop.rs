@@ -921,13 +921,11 @@ impl LashRuntime {
         self.state.effective_policy().context_window_tokens()
     }
 
-    /// Claim the lane for this turn, or record why the turn proceeds without it.
+    /// Claim and complete session-state admission before this turn starts.
     ///
-    /// A busy lane does not stop the turn: the commit CAS is the authority
-    /// (ADR 0029), so the turn continues and may well win. It must not continue
-    /// *anonymously* though, or a later `commit_cas_rejected` cannot say who was
-    /// writing under whose generation, so the observed holder is retained as
-    /// lane-less commit evidence for this turn.
+    /// ADR 0077 makes this stricter than the CAS-only fallback: a busy lane may
+    /// not hydrate or execute while another generation can migrate the complete
+    /// mutable continuation.
     async fn claim_session_execution_lease(
         &mut self,
     ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
@@ -950,20 +948,13 @@ impl LashRuntime {
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
         {
             Some(guard) => Ok(Some(guard)),
-            None => {
-                // The claim itself already logged the holder it lost to
-                // (`session_execution_lease.busy`). The turn proceeds without the
-                // lane because the commit CAS is the authority (ADR 0029), and a
-                // rejection still names this writer from its claimant identity.
-                tracing::debug!(
-                    session_id = %self.state.session_id,
-                    consulted = "session_execution_lease",
-                    outcome = "proceeding_under_commit_cas",
-                    event = "session_execution_lease.busy_advisory",
-                    "session execution lease is busy; proceeding under the commit CAS fence"
-                );
-                Ok(None)
-            }
+            None => Err(RuntimeError::new(
+                RuntimeErrorCode::SessionExecutionLaneBusy,
+                format!(
+                    "session `{}` cannot start a turn until execution admission acquires its lease",
+                    self.state.session_id
+                ),
+            )),
         }
     }
 
@@ -2704,6 +2695,9 @@ impl LashRuntime {
             .clone()
             .unwrap_or_else(|| opts.execution_scope_id().to_owned());
         input.trace_turn_id = Some(trace_turn_id.clone());
+        // Store-backed new turns acquire and admit the execution lane before
+        // the acceptance effect writes mutable session payload (ADR 0077).
+        let mut session_execution_lease = self.claim_session_execution_lease().await?;
         // Acceptance is journaled, not written directly: it happens before the
         // turn runs, which puts it inside a durable engine's replay window, and
         // a replayed handler must re-derive this admission rather than mint a
@@ -2750,13 +2744,35 @@ impl LashRuntime {
             self.host.core.clock.as_ref(),
         );
 
-        let mut session_execution_lease = self.claim_session_execution_lease().await?;
-        let drive = match session_execution_lease
-            .as_ref()
-            .map(SessionExecutionLeaseGuard::fence)
-        {
-            Some(fence) => {
-                let mut input_claim = store
+        let drive = {
+            let fence = session_execution_lease
+                .as_ref()
+                .map(SessionExecutionLeaseGuard::fence)
+                .expect("a store-backed turn acquires its execution lease before acceptance");
+            let mut input_claim = store
+                .claim_next_turn_inputs(
+                    &self.state.session_id,
+                    &fence,
+                    &self.runtime_lease_owner,
+                    MAX_CLAIMED_TURN_INPUTS,
+                )
+                .await
+                .map_err(super::runtime_error_from_store_commit)?;
+            // Same FIG-1573 backstop the queued drain runs: a lane holder
+            // that finds its own fresh acceptance unclaimable is looking at
+            // rows a dead turn pinned. Repair them, then claim once more in
+            // this same call.
+            if input_claim.is_none()
+                && self
+                    .defer_orphaned_turn_inputs_before_drain(
+                        &store,
+                        &fence,
+                        opts.execution_scope_id(),
+                    )
+                    .await
+                    > 0
+            {
+                input_claim = store
                     .claim_next_turn_inputs(
                         &self.state.session_id,
                         &fence,
@@ -2765,259 +2781,204 @@ impl LashRuntime {
                     )
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-                // Same FIG-1573 backstop the queued drain runs: a lane holder
-                // that finds its own fresh acceptance unclaimable is looking at
-                // rows a dead turn pinned. Repair them, then claim once more in
-                // this same call.
-                if input_claim.is_none()
-                    && self
-                        .defer_orphaned_turn_inputs_before_drain(
-                            &store,
-                            &fence,
-                            opts.execution_scope_id(),
-                        )
-                        .await
-                        > 0
+            }
+            let claimed_own_row = match input_claim {
+                Some(claim)
+                    if claim
+                        .inputs
+                        .iter()
+                        .any(|pending| pending.input_id == accepted.input_id) =>
                 {
-                    input_claim = store
-                        .claim_next_turn_inputs(
-                            &self.state.session_id,
-                            &fence,
-                            &self.runtime_lease_owner,
-                            MAX_CLAIMED_TURN_INPUTS,
-                        )
-                        .await
-                        .map_err(super::runtime_error_from_store_commit)?;
-                }
-                let claimed_own_row = match input_claim {
                     Some(claim)
-                        if claim
-                            .inputs
-                            .iter()
-                            .any(|pending| pending.input_id == accepted.input_id) =>
+                }
+                // A claim that reached rows but not this turn's own
+                // acceptance is claim-pinning up to
+                // `MAX_CLAIMED_TURN_INPUTS` rows this caller will never
+                // drive. Hand it straight back instead of dropping it and
+                // leaving those rows stalled until the lane generation
+                // advances far enough for the FIG-1573 backstop to repair
+                // them.
+                Some(foreign_claim) => {
+                    crate::trace::emit_trace(
+                        &self.host.core.tracing.trace_sink,
+                        &self.host.core.tracing.trace_context,
+                        lash_trace::TraceContext::default()
+                            .for_session(self.state.session_id.clone())
+                            // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                            .for_turn_index(self.state.turn_index + 1)
+                            .for_turn(trace_turn_id.clone()),
+                        lash_trace::TraceEvent::Custom {
+                            name: "turn_input.claim_abandoned".to_string(),
+                            payload: serde_json::json!({
+                                "claim_id": &foreign_claim.claim_id,
+                                "accepted_input_id": &accepted.input_id,
+                                "input_ids": foreign_claim
+                                    .inputs
+                                    .iter()
+                                    .map(|input| input.input_id.clone())
+                                    .collect::<Vec<_>>(),
+                                "reason": "claim_missed_own_acceptance",
+                            }),
+                        },
+                        self.host.core.clock.as_ref(),
+                    );
+                    if let Err(abandon_err) = store
+                        .abandon_turn_input_claims(std::slice::from_ref(&foreign_claim))
+                        .await
                     {
-                        Some(claim)
-                    }
-                    // A claim that reached rows but not this turn's own
-                    // acceptance is claim-pinning up to
-                    // `MAX_CLAIMED_TURN_INPUTS` rows this caller will never
-                    // drive. Hand it straight back instead of dropping it and
-                    // leaving those rows stalled until the lane generation
-                    // advances far enough for the FIG-1573 backstop to repair
-                    // them.
-                    Some(foreign_claim) => {
-                        crate::trace::emit_trace(
-                            &self.host.core.tracing.trace_sink,
-                            &self.host.core.tracing.trace_context,
-                            lash_trace::TraceContext::default()
-                                .for_session(self.state.session_id.clone())
-                                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                                .for_turn_index(self.state.turn_index + 1)
-                                .for_turn(trace_turn_id.clone()),
-                            lash_trace::TraceEvent::Custom {
-                                name: "turn_input.claim_abandoned".to_string(),
-                                payload: serde_json::json!({
-                                    "claim_id": &foreign_claim.claim_id,
-                                    "accepted_input_id": &accepted.input_id,
-                                    "input_ids": foreign_claim
-                                        .inputs
-                                        .iter()
-                                        .map(|input| input.input_id.clone())
-                                        .collect::<Vec<_>>(),
-                                    "reason": "claim_missed_own_acceptance",
-                                }),
-                            },
-                            self.host.core.clock.as_ref(),
+                        tracing::warn!(
+                            error = %abandon_err,
+                            claim_id = %foreign_claim.claim_id,
+                            claim_count = foreign_claim.inputs.len(),
+                            "failed to abandon a turn-input claim that missed its own acceptance"
                         );
-                        if let Err(abandon_err) = store
-                            .abandon_turn_input_claims(std::slice::from_ref(&foreign_claim))
-                            .await
-                        {
-                            tracing::warn!(
-                                error = %abandon_err,
-                                claim_id = %foreign_claim.claim_id,
-                                claim_count = foreign_claim.inputs.len(),
-                                "failed to abandon a turn-input claim that missed its own acceptance"
-                            );
-                        }
-                        None
                     }
-                    None => None,
-                };
-                match claimed_own_row {
-                    Some(input_claim) => {
-                        crate::trace::emit_trace(
-                            &self.host.core.tracing.trace_sink,
-                            &self.host.core.tracing.trace_context,
-                            lash_trace::TraceContext::default()
-                                .for_session(self.state.session_id.clone())
-                                // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                                .for_turn_index(self.state.turn_index + 1)
-                                .for_turn(trace_turn_id.clone()),
-                            lash_trace::TraceEvent::Custom {
-                                name: "turn_input.claimed".to_string(),
-                                payload: serde_json::json!({
-                                    "claim_id": &input_claim.claim_id,
-                                    "input_ids": input_claim
-                                        .inputs
-                                        .iter()
-                                        .map(|input| input.input_id.clone())
-                                        .collect::<Vec<_>>(),
-                                }),
-                            },
-                            self.host.core.clock.as_ref(),
-                        );
-                        super::turn_input_ingress::TurnInputDrive::Claimed(input_claim)
-                    }
-                    None => {
-                        // Probe the row before deciding. Cancellation is a
-                        // no-op on every state except an open one, so the same
-                        // call both withdraws a withdrawable acceptance and
-                        // reports why it could not.
-                        let outcome = match store
-                            .cancel_pending_turn_input(&self.state.session_id, &accepted.input_id)
-                            .await
-                        {
-                            Ok(outcome) => outcome,
-                            // A store fault is not a verdict on the row: it
-                            // leaves the acceptance open and undriven, so it
-                            // must surface as itself rather than as one of the
-                            // dispositions below, each of which tells the
-                            // caller something the probe never established.
-                            Err(err) => {
-                                if let Some(lease) = session_execution_lease.as_ref() {
-                                    let _ = lease.release_if_live().await;
-                                }
-                                return Err(super::runtime_error_from_store_commit(err));
-                            }
-                        };
-                        // Intent-fulfilled-iff-result-exists (ADR 0069 §6): a
-                        // replayed acceptance whose turn already committed is
-                        // settled, not claimable. That is a redrive, not a
-                        // contended lane - the turn re-derives the same commit
-                        // and the head CAS recognises it - so it drops to the
-                        // unclaimed regime like any other driver that could not
-                        // fence the row it accepted. One settlement path, two
-                        // regimes.
-                        if let crate::PendingTurnInputCancelOutcome::AlreadyCompleted(settled) =
-                            &outcome
-                        {
-                            // The redrive must re-derive the first execution's
-                            // *turn*, not just its own row. A first execution
-                            // that took the lane absorbed every earlier claimed
-                            // row into one turn, and a redrive naming fewer rows
-                            // materializes different words, hashes differently,
-                            // and is refused as a commit conflict instead of
-                            // replaying the receipt. So rebuild the settled row
-                            // set from the durable applications the first
-                            // execution wrote.
-                            let inputs = self
-                                .settled_turn_input_redrive_set(store.as_ref(), settled)
-                                .await;
-                            super::turn_input_ingress::TurnInputDrive::Unclaimed(
-                                crate::UnclaimedTurnInputs {
-                                    session_id: self.state.session_id.clone(),
-                                    inputs,
-                                    applications: Vec::new(),
-                                },
-                            )
-                        } else if matches!(outcome, crate::PendingTurnInputCancelOutcome::NotFound)
-                        {
-                            // The journaled acceptance names an identity, not a
-                            // write (ADR 0069 §6): a replayed acceptance hands
-                            // back the identity the first execution minted
-                            // without touching the store, so a substrate that
-                            // does not already hold the row has an unfulfilled
-                            // intent. Re-admit it under the *same* identity -
-                            // that admits this turn again, never a second one -
-                            // and drive it unclaimed, which is the same
-                            // settlement path the advisory-lane branch uses.
-                            let readmitted = store
-                                .enqueue_pending_turn_input(
-                                    crate::PendingTurnInputDraft::new(
-                                        self.state.session_id.clone(),
-                                        crate::TurnInputIngress::next_turn(),
-                                        input.durable_projection(),
-                                    )
-                                    .with_input_id(accepted.input_id.clone()),
-                                )
-                                .await
-                                .map_err(super::runtime_error_from_store_commit)?;
-                            super::turn_input_ingress::TurnInputDrive::Unclaimed(
-                                crate::UnclaimedTurnInputs {
-                                    session_id: self.state.session_id.clone(),
-                                    inputs: vec![readmitted],
-                                    applications: Vec::new(),
-                                },
-                            )
-                        } else {
-                            // This caller took the lane and its claim still did
-                            // not reach its own unsettled row: another driver
-                            // holds it, or it sits behind more than
-                            // `MAX_CLAIMED_TURN_INPUTS` earlier admissions. It
-                            // cannot settle the row unclaimed either - a
-                            // claimed row fails that predicate by construction
-                            // - so the caller is told which case it hit rather
-                            // than left guessing whether a retry double-submits.
+                    None
+                }
+                None => None,
+            };
+            match claimed_own_row {
+                Some(input_claim) => {
+                    crate::trace::emit_trace(
+                        &self.host.core.tracing.trace_sink,
+                        &self.host.core.tracing.trace_context,
+                        lash_trace::TraceContext::default()
+                            .for_session(self.state.session_id.clone())
+                            // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
+                            .for_turn_index(self.state.turn_index + 1)
+                            .for_turn(trace_turn_id.clone()),
+                        lash_trace::TraceEvent::Custom {
+                            name: "turn_input.claimed".to_string(),
+                            payload: serde_json::json!({
+                                "claim_id": &input_claim.claim_id,
+                                "input_ids": input_claim
+                                    .inputs
+                                    .iter()
+                                    .map(|input| input.input_id.clone())
+                                    .collect::<Vec<_>>(),
+                            }),
+                        },
+                        self.host.core.clock.as_ref(),
+                    );
+                    super::turn_input_ingress::TurnInputDrive::Claimed(input_claim)
+                }
+                None => {
+                    // Probe the row before deciding. Cancellation is a
+                    // no-op on every state except an open one, so the same
+                    // call both withdraws a withdrawable acceptance and
+                    // reports why it could not.
+                    let outcome = match store
+                        .cancel_pending_turn_input(&self.state.session_id, &accepted.input_id)
+                        .await
+                    {
+                        Ok(outcome) => outcome,
+                        // A store fault is not a verdict on the row: it
+                        // leaves the acceptance open and undriven, so it
+                        // must surface as itself rather than as one of the
+                        // dispositions below, each of which tells the
+                        // caller something the probe never established.
+                        Err(err) => {
                             if let Some(lease) = session_execution_lease.as_ref() {
                                 let _ = lease.release_if_live().await;
                             }
-                            let withdrawn = matches!(
-                                outcome,
-                                crate::PendingTurnInputCancelOutcome::Cancelled(_)
-                                    | crate::PendingTurnInputCancelOutcome::AlreadyCancelled(_)
-                            );
-                            return Err(RuntimeError::new(
-                                RuntimeErrorCode::SessionExecutionLaneBusy,
-                                if withdrawn {
-                                    format!(
-                                        "accepted turn input `{}` was not claimable by this \
+                            return Err(super::runtime_error_from_store_commit(err));
+                        }
+                    };
+                    // Intent-fulfilled-iff-result-exists (ADR 0069 §6): a
+                    // replayed acceptance whose turn already committed is
+                    // settled, not claimable. That is a redrive, not a
+                    // contended lane - the turn re-derives the same commit
+                    // and the head CAS recognises it - so it drops to the
+                    // unclaimed regime like any other driver that could not
+                    // fence the row it accepted. One settlement path, two
+                    // regimes.
+                    if let crate::PendingTurnInputCancelOutcome::AlreadyCompleted(settled) =
+                        &outcome
+                    {
+                        // The redrive must re-derive the first execution's
+                        // *turn*, not just its own row. A first execution
+                        // that took the lane absorbed every earlier claimed
+                        // row into one turn, and a redrive naming fewer rows
+                        // materializes different words, hashes differently,
+                        // and is refused as a commit conflict instead of
+                        // replaying the receipt. So rebuild the settled row
+                        // set from the durable applications the first
+                        // execution wrote.
+                        let inputs = self
+                            .settled_turn_input_redrive_set(store.as_ref(), settled)
+                            .await;
+                        super::turn_input_ingress::TurnInputDrive::Unclaimed(
+                            crate::UnclaimedTurnInputs {
+                                session_id: self.state.session_id.clone(),
+                                inputs,
+                                applications: Vec::new(),
+                            },
+                        )
+                    } else if matches!(outcome, crate::PendingTurnInputCancelOutcome::NotFound) {
+                        // The journaled acceptance names an identity, not a
+                        // write (ADR 0069 §6): a replayed acceptance hands
+                        // back the identity the first execution minted
+                        // without touching the store, so a substrate that
+                        // does not already hold the row has an unfulfilled
+                        // intent. Re-admit it under the *same* identity -
+                        // that admits this turn again, never a second one -
+                        // and drive it unclaimed, which is the same
+                        // settlement path the advisory-lane branch uses.
+                        let readmitted = store
+                            .enqueue_pending_turn_input(
+                                crate::PendingTurnInputDraft::new(
+                                    self.state.session_id.clone(),
+                                    crate::TurnInputIngress::next_turn(),
+                                    input.durable_projection(),
+                                )
+                                .with_input_id(accepted.input_id.clone()),
+                            )
+                            .await
+                            .map_err(super::runtime_error_from_store_commit)?;
+                        super::turn_input_ingress::TurnInputDrive::Unclaimed(
+                            crate::UnclaimedTurnInputs {
+                                session_id: self.state.session_id.clone(),
+                                inputs: vec![readmitted],
+                                applications: Vec::new(),
+                            },
+                        )
+                    } else {
+                        // This caller took the lane and its claim still did
+                        // not reach its own unsettled row: another driver
+                        // holds it, or it sits behind more than
+                        // `MAX_CLAIMED_TURN_INPUTS` earlier admissions. It
+                        // cannot settle the row unclaimed either - a
+                        // claimed row fails that predicate by construction
+                        // - so the caller is told which case it hit rather
+                        // than left guessing whether a retry double-submits.
+                        if let Some(lease) = session_execution_lease.as_ref() {
+                            let _ = lease.release_if_live().await;
+                        }
+                        let withdrawn = matches!(
+                            outcome,
+                            crate::PendingTurnInputCancelOutcome::Cancelled(_)
+                                | crate::PendingTurnInputCancelOutcome::AlreadyCancelled(_)
+                        );
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::SessionExecutionLaneBusy,
+                            if withdrawn {
+                                format!(
+                                    "accepted turn input `{}` was not claimable by this \
                                          caller and has been withdrawn; retrying the same turn \
                                          is safe",
-                                        accepted.input_id
-                                    )
-                                } else {
-                                    format!(
-                                        "accepted turn input `{}` was claimed by another driver \
+                                    accepted.input_id
+                                )
+                            } else {
+                                format!(
+                                    "accepted turn input `{}` was claimed by another driver \
                                          before this caller could drive it; its turn completes \
                                          without this caller",
-                                        accepted.input_id
-                                    )
-                                },
-                            ));
-                        }
+                                    accepted.input_id
+                                )
+                            },
+                        ));
                     }
                 }
-            }
-            // The session-execution lane is advisory for a direct turn, and a
-            // foreign holder does not stop one: the commit CAS is the authority
-            // (ADR 0029), and ADR 0069 §5 lets a turn settle the acceptance it
-            // drove without a claim. This turn drives exactly the row it
-            // accepted - never a row it did not accept - and its settlement is
-            // a conditional write requiring that row to still be unclaimed and
-            // unsettled. A recovery claim that takes the row first therefore
-            // wins at the head CAS, and this driver retires at its first commit
-            // attempt rather than duplicating a durable record.
-            None => {
-                crate::trace::emit_trace(
-                    &self.host.core.tracing.trace_sink,
-                    &self.host.core.tracing.trace_context,
-                    lash_trace::TraceContext::default()
-                        .for_session(self.state.session_id.clone())
-                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                        .for_turn_index(self.state.turn_index + 1)
-                        .for_turn(trace_turn_id.clone()),
-                    lash_trace::TraceEvent::Custom {
-                        name: "turn_input.driven_unclaimed".to_string(),
-                        payload: serde_json::json!({ "input_id": &accepted.input_id }),
-                    },
-                    self.host.core.clock.as_ref(),
-                );
-                super::turn_input_ingress::TurnInputDrive::Unclaimed(crate::UnclaimedTurnInputs {
-                    session_id: self.state.session_id.clone(),
-                    inputs: vec![accepted.clone()],
-                    applications: Vec::new(),
-                })
             }
         };
 

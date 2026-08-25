@@ -4,7 +4,7 @@
 
 
 -- Dumped from database version 16.15
--- Dumped by pg_dump version 17.11
+-- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -511,6 +511,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_execution_leases (
 
 CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     session_id text NOT NULL,
+    session_state_version integer,
     created_at_ms bigint,
     last_commit_at_ms bigint,
     relation_kind text NOT NULL,
@@ -897,7 +898,7 @@ INSERT INTO lash_durable_read_fixture.lash_process_observers VALUES ('durable-re
 -- Data for Name: lash_process_segment_handovers; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_process_segment_handovers VALUES ('durable-read-waiting-process', 1, '{"segment_ordinal":1,"program_hash":"durable-read-program-v1","handover":{"reason":"journal_budget","program_hash":"durable-read-program-v1","engine_state":[8,8,7]}}');
+INSERT INTO lash_durable_read_fixture.lash_process_segment_handovers VALUES ('durable-read-waiting-process', 1, '{"segment_ordinal":1,"handover":{"reason":"journal_budget","program_hash":"durable-read-program-v1","engine_state":[8,8,7]}}');
 
 
 --
@@ -962,7 +963,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 59);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 60);
 
 
 --
@@ -976,7 +977,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 1700000000000, 1700000000000, 'root', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 0, 1700000000000, 1700000000000, 'root', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1709,6 +1710,13 @@ CREATE INDEX idx_lash_runtime_effect_replay_session ON lash_durable_read_fixture
 --
 
 CREATE INDEX idx_lash_session_meta_catalog ON lash_durable_read_fixture.lash_session_meta USING btree (created_at_ms, session_id);
+
+
+--
+-- Name: idx_lash_session_meta_state_version; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_meta_state_version ON lash_durable_read_fixture.lash_session_meta USING btree (session_state_version, session_id);
 
 
 --

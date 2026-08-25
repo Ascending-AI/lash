@@ -1642,6 +1642,7 @@ lash::persistence::AttachmentWriteFence::ReclamationInFlight
 lash::persistence::BlobRef
 lash::persistence::BlobRef::0
 lash::persistence::BlobRef::as_str
+lash::persistence::CURRENT_SESSION_STATE_VERSION
 lash::persistence::CheckpointComponentDescriptor
 lash::persistence::CheckpointComponentDescriptor::blob_ref
 lash::persistence::CheckpointComponentDescriptor::encoding_version
@@ -1831,6 +1832,7 @@ lash::persistence::MaintenanceSweep
 lash::persistence::MaintenanceSweep::Incomplete
 lash::persistence::MaintenanceSweep::NothingToDo
 lash::persistence::MaintenanceSweep::Swept
+lash::persistence::OLDEST_SUPPORTED_SESSION_STATE_VERSION
 lash::persistence::OperationId
 lash::persistence::OperationId::key
 lash::persistence::OperationId::new
@@ -2152,12 +2154,15 @@ lash::persistence::SessionCheckpoint::turn_state
 lash::persistence::SessionCheckpoint::validate_component_encoding_versions
 lash::persistence::SessionCommitStore
 lash::persistence::SessionCommitStore::admit_and_bind_session
+lash::persistence::SessionCommitStore::admit_session_state
 lash::persistence::SessionCommitStore::commit_runtime_state
 lash::persistence::SessionCommitStore::load_node
 lash::persistence::SessionCommitStore::load_session
 lash::persistence::SessionCommitStore::load_session_head_meta
 lash::persistence::SessionCommitStore::load_session_meta
+lash::persistence::SessionCommitStore::read_session_state_version
 lash::persistence::SessionCommitStore::save_session_meta
+lash::persistence::SessionCommitStore::stamp_session_state_version_and_corrupt_payload_for_testing
 lash::persistence::SessionExecutionLease
 lash::persistence::SessionExecutionLease::authority
 lash::persistence::SessionExecutionLease::claimed_at_epoch_ms
@@ -2316,6 +2321,10 @@ lash::persistence::SessionRelation::ObserverIntent::pending_observer_process_ids
 lash::persistence::SessionRelation::ObserverIntent::relation
 lash::persistence::SessionRelation::Root
 lash::persistence::SessionRelation::parent_session_id
+lash::persistence::SessionStateAdmission
+lash::persistence::SessionStateAdmission::lease_fencing_token
+lash::persistence::SessionStateAdmission::session_id
+lash::persistence::SessionStateAdmission::version
 lash::persistence::SessionStoreCreateRequest
 lash::persistence::SessionStoreCreateRequest::parent_session_id
 lash::persistence::SessionStoreCreateRequest::policy
@@ -2481,6 +2490,12 @@ lash::persistence::StoreError::SessionExecutionLeaseRenewalRefused::session_id
 lash::persistence::StoreError::SessionNotBound
 lash::persistence::StoreError::SessionResolutionAmbiguous
 lash::persistence::StoreError::SessionResolutionAmbiguous::session_count
+lash::persistence::StoreError::SessionStateMigrationUnavailable
+lash::persistence::StoreError::SessionStateMigrationUnavailable::current
+lash::persistence::StoreError::SessionStateMigrationUnavailable::found
+lash::persistence::StoreError::SessionStateVersionNewerThanRuntime
+lash::persistence::StoreError::SessionStateVersionNewerThanRuntime::current
+lash::persistence::StoreError::SessionStateVersionNewerThanRuntime::found
 lash::persistence::StoreError::StorageFailure
 lash::persistence::StoreError::StorageFailure::backend
 lash::persistence::StoreError::StorageFailure::message
@@ -7821,6 +7836,7 @@ lash::testing::conformance::attachment_ownership_isolation_with_store
 lash::testing::conformance::attachment_store
 lash::testing::conformance::attachment_store_reopenable
 lash::testing::conformance::borrowed_session_execution_lease_commit_contract
+lash::testing::conformance::busy_execution_lane_refuses_direct_turn_before_acceptance
 lash::testing::conformance::checkpoint_claim_probe_transaction_counts
 lash::testing::conformance::checkpoint_rejects_unknown_component_ref
 lash::testing::conformance::cold_process_durable_recovery_expectation
@@ -7913,7 +7929,6 @@ lash::testing::conformance::turn_input_claims_supersede_across_session_lease_gen
 lash::testing::conformance::turn_work_driver
 lash::testing::conformance::unbound_session_meta_refuses_ambiguous_resolution
 lash::testing::conformance::unbound_session_reads_resolve_the_same_session
-lash::testing::conformance::unclaimed_settlement_loser_yields_to_the_successor
 lash::testing::conformance::unclaimed_turn_input_settlement_is_a_conditional_write
 lash::testing::conformance::wake_delivery_crash_matrix
 lash::testing::conformance::wake_delivery_ordering_group_conformance

@@ -1329,6 +1329,10 @@ async fn a_busy_execution_lane_is_never_reported_as_an_exhausted_queue() -> Resu
         .disable_queued_work_driver()
         .build(crate::testing::runtime_lease_owner())?;
     let holder = core.session("busy-lane-drain-reason").open().await?;
+    // Both runtimes recover before either owns the lane. Once the first drain
+    // starts, the already-admitted peer must report lane contention rather
+    // than trying to recover through the live holder.
+    let peer = core.session("busy-lane-drain-reason").open().await?;
     holder
         .enqueue(TurnInput::text("hang queued"))
         .send()
@@ -1337,9 +1341,7 @@ async fn a_busy_execution_lane_is_never_reported_as_an_exhausted_queue() -> Resu
     let drain = tokio::spawn(async move { drainer.queued_turn().run().await });
     started_rx.await.expect("queued drain reached the provider");
 
-    // A second handle over the same durable session cannot take the lane the
-    // hung drain still holds.
-    let peer = core.session("busy-lane-drain-reason").open().await?;
+    // The peer cannot take the lane the hung drain still holds.
     let peer_drain = peer.queued_turn().run().await?;
 
     assert!(
@@ -7370,9 +7372,10 @@ async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_turn_inner()
         Some(&serde_json::json!("turn two complete"))
     );
     assert_eq!(append_count.load(Ordering::SeqCst), 1);
-    // Main turn 1, its lane-less TurnPersisted append, and main turn 2 each
-    // acquire once. No hidden transfer/reacquire occurs at either boundary.
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 3);
+    // Initial state admission plus main turn 1, its lane-less TurnPersisted
+    // append, and main turn 2 each acquire once. No hidden transfer/reacquire
+    // occurs at either boundary.
+    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 4);
     Ok(())
 }
 
@@ -7421,7 +7424,9 @@ async fn probe_inprocess_continue_as_survives_post_commit_graph_append_inner() -
         Some(&serde_json::json!("done after in-process handoff")),
         "post-commit graph writes must not strand the in-process frame handoff: {output:?}"
     );
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 1);
+    // Initial state admission and the outer turn each acquire once; the nested
+    // post-commit append borrows the outer fence.
+    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 2);
     Ok(())
 }
 
@@ -7476,7 +7481,9 @@ async fn durable_queued_continue_as_survives_post_commit_graph_append_inner() ->
         Some(&serde_json::json!("done after durable handoff")),
         "post-commit graph writes must not strand the committed frame handoff: {output:?}"
     );
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 1);
+    // The queued ingress admission and the outer queued turn each acquire
+    // once; the nested post-commit append borrows that outer fence.
+    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 2);
     Ok(())
 }
 
@@ -7992,7 +7999,9 @@ async fn durable_queued_chained_continue_as_survives_nested_commit_handoff_inner
         output.final_value(),
         Some(&serde_json::json!("done after chained handoffs"))
     );
-    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 1);
+    // The queued ingress admission and the outer chained turn each acquire
+    // once; both nested handoffs borrow the outer fence.
+    assert_sqlite_session_lane_free_at_generation(store_factory.as_ref(), session_id, 2);
     Ok(())
 }
 
@@ -8453,8 +8462,11 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
     std::mem::forget(dead_lane);
     drop(dead_boot_store);
 
-    // Boot 2 comes up 14s later and drains on the field's cadence.
-    clock.advance(14_000);
+    // Boot 2 comes up after the dead boot's lease expires. Session recovery is
+    // itself lease-fenced, so a successor cannot hydrate the session at 14s
+    // and merely wait to acquire the lane later; it must first cross the same
+    // expiry boundary that makes the queued turn drainable.
+    clock.advance(dead_lane_expiry - lash_core::Clock::timestamp_ms(clock.as_ref()));
     let second_core =
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
             .provider(
@@ -8582,8 +8594,11 @@ async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reop
     drop(first_session);
     drop(first_core);
 
-    // Boot 2 reopens and drains on the field's cadence for well past any TTL.
-    clock.advance(14_000);
+    // Boot 2 cannot admit the session until the hard-killed turn's execution
+    // lease expires. Advance to that boundary before reopening; admission now
+    // fences recovery itself rather than letting a successor hydrate early and
+    // wait to acquire the lane only when it starts draining.
+    clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
     let second_core =
         explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
             .provider(

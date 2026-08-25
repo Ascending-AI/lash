@@ -76,7 +76,7 @@ async fn postgres_unclaimed_turn_input_settlement_is_a_conditional_write_when_co
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_unclaimed_settlement_loser_yields_to_the_successor_when_configured() {
+async fn postgres_busy_execution_lane_refuses_direct_turn_before_acceptance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres unclaimed-settlement stand-down conformance: database is not \
@@ -86,7 +86,7 @@ async fn postgres_unclaimed_settlement_loser_yields_to_the_successor_when_config
     };
     reset(&storage).await;
     Box::pin(
-        lash_core::testing::conformance::unclaimed_settlement_loser_yields_to_the_successor(
+        lash_core::testing::conformance::busy_execution_lane_refuses_direct_turn_before_acceptance(
             "postgres",
             Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
         ),

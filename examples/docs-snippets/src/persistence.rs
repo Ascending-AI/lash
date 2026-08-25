@@ -390,6 +390,24 @@ fn assert_facade_exports_typed_attachment_parse_errors() {
     assert!(<InvalidMediaType as Error>::source(&invalid_media_type).is_none());
 }
 
+fn newer_session_state_requires_runtime_upgrade(
+    error: &lash::persistence::StoreError,
+) -> Option<(u32, u32)> {
+    match error {
+        lash::persistence::StoreError::SessionStateVersionNewerThanRuntime { found, current } => {
+            Some((*found, *current))
+        }
+        _ => None,
+    }
+}
+
+fn initial_session_state_generation() -> (u32, u32) {
+    (
+        lash::persistence::CURRENT_SESSION_STATE_VERSION,
+        lash::persistence::OLDEST_SUPPORTED_SESSION_STATE_VERSION,
+    )
+}
+
 async fn enumerate_sessions() -> anyhow::Result<()> {
     // docs:start:enumerate-sessions
     use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
@@ -546,6 +564,15 @@ mod tests {
         .expect("shared-factory snippet must build");
 
         assert_facade_exports_typed_attachment_parse_errors();
+        assert_eq!(initial_session_state_generation(), (0, 0));
+        let refusal = lash::persistence::StoreError::SessionStateVersionNewerThanRuntime {
+            found: lash::persistence::CURRENT_SESSION_STATE_VERSION + 1,
+            current: lash::persistence::CURRENT_SESSION_STATE_VERSION,
+        };
+        assert_eq!(
+            newer_session_state_requires_runtime_upgrade(&refusal),
+            Some((1, 0))
+        );
         enumerate_sessions()
             .await
             .expect("session enumeration snippet must preserve catalog state");

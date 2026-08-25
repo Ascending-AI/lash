@@ -20,8 +20,9 @@ pub(crate) enum StoreBacking {
 ///
 /// This is the *only* schema the store supports. Older durable-core databases
 /// must normally be deleted before opening with this binary. The narrow in-place
-/// exception is 39 -> 40: [`ensure_schema`] creates the additive cancellation-
-/// request table before advancing `PRAGMA user_version`. Lash's broader durable
+/// exceptions are 39 -> 41 and 40 -> 41: [`ensure_schema`] creates any missing
+/// cancellation-request table and session-state marker before advancing
+/// `PRAGMA user_version`. Lash's broader durable
 /// contract still lives one level up in per-record `schema_version` stamps, not
 /// in compatibility reads.
 /// Each `checkpoint_blob_refs` row is owned by the session whose head or anchor
@@ -124,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_deltas_session_seq
 
 CREATE TABLE IF NOT EXISTS session_meta (
     session_id                       TEXT PRIMARY KEY,
+    session_state_version            INTEGER,
     created_at_ms                    INTEGER NOT NULL DEFAULT 0,
     last_commit_at_ms                INTEGER,
     relation_kind                    TEXT NOT NULL,
@@ -427,7 +429,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a version-40 file written by an older binary self-heals into the
+/// schema, so a version-41 file written by an older binary self-heals into the
 /// newer index set on first open, and a newer file stays readable by the older
 /// binary — the two are mutually compatible on the same path. Bumping instead
 /// would reject-and-recreate live stores for a change that costs nothing to
@@ -438,7 +440,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// semantic change bumps.
 /// Version 40 persists per-turn cancellation requests and their undelivered
 /// input outcomes.
-pub(crate) const SCHEMA_VERSION: i32 = 40;
+/// Version 41 adds the nullable independently readable session-state generation
+/// beside durable session binding metadata. NULL is the version-zero legacy map.
+pub(crate) const SCHEMA_VERSION: i32 = 41;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -922,7 +926,14 @@ fn prepare_versioned_schema<'connection>(
         tx.execute_batch(schema)?;
         return Ok(tx);
     }
-    if database_kind == "session" && user_version == 39 && schema_version == SCHEMA_VERSION {
+    if database_kind == "session"
+        && matches!(user_version, 39 | 40)
+        && schema_version == SCHEMA_VERSION
+    {
+        tx.execute(
+            "ALTER TABLE session_meta ADD COLUMN session_state_version INTEGER",
+            [],
+        )?;
         tx.execute_batch(schema)?;
         tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);

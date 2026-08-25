@@ -682,21 +682,63 @@ pub(crate) async fn cancel_cron_jobs_for_session(
     session_id: &str,
     reason: &str,
 ) -> Result<(), AppError> {
-    let session = state
-        .open_session(session_id)
+    let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
+    policy.session_id = Some(session_id.to_string());
+    policy.model = model_spec_from_selection(state.selected_model());
+    let store = state
+        .session_store_factory
+        .create_store(&lash::persistence::SessionStoreCreateRequest {
+            session_id: session_id.to_string(),
+            relation: lash::persistence::SessionRelation::Root,
+            policy,
+        })
         .await
-        .map_err(AppError::session_open)?;
-    let registrations = session
-        .triggers()
-        .by_source_type(CRON_SCHEDULE_SOURCE_TYPE)
+        .map_err(|error| {
+            state.session_admission_error(
+                session_id,
+                "cron.restate.cancel",
+                lash::EmbedError::Store(error),
+            )
+        })?;
+    store.read_session_state_version().await.map_err(|error| {
+        state.session_admission_error(
+            session_id,
+            "cron.restate.cancel",
+            lash::EmbedError::Store(error),
+        )
+    })?;
+    let mut filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
+    filter.source_type = Some(CRON_SCHEDULE_SOURCE_TYPE.to_string());
+    let registrations = state
+        .trigger_store
+        .list_subscriptions(filter)
         .await
-        // Audited: trigger-registration reads lower trigger-store errors to SessionError::Protocol before this boundary.
         .map_err(AppError::internal)?;
+    if state
+        .session_store_factory
+        .session_was_deleted(session_id)
+        .await
+        .map_err(AppError::internal)?
+    {
+        return Err(state.session_admission_error(
+            session_id,
+            "cron.restate.cancel",
+            lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
+                session_id: session_id.to_string(),
+            }),
+        ));
+    }
+    store.read_session_state_version().await.map_err(|error| {
+        state.session_admission_error(
+            session_id,
+            "cron.restate.cancel",
+            lash::EmbedError::Store(error),
+        )
+    })?;
     let mut job_keys: BTreeSet<String> = registrations
         .iter()
         .map(|registration| cron_job_key(session_id, &registration.source_key))
         .collect();
-    session.close().await.map_err(AppError::session_open)?;
     job_keys.extend({
         let mut guard = state.restate_cron_job_keys.lock_recover();
         guard.remove(session_id).unwrap_or_default()

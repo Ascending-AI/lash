@@ -1078,9 +1078,9 @@ async fn in_memory_direct_turn_acceptance_mints_no_idempotency_key() {
 }
 
 #[tokio::test]
-async fn in_memory_unclaimed_settlement_loser_yields_to_the_successor() {
+async fn in_memory_busy_execution_lane_refuses_direct_turn_before_acceptance() {
     Box::pin(
-        crate::testing::conformance::unclaimed_settlement_loser_yields_to_the_successor(
+        crate::testing::conformance::busy_execution_lane_refuses_direct_turn_before_acceptance(
             "in-memory",
             Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
         ),

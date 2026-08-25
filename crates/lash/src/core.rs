@@ -1,6 +1,5 @@
 use crate::support::*;
 use lash_core::facade_support;
-use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
@@ -397,6 +396,10 @@ impl LashCore {
         let is_next_turn = matches!(ingress, lash_core::TurnInputIngress::NextTurn);
         let mut draft = lash_core::PendingTurnInputDraft::new(session_id, ingress, input);
         draft.source_key = id.map(|id| format!("host:{id}"));
+        store
+            .read_session_state_version()
+            .await
+            .map_err(EmbedError::Store)?;
         let enqueued = store
             .enqueue_pending_turn_input(draft)
             .await
@@ -570,7 +573,9 @@ impl LashCore {
         let Some(store_factory) = self.store_factory.as_ref() else {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
-        match scoped_effect_controller.execution_scope() {
+        match lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
+            &scoped_effect_controller,
+        ) {
             lash_core::ExecutionScope::SessionDelete {
                 session_id: scoped_session_id,
             } if scoped_session_id == &session_id => {}

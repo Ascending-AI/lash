@@ -216,7 +216,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // enumeration reports zero for legacy rows whose creation time is unknowable.
 // Version 59 persists per-turn cancellation requests and their undelivered
 // input outcomes.
-const SCHEMA_VERSION: i32 = 59;
+// Version 60 adds the nullable independently readable session-state generation
+// beside durable session binding metadata. NULL is the version-zero legacy map.
+const SCHEMA_VERSION: i32 = 60;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -124,6 +124,7 @@ pub const REWIND_PAST_54_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests
      DROP INDEX idx_lash_trigger_occurrences_reclaimable;
      ALTER TABLE lash_trigger_occurrences DROP COLUMN reclaimable_at_ms;
      ALTER TABLE lash_session_meta
+         DROP COLUMN session_state_version,
          DROP COLUMN created_at_ms,
          DROP COLUMN last_commit_at_ms;
      ALTER TABLE lash_deleted_sessions
@@ -147,6 +148,7 @@ pub const REWIND_PAST_55_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests
      DROP INDEX idx_lash_trigger_occurrences_reclaimable;
      ALTER TABLE lash_trigger_occurrences DROP COLUMN reclaimable_at_ms;
      ALTER TABLE lash_session_meta
+         DROP COLUMN session_state_version,
          DROP COLUMN created_at_ms,
          DROP COLUMN last_commit_at_ms;
      ALTER TABLE lash_deleted_sessions
@@ -162,6 +164,7 @@ pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests
      DROP INDEX idx_lash_sessions_checkpoint_ref;
      DROP INDEX idx_lash_node_anchors_checkpoint_ref;
      ALTER TABLE lash_session_meta
+         DROP COLUMN session_state_version,
          DROP COLUMN created_at_ms,
          DROP COLUMN last_commit_at_ms;
      ALTER TABLE lash_deleted_sessions

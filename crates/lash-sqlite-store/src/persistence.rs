@@ -26,6 +26,29 @@
 use super::*;
 use lash_core::SelectedQueuedWorkClaimOutcome;
 
+fn read_session_state_version_conn(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<u32, StoreError> {
+    let marker = conn
+        .query_row(
+            "SELECT session_state_version FROM session_meta WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .flatten()
+        .map(|version| {
+            u32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
+                record_kind: "SessionStateVersion",
+                message: format!("marker {version} is outside the unsigned 32-bit domain"),
+            })
+        })
+        .transpose()?;
+    lash_core::store::resolve_session_state_version(marker)
+}
+
 pub(crate) fn ensure_session_not_deleted_conn(
     conn: &rusqlite::Connection,
     session_id: &str,
@@ -242,6 +265,63 @@ pub(crate) fn nearest_frame_node_id_conn(
 
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
+    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+        let Some(session_id) = self.resolve_session_id_for_read().await? else {
+            return Ok(lash_core::store::OLDEST_SUPPORTED_SESSION_STATE_VERSION);
+        };
+        self.conn
+            .call(move |conn| Ok(read_session_state_version_conn(conn, &session_id)))
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn admit_session_state(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+    ) -> Result<lash_core::store::SessionStateAdmission, StoreError> {
+        let lease = lease.clone();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome = (|| {
+                    ensure_session_execution_lease_conn(tx, &lease.session_id, &lease, now)?;
+                    let version = read_session_state_version_conn(tx, &lease.session_id)?;
+                    Ok(lash_core::store::SessionStateAdmission {
+                        session_id: lease.session_id.clone(),
+                        version,
+                        lease_fencing_token: lease.fencing_token,
+                    })
+                })();
+                Ok(match outcome {
+                    Ok(admission) => TxOutcome::Commit(Ok(admission)),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), StoreError> {
+        let session_id = self.selected_session_id()?;
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    "UPDATE session_meta SET session_state_version = ?2 WHERE session_id = ?1",
+                    params![session_id, i64::from(version)],
+                )?;
+                tx.execute(
+                    "UPDATE session_head SET head_json = '{not-current-json' WHERE session_id = ?1",
+                    params![session_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(None);
@@ -250,6 +330,7 @@ impl SessionCommitStore for Store {
             .call(move |conn| {
                 let tx = conn.transaction()?;
                 let outcome: Result<Option<PersistedSessionRead>, StoreError> = (|| {
+                    read_session_state_version_conn(&tx, &session_id)?;
                     let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
                         return Ok(None);
                     };
@@ -295,6 +376,7 @@ impl SessionCommitStore for Store {
     }
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.read_session_state_version().await?;
         Store::load_session_head_meta(self).await
     }
 

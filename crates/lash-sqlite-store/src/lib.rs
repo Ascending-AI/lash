@@ -26,10 +26,10 @@
 //! ## Schema cutover, with narrow additive migrations
 //!
 //! There is exactly one supported schema (see [`schema::SCHEMA`]). Older
-//! databases must normally be deleted before opening. Durable-core 37 and 38
-//! are the exact in-place exceptions: both gain the version-40 cancellation
-//! request table, while 37 also decodes every rooted checkpoint manifest and
-//! arms the exact component-edge projection transactionally.
+//! databases must normally be deleted before opening. Durable-core 39 and 40
+//! are the exact in-place exceptions: both gain the independently readable
+//! session-state generation marker, while 39 also gains the version-40
+//! cancellation request table.
 //!
 //! ## Catalog contention
 //!

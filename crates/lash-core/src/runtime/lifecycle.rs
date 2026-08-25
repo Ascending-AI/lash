@@ -654,11 +654,16 @@ impl LashRuntime {
                 "parked runtime owner does not match the resuming host owner".to_string(),
             ));
         }
-        let loaded = crate::store::load_persisted_session_state(parked.store.as_ref())
-            .await
-            .map_err(|err| {
-                SessionError::Protocol(format!("failed to load runtime state: {err}"))
-            })?;
+        let loaded = crate::store::load_persisted_session_admitted(
+            parked.store.as_ref(),
+            &parked.session_id,
+            &runtime_lease_owner,
+            &parked.runtime_lease_executor_id,
+            env.core.control.lease_timings.ttl_ms(),
+        )
+        .await
+        .map_err(|err| session_commit_error("failed to load runtime state", err))?
+        .map(|loaded| loaded.state);
         let state = loaded.unwrap_or_else(|| RuntimeSessionState {
             session_id: parked.session_id.clone(),
             policy: parked.policy.clone(),

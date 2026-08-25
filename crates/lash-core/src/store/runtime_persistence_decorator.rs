@@ -13,6 +13,26 @@ use super::*;
 pub trait RuntimePersistenceDecorator: Send + Sync {
     fn inner(&self) -> &(dyn RuntimePersistence + '_);
 
+    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+        self.inner().read_session_state_version().await
+    }
+
+    async fn admit_session_state(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+    ) -> Result<SessionStateAdmission, StoreError> {
+        self.inner().admit_session_state(lease).await
+    }
+
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), StoreError> {
+        self.inner()
+            .stamp_session_state_version_and_corrupt_payload_for_testing(version)
+            .await
+    }
+
     fn record_intent(&self, intent: AttachmentIntent) -> Result<(), StoreError> {
         self.inner().record_intent(intent)
     }
@@ -542,6 +562,27 @@ impl<T> SessionCommitStore for T
 where
     T: RuntimePersistenceDecorator + ?Sized,
 {
+    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+        RuntimePersistenceDecorator::read_session_state_version(self).await
+    }
+
+    async fn admit_session_state(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+    ) -> Result<SessionStateAdmission, StoreError> {
+        RuntimePersistenceDecorator::admit_session_state(self, lease).await
+    }
+
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), StoreError> {
+        RuntimePersistenceDecorator::stamp_session_state_version_and_corrupt_payload_for_testing(
+            self, version,
+        )
+        .await
+    }
+
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
         RuntimePersistenceDecorator::load_session(self).await
     }

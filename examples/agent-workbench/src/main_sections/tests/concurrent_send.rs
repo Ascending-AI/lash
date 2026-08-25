@@ -160,10 +160,10 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
-/// FIG-1133: a new turn started by the replacement worker inside a dead lane's
-/// TTL still publishes its paid-for turn and projection under head-CAS authority.
+/// ADR 0077: a replacement worker is refused while a dead holder's lease is
+/// still live, then admits and completes after the TTL expires.
 #[tokio::test]
-async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
+async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
     let data_dir = tempfile::tempdir().expect("successor persistence tempdir");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         data_dir.path().join("lash-sessions"),
@@ -215,12 +215,19 @@ async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
         &session_id,
         &dead_incarnation,
         "new-turn-within-dead-lease-ttl-commits-under-head-cas-executor",
-        60_000,
+        100,
     )
     .await
     .expect("incarnation A claims the session lane")
     .acquired()
     .expect("the parked session lane is free for incarnation A");
+
+    let before_expiry = state.core.session(session_id.clone()).open().await;
+    assert!(
+        matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
+        "replacement recovery must wait for the dead holder TTL"
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     let successor = state
         .core
@@ -239,7 +246,7 @@ async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
         .expect("require finish")
         .stream_to(&ui_events)
         .await
-        .expect("the replacement runtime completes under commit-CAS authority");
+        .expect("the replacement runtime completes after lease takeover");
     crate::restate::record_turn_output(
         &state,
         &successor,
@@ -276,8 +283,8 @@ async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
         state_rows(&projected)
     );
 
-    // A lane-less append also proceeds while the unrelated legacy holder stays
-    // live; the append is complete or loses only at the head CAS.
+    // After takeover and completion, ordinary administration can reopen and
+    // append against the current generation.
     let contender = state
         .core
         .session(session_id.clone())
@@ -292,7 +299,7 @@ async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
             "append committed under head CAS",
         )])
         .await
-        .expect("the lane-less append commits despite the unrelated busy holder");
+        .expect("the post-takeover append commits");
     let durable_after_append = lash::persistence::load_persisted_session_state(&store)
         .await
         .expect("re-read durable session after lane-less append")
@@ -303,17 +310,17 @@ async fn new_turn_within_dead_lease_ttl_commits_under_head_cas() {
             .messages()
             .iter()
             .any(|message| lash::message_text(message) == "append committed under head CAS"),
-        "the lane-less append must be fully durable"
+        "the post-takeover append must be fully durable"
     );
 
-    // Keep the exact pre-TTL evidence live through both assertions.
+    // Keep the exact pre-TTL evidence live through the takeover assertions.
     assert_eq!(dead_lease.owner, dead_incarnation);
 }
 
-/// FIG-1117 restart arm: a replacement boot of the same worker owner may commit
-/// while the dead boot's lease is still inside its TTL.
+/// ADR 0077 restart arm: even the same stable worker owner must wait for the
+/// dead boot incarnation's live lease to expire before recovery.
 #[tokio::test]
-async fn same_turn_successor_within_dead_lease_ttl_commits_under_head_cas() {
+async fn same_worker_successor_waits_for_dead_boot_ttl() {
     let data_dir = tempfile::tempdir().expect("same-turn successor tempdir");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         data_dir.path().join("lash-sessions"),
@@ -356,12 +363,19 @@ async fn same_turn_successor_within_dead_lease_ttl_commits_under_head_cas() {
         &session_id,
         &dead_boot,
         "same-turn-successor-within-dead-lease-ttl-commits-under-head-cas-executor",
-        60_000,
+        100,
     )
     .await
     .expect("dead boot claims the lane")
     .acquired()
     .expect("restart-gate lane starts free");
+
+    let before_expiry = state.core.session(session_id.clone()).open().await;
+    assert!(
+        matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
+        "the same stable owner still needs expiry of the dead incarnation"
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     let successor = state
         .core
@@ -377,7 +391,7 @@ async fn same_turn_successor_within_dead_lease_ttl_commits_under_head_cas() {
             "same-turn successor committed",
         )])
         .await
-        .expect("same-turn successor commits inside the dead lease TTL");
+        .expect("same-turn successor commits after the dead lease TTL");
     let durable = lash::persistence::load_persisted_session_state(&store)
         .await
         .expect("read same-turn successor state")
@@ -841,13 +855,11 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     );
 }
 
-/// FIG-1000: the admission check in the handler is advisory — the session
-/// execution lease and the commit CAS are the authority — so a send that wins
-/// admission can still lose the commit race. When it does, the loss must be
-/// visible: a failure row every viewer sees, and no optimistic user row left
-/// standing for a turn that committed nothing.
+/// ADR 0077: a busy execution lane refuses competing recovery before any
+/// mutable session payload is hydrated. The current holder stays authoritative
+/// and completes normally once its provider resumes.
 #[tokio::test]
-async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_row() {
+async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() {
     let data_dir = tempfile::tempdir().expect("losing race tempdir");
     let (provider, mut provider_entered, release) =
         gated_first_call_provider("workbench-losing-commit-race");
@@ -929,28 +941,24 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
         "the admitted send renders optimistically while it runs"
     );
 
-    // A competing executor of the same session — a racing sibling the advisory
-    // admission check could not see — commits first and takes the head revision.
-    let competitor = state
+    let competitor_error = match state
         .core
         .session(session_id.clone())
         .open()
         .await
-        .expect("open competing session");
-    competitor
-        .turn(lash::TurnInput::text("competing send"))
-        .turn_id("competing-turn")
-        .require_finish()
-        .expect("require finish")
-        .run()
-        .await
-        .expect("the competing turn commits first");
-    drop(competitor);
+    {
+        Ok(_) => panic!("a busy lane must refuse competing recovery"),
+        Err(error) => error,
+    };
+    assert!(
+        competitor_error.to_string().contains("store commit is contended"),
+        "the refusal must identify the busy admission lane: {competitor_error}"
+    );
     let holder_after_race = state
         .core
         .session_lease_diagnostics(&session_id)
         .await
-        .expect("read holder after lane-less competitor")
+        .expect("read holder after refused competitor")
         .expect("stalled holder row remains present")
         .holder
         .expect("stalled holder remains current");
@@ -958,28 +966,15 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
 
     release.notify_one();
     let (terminalized, error_evidence) = losing.await.expect("losing turn task");
-    assert_eq!(
-        error_evidence,
-        Some((
-            lash::runtime::RuntimeErrorCode::StoreCommitFailed,
-            "store head revision conflict: expected 0, actual 1".to_string(),
-        )),
-        "the Busy/lane-less writer must lose at the typed head-CAS boundary"
-    );
-    assert!(
-        terminalized.is_err(),
-        "a turn refused by the durable fence must terminalize as a failure"
-    );
+    assert_eq!(error_evidence, None);
+    assert!(terminalized.is_ok(), "the admitted holder must complete");
 
     let failure_rows = product_event_rows(&state, &session_id);
-    assert_eq!(
+    assert!(
         failure_rows
             .iter()
-            .filter(|(id, _)| id == &format!("turn:{turn_id}:failed"))
-            .map(|(_, text)| text.as_str())
-            .collect::<Vec<_>>(),
-        vec![PUBLIC_TURN_FAILURE_MESSAGE],
-        "the refused turn must render a failure row in every viewer: {failure_rows:?}"
+            .all(|(id, _)| id != &format!("turn:{turn_id}:failed")),
+        "refusing the competitor must not fail the admitted holder: {failure_rows:?}"
     );
     let done = state
         .event_tx
@@ -995,16 +990,18 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
         .collect::<Vec<_>>();
     assert_eq!(
         done,
-        vec![(Some(turn_id.clone()), TurnDoneOutcome::Failed)],
-        "the turn's done event must name the failure so every viewer stops claiming it ran"
+        vec![(Some(turn_id.clone()), TurnDoneOutcome::Completed)],
+        "the admitted holder completes exactly once"
     );
     assert!(
-        product_user_rows(&state, &session_id).is_empty(),
-        "the refused turn's optimistic user row must retire: it committed nothing"
+        product_user_rows(&state, &session_id)
+            .iter()
+            .any(|(_, text)| text == "admitted send"),
+        "the admitted holder's committed user row remains visible"
     );
     assert!(
         state.active_turns.for_session(&session_id).is_empty(),
-        "the refused turn must not stay active"
+        "the completed holder must not stay active"
     );
 
     let Json(settled) = app_state(State(state.clone()), Query(SessionQuery::default()))
@@ -1016,14 +1013,8 @@ async fn a_turn_that_loses_the_commit_race_surfaces_its_failure_and_retires_its_
             .filter(|(role, _)| role == "user")
             .map(|(_, text)| text)
             .collect::<Vec<_>>(),
-        vec!["competing send".to_string()],
-        "the settled projection carries only the turn that actually committed"
-    );
-    assert!(
-        state_rows(&settled)
-            .iter()
-            .all(|(_, text)| text != "admitted send"),
-        "no phantom row may survive for a turn whose commit was refused"
+        vec!["admitted send".to_string()],
+        "the settled projection carries the admitted holder"
     );
 }
 

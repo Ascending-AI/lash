@@ -12,6 +12,7 @@ use super::*;
 
 #[path = "session_store_factory_config_commands.rs"]
 mod config_commands;
+mod state_version;
 mod turn_cancel;
 
 /// Run the [`SessionStoreFactory`](crate::SessionStoreFactory) conformance
@@ -39,6 +40,7 @@ pub async fn session_store_factory<F>(
     let second = make();
     assert_fresh_instances(&first, &second, "session_store_factory");
     drop((first, second));
+    state_version::session_state_version_admission_contract(make()).await;
     session_admission_contract(make()).await;
     session_store_binding_is_catalog_cardinality_independent(&make).await;
     session_store_factory_open_missing_returns_none(make()).await;

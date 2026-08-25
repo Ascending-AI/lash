@@ -390,8 +390,83 @@ async fn lock_process_wake_source_tx(
     Ok(())
 }
 
+async fn read_session_state_version_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &str,
+    lock: bool,
+) -> Result<u32, StoreError> {
+    let suffix = if lock { " FOR UPDATE" } else { "" };
+    let marker: Option<i32> = sqlx::query_scalar(&format!(
+        "SELECT session_state_version FROM lash_session_meta WHERE session_id = $1{suffix}"
+    ))
+    .bind(session_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?
+    .flatten();
+    let marker = marker
+        .map(|version| {
+            u32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
+                record_kind: "SessionStateVersion",
+                message: format!("marker {version} is outside the unsigned 32-bit domain"),
+            })
+        })
+        .transpose()?;
+    lash_core::store::resolve_session_state_version(marker)
+}
+
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
+    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let version = read_session_state_version_tx(&mut tx, &self.session_id, false).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(version)
+    }
+
+    async fn admit_session_state(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+    ) -> Result<lash_core::store::SessionStateAdmission, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
+        let version = read_session_state_version_tx(&mut tx, &lease.session_id, true).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(lash_core::store::SessionStateAdmission {
+            session_id: lease.session_id.clone(),
+            version,
+            lease_fencing_token: lease.fencing_token,
+        })
+    }
+
+    async fn stamp_session_state_version_and_corrupt_payload_for_testing(
+        &self,
+        version: u32,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        sqlx::query(
+            "UPDATE lash_session_meta SET session_state_version = $2 WHERE session_id = $1",
+        )
+        .bind(&self.session_id)
+        .bind(
+            i32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
+                record_kind: "SessionStateVersion",
+                message: format!("test marker {version} exceeds PostgreSQL INTEGER"),
+            })?,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        sqlx::query(
+            "UPDATE lash_sessions SET head_json = '{not-current-json' WHERE session_id = $1",
+        )
+        .bind(&self.session_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+        tx.commit().await.map_err(store_sqlx_error)
+    }
+
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
         let session_id = &self.session_id;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
@@ -399,6 +474,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
+        read_session_state_version_tx(&mut tx, session_id, false).await?;
         let Some(meta) = load_session_head_meta_tx(&mut tx, session_id, false).await? else {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
@@ -427,6 +503,7 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.read_session_state_version().await?;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let meta = load_session_head_meta_tx(&mut tx, &self.session_id, false).await?;
         tx.commit().await.map_err(store_sqlx_error)?;

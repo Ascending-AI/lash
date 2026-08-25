@@ -90,6 +90,14 @@ pub enum StoreError {
     SessionResolutionAmbiguous { session_count: u64 },
     #[error("session `{session_id}` was admitted without durable session metadata")]
     SessionBindingNotMaterialized { session_id: String },
+    #[error(
+        "session state version {found} is newer than this runtime's version {current}; upgrade the runtime before opening this session"
+    )]
+    SessionStateVersionNewerThanRuntime { found: u32, current: u32 },
+    #[error(
+        "session state version {found} requires migration to runtime version {current}, but no complete converter chain is installed"
+    )]
+    SessionStateMigrationUnavailable { found: u32, current: u32 },
     #[error("invalid session id: {reason}")]
     InvalidSessionId { reason: &'static str },
     #[error(
@@ -481,6 +489,10 @@ impl StoreError {
             Self::SessionNotBound => "SessionNotBound",
             Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
+            Self::SessionStateVersionNewerThanRuntime { .. } => {
+                "SessionStateVersionNewerThanRuntime"
+            }
+            Self::SessionStateMigrationUnavailable { .. } => "SessionStateMigrationUnavailable",
             Self::InvalidSessionId { .. } => "InvalidSessionId",
             Self::SessionDeleted { .. } => "SessionDeleted",
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",

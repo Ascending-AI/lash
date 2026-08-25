@@ -62,8 +62,9 @@ use crate::store::{
 mod observability;
 pub(crate) mod queued_lane_wait;
 
+pub(crate) use observability::trace_acquisition;
+use observability::trace_busy;
 pub(super) use observability::trace_commit_cas_rejected;
-use observability::{trace_busy, trace_taken_over};
 
 static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -236,9 +237,9 @@ impl SessionExecutionLeaseGuard {
                 return Ok(SessionExecutionLeaseGuardAcquisition::Busy(holder));
             }
         };
-        Ok(SessionExecutionLeaseGuardAcquisition::Acquired(
-            Self::from_acquisition(store, acquisition, timings, clock),
-        ))
+        let guard = Self::from_acquisition(store, acquisition, timings, clock);
+        guard.store.admit_session_state(&guard.fence()).await?;
+        Ok(SessionExecutionLeaseGuardAcquisition::Acquired(guard))
     }
 
     /// Report the claim, then start renewing it.
@@ -252,20 +253,8 @@ impl SessionExecutionLeaseGuard {
         timings: LeaseTimings,
         clock: Arc<dyn Clock>,
     ) -> Self {
+        trace_acquisition(&acquisition);
         let lease = acquisition.lease;
-        tracing::info!(
-            session_id = %lease.session_id,
-            owner_id = %lease.owner.owner_id,
-            incarnation_id = %lease.owner.incarnation_id,
-            executor_id = %lease.executor_id,
-            fencing_token = lease.fencing_token,
-            expires_at_epoch_ms = lease.expires_at_epoch_ms,
-            event = "session_execution_lease.acquired",
-            "acquired session execution lease"
-        );
-        if let Some(displaced) = acquisition.displaced.as_ref() {
-            trace_taken_over(&lease, displaced);
-        }
         let lease = Arc::new(StdMutex::new(lease));
         let release_state = Arc::new(AtomicU8::new(release_state::LIVE));
         let loss_cause = Arc::new(AtomicU8::new(loss_cause::NONE));
