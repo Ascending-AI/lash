@@ -8080,7 +8080,6 @@ lash::tools::ToolExecutionGrant::contract
 lash::tools::ToolExecutionGrant::execution_binding
 lash::tools::ToolExecutionGrant::from_definition
 lash::tools::ToolExecutionGrant::manifest
-lash::tools::ToolExecutionGrant::new
 lash::tools::ToolExecutionGrant::source_id
 lash::tools::ToolExecutionGrant::with_execution_binding
 lash::tools::ToolExecutionGrant::with_source_id

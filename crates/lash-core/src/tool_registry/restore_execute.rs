@@ -71,7 +71,7 @@ impl ToolRegistry {
         &self,
         grant: &ToolExecutionGrant,
     ) -> Result<Arc<dyn ToolSourceExecutor>, ToolOutcome> {
-        let tool_id = &grant.manifest.id;
+        let tool_id = &grant.manifest().id;
         let Some(source_id) = grant.source_id.as_deref() else {
             return Err(ToolOutcome::err_fmt(format_args!(
                 "Granted tool id `{tool_id}` is missing an explicit tool source"
@@ -198,10 +198,11 @@ impl ToolProvider for ToolRegistry {
         grant: &ToolExecutionGrant,
         call: ToolPrepareCall<'_>,
     ) -> Result<PreparedToolCall, ToolOutcome> {
-        if call.tool_id != grant.manifest.id {
+        if call.tool_id != grant.manifest().id {
             return Err(ToolOutcome::err_fmt(format_args!(
                 "Granted prepare id `{}` does not match call id `{}`",
-                grant.manifest.id, call.tool_id
+                grant.manifest().id,
+                call.tool_id
             )));
         }
         let source = self.resolve_granted_execution_source(grant)?;
@@ -283,7 +284,7 @@ impl ToolProvider for ToolRegistry {
             Err(result) => return result,
         };
         source
-            .execute_by_id(&grant.manifest.id, args, context)
+            .execute_by_id(&grant.manifest().id, args, context)
             .await
     }
 
@@ -298,7 +299,7 @@ impl ToolProvider for ToolRegistry {
             Err(result) => return crate::ToolAttemptOutcome::from_tool_result(result),
         };
         source
-            .execute_attempt_by_id(&grant.manifest.id, args, context)
+            .execute_attempt_by_id(&grant.manifest().id, args, context)
             .await
     }
 }

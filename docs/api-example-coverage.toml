@@ -29,13 +29,13 @@ gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
 # vanishes among thousands; see the comment above the tombstones themselves.
-removal_verdicts_recorded = 786
+removal_verdicts_recorded = 787
 
 # The number of `file.rs::Symbol::path` citations the reasons carry. The citation
 # check only reads a reference that names a symbol, so stripping the `::path` off
 # one turns a checked claim into prose nobody can confirm; pinning the population
 # makes that an edit a reviewer sees rather than a silent exemption (FIG-1526).
-prose_citations_recorded = 2683
+prose_citations_recorded = 2675
 
 # AST-only Lashlang APIs are outside the host-facade rustdoc walk below. Keep
 # their explicit dispositions here so that "not host-facing" never becomes
@@ -12130,7 +12130,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::reopen_preserving_history"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3608#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
+usage = "crates/lash/src/tests/turn_streaming.rs:3609#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
 reason = "Relocate: this all-features-only handle is implemented in lash_core::testing and exists solely so the importable replay law can distinguish preserved history from a fresh incarnation."
 
 [[api]]
@@ -12158,7 +12158,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3821#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
+usage = "crates/lash/src/tests/turn_streaming.rs:3822#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
 reason = "Relocate: this all-features-only method is implemented in lash_core::testing and consumed only to pin the distinct replay-visible and pre-notification cuts in the snapshot-subscribe conformance law."
 
 [[api]]
@@ -49626,7 +49626,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::into_trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2590#.into_trigger()?"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2591#lash_core::RuntimeEffectLocalExecutor::into_trigger(local_executor)?"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -50064,7 +50064,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2593#Ok(lash_core::RuntimeEffectOutcome::Trigger {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2595#Ok(lash_core::RuntimeEffectOutcome::Trigger { result })"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -50074,7 +50074,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger::result"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2594#result: Box::new(result),"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2595#Ok(lash_core::RuntimeEffectOutcome::Trigger { result })"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -56547,7 +56547,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3609#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
+usage = "crates/lash/src/tests/turn_streaming.rs:3610#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
 reason = "Importable live-replay law exercised by the runtime's in-memory conformance test; only test code invokes it, which is the purpose of the `testing` feature."
 
 [[api]]
@@ -58519,8 +58519,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ToolContract::matches_manifest_identity"]
 area = "plugins"
-disposition = "unused-justify"
-reason = "Concrete integrator class: tool providers verify a group-indexed manifest still names the same contract identity before trusting a cached resolution."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1247#assert!(execution_contract.matches_manifest_identity(execution_manifest));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1247#assert!(execution_contract.matches_manifest_identity(execution_manifest));"
+reason = "The executed assertion observes that both private grant projections retain the identity derived from one definition."
 
 [[api]]
 symbol = "lash::tools::ToolContract::model_tool"
@@ -58974,19 +58976,19 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant"]
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+usage = "examples/docs-snippets/src/remote_protocol.rs:1240#let execution_grant = ToolExecutionGrant::from_definition(definition)"
+reason = "The executed example constructs the public grant type through its sole public constructor."
 
 [[api]]
 symbol = "lash::tools::ToolExecutionGrant::contract"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::contract"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let definition = ToolDefinition::try_from(&grant)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
+usage = "examples/docs-snippets/src/remote_protocol.rs:1246#assert_eq!(execution_contract.examples.len(), 1);"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1246#assert_eq!(execution_contract.examples.len(), 1);"
+reason = "The executed assertion observes the contract accessor returned the examples derived from the same tool definition."
 
 [[api]]
 symbol = "lash::tools::ToolExecutionGrant::execution_binding"
@@ -58997,7 +58999,7 @@ area = "plugins"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
 assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
+reason = "The executed assertion observes the execution binding installed by the builder."
 
 [[api]]
 symbol = "lash::tools::ToolExecutionGrant::from_definition"
@@ -59006,30 +59008,20 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::from_definition"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-reason = "Reanchored to the existing direct outcome assertion; the former usage anchor was syntax-only or a fluent setup line."
+usage = "examples/docs-snippets/src/remote_protocol.rs:1244#assert_eq!(execution_manifest.name, \"search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1244#assert_eq!(execution_manifest.name, \"search_docs\");"
+reason = "The executed assertion observes the manifest derived by the sole public constructor."
 
 [[api]]
 symbol = "lash::tools::ToolExecutionGrant::manifest"
-kind = "field"
+kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::manifest"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let definition = ToolDefinition::try_from(&grant)`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
-
-[[api]]
-symbol = "lash::tools::ToolExecutionGrant::new"
-kind = "function"
-availability = "default+all-features"
-aliases = ["lash_core::ToolExecutionGrant::new"]
-area = "plugins"
-disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1241#ToolExecutionGrant::new(definition.manifest(), definition.contract());"
-reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+usage = "examples/docs-snippets/src/remote_protocol.rs:1244#assert_eq!(execution_manifest.name, \"search_docs\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1244#assert_eq!(execution_manifest.name, \"search_docs\");"
+reason = "The executed assertion observes the manifest accessor returned the manifest derived from the tool definition."
 
 [[api]]
 symbol = "lash::tools::ToolExecutionGrant::source_id"
@@ -59038,9 +59030,9 @@ availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::source_id"]
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1248#execution_grant.source_id.as_deref(),"
-assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
-reason = "Exercised by the docs-snippets example at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`assert_eq!(ToolId::as_str(&tool_id), definition.id().as_str());`; the assertion at examples/docs-snippets/src/remote_protocol.rs::asserted_tool_examples::remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants#`let tool_id = ToolId::new(\"remote-tool:search_docs\");` in `remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants` observes that `execution_grant.execution_binding[\"tenant\"]` equals `\"acme\"`."
+usage = "examples/docs-snippets/src/remote_protocol.rs:1250#assert_eq!(execution_source_id, Some(PLUGIN_TOOL_SOURCE_ID));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1250#assert_eq!(execution_source_id, Some(PLUGIN_TOOL_SOURCE_ID));"
+reason = "The executed assertion observes the source id installed by the builder."
 
 [[api]]
 symbol = "lash::tools::ToolExecutionGrant::with_execution_binding"
@@ -59048,9 +59040,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::with_execution_binding"]
 area = "plugins"
-disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1235#.with_execution_binding(serde_json::json!({ \"tenant\": \"acme\" }));"
-reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1251#assert_eq!(execution_grant.execution_binding[\"tenant\"], \"acme\");"
+reason = "The executed assertion observes the execution binding installed by this builder."
 
 [[api]]
 symbol = "lash::tools::ToolExecutionGrant::with_source_id"
@@ -59058,9 +59051,10 @@ kind = "function"
 availability = "default+all-features"
 aliases = ["lash_core::ToolExecutionGrant::with_source_id"]
 area = "plugins"
-disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/remote_protocol.rs:1234#.with_source_id(PLUGIN_TOOL_SOURCE_ID)"
-reason = "Syntax-only evidence: the recorded example anchor only constructs or declares the type, without observing its behavior; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/remote_protocol.rs:1250#assert_eq!(execution_source_id, Some(PLUGIN_TOOL_SOURCE_ID));"
+assertion = "examples/docs-snippets/src/remote_protocol.rs:1250#assert_eq!(execution_source_id, Some(PLUGIN_TOOL_SOURCE_ID));"
+reason = "The executed assertion observes the source id installed by this builder."
 
 [[api]]
 symbol = "lash::tools::ToolFailure"
@@ -79462,7 +79456,7 @@ availability = "default+all-features"
 aliases = ["lash_core::session::tool_execution::ToolInvocation::args"]
 area = "sessions-turns"
 disposition = "unused-justify"
-reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` hands `ToolInvocation` to hosts (runtime embedders). Consumer class: facade agent-scenario tests and the Lashlang process-engine implementer -- this field is exercised in-repo at crates/lash/src/tests/turn_streaming.rs::FrameStateDeferredTools::execute_granted#`self.execute_by_id(&grant.manifest.id, args, context).await`, crates/lash/src/tests/turn_streaming.rs::FrameStateDeferredTools::execute_granted#`args: &serde_json::Value,`, and no example reaches it, which is what keeps the row unused."
+reason = "Core-only reachable surface: no root export names this item, and it is contract surface because `lash_core::RuntimeExecutionContext::call_tool_batch` hands `ToolInvocation` to hosts (runtime embedders). Consumer class: facade agent-scenario tests and the Lashlang process-engine implementer -- this field is exercised in-repo at crates/lash/src/tests/turn_streaming.rs::FrameStateDeferredTools::execute_granted#`self.execute_by_id(&grant.manifest().id, args, context)`, crates/lash/src/tests/turn_streaming.rs::FrameStateDeferredTools::execute_granted#`args: &serde_json::Value,`, and no example reaches it, which is what keeps the row unused."
 
 [[api]]
 symbol = "lash_core::facade_support::ToolInvocation::child_execution_trace_hook"
@@ -89861,6 +89855,10 @@ kind = "function"
 [[removal_verdict]]
 symbol = "lash::tools::CancelHint::Ignore"
 kind = "variant"
+
+[[removal_verdict]]
+symbol = "lash::tools::ToolExecutionGrant::new"
+kind = "function"
 
 [[removal_verdict]]
 symbol = "lash::triggers::TriggerCommand::is_mutation"

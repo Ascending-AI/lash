@@ -679,7 +679,7 @@ fn deferred_execution_grants(
             if let Some(source_id) = grant.source_id.as_deref() {
                 execution_grant = execution_grant.with_source_id(source_id);
             }
-            Some((execution_grant.manifest.id.clone(), execution_grant))
+            Some((execution_grant.manifest().id.clone(), execution_grant))
         })
         .collect()
 }
@@ -1478,7 +1478,8 @@ mod tests {
             args: &serde_json::Value,
             context: &lash_core::AttemptContext<'_>,
         ) -> lash_core::ToolOutcome {
-            self.execute_by_id(&grant.manifest.id, args, context).await
+            self.execute_by_id(&grant.manifest().id, args, context)
+                .await
         }
     }
 
@@ -2586,13 +2587,12 @@ mod tests {
                         .effect_id()
                         .expect("captured trigger effect id")
                         .to_string();
-                    let result = local_executor
-                        .into_trigger()?
-                        .execute(&operation_id, *command)
-                        .await?;
-                    Ok(lash_core::RuntimeEffectOutcome::Trigger {
-                        result: Box::new(result),
-                    })
+                    let result =
+                        lash_core::RuntimeEffectLocalExecutor::into_trigger(local_executor)?
+                            .execute(&operation_id, *command)
+                            .await?;
+                    let result = Box::new(result);
+                    Ok(lash_core::RuntimeEffectOutcome::Trigger { result })
                 }
                 _ => local_executor.execute(envelope).await,
             }

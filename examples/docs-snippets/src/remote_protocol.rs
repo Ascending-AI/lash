@@ -1237,17 +1237,17 @@ mod asserted_tool_examples {
         assert_eq!(tool_grant.source_id.as_deref(), Some(PLUGIN_TOOL_SOURCE_ID));
         assert_eq!(tool_grant.execution_binding["tenant"], "acme");
 
-        let direct_execution_grant =
-            ToolExecutionGrant::new(definition.manifest(), definition.contract());
-        assert_eq!(direct_execution_grant.manifest.name, "search_docs");
-        assert_eq!(direct_execution_grant.contract.examples.len(), 1);
         let execution_grant = ToolExecutionGrant::from_definition(definition)
             .with_source_id(PLUGIN_TOOL_SOURCE_ID)
             .with_execution_binding(serde_json::json!({ "tenant": "acme" }));
-        assert_eq!(
-            execution_grant.source_id.as_deref(),
-            Some(PLUGIN_TOOL_SOURCE_ID)
-        );
+        let execution_manifest = execution_grant.manifest();
+        assert_eq!(execution_manifest.name, "search_docs");
+        let execution_contract = execution_grant.contract();
+        assert_eq!(execution_contract.examples.len(), 1);
+        assert!(execution_contract.matches_manifest_identity(execution_manifest));
+        // Routing remains host-settable without reopening the manifest/contract pair.
+        let execution_source_id = execution_grant.source_id.as_deref();
+        assert_eq!(execution_source_id, Some(PLUGIN_TOOL_SOURCE_ID));
         assert_eq!(execution_grant.execution_binding["tenant"], "acme");
 
         assert_eq!(

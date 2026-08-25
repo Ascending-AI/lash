@@ -139,6 +139,9 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-core/src/lib.rs:PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION": (
         "sha256:2f04d80d453bf0e962e4c3a0eafa71897732e60e6922a975388f24160016a0a1"
     ),
+    # FIG-1980: tool_execution_grant_json_layout_is_stable witnesses that the
+    # serde surface is unchanged, so TOOL_BATCH_FAMILY_VERSION remains 1.
+    'crates/lash-core/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:a8285c2863162c569cafbb16c7fe31c203cba082a809439f21349b8c659de53c',
 }
 
 

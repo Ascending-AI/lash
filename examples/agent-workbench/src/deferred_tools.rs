@@ -409,10 +409,10 @@ impl ToolProvider for DeferredExecutionProvider {
         args: &Value,
         context: &lash::tools::AttemptContext<'_>,
     ) -> ToolOutcome {
-        let Some(definition) = self.definition_by_id(&grant.manifest.id) else {
+        let Some(definition) = self.definition_by_id(&grant.manifest().id) else {
             return ToolOutcome::err_fmt(format_args!(
                 "unknown deferred tool id `{}`",
-                grant.manifest.id
+                grant.manifest().id
             ));
         };
         self.execute_definition(definition, args, context).await

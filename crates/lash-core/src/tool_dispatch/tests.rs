@@ -1089,7 +1089,8 @@ impl ToolProvider for ExactDispatchTools {
         args: &serde_json::Value,
         context: &crate::AttemptContext<'_>,
     ) -> ToolOutcome {
-        self.execute_by_id(&grant.manifest.id, args, context).await
+        self.execute_by_id(&grant.manifest().id, args, context)
+            .await
     }
 }
 

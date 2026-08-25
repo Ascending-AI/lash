@@ -1144,10 +1144,10 @@ impl PreparedToolBatch {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolExecutionGrant {
     /// Tool identity and model-facing metadata authorized by the grant.
-    pub manifest: ToolManifest,
+    pub(crate) manifest: ToolManifest,
     /// Contract used to validate granted call arguments without consulting the
     /// current Tool Catalog.
-    pub contract: Box<ToolContract>,
+    pub(crate) contract: Box<ToolContract>,
     /// Explicit registry source route for registry-backed execution. Direct
     /// non-registry providers may ignore this; [`ToolRegistry`](crate::ToolRegistry)
     /// requires it.
@@ -1157,21 +1157,25 @@ pub struct ToolExecutionGrant {
 }
 
 impl ToolExecutionGrant {
-    /// Constructs explicit out-of-catalog execution authority for protocol and process-engine
-    /// implementors handling deferred-resolution flows.
-    pub fn new(manifest: ToolManifest, contract: ToolContract) -> Self {
+    /// Constructs out-of-catalog execution authority from one tool definition for protocol and
+    /// process-engine implementors handling deferred-resolution flows.
+    pub fn from_definition(definition: ToolDefinition) -> Self {
         Self {
-            manifest,
-            contract: Box::new(contract),
+            manifest: definition.manifest(),
+            contract: Box::new(definition.contract()),
             source_id: None,
             execution_binding: serde_json::Value::Null,
         }
     }
 
-    /// Constructs out-of-catalog execution authority from one tool definition for protocol and
-    /// process-engine implementors handling deferred-resolution flows.
-    pub fn from_definition(definition: ToolDefinition) -> Self {
-        Self::new(definition.manifest(), definition.contract())
+    /// Returns the tool identity and model-facing metadata authorized by this grant.
+    pub fn manifest(&self) -> &ToolManifest {
+        &self.manifest
+    }
+
+    /// Returns the contract used to validate granted call arguments.
+    pub fn contract(&self) -> &ToolContract {
+        &self.contract
     }
 
     /// Sets the source id carried by a `ToolExecutionGrant` for protocol and process-engine
