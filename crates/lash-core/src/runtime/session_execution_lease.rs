@@ -63,7 +63,7 @@ mod observability;
 pub(crate) mod queued_lane_wait;
 
 pub(crate) use observability::trace_acquisition;
-use observability::trace_busy;
+pub(crate) use observability::trace_busy;
 pub(super) use observability::trace_commit_cas_rejected;
 
 static NEXT_LEASE_GUARD_ID: AtomicU64 = AtomicU64::new(1);

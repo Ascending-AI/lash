@@ -1808,6 +1808,7 @@ finish initial
         process_deployment: lash_restate::RestateProcessDeployment,
         trace_path: PathBuf,
     }
+
     async fn live_workbench_restate_state_with_provider(
         data_dir: &std::path::Path,
         restate_ingress_url: String,
@@ -1839,7 +1840,19 @@ finish initial
         let stores = WorkbenchStores::open(data_dir, database_url)
             .await
             .expect("open live workbench stores");
-        let core_store_factory = Arc::clone(&stores.session_store_factory);
+        let mut core_store_factory = Arc::clone(&stores.session_store_factory);
+        let session_id = sessions.current();
+        let admission_gate = registered_session_open_admission_gates()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&session_id)
+            .cloned();
+        if let Some(gate) = admission_gate {
+            core_store_factory = Arc::new(GatedSessionStoreFactory {
+                inner: core_store_factory,
+                gate,
+            });
+        }
         let process_registry = Arc::clone(&stores.process_registry);
         let process_continuations = Arc::clone(&stores.process_continuations);
         let trigger_store = Arc::clone(&stores.trigger_store);
@@ -2363,5 +2376,6 @@ finish initial
     include!("tests/tool_control.rs");
     include!("tests/concurrent_send.rs");
     include!("tests/no_progress_budget.rs");
+    include!("tests/session_open_admission.rs");
 
 }

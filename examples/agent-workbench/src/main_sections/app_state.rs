@@ -66,7 +66,7 @@ impl AppState {
     /// Opens a session through [`Self::session_builder`], so every open states
     /// the dialect this workbench means that session to run.
     async fn open_session(&self, session_id: &str) -> Result<lash::LashSession, lash::EmbedError> {
-        self.session_builder(session_id.to_string()).open().await
+        open_session_with_bounded_retry(self, session_id).await
     }
 
     fn current_session_id(&self) -> String {
@@ -1185,6 +1185,9 @@ impl AppError {
             log_deleted_session_refusal(session_id, context);
             return Self::conflict(deleted_session_message(session_id));
         }
+        if session_open_is_contended(&error) {
+            return temporarily_unavailable_session_open();
+        }
         Self::internal(error)
     }
 
@@ -1219,6 +1222,15 @@ impl AppError {
                 message: deleted_session_message(session_id),
                 verdict,
             };
+        }
+        // `SessionError::Store` is minted only by `load_persisted_state_admitted`,
+        // so this match is open-only; mid-turn contention arrives as
+        // `EmbedError::Runtime(StoreCommitContended)` and does not match. If a
+        // future non-open path mints `EmbedError::Store(Contended)`, durable turn
+        // failures would flip from Ambiguous to Retryable and Restate would rerun
+        // the provider call.
+        if session_open_is_contended(&error) {
+            return temporarily_unavailable_session_open();
         }
         eprintln!("agent-workbench runtime request failure: {error}");
         Self {
@@ -1293,6 +1305,40 @@ impl IntoResponse for AppError {
 #[cfg(test)]
 mod app_error_tests {
     use super::*;
+
+    #[test]
+    fn contended_session_open_is_retryable_service_unavailable() {
+        let error = AppError::session_open(lash::EmbedError::Session(
+            lash::SessionError::Store {
+                context: "failed to admit and load store".to_string(),
+                source: lash::persistence::StoreError::Contended,
+            },
+        ));
+
+        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.verdict, AppErrorVerdict::Retryable);
+    }
+
+    #[tokio::test]
+    async fn non_contended_session_open_is_not_retried() {
+        let mut attempts = 0;
+        let error = retry_session_open(
+            || {
+                attempts += 1;
+                std::future::ready(Err::<(), _>(lash::EmbedError::Store(
+                    lash::persistence::StoreError::Backend("store unavailable".to_string()),
+                )))
+            },
+            |_, _| {},
+        )
+        .await
+        .expect_err("a non-contended open error passes through");
+        let error = AppError::session_open(error);
+
+        assert_eq!(attempts, 1);
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.verdict, AppErrorVerdict::Ambiguous);
+    }
 
     #[test]
     fn deleted_session_open_is_a_comprehensible_conflict() {

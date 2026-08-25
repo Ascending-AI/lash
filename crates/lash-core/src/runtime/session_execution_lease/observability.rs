@@ -107,7 +107,7 @@ pub(in crate::runtime) fn trace_commit_cas_rejected(
     );
 }
 
-pub(super) fn trace_busy(
+pub(crate) fn trace_busy(
     session_id: &str,
     claimant: &crate::LeaseOwnerIdentity,
     claimant_executor_id: &str,
