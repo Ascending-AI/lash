@@ -348,7 +348,6 @@ fn trace_with_events(
         crate::trace::OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
         Vec::new(),
         crate::trace::AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new()),
-        std::path::Path::new("trace.json"),
     )
 }
 
@@ -419,7 +418,6 @@ mod attribution_tests {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use std::sync::Arc;
 
     use lash_core::store::RuntimeCommit;
@@ -665,7 +663,6 @@ mod tests {
             OracleVerdict::passed("sim.oracle.generated-workload.v1", "passed"),
             Vec::new(),
             AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new()),
-            Path::new("trace.json"),
         )
     }
 }

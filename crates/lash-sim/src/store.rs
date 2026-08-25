@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use crate::runtime_contracts::{RuntimeTurnObservation, runtime_turn_contract};
 use crate::scheduler::{BoundaryEvent, BoundaryKind};
 use crate::trace::{
-    AbstractWorldSummary, DurableEffectAbstractSummary, SessionAbstractSummary,
-    WorkerAbstractSummary, value_digest,
+    AbstractWorldSummary, DurableEffectAbstractSummary, ProviderTurnSummary,
+    SessionAbstractSummary, WorkerAbstractSummary, value_digest,
 };
 
 pub use lash_core::testing::checkpoint_observer::{
@@ -237,32 +237,16 @@ impl ModelStore {
                     .or_else(|| event.payload.get("text").and_then(Value::as_str))
                     .unwrap_or("")
                     .to_string();
-                session.provider_outputs.push(text);
-                if let Some(provider_exchange_count) = observed
-                    .get("provider_exchange_count")
-                    .and_then(Value::as_u64)
-                    .map(|value| value as usize)
-                {
-                    session
-                        .provider_exchange_counts
-                        .push(provider_exchange_count);
-                }
-                if let Some(graph_node_count) = observed
-                    .get("graph_node_count")
-                    .and_then(Value::as_u64)
-                    .map(|value| value as usize)
-                {
-                    session.graph_node_counts.push(graph_node_count);
-                }
-                if let Some(transcript_message_count) = observed
-                    .get("transcript_message_count")
-                    .and_then(Value::as_u64)
-                    .map(|value| value as usize)
-                {
-                    session
-                        .transcript_message_counts
-                        .push(transcript_message_count);
-                }
+                session.provider_turns.push(ProviderTurnSummary {
+                    output: text,
+                    exchange_count: observed
+                        .get("provider_exchange_count")
+                        .and_then(Value::as_u64),
+                    graph_node_count: observed.get("graph_node_count").and_then(Value::as_u64),
+                    transcript_message_count: observed
+                        .get("transcript_message_count")
+                        .and_then(Value::as_u64),
+                });
             }
             BoundaryKind::ProviderEvent => {
                 self.ensure_session(event.actor_alias.clone());
@@ -331,7 +315,7 @@ impl ModelStore {
                 let turn_index = observed
                     .get("turn_index")
                     .and_then(Value::as_u64)
-                    .unwrap_or(session.provider_outputs.len() as u64)
+                    .unwrap_or(session.provider_turns.len() as u64)
                     as usize;
                 session.observer_turn_indices.push(turn_index);
                 if observed
@@ -513,7 +497,7 @@ impl ModelStore {
                 let turn_index = self
                     .sessions
                     .get(&event.actor_alias)
-                    .map_or(1, |session| session.provider_outputs.len() + 1);
+                    .map_or(1, |session| session.provider_turns.len() + 1);
                 let text = event
                     .payload
                     .get("text")
@@ -967,7 +951,7 @@ impl ModelStore {
                 let turn_index = self
                     .sessions
                     .get(&event.actor_alias)
-                    .map_or(0, |session| session.provider_outputs.len());
+                    .map_or(0, |session| session.provider_turns.len());
                 json!({
                     "session": event.actor_alias,
                     "turn_index": turn_index,
@@ -1244,14 +1228,11 @@ struct ModelSession {
     alias: String,
     opened: bool,
     ingress_count: usize,
-    provider_outputs: Vec<String>,
+    provider_turns: Vec<ProviderTurnSummary>,
     usage_ledger_keys: BTreeSet<String>,
     cumulative_input_tokens: i64,
     cumulative_output_tokens: i64,
     cumulative_reasoning_output_tokens: i64,
-    provider_exchange_counts: Vec<usize>,
-    graph_node_counts: Vec<usize>,
-    transcript_message_counts: Vec<usize>,
     tool_outputs: Vec<String>,
     exec_code_outputs: Vec<String>,
     observer_turn_indices: Vec<usize>,
@@ -1277,14 +1258,11 @@ impl ModelSession {
             alias,
             opened: false,
             ingress_count: 0,
-            provider_outputs: Vec::new(),
+            provider_turns: Vec::new(),
             usage_ledger_keys: BTreeSet::new(),
             cumulative_input_tokens: 0,
             cumulative_output_tokens: 0,
             cumulative_reasoning_output_tokens: 0,
-            provider_exchange_counts: Vec::new(),
-            graph_node_counts: Vec::new(),
-            transcript_message_counts: Vec::new(),
             tool_outputs: Vec::new(),
             exec_code_outputs: Vec::new(),
             observer_turn_indices: Vec::new(),
@@ -1310,10 +1288,7 @@ impl ModelSession {
             alias: self.alias.clone(),
             opened: self.opened,
             ingress_count: self.ingress_count,
-            provider_outputs: self.provider_outputs.clone(),
-            provider_exchange_counts: self.provider_exchange_counts.clone(),
-            graph_node_counts: self.graph_node_counts.clone(),
-            transcript_message_counts: self.transcript_message_counts.clone(),
+            provider_turns: self.provider_turns.clone(),
             tool_outputs: self.tool_outputs.clone(),
             exec_code_outputs: self.exec_code_outputs.clone(),
             observer_turn_indices: self.observer_turn_indices.clone(),
