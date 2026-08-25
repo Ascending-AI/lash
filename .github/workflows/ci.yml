@@ -177,7 +177,7 @@ jobs:
           if ! git rev-parse --verify "${base_sha}^{commit}" >/dev/null 2>&1; then
             fail_open "base commit ${base_sha} is unavailable"
           fi
-          if ! git diff --name-only --no-renames -z "${base_sha}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-paths"; then
+          if ! git diff --name-status --no-renames -z "${base_sha}" "${GITHUB_SHA}" > "${RUNNER_TEMP}/changed-paths"; then
             fail_open "exact diff ${base_sha}..${GITHUB_SHA} could not be computed"
           fi
           python3 scripts/ci_plan.py classify --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"

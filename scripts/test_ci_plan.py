@@ -8,12 +8,38 @@ import ci_plan
 
 class ClassifyTests(unittest.TestCase):
     def test_docs_only_skips_every_expensive_family(self) -> None:
-        plan = ci_plan.classify(["README.md", "docs/runbooks/ci.md", "runbooks/operator/README.md"])
+        plan = ci_plan.classify(
+            [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")]
+        )
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
+    def test_docs_file_deletion_runs_every_expensive_family(self) -> None:
+        plan = ci_plan.classify([("D", "docs/adr/0008-confidence-gate.md")])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual("docs deletion", plan["reason"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_docs_addition_and_modification_preserve_docs_only_skip(self) -> None:
+        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")])
+        self.assertEqual("true", plan["docs_only"])
+        self.assertEqual("docs-only diff", plan["reason"])
+        self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_docs_deletion_mixed_with_docs_modification_runs_everything(self) -> None:
+        plan = ci_plan.classify([("D", "docs/old.md"), ("M", "README.md")])
+        self.assertEqual("false", plan["docs_only"])
+        self.assertEqual("docs deletion", plan["reason"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_unknown_status_fails_open(self) -> None:
+        plan = ci_plan.classify([("X", "docs/unknown.md")])
+        self.assertEqual("true", plan["fail_open"])
+        self.assertIn("unknown change statuses", plan["reason"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
     def test_rust_change_runs_every_expensive_family(self) -> None:
-        plan = ci_plan.classify(["crates/lash-core/src/lib.rs"])
+        plan = ci_plan.classify([("M", "crates/lash-core/src/lib.rs")])
         self.assertEqual("true", plan["rust_code"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
@@ -31,11 +57,11 @@ class ClassifyTests(unittest.TestCase):
         ]
         for path in paths:
             with self.subTest(path=path):
-                plan = ci_plan.classify([path])
+                plan = ci_plan.classify([("M", path)])
                 self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_unknown_path_fails_open(self) -> None:
-        plan = ci_plan.classify(["mystery.data"])
+        plan = ci_plan.classify([("M", "mystery.data")])
         self.assertEqual("true", plan["fail_open"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 

@@ -12,6 +12,7 @@ from typing import Mapping
 
 
 FAMILIES = ("rust", "confidence", "stores", "functional_e2e", "workers_e2e")
+CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
 
 GATED_JOBS = {
     "api-coverage": "rust",
@@ -77,39 +78,6 @@ def _is_known_path(path: str) -> bool:
     )
 
 
-def classify(paths: list[str]) -> dict[str, str]:
-    if not paths:
-        raise PlanError("the exact diff was empty")
-    if any(not path or path.startswith("/") or "\x00" in path for path in paths):
-        raise PlanError("the diff contained an invalid repository path")
-
-    global_invalidator = any(_is_global_invalidator(path) for path in paths)
-    docs_only = all(_is_docs_path(path) for path in paths)
-    ambiguous = sorted(path for path in paths if not _is_known_path(path))
-    run_everything = global_invalidator or not docs_only or bool(ambiguous)
-
-    outputs = {
-        "rust_code": str(any(path.endswith(".rs") or path.startswith(("crates/", "src/", "tests/")) for path in paths)).lower(),
-        "deps_config": str(any(PurePosixPath(path).name in {"Cargo.lock", "Cargo.toml"} or path.startswith((".cargo/", ".config/")) for path in paths)).lower(),
-        "docs_only": str(docs_only).lower(),
-        "workflows_only": str(all(path.startswith(".github/workflows/") for path in paths)).lower(),
-        "e2e_relevant": str(any(path.startswith(("examples/", "runbooks/")) or "e2e" in PurePosixPath(path).parts for path in paths)).lower(),
-        "scripts_gates": str(any(path.startswith("scripts/") or path in {"justfile", "deny.toml"} for path in paths)).lower(),
-        "fail_open": str(bool(ambiguous)).lower(),
-        "reason": (
-            f"ambiguous paths: {', '.join(ambiguous)}"
-            if ambiguous
-            else "global invalidator"
-            if global_invalidator
-            else "docs-only diff"
-            if docs_only
-            else "production-relevant diff"
-        ),
-    }
-    outputs.update({family: str(run_everything).lower() for family in FAMILIES})
-    return outputs
-
-
 def fail_open(reason: str) -> dict[str, str]:
     outputs = {
         "rust_code": "false",
@@ -122,6 +90,49 @@ def fail_open(reason: str) -> dict[str, str]:
         "reason": reason,
     }
     outputs.update({family: "true" for family in FAMILIES})
+    return outputs
+
+
+def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
+    if not changes:
+        raise PlanError("the exact diff was empty")
+    unknown_statuses = sorted({status for status, _ in changes if status not in CHANGE_STATUSES})
+    if unknown_statuses:
+        statuses = ", ".join(repr(status) for status in unknown_statuses)
+        return fail_open(f"unknown change statuses: {statuses}")
+
+    paths = [path for _, path in changes]
+    if any(not path or path.startswith("/") or "\x00" in path for path in paths):
+        raise PlanError("the diff contained an invalid repository path")
+
+    global_invalidator = any(_is_global_invalidator(path) for path in paths)
+    has_deletion = any(status == "D" for status, _ in changes)
+    docs_deletion = any(status == "D" and _is_docs_path(path) for status, path in changes)
+    docs_only = all(_is_docs_path(path) for path in paths) and not has_deletion
+    ambiguous = sorted(path for path in paths if not _is_known_path(path))
+    run_everything = global_invalidator or not docs_only or bool(ambiguous)
+
+    outputs = {
+        "rust_code": str(any(path.endswith(".rs") or path.startswith(("crates/", "src/", "tests/")) for path in paths)).lower(),
+        "deps_config": str(any(PurePosixPath(path).name in {"Cargo.lock", "Cargo.toml"} or path.startswith((".cargo/", ".config/")) for path in paths)).lower(),
+        "docs_only": str(docs_only).lower(),
+        "workflows_only": str(all(path.startswith(".github/workflows/") for path in paths)).lower(),
+        "e2e_relevant": str(any(path.startswith(("examples/", "runbooks/")) or "e2e" in PurePosixPath(path).parts for path in paths)).lower(),
+        "scripts_gates": str(any(path.startswith("scripts/") or path in {"justfile", "deny.toml"} for path in paths)).lower(),
+        "fail_open": str(bool(ambiguous)).lower(),
+        "reason": (
+            "docs deletion"
+            if docs_deletion
+            else f"ambiguous paths: {', '.join(ambiguous)}"
+            if ambiguous
+            else "global invalidator"
+            if global_invalidator
+            else "docs-only diff"
+            if docs_only
+            else "production-relevant diff"
+        ),
+    }
+    outputs.update({family: str(run_everything).lower() for family in FAMILIES})
     return outputs
 
 
@@ -189,11 +200,18 @@ def _write_outputs(outputs: Mapping[str, str]) -> None:
         print(f"{key}={value}")
 
 
-def _read_nul_paths(path: Path) -> list[str]:
+def _read_nul_changes(path: Path) -> list[tuple[str, str]]:
     raw = path.read_bytes()
     if raw and not raw.endswith(b"\0"):
         raise PlanError("the changed-path file was not NUL terminated")
-    return [item.decode("utf-8") for item in raw.split(b"\0") if item]
+    if not raw:
+        return []
+
+    fields = raw[:-1].split(b"\0")
+    if len(fields) % 2:
+        raise PlanError("the changed-path file did not contain status/path pairs")
+    decoded = [field.decode("utf-8") for field in fields]
+    return list(zip(decoded[::2], decoded[1::2], strict=True))
 
 
 def main() -> int:
@@ -211,7 +229,7 @@ def main() -> int:
 
     if args.command == "classify":
         try:
-            outputs = classify(_read_nul_paths(args.paths_file))
+            outputs = classify(_read_nul_changes(args.paths_file))
         except (OSError, UnicodeError, PlanError) as error:
             outputs = fail_open(f"classification error: {error}")
         _write_outputs(outputs)
