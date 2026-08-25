@@ -49,7 +49,7 @@ impl TurnAttach for RestateTurnAttach {
                 &workflow_key,
                 "await_resolution",
                 &RestateDurableWaitAwaitRequest {
-                    address: durable_address,
+                    key,
                     timeout_ms: None,
                 },
             )

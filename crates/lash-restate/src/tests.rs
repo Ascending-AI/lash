@@ -13,8 +13,9 @@ use crate::controller::{
 };
 use crate::durable_wait::{
     DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_INDEX_METADATA_KEY,
-    RestateDurableWaitIndexMetadata, RestateDurableWaitIndexState, RestateTurnCancelWake,
-    restate_await_event_key, split_cancellable_waits, validate_durable_wait_index_epoch,
+    RestateDurableWaitIndexMetadata, RestateTurnCancelWake, durable_wait_address_from_state_key,
+    durable_wait_index_state_key, restate_await_event_key, split_cancellable_waits,
+    validate_durable_wait_index_epoch,
 };
 use crate::process::{
     boundary_must_be_declined, missing_segment_is_superseded, process_segment_workflow_key,
@@ -3470,21 +3471,14 @@ async fn fig790_second_await_terminal_suspension_redrives_after_journaled_cancel
 
 #[test]
 fn restate_session_cancel_sweep_excludes_turn_control_addresses() {
-    let durable_wait = RestateDurableWaitAddress {
-        workflow_key: "tool-wait".to_string(),
-        session_id: Some("session".to_string()),
-        classification: RestateDurableWaitClassification::DurableWait,
-    };
-    let cancel_gate = RestateDurableWaitAddress {
-        workflow_key: "turn-cancel".to_string(),
-        session_id: Some("session".to_string()),
-        classification: RestateDurableWaitClassification::TurnControl,
-    };
-    let terminal = RestateDurableWaitAddress {
-        workflow_key: "turn-terminal".to_string(),
-        session_id: Some("session".to_string()),
-        classification: RestateDurableWaitClassification::TurnControl,
-    };
+    let scope = durable_turn_scope("session", "turn");
+    let durable_wait =
+        restate_await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("tool-wait"))
+            .expect("durable wait key");
+    let cancel_gate = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
+        .expect("turn-cancel key");
+    let terminal = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnTerminal)
+        .expect("turn-terminal key");
 
     let (cancelled, retained) = split_cancellable_waits(vec![
         durable_wait.clone(),
@@ -4161,16 +4155,124 @@ fn fig1943_apply_state_commands(state: &mut BTreeMap<String, Vec<u8>>, output: &
 }
 
 #[tokio::test]
+async fn durable_wait_workflow_rejects_a_key_for_a_different_workflow_address() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitWorkflowImpl.serve())
+        .build();
+    let key = restate_await_event_key(
+        &ExecutionScope::runtime_operation("fig2005-forged-address"),
+        AwaitEventWaitIdentity::Custom {
+            key: "fig2005-forged-address".to_string(),
+        },
+    )
+    .expect("derive FIG-2005 wait key");
+    let expected_workflow_key = RestateDurableWaitAddress::for_key(&key).workflow_key;
+
+    let output = invoke_endpoint(
+        &endpoint,
+        "LashDurableWaitWorkflow",
+        "resolve",
+        "forged-workflow-key",
+        &RestateDurableWaitResolveRequest {
+            key: key.clone(),
+            resolution: Resolution::Cancelled,
+        },
+    )
+    .await
+    .expect("invoke forged FIG-2005 workflow request");
+    let error = restate_output_failure_message(&output)
+        .or_else(|| restate_error_message(&output))
+        .expect("a mismatched wait-key preimage must fail the workflow invocation");
+    assert!(error.contains("durable-wait workflow key mismatch"));
+    assert!(error.contains(&expected_workflow_key));
+    assert!(error.contains("forged-workflow-key"));
+}
+
+#[tokio::test]
+async fn durable_wait_index_rejects_an_inconsistent_key_preimage_before_state_write() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitIndexImpl.serve())
+        .build();
+    let scope = durable_turn_scope("fig2005-forged-session", "fig2005-forged-turn");
+    let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
+        .expect("derive FIG-2005 turn-control key");
+    key.wait = AwaitEventWaitIdentity::tool_completion("fig2005-forged-tool-completion");
+    let address = RestateDurableWaitAddress::for_key(&key);
+    assert_eq!(
+        address.classification,
+        RestateDurableWaitClassification::DurableWait,
+        "the forged wait must target the sweepable partition"
+    );
+    let object_key = address.index_key();
+    let mut state = BTreeMap::new();
+
+    let output = invoke_endpoint_body(
+        &endpoint,
+        "LashDurableWaitIndex",
+        "register",
+        fig1943_invocation_with_state(
+            &object_key,
+            &RestateDurableWaitIndexRequest { key: key.clone() },
+            &state,
+        ),
+    )
+    .await
+    .expect("invoke FIG-2005 forged-key registration");
+    let registration = restate_output_json::<RestateDurableWaitRegistration>(&output);
+    fig1943_apply_state_commands(&mut state, &output);
+    let state_key = durable_wait_index_state_key(&address);
+    let error = restate_output_failure_message(&output).or_else(|| restate_error_message(&output));
+    assert!(
+        error.is_some(),
+        "inconsistent key was accepted as {registration:?} and stored in the sweepable partition: {}",
+        state.contains_key(&state_key)
+    );
+    assert!(
+        error
+            .expect("inconsistent key preimage must fail")
+            .contains("inconsistent durable-wait key preimage"),
+        "terminal error must name the key-preimage inconsistency"
+    );
+    assert!(state.is_empty(), "terminal rejection must not write state");
+}
+
+#[test]
+fn durable_wait_register_and_sweep_derive_the_same_address_for_every_scope() {
+    let scopes = [
+        durable_turn_scope("fig2005-session", "fig2005-turn"),
+        ExecutionScope::process("fig2005-process"),
+        ExecutionScope::queue_drain("fig2005-session", "fig2005-drain"),
+        ExecutionScope::session_delete("fig2005-session"),
+        ExecutionScope::runtime_operation("fig2005-operation"),
+    ];
+
+    for (ordinal, scope) in scopes.into_iter().enumerate() {
+        let key = restate_await_event_key(
+            &scope,
+            AwaitEventWaitIdentity::Custom {
+                key: format!("fig2005-round-trip-{ordinal}"),
+            },
+        )
+        .expect("derive FIG-2005 round-trip key");
+        let registered = RestateDurableWaitAddress::for_key(&key);
+        let swept =
+            durable_wait_address_from_state_key(&key, &durable_wait_index_state_key(&registered))
+                .expect("reconstruct FIG-2005 wait address from index state");
+        assert_eq!(swept, registered, "scope {scope:?} changed during sweep");
+    }
+}
+
+#[tokio::test]
 async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let endpoint = Endpoint::builder()
         .bind(LashDurableWaitIndexImpl.serve())
         .build();
     let object_key = "fig1943-session";
-    let address = RestateDurableWaitAddress {
-        workflow_key: "fig1943-tool-wait".to_string(),
-        session_id: Some(object_key.to_string()),
-        classification: RestateDurableWaitClassification::DurableWait,
-    };
+    let key = restate_await_event_key(
+        &durable_turn_scope(object_key, "fig1943-turn"),
+        AwaitEventWaitIdentity::tool_completion("fig1943-tool-wait"),
+    )
+    .expect("derive FIG-1943 tool-wait key");
     let mut state = BTreeMap::new();
 
     let registered = invoke_endpoint_body(
@@ -4179,9 +4281,7 @@ async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
         "register",
         fig1943_invocation_with_state(
             object_key,
-            &RestateDurableWaitIndexRequest {
-                address: address.clone(),
-            },
+            &RestateDurableWaitIndexRequest { key: key.clone() },
             &state,
         ),
     )
@@ -4192,6 +4292,14 @@ async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
         Some(RestateDurableWaitRegistration::Registered)
     );
     fig1943_apply_state_commands(&mut state, &registered);
+    let state_key = durable_wait_index_state_key(&RestateDurableWaitAddress::for_key(&key));
+    let indexed_key: AwaitEventKey = serde_json::from_slice(
+        state
+            .get(&state_key)
+            .expect("FIG-2005 index state stores the key preimage"),
+    )
+    .expect("decode FIG-2005 indexed key preimage");
+    assert_eq!(indexed_key, key);
 
     let terminal = Resolution::Ok(serde_json::json!({ "tool_result": "complete" }));
     let resolved = invoke_endpoint_body_with_json_call_responses(
@@ -4201,7 +4309,7 @@ async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
         fig1943_invocation_with_state(
             object_key,
             &RestateDurableWaitResolveRequest {
-                address: address.clone(),
+                key: key.clone(),
                 resolution: terminal.clone(),
             },
             &state,
@@ -4236,11 +4344,7 @@ async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
         &endpoint,
         "LashDurableWaitIndex",
         "register",
-        fig1943_invocation_with_state(
-            object_key,
-            &RestateDurableWaitIndexRequest { address },
-            &state,
-        ),
+        fig1943_invocation_with_state(object_key, &RestateDurableWaitIndexRequest { key }, &state),
     )
     .await
     .expect("re-register the already-resolved FIG-1943 wait");
@@ -4252,38 +4356,6 @@ async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 
 #[test]
 fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
-    let session_id = "upgrade-session";
-    let durable_wait = RestateDurableWaitAddress {
-        workflow_key: "durable-workflow".to_string(),
-        session_id: Some(session_id.to_string()),
-        classification: RestateDurableWaitClassification::DurableWait,
-    };
-    let turn_control = RestateDurableWaitAddress {
-        workflow_key: "control-workflow".to_string(),
-        session_id: Some(session_id.to_string()),
-        classification: RestateDurableWaitClassification::TurnControl,
-    };
-    let awakeable = RestateDurableWaitAwakeableRequest {
-        address: durable_wait.clone(),
-        awakeable_id: "awakeable-1".to_string(),
-    };
-
-    // This byte payload is the value persisted under the old `waits` key.
-    let old_layout_bytes = serde_json::to_vec(&RestateDurableWaitIndexState {
-        revoked: true,
-        waits: vec![durable_wait.clone(), turn_control.clone()],
-        awakeables: vec![awakeable.clone()],
-    })
-    .expect("serialize old wait-index layout");
-    let old_layout: RestateDurableWaitIndexState =
-        serde_json::from_slice(&old_layout_bytes).expect("read pre-cutover wait-index layout");
-    assert!(old_layout.revoked);
-    assert_eq!(old_layout.waits.len(), 2);
-    assert_eq!(
-        old_layout.awakeables[0].awakeable_id,
-        awakeable.awakeable_id
-    );
-
     let error = validate_durable_wait_index_epoch(None, &["waits".to_string()])
         .expect_err("pre-cutover aggregate state must be rejected");
     assert!(error.contains("drain and recreate"));
@@ -4303,41 +4375,42 @@ fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
         &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
     )
     .expect_err("wrong identity epoch must be rejected");
-    assert!(wrong_epoch.contains("incompatible with epoch 3"));
+    assert!(wrong_epoch.contains("incompatible with epoch 4"));
     assert!(wrong_epoch.contains("drain and recreate"));
     assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
 }
 
-fn wait_index_measurement_address(ordinal: usize) -> RestateDurableWaitAddress {
-    RestateDurableWaitAddress {
-        workflow_key: format!("{ordinal:064x}"),
-        session_id: Some("restate-postgres-workers-e2e".to_string()),
-        classification: RestateDurableWaitClassification::DurableWait,
-    }
+#[test]
+fn durable_wait_identity_epoch_four_rejects_epoch_three_state() {
+    let error =
+        validate_durable_wait_index_epoch(Some(3), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
+            .expect_err("epoch-3 durable-wait state must not open under epoch 4");
+    assert!(error.contains("identity epoch 3 is incompatible with epoch 4"));
+    assert!(error.contains("drain and recreate"));
+}
+
+fn wait_index_measurement_key(ordinal: usize) -> AwaitEventKey {
+    restate_await_event_key(
+        &durable_turn_scope("restate-postgres-workers-e2e", "measurement"),
+        AwaitEventWaitIdentity::Custom {
+            key: format!("wait-{ordinal:064x}"),
+        },
+    )
+    .expect("derive wait-index measurement key")
 }
 
 fn aggregate_wait_index_serialized_bytes(k: usize) -> usize {
-    let waits = (0..k)
-        .map(wait_index_measurement_address)
-        .collect::<Vec<_>>();
+    let waits = (0..k).map(wait_index_measurement_key).collect::<Vec<_>>();
     let mut bytes = 0;
     for registered in 1..=k {
-        bytes += serde_json::to_vec(&RestateDurableWaitIndexState {
-            revoked: false,
-            waits: waits[..registered].to_vec(),
-            awakeables: Vec::new(),
-        })
-        .expect("serialize aggregate wait-index register state")
-        .len();
+        bytes += serde_json::to_vec(&(false, &waits[..registered]))
+            .expect("serialize aggregate wait-index register state")
+            .len();
     }
     for remaining in (0..k).rev() {
-        bytes += serde_json::to_vec(&RestateDurableWaitIndexState {
-            revoked: false,
-            waits: waits[..remaining].to_vec(),
-            awakeables: Vec::new(),
-        })
-        .expect("serialize aggregate wait-index settle state")
-        .len();
+        bytes += serde_json::to_vec(&(false, &waits[..remaining]))
+            .expect("serialize aggregate wait-index settle state")
+            .len();
     }
     bytes
 }
@@ -4348,10 +4421,10 @@ fn keyed_wait_index_serialized_bytes(k: usize) -> usize {
         .len();
     metadata_bytes
         + (0..k)
-            .map(wait_index_measurement_address)
-            .map(|address| {
-                serde_json::to_vec(&address)
-                    .expect("serialize keyed wait-index entry")
+            .map(wait_index_measurement_key)
+            .map(|key| {
+                serde_json::to_vec(&key)
+                    .expect("serialize keyed wait-index key preimage")
                     .len()
             })
             .sum::<usize>()
@@ -6096,7 +6169,7 @@ struct TestTurnCancelGateState {
 
 struct TestTurnCancelGateEntry {
     session_id: String,
-    address: RestateDurableWaitAddress,
+    key: AwaitEventKey,
     sender: tokio::sync::oneshot::Sender<RestateTurnCancelWake>,
 }
 
@@ -6113,9 +6186,9 @@ enum TestTurnCancelRegistrationVerdict {
 impl TestTurnCancelGate {
     fn register(
         &self,
-        address: RestateDurableWaitAddress,
+        key: AwaitEventKey,
     ) -> Result<TestTurnCancelRegistrationVerdict, TerminalError> {
-        let Some(session_id) = address.session_id.clone() else {
+        let Some(session_id) = key.scope.session_id().map(str::to_string) else {
             return Err(TerminalError::new(
                 "turn cancellation gate is missing its session id",
             ));
@@ -6131,7 +6204,7 @@ impl TestTurnCancelGate {
             id,
             TestTurnCancelGateEntry {
                 session_id,
-                address,
+                key,
                 sender,
             },
         );
@@ -6147,9 +6220,9 @@ impl TestTurnCancelGate {
             .remove(&registration_id);
     }
 
-    fn resolve(&self, address: &RestateDurableWaitAddress) -> bool {
+    fn resolve(&self, key: &AwaitEventKey) -> bool {
         self.wake_matching(
-            |entry| entry.address == *address,
+            |entry| entry.key == *key,
             RestateTurnCancelWake::TurnCancelled,
         )
     }
@@ -6230,10 +6303,15 @@ where
                 }
             };
         };
-        let session_id = turn_cancel.address.session_id.clone().ok_or_else(|| {
-            TerminalError::new("turn cancellation gate is missing its session id")
-        })?;
-        let mut registration = match gate.register(turn_cancel.address)? {
+        let session_id = turn_cancel
+            .key
+            .scope
+            .session_id()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                TerminalError::new("turn cancellation gate is missing its session id")
+            })?;
+        let mut registration = match gate.register(turn_cancel.key)? {
             TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
             TestTurnCancelRegistrationVerdict::Revoked => {
                 return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
@@ -6275,23 +6353,28 @@ where
                 .await
                 .map(RestateTurnCancelRaceOutcome::Completed);
         };
-        let session_id = turn_cancel.address.session_id.clone().ok_or_else(|| {
-            TerminalError::new("turn cancellation gate is missing its session id")
-        })?;
-        let mut registration = match gate.register(turn_cancel.address)? {
+        let session_id = turn_cancel
+            .key
+            .scope
+            .session_id()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                TerminalError::new("turn cancellation gate is missing its session id")
+            })?;
+        let mut registration = match gate.register(turn_cancel.key)? {
             TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
             TestTurnCancelRegistrationVerdict::Revoked => {
                 return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
             }
         };
-        let event_address = request.address.clone();
+        let event_key = request.key.clone();
         tokio::select! {
             biased;
             wake = &mut registration.receiver => {
                 let wake = wake.map_err(|_| TerminalError::new("test turn cancellation gate was dropped"))?;
                 if wake == RestateTurnCancelWake::TurnCancelled {
                     context.resolve_event(RestateDurableWaitResolveRequest {
-                        address: event_address,
+                        key: event_key,
                         resolution: Resolution::Cancelled,
                     }).await?;
                 }
@@ -6323,10 +6406,15 @@ where
                 .map(Box::new)
                 .map(RestateTurnCancelRaceOutcome::Completed);
         };
-        let session_id = turn_cancel.address.session_id.clone().ok_or_else(|| {
-            TerminalError::new("turn cancellation gate is missing its session id")
-        })?;
-        let mut registration = match gate.register(turn_cancel.address)? {
+        let session_id = turn_cancel
+            .key
+            .scope
+            .session_id()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                TerminalError::new("turn cancellation gate is missing its session id")
+            })?;
+        let mut registration = match gate.register(turn_cancel.key)? {
             TestTurnCancelRegistrationVerdict::Registered(registration) => registration,
             TestTurnCancelRegistrationVerdict::Revoked => {
                 return Ok(RestateTurnCancelRaceOutcome::SessionRevoked { session_id });
@@ -6373,7 +6461,7 @@ struct RecordingContext {
     durable_events: Mutex<HashMap<String, Resolution>>,
     durable_event_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
     process_terminal_notifies: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
-    session_waits: Mutex<HashMap<String, Vec<RestateDurableWaitAddress>>>,
+    session_waits: Mutex<HashMap<String, Vec<AwaitEventKey>>>,
     revoked_sessions: Mutex<HashSet<String>>,
     turn_cancel_gate: TestTurnCancelGate,
 }
@@ -6443,14 +6531,14 @@ impl RecordingContext {
 
     fn resolve_durable_event(&self, request: RestateDurableWaitResolveRequest) -> ResolveOutcome {
         if request
-            .address
-            .session_id
-            .as_deref()
+            .key
+            .scope
+            .session_id()
             .is_some_and(|session_id| self.revoked_sessions.lock_recover().contains(session_id))
         {
             return ResolveOutcome::UnknownOrRevoked;
         }
-        self.turn_cancel_gate.resolve(&request.address);
+        self.turn_cancel_gate.resolve(&request.key);
         self.terminalize_durable_event(request)
     }
 
@@ -6459,28 +6547,29 @@ impl RecordingContext {
         request: RestateDurableWaitResolveRequest,
     ) -> ResolveOutcome {
         self.resolved_events.lock_recover().push(request.clone());
+        let address = request.address();
         let mut events = self.durable_events.lock_recover();
-        if let Some(terminal) = events.get(&request.address.workflow_key) {
+        if let Some(terminal) = events.get(&address.workflow_key) {
             return ResolveOutcome::AlreadyResolved {
                 terminal: terminal.clone(),
             };
         }
-        events.insert(request.address.workflow_key.clone(), request.resolution);
+        events.insert(address.workflow_key.clone(), request.resolution);
         drop(events);
-        self.durable_event_notify(&request.address.workflow_key)
+        self.durable_event_notify(&address.workflow_key)
             .notify_waiters();
         ResolveOutcome::Accepted
     }
 
-    fn settle_session_wait(&self, address: &RestateDurableWaitAddress) {
-        if address.classification == RestateDurableWaitClassification::TurnControl {
+    fn settle_session_wait(&self, key: &AwaitEventKey) {
+        if key.wait.is_turn_control() {
             return;
         }
-        let Some(session_id) = address.session_id.as_deref() else {
+        let Some(session_id) = key.scope.session_id() else {
             return;
         };
         if let Some(waits) = self.session_waits.lock_recover().get_mut(session_id) {
-            waits.retain(|wait| wait != address);
+            waits.retain(|wait| wait != key);
         }
     }
 }
@@ -6606,10 +6695,11 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     {
         let context = Arc::clone(self);
         Box::pin(async move {
-            if let Some(session_id) = request.address.session_id.as_deref() {
+            let address = request.address();
+            if let Some(session_id) = request.key.scope.session_id() {
                 if context.revoked_sessions.lock_recover().contains(session_id) {
                     context.terminalize_durable_event(RestateDurableWaitResolveRequest {
-                        address: request.address,
+                        key: request.key,
                         resolution: Resolution::Cancelled,
                     });
                     return Ok(Resolution::Cancelled);
@@ -6619,17 +6709,17 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                     .lock_recover()
                     .entry(session_id.to_string())
                     .or_default()
-                    .push(request.address.clone());
+                    .push(request.key.clone());
             }
-            let notify = context.durable_event_notify(&request.address.workflow_key);
+            let notify = context.durable_event_notify(&address.workflow_key);
             loop {
                 if let Some(resolution) = context
                     .durable_events
                     .lock_recover()
-                    .get(&request.address.workflow_key)
+                    .get(&address.workflow_key)
                     .cloned()
                 {
-                    context.settle_session_wait(&request.address);
+                    context.settle_session_wait(&request.key);
                     return Ok(resolution);
                 }
                 if let Some(timeout_ms) = request.timeout_ms {
@@ -6637,13 +6727,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                         _ = notify.notified() => {}
                         _ = cancellation.cancelled() => {
                             context.resolve_durable_event(RestateDurableWaitResolveRequest {
-                                address: request.address.clone(),
+                                key: request.key.clone(),
                                 resolution: Resolution::Cancelled,
                             });
                         }
                         _ = tokio::time::sleep(Duration::from_millis(timeout_ms)) => {
                             context.resolve_durable_event(RestateDurableWaitResolveRequest {
-                                address: request.address.clone(),
+                                key: request.key.clone(),
                                 resolution: Resolution::Timeout,
                             });
                         }
@@ -6653,7 +6743,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                         _ = notify.notified() => {}
                         _ = cancellation.cancelled() => {
                             context.resolve_durable_event(RestateDurableWaitResolveRequest {
-                                address: request.address.clone(),
+                                key: request.key.clone(),
                                 resolution: Resolution::Cancelled,
                             });
                         }
@@ -6772,14 +6862,16 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         let (resolve, retain): (Vec<_>, Vec<_>) = if revoke {
             (waits, Vec::new())
         } else {
-            split_cancellable_waits(waits)
+            waits
+                .into_iter()
+                .partition(|key| !key.wait.is_turn_control())
         };
         if !retain.is_empty() {
             self.session_waits.lock_recover().insert(session_id, retain);
         }
-        for address in resolve {
+        for key in resolve {
             self.terminalize_durable_event(RestateDurableWaitResolveRequest {
-                address,
+                key,
                 resolution: Resolution::Cancelled,
             });
         }
@@ -7423,7 +7515,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     where
         'ctx: 'run,
     {
-        let outcome = if self.turn_cancel_gate.resolve(&request.address) {
+        let outcome = if self.turn_cancel_gate.resolve(&request.key) {
             ResolveOutcome::Accepted
         } else {
             ResolveOutcome::UnknownOrRevoked
@@ -7738,7 +7830,7 @@ fn test_turn_cancel_wait_request(
     )
     .expect("test turn cancellation gate key");
     RestateDurableWaitAwaitRequest {
-        address: RestateDurableWaitAddress::for_key(&key),
+        key,
         timeout_ms: None,
     }
 }
@@ -7838,7 +7930,7 @@ async fn recording_context_process_await_reports_turn_cancelled() {
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
-            address: turn_cancel.address,
+            key: turn_cancel.key,
             resolution: Resolution::Cancelled,
         },
     )
@@ -7874,7 +7966,7 @@ async fn positional_replay_context_process_await_reports_turn_cancelled() {
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
-            address: turn_cancel.address,
+            key: turn_cancel.key,
             resolution: Resolution::Cancelled,
         },
     )
@@ -7910,7 +8002,7 @@ async fn replayable_recording_context_process_await_reports_turn_cancelled() {
     RestateControllerContext::resolve_event(
         &context,
         RestateDurableWaitResolveRequest {
-            address: turn_cancel.address,
+            key: turn_cancel.key,
             resolution: Resolution::Cancelled,
         },
     )
@@ -8236,7 +8328,7 @@ async fn restate_suspended_timer_is_woken_by_the_durable_turn_cancel_gate() {
     .expect("cancel gate key");
     assert_eq!(
         context.resolve_durable_event(RestateDurableWaitResolveRequest {
-            address: RestateDurableWaitAddress::for_key(&cancel_key),
+            key: cancel_key,
             resolution: Resolution::Ok(serde_json::json!({
                 "state": "cancel_requested",
                 "cancellation": {
@@ -8298,7 +8390,7 @@ async fn restate_suspended_await_event_is_woken_by_the_durable_turn_cancel_gate(
     .expect("cancel gate key");
     assert_eq!(
         context.resolve_durable_event(RestateDurableWaitResolveRequest {
-            address: RestateDurableWaitAddress::for_key(&cancel_key),
+            key: cancel_key,
             resolution: Resolution::Ok(serde_json::json!({
                 "state": "cancel_requested",
                 "cancellation": {
@@ -11026,7 +11118,7 @@ async fn restate_controller_replays_parent_shaped_start_await_suspend_flow() {
     .expect("parent suspend key");
     context.resolve_process_terminal(process_id, &terminal);
     context.resolve_durable_event(RestateDurableWaitResolveRequest {
-        address: RestateDurableWaitAddress::for_key(&suspend_key),
+        key: suspend_key.clone(),
         resolution: Resolution::Ok(serde_json::json!({ "answer": "resume" })),
     });
 
@@ -11346,10 +11438,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
             AwaitEventWaitIdentity::process_signal("task-signal", "notify", 1),
         )
         .expect("first signal wait key");
-        assert_eq!(
-            resolved[0].address,
-            RestateDurableWaitAddress::for_key(&expected_key)
-        );
+        assert_eq!(resolved[0].key, expected_key);
         assert_eq!(
             resolved[0].resolution,
             Resolution::Ok(serde_json::json!({ "signal": "notify" }))
@@ -11389,8 +11478,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
     )
     .expect("second signal wait key");
     assert_eq!(
-        resolved[1].address,
-        RestateDurableWaitAddress::for_key(&expected_key),
+        resolved[1].key, expected_key,
         "second signal must resolve the ordinal-2 wait key"
     );
 }
