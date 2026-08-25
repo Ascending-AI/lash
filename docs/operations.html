@@ -87,7 +87,7 @@ let core = builder.build(owner)?;</code></pre>
         <p>lash maintains no implicit migration chain, by policy. A version whose schema changed is adopted either by an explicit, published migration or by recreating the store from empty, and either step is one-way: the previous binary refuses the resulting schema on the same exact-match gate. There is no downgrade path, no rollback, and no restore procedure. Recovery from a failed bump is fix-forward.</p>
         <p>This release uses these store schema versions:</p>
         <ul>
-          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">42</span></li>
+          <li>SQLite durable-core version <span data-format-version="SQLITE_SCHEMA_VERSION">42</span> (<code>lash_sqlite_store::SESSION_SCHEMA_VERSION</code>)</li>
           <li>SQLite process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span></li>
           <li>SQLite effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">11</span></li>
           <li>SQLite trigger version <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span></li>

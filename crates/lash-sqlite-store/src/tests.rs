@@ -6,6 +6,11 @@ use lashlang::LashlangArtifactStore;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn public_session_schema_version_tracks_the_internal_schema_version() {
+    assert_eq!(SESSION_SCHEMA_VERSION, crate::schema::SCHEMA_VERSION);
+}
+
 fn count_checkpoint_data_statement(event: rusqlite::trace::TraceEvent<'_>) {
     if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event {
         let sql = sql.trim_start();

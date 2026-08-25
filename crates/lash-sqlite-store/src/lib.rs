@@ -134,6 +134,14 @@ use schema::{
     StoreBacking, apply_pragmas, ensure_effect_schema, ensure_process_schema, ensure_schema,
     ensure_trigger_schema,
 };
+
+/// The SQLite durable-core session schema version stamped in `PRAGMA user_version`.
+///
+/// Hosts can use this constant for compatibility stamps. It moves whenever the
+/// SQLite session-store format changes; it does not cover the process, trigger,
+/// or effect schemas.
+pub const SESSION_SCHEMA_VERSION: i32 = schema::SCHEMA_VERSION;
+
 pub use triggers::SqliteTriggerStore;
 
 /// SQLite-backed store for checkpoint blobs, runtime session state, and
