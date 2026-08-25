@@ -11,7 +11,5 @@ mod nesting_cap;
 mod property;
 #[path = "rlm_prompt_claims.rs"]
 mod rlm_prompt_claims;
-#[path = "stack_budget.rs"]
-mod stack_budget;
 #[path = "value_semantics.rs"]
 mod value_semantics;

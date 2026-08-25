@@ -216,7 +216,7 @@ fn ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort() {
     for depth in [72usize, 96, 128] {
         let status = std::process::Command::new(&exe)
             .args([
-                "stack_budget::ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort",
+                "ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort",
                 "--exact",
                 "--nocapture",
             ])
