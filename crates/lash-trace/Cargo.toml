@@ -1,5 +1,5 @@
 [package]
-name = "lash-trace"
+name = "lash-internal-trace"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Trace types and JSONL exporter for the lash agent runtime."
 keywords = ["lash", "agent", "trace", "jsonl", "observability"]
 categories = ["asynchronous", "development-tools::debugging"]
+
+[lib]
+name = "lash_trace"
 
 [features]
 default = []

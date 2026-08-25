@@ -1,5 +1,5 @@
 [package]
-name = "lash-provider-openai"
+name = "lash-internal-provider-openai"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "OpenAI providers for lash: API-key (OpenRouter, OpenAI, vLLM, etc.) and Codex OAuth (ChatGPT Plus/Pro/Team)."
 keywords = ["lash", "agent", "llm", "openai", "codex"]
 categories = ["api-bindings", "asynchronous"]
+
+[lib]
+name = "lash_provider_openai"
 
 [features]
 # Enables public test support and the cross-provider response-normalization
@@ -41,12 +44,12 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 # Self dev-dependency so `testing` is on for every test build of this crate:
-# a bare `cargo test -p lash-provider-openai` runs the conformance law instead of
+# a bare `cargo test -p lash-internal-provider-openai` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).
-lash-provider-openai = { path = ".", features = ["testing"] }
+lash-provider-openai = { package = "lash-internal-provider-openai", path = ".", features = ["testing"] }
 # The runtime facade, so the Codex WebSocket path is proven end-to-end through
 # a normal `LashCore` turn in `tests/codex_websocket_runtime.rs`.
-lash = { workspace = true }
+lash = { package = "lash-runtime", path = "../lash" }
 # `lash_core::test_support` holds the core items whose only consumers are tests.
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["testing"] }

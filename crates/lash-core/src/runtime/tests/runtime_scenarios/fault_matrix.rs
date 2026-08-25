@@ -65,7 +65,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::ProviderFailureRetry,
         contract: "Retryable LLM provider failures are retried deterministically and fail the turn only after exhaustion.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-core",
+            package: "lash-internal-core",
             test_target: None,
             filter: "retryable_llm_failures_exhaust_and_fail_turn",
             required_env: None,
@@ -76,7 +76,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::ProviderFailureRetry,
         contract: "Protocol-level provider failure stops without manufacturing a checkpoint.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-protocol-standard",
+            package: "lash-internal-protocol-standard",
             test_target: Some("protocol_scenarios"),
             filter: "standard_protocol_scenario_provider_error_stops_without_checkpoint",
             required_env: None,
@@ -111,7 +111,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::LeaseLoss,
         contract: "After a successor generation re-claims queued work, the predecessor claim is rejected at commit without mutation.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-core",
+            package: "lash-internal-core",
             test_target: None,
             filter: "queued_work_claims_supersede_across_session_lease_generations",
             required_env: None,
@@ -122,7 +122,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::LeaseLoss,
         contract: "A failed turn's DeferredNextTurn claim is reclaimed by idle retry under a new session-lease generation while its stale completion is rejected.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-core",
+            package: "lash-internal-core",
             test_target: None,
             filter: "turn_input_claims_supersede_across_session_lease_generations",
             required_env: None,
@@ -133,7 +133,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::LeaseLoss,
         contract: "More than 32 same-generation claims cannot hide a later unclaimed queued-work, session-command, or turn-input row from bounded scans.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-core",
+            package: "lash-internal-core",
             test_target: None,
             filter: "same_generation_claim_scans_reach_rows_beyond_the_scan_surplus",
             required_env: None,
@@ -144,7 +144,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::TriggerDeliveryRecovery,
         contract: "A trigger delivery reserved before a crash but missing its process row is reconciled into exactly one deterministic process start.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-core",
+            package: "lash-internal-core",
             test_target: None,
             filter: "sweep_reconciles_reserved_trigger_delivery_without_process",
             required_env: None,
@@ -155,7 +155,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::TriggerDeliveryRecovery,
         contract: "Retention prunes trigger delivery rows with their terminal process rows so recovery does not resurrect completed trigger work.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-core",
+            package: "lash-internal-core",
             test_target: None,
             filter: "sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process",
             required_env: None,
@@ -166,7 +166,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         kind: DurableFaultKind::BackendPermutation,
         contract: "Sqlite runs the backend conformance contract, including reopen, source-key, claim, lease, process change-feed ordering, process_change_feed_never_misses_concurrent_terminal_writers, drainage, watermark-bounded prune, and effect replay cases.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-sqlite-store",
+            package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),
             filter: "conformance",
             required_env: None,
@@ -266,7 +266,14 @@ fn durable_fault_matrix_fast_gate_executes_all_nonblocked_evidence() {
     let scenario_commands = run_fast_gate_with_fake_cargo("scenario-harnesses");
     assert!(
         scenario_commands.iter().any(|command| {
-            command == &["test", "-p", "lash-core", "--locked", "runtime_scenario"]
+            command
+                == &[
+                    "test",
+                    "-p",
+                    "lash-internal-core",
+                    "--locked",
+                    "runtime_scenario",
+                ]
         }),
         "fast gate must execute RuntimeScenario evidence rows"
     );

@@ -205,7 +205,37 @@ def compute_layers(
         layers.append(ready)
         completed.update(ready)
         remaining.difference_update(ready)
+    validate_publish_order(
+        packages,
+        [package_id for layer in layers for package_id in layer],
+        already_completed,
+    )
     return layers
+
+
+def validate_publish_order(
+    packages: dict[str, dict],
+    ordered_package_ids: list[str],
+    already_completed: set[str] | None = None,
+) -> None:
+    """Reject an incomplete, duplicated, or dependency-inverted publish order."""
+    completed = set(already_completed or ())
+    expected = set(packages) - completed
+    actual = set(ordered_package_ids)
+    if len(ordered_package_ids) != len(actual) or actual != expected:
+        raise RuntimeError("publish order does not contain each pending package exactly once")
+
+    for package_id in ordered_package_ids:
+        missing = packages[package_id]["workspace_dependencies"] - completed
+        if missing:
+            package_name = packages[package_id]["name"]
+            dependency_names = ", ".join(
+                sorted(packages[dependency_id]["name"] for dependency_id in missing)
+            )
+            raise RuntimeError(
+                f"publish order places {package_name} before: {dependency_names}"
+            )
+        completed.add(package_id)
 
 
 def print_plan(packages: dict[str, dict], version: str | None) -> None:

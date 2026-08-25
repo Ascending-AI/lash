@@ -1,5 +1,5 @@
 [package]
-name = "lash-s3-store"
+name = "lash-internal-s3-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "S3-compatible attachment storage adapter for the lash agent runtime."
 keywords = ["lash", "agent", "s3", "minio", "attachments"]
 categories = ["database", "asynchronous"]
+
+[lib]
+name = "lash_s3_store"
 
 [lints]
 workspace = true

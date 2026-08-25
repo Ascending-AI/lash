@@ -1,5 +1,5 @@
 [package]
-name = "lash-plugin-tool-output-budget"
+name = "lash-internal-plugin-tool-output-budget"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Tool-output budgeting plugin for the lash agent runtime."
 keywords = ["lash", "agent", "tools", "plugin", "llm"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_plugin_tool_output_budget"
 
 [lints]
 workspace = true

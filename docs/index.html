@@ -339,10 +339,10 @@ start notify(mail: gmail.work, finding: finding)</code></pre>
         <h2 class="stanza__title">embed it</h2>
         <p class="stanza__lede">The shortest path to a working turn: add the crate, pick a provider, open a session, run one turn. Tools, modes, persistence, and tracing layer on after that.</p>
 
-        <p>The facade ships on crates.io as <code>lash-runtime</code> and is imported as <code>use lash::…</code>. During the alpha series the versions carry an <code>-alpha.N</code> suffix, so the dep needs the explicit pre-release tag.</p>
+        <p>The facade ships on crates.io as <code>lash-runtime</code> and is imported as <code>use lash::…</code>. During the alpha series the versions carry an <code>-alpha.N</code> suffix, so the dep needs the explicit pre-release tag; companion implementations publish as <code>lash-internal-*</code> and use dependency aliases to preserve their Rust crate names.</p>
 <pre data-lang="cargo.toml"><code>[dependencies]
 lash-runtime         = "=0.1.0-alpha.113"
-lash-provider-openai = "=0.1.0-alpha.113"
+lash-provider-openai = { package = "lash-internal-provider-openai", version = "=0.1.0-alpha.113" }
 anyhow               = "1"
 tokio                = { version = "1", features = ["full"] }</code></pre>
 

@@ -1,5 +1,5 @@
 [package]
-name = "lash-sansio"
+name = "lash-internal-sansio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Sans-IO protocol kernel for the lash agent runtime. Pure types and state machine; no IO or async."
 keywords = ["lash", "agent", "sans-io", "protocol", "runtime"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_sansio"
 
 [lints]
 workspace = true

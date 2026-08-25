@@ -16,10 +16,10 @@
 # Everything else stays at nextest's defaults on purpose.
 
 # Suites that talk to the one Postgres database / MinIO bucket that a run
-# stands up. They are not isolated from each other: the `lash-postgres-store`
+# stands up. They are not isolated from each other: the `lash-internal-postgres-store`
 # binaries below truncate every `lash_*` table on the configured database, the
 # `lash-sim` cross-backend differential compares against those same tables, and
-# the `lash-s3-store` MinIO tests share one bucket. Today they interlock by
+# the `lash-internal-s3-store` MinIO tests share one bucket. Today they interlock by
 # hand, holding a session-level Postgres advisory lock
 # (`SHARED_DATABASE_LOCK_KEY`) across process boundaries, which under
 # process-per-test means every waiter burns a test slot doing nothing but
@@ -37,7 +37,7 @@
 #
 # Deliberately NOT in this group: `lash-sim`'s Postgres-backed unit tests
 # (`crates/lash-sim/src/postgres_test_isolation.rs`) and anything else built on
-# `IsolatedDatabase`, plus the four `lash-postgres-store` binaries excluded by
+# `IsolatedDatabase`, plus the four `lash-internal-postgres-store` binaries excluded by
 # name below — those provision a database or a UUID-named scratch schema per
 # test (`crates/lash-postgres-store/tests/schema_drift/harness.rs`) and have
 # nothing to serialize against. Serializing them was measured at 7.7s -> 31.0s
@@ -64,7 +64,7 @@ final-status-level = "slow"
 # gate test or letting all five contend on Cargo's build lock at once.
 [[profile.default.overrides]]
 filter = '''
-  package(lash-core)
+  package(lash-internal-core)
   & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
 '''
 test-group = "fault-matrix-real-cargo"
@@ -75,7 +75,7 @@ test-group = "fault-matrix-real-cargo"
 [[profile.default.overrides]]
 filter = '''
     (
-      package(lash-postgres-store) & kind(test)
+      package(lash-internal-postgres-store) & kind(test)
       & !(
           binary(schema_drift)
         + binary(preflight_durable_walk)
@@ -85,7 +85,7 @@ filter = '''
     )
   + (package(lash-sim) & binary(cross_backend_store_differential))
   + (package(lash-runtime) & test(agent_scenarios::process_parent_atomicity::))
-  + (package(lash-s3-store) & test(minio))
+  + (package(lash-internal-s3-store) & test(minio))
 '''
 test-group = "docker-services"
 
@@ -113,7 +113,7 @@ slow-timeout = { period = "300s", terminate-after = 1 }
 # retain a 1500s ceiling without changing their existing two-thread group.
 [[profile.ci.overrides]]
 filter = '''
-  package(lash-core)
+  package(lash-internal-core)
   & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
 '''
 priority = 100

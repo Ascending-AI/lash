@@ -1,5 +1,5 @@
 [package]
-name = "lash-standard-plugins"
+name = "lash-internal-standard-plugins"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Default plugin stack bundle for the lash agent runtime."
 keywords = ["lash", "agent", "plugins", "llm", "runtime"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_standard_plugins"
 
 [features]
 default = []

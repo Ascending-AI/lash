@@ -45,7 +45,7 @@ jobs:
     env:
       LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
     steps:
-      - run: cargo test -p lash-postgres-store
+      - run: cargo test -p lash-internal-postgres-store
 """,
         )
         violations = checker.check_repository(self.root)
@@ -66,7 +66,7 @@ jobs:
       LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
       LASH_REQUIRE_POSTGRES: "1"
     steps:
-      - run: cargo test -p lash-postgres-store
+      - run: cargo test -p lash-internal-postgres-store
 """,
         )
         self.assertEqual(checker.check_repository(self.root), [])
@@ -142,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: S3 conformance
-        run: cargo test -p lash-s3-store
+        run: cargo test -p lash-internal-s3-store
         env:
           LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
 """,
@@ -367,7 +367,7 @@ jobs:
         scripts = self.root / "scripts"
         scripts.mkdir(parents=True)
         (scripts / "gate.sh").write_text(
-            "cargo test -p lash-postgres-store --test conformance --locked\n",
+            "cargo test -p lash-internal-postgres-store --test conformance --locked\n",
             encoding="utf-8",
         )
         self.assertEqual(checker.check_repository(self.root), [])

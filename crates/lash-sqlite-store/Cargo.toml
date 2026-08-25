@@ -1,5 +1,5 @@
 [package]
-name = "lash-sqlite-store"
+name = "lash-internal-sqlite-store"
 autotests = false
 version.workspace = true
 edition.workspace = true
@@ -13,6 +13,9 @@ rust-version.workspace = true
 description = "SQLite-backed session store for the lash agent runtime."
 keywords = ["lash", "agent", "sqlite", "persistence", "store"]
 categories = ["database", "asynchronous"]
+
+[lib]
+name = "lash_sqlite_store"
 
 [features]
 testing = ["lash-core/testing"]
@@ -42,7 +45,7 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { path = ".", features = ["testing"] }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }

@@ -2634,7 +2634,9 @@ class RustdocIsolationTests(unittest.TestCase):
             ), mock.patch.object(
                 check_api_example_coverage.rustdoc_json_cache, "run_command", run_command
             ):
-                check_api_example_coverage.rustdoc("lash-core", "lash_core", False)
+                check_api_example_coverage.rustdoc(
+                    "lash-internal-core", "lash_core", False
+                )
         return seen
 
     def test_builds_under_a_subdirectory_of_the_checkouts_target_directory(self):
@@ -2684,7 +2686,7 @@ class RustdocIsolationTests(unittest.TestCase):
                 "cargo",
                 "rustdoc",
                 "-p",
-                "lash-core",
+                "lash-internal-core",
                 "--lib",
                 "--",
                 "-Z",

@@ -333,10 +333,8 @@ impl TraceSink for FanoutTraceSink {
             <h2>OpenTelemetry Export</h2>
             <p>Optional <code>otel-trace</code> cargo feature converts events to OTel spans for export to Jaeger, Honeycomb, Datadog, or any OTLP backend. Off by default. The sink lives in <code>lash-trace</code> and is re-exported by <code>lash-core</code> under the feature.</p>
           </div>
-          <pre data-lang="console"><code># In your downstream Cargo.toml — pull in lash-core with the otel-trace
-# feature alongside the lash-runtime facade.
-lash-runtime = "=0.1.0-alpha.113"
-lash-core    = { version = "=0.1.0-alpha.113", features = ["otel-trace"] }</code></pre>
+          <pre data-lang="console"><code># In your downstream Cargo.toml, enable OpenTelemetry on the supported facade.
+lash-runtime = { version = "=0.1.0-alpha.113", features = ["otel-trace"] }</code></pre>
           <p><code>lash_core::OtelTraceSink</code> wraps an <code>opentelemetry</code> tracer and converts every event to a span with payload attributes. Use in place of (or alongside) <code>JsonlTraceSink</code>:</p>
           <pre data-lang="rust" data-snippet="tracing#otel-trace-core"><code>use std::sync::Arc;
 

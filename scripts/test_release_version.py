@@ -28,7 +28,7 @@ def write(path: pathlib.Path, text: str) -> None:
 
 
 class ReleaseVersionTest(unittest.TestCase):
-    def test_set_keeps_non_lockstep_workspace_crates_out_of_lockfile_bump(self) -> None:
+    def test_stamp_follows_package_aliases_and_skips_non_lockstep_crates(self) -> None:
         release_version = load_release_version_module()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -45,14 +45,14 @@ class ReleaseVersionTest(unittest.TestCase):
                 edition = "2024"
 
                 [workspace.dependencies]
-                public-crate = { path = "crates/public-crate", version = "=0.1.0-alpha.1" }
+                public-crate = { package = "lash-internal-public-crate", path = "crates/public-crate", version = "=0.1.0-alpha.1" }
                 """,
             )
             write(
                 root / "crates/public-crate/Cargo.toml",
                 """
                 [package]
-                name = "public-crate"
+                name = "lash-internal-public-crate"
                 version.workspace = true
                 edition.workspace = true
                 """,
@@ -120,9 +120,17 @@ class ReleaseVersionTest(unittest.TestCase):
             )
 
             lockfile = (root / "Cargo.lock").read_text()
-            self.assertIn('name = "public-crate"\nversion = "0.1.0-alpha.2"', lockfile)
+            self.assertIn(
+                'name = "lash-internal-public-crate"\nversion = "0.1.0-alpha.2"',
+                lockfile,
+            )
             self.assertIn('name = "private-crate"\nversion = "0.0.0"', lockfile)
             self.assertNotIn('name = "private-crate"\nversion = "0.1.0-alpha.2"', lockfile)
+            self.assertIn(
+                'public-crate = { package = "lash-internal-public-crate", '
+                'path = "crates/public-crate", version = "=0.1.0-alpha.2" }',
+                (root / "Cargo.toml").read_text(),
+            )
             self.assertEqual(
                 (root / "docs/released-version.txt").read_text(),
                 "0.1.0-alpha.2\n",

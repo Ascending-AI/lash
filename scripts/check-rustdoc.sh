@@ -14,8 +14,8 @@ cd "$repo"
 
 export RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings"
 
-cargo doc -p lash-runtime -p lash-core --no-deps --locked
-cargo doc -p lash-runtime -p lash-core --no-deps --all-features --locked
+cargo doc -p lash-runtime -p lash-internal-core --no-deps --locked
+cargo doc -p lash-runtime -p lash-internal-core --no-deps --all-features --locked
 
 # `missing_docs` is crate-wide and also fires on thousands of items outside
 # ADR 0051's member-level closure. Generate rustdoc JSON instead so the
@@ -30,7 +30,7 @@ target_dir="$({ cargo metadata --no-deps --format-version 1; } | \
 # The member check below always runs against whichever copy the cache names.
 core_json="$(RUSTDOCFLAGS="${RUSTDOCFLAGS} -Z unstable-options --output-format json" \
   python3 scripts/rustdoc_json_cache.py \
-    --package lash-core --crate-name lash_core \
+    --package lash-internal-core --crate-name lash_core \
     --destination "$target_dir/doc/lash_core.json" \
-    -- cargo doc -p lash-core --no-deps --all-features --locked)"
+    -- cargo doc -p lash-internal-core --no-deps --all-features --locked)"
 python3 scripts/check_core_public_member_docs.py "$core_json"

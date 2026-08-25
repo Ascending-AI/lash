@@ -1,5 +1,5 @@
 [package]
-name = "lash-protocol-standard"
+name = "lash-internal-protocol-standard"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "Standard protocol (native provider tool calls) for the lash agent runtime."
 keywords = ["lash", "agent", "mode", "tools", "llm"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_protocol_standard"
 
 [lints]
 workspace = true

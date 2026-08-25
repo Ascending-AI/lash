@@ -38,7 +38,7 @@ lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true }
 lash-standard-plugins = { workspace = true }
 lash-subagents = { workspace = true }
-lash-tools = { path = "../../crates/lash-tools", default-features = false, features = ["lashlang"] }
+lash-tools = { package = "lash-internal-tools", path = "../../crates/lash-tools", default-features = false, features = ["lashlang"] }
 percent-encoding = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }

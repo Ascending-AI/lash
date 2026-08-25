@@ -1,5 +1,5 @@
 [package]
-name = "lash-llm-tools"
+name = "lash-internal-llm-tools"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,9 @@ rust-version.workspace = true
 description = "LLM-backed tool implementations (llm_query and friends) for the lash agent runtime."
 keywords = ["lash", "agent", "tools", "llm", "subagent"]
 categories = ["asynchronous", "api-bindings"]
+
+[lib]
+name = "lash_llm_tools"
 
 [features]
 default = []

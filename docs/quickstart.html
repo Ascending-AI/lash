@@ -63,11 +63,11 @@
   <div class="section" id="add-the-crates">
     <div class="section-header">
       <h2>Add The Crates</h2>
-      <p>Pin the alpha pre-release explicitly and add the provider crate you actually use.</p>
+      <p>Pin the alpha pre-release explicitly; companion implementations publish as <code>lash-internal-*</code> and use dependency aliases to preserve their Rust crate names.</p>
     </div>
 <pre data-lang="cargo.toml"><code>[dependencies]
 lash-runtime         = "=0.1.0-alpha.113"
-lash-provider-openai = "=0.1.0-alpha.113"
+lash-provider-openai = { package = "lash-internal-provider-openai", version = "=0.1.0-alpha.113" }
 anyhow               = "1"
 tokio                = { version = "1", features = ["full"] }</code></pre>
     <p>For ordinary projects the facade and provider crates are enough. Drop down to <code>lash-core</code> only for custom runtime hosts, explicit process registries, store implementations, or diagnostics that need internal state.</p>

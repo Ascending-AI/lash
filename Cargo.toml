@@ -147,35 +147,35 @@ num-traits = "0.2"
 # rewrites every `=` pin (and the lockfile) in the release workflow's ephemeral
 # tag checkout, so published crates depend on the real release version.
 lash = { package = "lash-runtime", path = "crates/lash", version = "=0.0.0-dev" }
-lash-core = { path = "crates/lash-core", version = "=0.0.0-dev" }
-lash-http-transport = { path = "crates/lash-http-transport", version = "=0.0.0-dev" }
-lash-llm-tools = { path = "crates/lash-llm-tools", version = "=0.0.0-dev" }
-lash-llm-transport = { path = "crates/lash-llm-transport", version = "=0.0.0-dev" }
-lash-lashlang-runtime = { path = "crates/lash-lashlang-runtime", version = "=0.0.0-dev" }
-lash-postgres-store = { path = "crates/lash-postgres-store", version = "=0.0.0-dev" }
-lash-s3-store = { path = "crates/lash-s3-store", version = "=0.0.0-dev" }
-lash-plugin-mcp = { path = "crates/lash-plugin-mcp", version = "=0.0.0-dev" }
-lash-plugin-process-controls = { path = "crates/lash-plugin-process-controls", version = "=0.0.0-dev" }
-lash-plugin-tool-output-budget = { path = "crates/lash-plugin-tool-output-budget", version = "=0.0.0-dev" }
-lash-protocol-rlm = { path = "crates/lash-protocol-rlm", version = "=0.0.0-dev" }
-lash-protocol-standard = { path = "crates/lash-protocol-standard", version = "=0.0.0-dev" }
-lash-provider-anthropic = { path = "crates/lash-provider-anthropic", version = "=0.0.0-dev" }
-lash-provider-auth = { path = "crates/lash-provider-auth", version = "=0.0.0-dev" }
-lash-provider-google = { path = "crates/lash-provider-google", version = "=0.0.0-dev" }
-lash-provider-openai = { path = "crates/lash-provider-openai", version = "=0.0.0-dev" }
+lash-core = { package = "lash-internal-core", path = "crates/lash-core", version = "=0.0.0-dev" }
+lash-http-transport = { package = "lash-internal-http-transport", path = "crates/lash-http-transport", version = "=0.0.0-dev" }
+lash-llm-tools = { package = "lash-internal-llm-tools", path = "crates/lash-llm-tools", version = "=0.0.0-dev" }
+lash-llm-transport = { package = "lash-internal-llm-transport", path = "crates/lash-llm-transport", version = "=0.0.0-dev" }
+lash-lashlang-runtime = { package = "lash-internal-lashlang-runtime", path = "crates/lash-lashlang-runtime", version = "=0.0.0-dev" }
+lash-postgres-store = { package = "lash-internal-postgres-store", path = "crates/lash-postgres-store", version = "=0.0.0-dev" }
+lash-s3-store = { package = "lash-internal-s3-store", path = "crates/lash-s3-store", version = "=0.0.0-dev" }
+lash-plugin-mcp = { package = "lash-internal-plugin-mcp", path = "crates/lash-plugin-mcp", version = "=0.0.0-dev" }
+lash-plugin-process-controls = { package = "lash-internal-plugin-process-controls", path = "crates/lash-plugin-process-controls", version = "=0.0.0-dev" }
+lash-plugin-tool-output-budget = { package = "lash-internal-plugin-tool-output-budget", path = "crates/lash-plugin-tool-output-budget", version = "=0.0.0-dev" }
+lash-protocol-rlm = { package = "lash-internal-protocol-rlm", path = "crates/lash-protocol-rlm", version = "=0.0.0-dev" }
+lash-protocol-standard = { package = "lash-internal-protocol-standard", path = "crates/lash-protocol-standard", version = "=0.0.0-dev" }
+lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = "crates/lash-provider-anthropic", version = "=0.0.0-dev" }
+lash-provider-auth = { package = "lash-internal-provider-auth", path = "crates/lash-provider-auth", version = "=0.0.0-dev" }
+lash-provider-google = { package = "lash-internal-provider-google", path = "crates/lash-provider-google", version = "=0.0.0-dev" }
+lash-provider-openai = { package = "lash-internal-provider-openai", path = "crates/lash-provider-openai", version = "=0.0.0-dev" }
 lash-regress = { path = "crates/lash-regress", version = "=0.0.0-dev", features = ["utf16"] }
-lash-remote-protocol = { path = "crates/lash-remote-protocol", version = "=0.0.0-dev" }
-lash-restate = { path = "crates/lash-restate", version = "=0.0.0-dev" }
-lash-rlm-types = { path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
-lash-sansio = { path = "crates/lash-sansio", version = "=0.0.0-dev" }
-lash-standard-plugins = { path = "crates/lash-standard-plugins", version = "=0.0.0-dev" }
-lash-subagents = { path = "crates/lash-subagents", version = "=0.0.0-dev" }
-lash-tool-support = { path = "crates/lash-tool-support", version = "=0.0.0-dev" }
-lash-tools = { path = "crates/lash-tools", version = "=0.0.0-dev" }
-lash-trace = { path = "crates/lash-trace", version = "=0.0.0-dev" }
-lash-sqlite-store = { path = "crates/lash-sqlite-store", version = "=0.0.0-dev" }
-lashlang = { path = "crates/lashlang", version = "=0.0.0-dev" }
-lash-typescript = { path = "crates/lash-typescript", version = "=0.0.0-dev" }
+lash-remote-protocol = { package = "lash-internal-remote-protocol", path = "crates/lash-remote-protocol", version = "=0.0.0-dev" }
+lash-restate = { package = "lash-internal-restate", path = "crates/lash-restate", version = "=0.0.0-dev" }
+lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
+lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
+lash-standard-plugins = { package = "lash-internal-standard-plugins", path = "crates/lash-standard-plugins", version = "=0.0.0-dev" }
+lash-subagents = { package = "lash-internal-subagents", path = "crates/lash-subagents", version = "=0.0.0-dev" }
+lash-tool-support = { package = "lash-internal-tool-support", path = "crates/lash-tool-support", version = "=0.0.0-dev" }
+lash-tools = { package = "lash-internal-tools", path = "crates/lash-tools", version = "=0.0.0-dev" }
+lash-trace = { package = "lash-internal-trace", path = "crates/lash-trace", version = "=0.0.0-dev" }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "crates/lash-sqlite-store", version = "=0.0.0-dev" }
+lashlang = { package = "lash-internal-lashlang", path = "crates/lashlang", version = "=0.0.0-dev" }
+lash-typescript = { package = "lash-internal-typescript", path = "crates/lash-typescript", version = "=0.0.0-dev" }
 swc_common = "=25.0.0"
 swc_ecma_ast = "=28.0.0"
 swc_ecma_parser = { version = "=44.0.0", default-features = false, features = ["typescript"] }

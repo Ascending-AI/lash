@@ -1091,15 +1091,17 @@ finalize_mutation_gate
         gate = GATE.read_text(encoding="utf-8")
 
         critical_packages = gate.split("critical_packages=(", 1)[1].split(")", 1)[0]
-        self.assertIn("lash-sqlite-store", critical_packages)
-        self.assertIn("lash-postgres-store", critical_packages)
+        self.assertIn("lash-internal-sqlite-store", critical_packages)
+        self.assertIn("lash-internal-postgres-store", critical_packages)
         for function_name in ("run_mutation_smoke", "run_mutation_full"):
             body = shell_function_body(gate, function_name)
             loop_headers = re.findall(
                 r"^\s*for\s+package\s+in\s+(.+);\s*do\s*$", body, re.MULTILINE
             )
             self.assertEqual(['"${selected_packages[@]}"'], loop_headers)
-            self.assertIn('if [ "$package" = "lash-postgres-store" ]; then', body)
+            self.assertIn(
+                'if [ "$package" = "lash-internal-postgres-store" ]; then', body
+            )
             self.assertIn("run_postgres_mutants_recorded", body)
 
         postgres_mutation = shell_function_body(
@@ -1203,7 +1205,7 @@ derive_mutation_jobs() {{
             command
             for command in shell_logical_commands(gate)
             if re.search(
-                r"\bcargo test -p lash-postgres-store\b.*(?:^|\s)--test\s+conformance(?:\s|$)",
+                r"\bcargo test -p lash-internal-postgres-store\b.*(?:^|\s)--test\s+conformance(?:\s|$)",
                 command,
             )
         ]
@@ -1221,7 +1223,7 @@ derive_mutation_jobs() {{
         s3_store_job = workflow_job_block(workflow, "s3-store")
 
         self.assertIn(
-            "run: cargo test -p lash-s3-store --locked", s3_store_job
+            "run: cargo test -p lash-internal-s3-store --locked", s3_store_job
         )
         self.assertIn(
             "LASH_MINIO_ENDPOINT: http://127.0.0.1:9000", s3_store_job
@@ -1273,14 +1275,14 @@ derive_mutation_jobs() {{
         # property runners.
         required_snippets = [
             'step "LLM transport SSE framing property suite"',
-            "run_cargo_tests -p lash-llm-transport --locked --test property",
-            "run_cargo_tests -p lash-provider-anthropic --locked --test property",
-            "run_cargo_tests -p lash-provider-google --locked --test property",
+            "run_cargo_tests -p lash-internal-llm-transport --locked --test property",
+            "run_cargo_tests -p lash-internal-provider-anthropic --locked --test property",
+            "run_cargo_tests -p lash-internal-provider-google --locked --test property",
             # Durable-wait session-cancel evidence: the inline effect-host
             # conformance test that exercises
             # effect_host_await_event_session_cancel_resolves_outstanding_waits.
             'step "Inline effect-host await-event session-cancel conformance"',
-            "run_cargo_tests -p lash-core --locked inline_effect_host_satisfies_conformance",
+            "run_cargo_tests -p lash-internal-core --locked inline_effect_host_satisfies_conformance",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)
@@ -1291,7 +1293,8 @@ derive_mutation_jobs() {{
 
         for provider in ("openai", "anthropic", "google"):
             self.assertIn(
-                f"cargo test -p lash-provider-{provider} --features testing --locked conformance",
+                f"cargo test -p lash-internal-provider-{provider} "
+                "--features testing --locked conformance",
                 feature_checks,
             )
 
@@ -1436,11 +1439,11 @@ derive_mutation_jobs() {{
             "api-coverage": ("python3 scripts/check_api_example_coverage.py",),
             "api-surface": ("python3 scripts/api_surface.py check",),
             "package-feature-checks": (
-                "cargo check -p lash-protocol-rlm --features testing --locked",
+                "cargo check -p lash-internal-protocol-rlm --features testing --locked",
                 "cargo check -p agent-workbench --locked",
                 "cargo check -p slack-clone --all-targets --features e2e --locked",
                 "cargo check -p agent-service --features restate --all-targets --locked",
-                "cargo test -p lash-remote-protocol --features core-conversions --locked",
+                "cargo test -p lash-internal-remote-protocol --features core-conversions --locked",
             ),
             "runtime-feature-boundary": (
                 "cargo check -p lash-runtime --no-default-features --locked",

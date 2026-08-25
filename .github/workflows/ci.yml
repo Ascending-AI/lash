@@ -725,7 +725,7 @@ jobs:
       # the host losing it.
       - name: Check package-scoped testing consumers
         run: |
-          cargo check -p lash-protocol-rlm --features testing --locked
+          cargo check -p lash-internal-protocol-rlm --features testing --locked
           cargo check -p agent-workbench --locked
           cargo check -p slack-clone --all-targets --features e2e --locked
           cargo check -p agent-service --features restate --all-targets --locked
@@ -733,25 +733,25 @@ jobs:
       # The workspace test run only reaches lash-remote-protocol's core
       # conversions because `lash` unifies the feature in. Run the crate on its
       # own so the coverage survives any change to who depends on what, and so
-      # `cargo test -p lash-remote-protocol` stops being a misleading command.
+      # `cargo test -p lash-internal-remote-protocol` stops being a misleading command.
       - name: Test lash-remote-protocol core conversions
-        run: cargo test -p lash-remote-protocol --features core-conversions --locked
+        run: cargo test -p lash-internal-remote-protocol --features core-conversions --locked
 
       # Provider test support is deliberately outside each crate's default
       # feature set. Keep the shared normalization contract explicit so a
       # production-safe default cannot silently reduce conformance coverage.
       #
-      # A bare `cargo test -p lash-provider-*` now runs these laws too: each
+      # A bare `cargo test -p lash-internal-provider-*` now runs these laws too: each
       # crate carries a self dev-dependency that turns `testing` on for its test
       # builds, plus a sentinel test that fails if the law is ever compiled out.
       # This step stays because it pins the feature by name, independently of
       # that wiring.
       - name: Test provider response-normalization conformance
         run: |
-          cargo test -p lash-llm-transport --features testing --locked conformance
-          cargo test -p lash-provider-openai --features testing --locked conformance
-          cargo test -p lash-provider-anthropic --features testing --locked conformance
-          cargo test -p lash-provider-google --features testing --locked conformance
+          cargo test -p lash-internal-llm-transport --features testing --locked conformance
+          cargo test -p lash-internal-provider-openai --features testing --locked conformance
+          cargo test -p lash-internal-provider-anthropic --features testing --locked conformance
+          cargo test -p lash-internal-provider-google --features testing --locked conformance
 
       - name: Report sccache stats
         if: always()
@@ -814,17 +814,17 @@ jobs:
           count=$(cargo test -p lash-runtime --no-default-features --locked --lib -- --list | grep -c ': test$')
           [ "$count" -ge 130 ] || { echo "default-build lash-runtime tests regressed: $count"; exit 1; }
 
-          if cargo tree -p lash-runtime -e normal --no-default-features --locked | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then
+          if cargo tree -p lash-runtime -e normal --no-default-features --locked | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
             echo "default-off lash-runtime pulled RLM/Lashlang dependencies"
             exit 1
           fi
 
-          if cargo tree -p lash-runtime -e normal --locked | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then
+          if cargo tree -p lash-runtime -e normal --locked | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
             echo "default lash-runtime pulled RLM/Lashlang dependencies"
             exit 1
           fi
 
-          if cargo tree -p lash-runtime -e normal --no-default-features --features testing --locked | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then
+          if cargo tree -p lash-runtime -e normal --no-default-features --features testing --locked | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
             echo "testing-only lash-runtime pulled RLM/Lashlang dependencies"
             exit 1
           fi
@@ -1355,7 +1355,7 @@ jobs:
       # That guard is per-process, so this must stay `cargo test` — nextest's
       # process-per-test model would race the suites against each other.
       - name: Test Postgres store (conformance)
-        run: cargo test -p lash-postgres-store --locked
+        run: cargo test -p lash-internal-postgres-store --locked
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
@@ -1441,7 +1441,7 @@ jobs:
             'mc alias set ci http://127.0.0.1:9000 minioadmin minioadmin >/dev/null && mc mb --ignore-existing ci/lash-attachments'
 
       - name: Test S3 store conformance
-        run: cargo test -p lash-s3-store --locked
+        run: cargo test -p lash-internal-s3-store --locked
         env:
           LASH_MINIO_ENDPOINT: http://127.0.0.1:9000
           LASH_REQUIRE_MINIO: "1"

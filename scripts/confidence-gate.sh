@@ -83,12 +83,12 @@ if [ "$area" != "all" ]; then
 fi
 ci_features="${LASH_CI_FEATURES:-}"
 critical_packages=(
-  lash-core
-  lashlang
-  lash-protocol-rlm
-  lash-protocol-standard
-  lash-sqlite-store
-  lash-postgres-store
+  lash-internal-core
+  lash-internal-lashlang
+  lash-internal-protocol-rlm
+  lash-internal-protocol-standard
+  lash-internal-sqlite-store
+  lash-internal-postgres-store
 )
 selected_packages=()
 area_mutation_file_args=()
@@ -96,9 +96,9 @@ if [ "$area" = "all" ]; then
   selected_packages=("${critical_packages[@]}")
 else
   case "$area" in
-    store) selected_packages=(lash-sqlite-store lash-postgres-store) ;;
-    process|trigger|effect-host|provider) selected_packages=(lash-core) ;;
-    protocol) selected_packages=(lashlang lash-protocol-rlm lash-protocol-standard) ;;
+    store) selected_packages=(lash-internal-sqlite-store lash-internal-postgres-store) ;;
+    process|trigger|effect-host|provider) selected_packages=(lash-internal-core) ;;
+    protocol) selected_packages=(lash-internal-lashlang lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
     sim) selected_packages=(lash-sim) ;;
   esac
   case "$area" in
@@ -699,19 +699,19 @@ run_scenario_harnesses() {
 
   if area_selected store; then
     step "Golden durable-store semantic read-back"
-    run_cargo_tests -p lash-sqlite-store --locked --test durable_read_fixture \
+    run_cargo_tests -p lash-internal-sqlite-store --locked --test durable_read_fixture \
       sqlite_durable_fixture_reads_with_identical_semantics
-    run_cargo_tests -p lash-postgres-store --locked --test durable_read_fixture \
+    run_cargo_tests -p lash-internal-postgres-store --locked --test durable_read_fixture \
       postgres_durable_fixture_reads_with_identical_semantics_when_configured
 
     step "Durable store-contract state-machine properties"
     LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
-      run_cargo_tests -p lash-core --locked store_contract_state_machine_properties
+      run_cargo_tests -p lash-internal-core --locked store_contract_state_machine_properties
     LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
-      run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       store_contract_state_machine_properties
     LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \
-      run_cargo_tests -p lash-postgres-store --locked --test conformance \
+      run_cargo_tests -p lash-internal-postgres-store --locked --test conformance \
       store_contract_state_machine_properties_when_configured
 
     local sqlite_fault_seeds=4
@@ -728,26 +728,26 @@ run_scenario_harnesses() {
   if area_selected process; then
     step "Runtime-persistence state-machine properties"
     LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-      run_cargo_tests -p lash-core --locked runtime_persistence_state_machine_properties
+      run_cargo_tests -p lash-internal-core --locked runtime_persistence_state_machine_properties
     LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-      run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       runtime_persistence_state_machine_properties
     LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-      run_cargo_tests -p lash-postgres-store --locked --test conformance \
+      run_cargo_tests -p lash-internal-postgres-store --locked --test conformance \
       runtime_persistence_state_machine_properties_when_configured
 
     step "Session graph state-machine property harness"
     LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
-      run_cargo_tests -p lash-core --locked session_graph_state_machine_properties
+      run_cargo_tests -p lash-internal-core --locked session_graph_state_machine_properties
     LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
-      run_cargo_tests -p lash-sqlite-store --locked --test conformance \
+      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       session_graph_state_machine_properties
     LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
-      run_cargo_tests -p lash-postgres-store --locked --test conformance \
+      run_cargo_tests -p lash-internal-postgres-store --locked --test conformance \
       session_graph_state_machine_properties_when_configured
 
     step "Runtime Scenario harness"
-    run_cargo_tests -p lash-core --locked runtime_scenario
+    run_cargo_tests -p lash-internal-core --locked runtime_scenario
 
     step "Agent Scenario harness"
     run_cargo_tests -p lash-runtime --locked --features rlm,testing agent_scenarios
@@ -756,63 +756,63 @@ run_scenario_harnesses() {
 
   if area_selected protocol; then
     step "Standard Protocol Scenario harness"
-    run_cargo_tests -p lash-protocol-standard --locked --test protocol_scenarios
-    run_cargo_tests -p lash-protocol-standard --locked standard_scenario_contract_metadata
+    run_cargo_tests -p lash-internal-protocol-standard --locked --test protocol_scenarios
+    run_cargo_tests -p lash-internal-protocol-standard --locked standard_scenario_contract_metadata
 
     step "RLM Protocol Scenario harness"
-    run_cargo_tests -p lash-protocol-rlm --locked --test protocol_drivers
-    run_cargo_tests -p lash-protocol-rlm --locked rlm_scenario_contract_metadata
+    run_cargo_tests -p lash-internal-protocol-rlm --locked --test protocol_drivers
+    run_cargo_tests -p lash-internal-protocol-rlm --locked rlm_scenario_contract_metadata
   fi
 }
 
 run_state_machine_and_fault_matrix() {
   if area_selected process; then
     step "Runtime state-machine property runner"
-    run_cargo_tests -p lash-core --locked runtime_state_machine_property
+    run_cargo_tests -p lash-internal-core --locked runtime_state_machine_property
     step "Durable fault matrix metadata"
-    run_cargo_tests -p lash-core --locked durable_fault_matrix
+    run_cargo_tests -p lash-internal-core --locked durable_fault_matrix
     step "Durable process fault-matrix evidence"
     run_cargo_tests -p lash-runtime --locked --features rlm,testing \
       runtime_rebuild_and_worker_recovery_with_durable_stores
-    run_cargo_tests -p lash-core --locked \
+    run_cargo_tests -p lash-internal-core --locked \
       queued_work_claims_supersede_across_session_lease_generations
-    run_cargo_tests -p lash-core --locked \
+    run_cargo_tests -p lash-internal-core --locked \
       turn_input_claims_supersede_across_session_lease_generations
-    run_cargo_tests -p lash-core --locked \
+    run_cargo_tests -p lash-internal-core --locked \
       same_generation_claim_scans_reach_rows_beyond_the_scan_surplus
   fi
 
   if area_selected protocol; then
     step "Lashlang property suite"
-    run_cargo_tests -p lashlang --locked --test property
+    run_cargo_tests -p lash-internal-lashlang --locked --test property
   fi
 
   if area_selected provider; then
     step "LLM transport SSE framing property suite"
-    run_cargo_tests -p lash-llm-transport --locked --test property
-    run_cargo_tests -p lash-provider-anthropic --locked --test property
-    run_cargo_tests -p lash-provider-google --locked --test property
+    run_cargo_tests -p lash-internal-llm-transport --locked --test property
+    run_cargo_tests -p lash-internal-provider-anthropic --locked --test property
+    run_cargo_tests -p lash-internal-provider-google --locked --test property
     step "Provider retry fault-matrix evidence"
-    run_cargo_tests -p lash-core --locked retryable_llm_failures_exhaust_and_fail_turn
-    run_cargo_tests -p lash-protocol-standard --locked --test protocol_scenarios \
+    run_cargo_tests -p lash-internal-core --locked retryable_llm_failures_exhaust_and_fail_turn
+    run_cargo_tests -p lash-internal-protocol-standard --locked --test protocol_scenarios \
       standard_protocol_scenario_provider_error_stops_without_checkpoint
   fi
 
   if area_selected effect-host; then
     step "Inline effect-host await-event session-cancel conformance"
-    run_cargo_tests -p lash-core --locked inline_effect_host_satisfies_conformance
+    run_cargo_tests -p lash-internal-core --locked inline_effect_host_satisfies_conformance
   fi
 
   if area_selected trigger; then
     step "Durable trigger fault-matrix evidence"
-    run_cargo_tests -p lash-core --locked sweep_reconciles_reserved_trigger_delivery_without_process
-    run_cargo_tests -p lash-core --locked \
+    run_cargo_tests -p lash-internal-core --locked sweep_reconciles_reserved_trigger_delivery_without_process
+    run_cargo_tests -p lash-internal-core --locked \
       sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process
   fi
 
   if area_selected store; then
     step "SQLite backend fault-matrix conformance"
-    cargo test -p lash-sqlite-store --locked --test conformance conformance
+    cargo test -p lash-internal-sqlite-store --locked --test conformance conformance
   fi
 }
 
@@ -1362,7 +1362,7 @@ EOF
 
 run_local_backend_conformance() {
   step "Sqlite backend conformance"
-  cargo test -p lash-sqlite-store --locked --test conformance
+  cargo test -p lash-internal-sqlite-store --locked --test conformance
 }
 
 run_backend_contention_evidence() {
@@ -1437,16 +1437,16 @@ run_postgres_schema_gate() {
   step "Postgres schema artifact drift and structural check"
   LASH_POSTGRES_DATABASE_URL="$database_url" \
     LASH_REQUIRE_POSTGRES=1 \
-    cargo test -p lash-postgres-store --locked --lib schema_shape
+    cargo test -p lash-internal-postgres-store --locked --lib schema_shape
   LASH_POSTGRES_DATABASE_URL="$database_url" \
     LASH_REQUIRE_POSTGRES=1 \
-    cargo test -p lash-postgres-store --locked --test schema_drift
+    cargo test -p lash-internal-postgres-store --locked --test schema_drift
 }
 
 run_postgres_conformance() {
   step "Postgres backend conformance"
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance
+    LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
     run_postgres_schema_gate "$LASH_POSTGRES_DATABASE_URL"
     run_cross_backend_store_soak "$LASH_POSTGRES_DATABASE_URL"
     run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
@@ -1501,7 +1501,7 @@ EOF
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     LASH_REQUIRE_POSTGRES=1 \
-    cargo test -p lash-postgres-store --locked --test conformance
+    cargo test -p lash-internal-postgres-store --locked --test conformance
   run_postgres_schema_gate "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_cross_backend_store_soak "postgres://lash:lash@127.0.0.1:${port}/lash"
   run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
@@ -1593,7 +1593,7 @@ run_broad_postgres_evidence() {
   fi
   step "Broad Postgres/static replay evidence"
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    LASH_REQUIRE_POSTGRES=1 cargo test -p lash-postgres-store --locked --test conformance
+    LASH_REQUIRE_POSTGRES=1 cargo test -p lash-internal-postgres-store --locked --test conformance
     run_generated_postgres_dynamic_replay "$LASH_POSTGRES_DATABASE_URL" "env"
     if area_selected sim; then
       run_model_replay_suite
@@ -1658,7 +1658,7 @@ EOF
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     LASH_REQUIRE_POSTGRES=1 \
-    cargo test -p lash-postgres-store --locked --test conformance
+    cargo test -p lash-internal-postgres-store --locked --test conformance
   run_generated_postgres_dynamic_replay "postgres://lash:lash@127.0.0.1:${port}/lash" "docker"
   if area_selected sim; then
     run_model_replay_suite
@@ -1933,6 +1933,8 @@ EOF
     --output-path "${coverage_dir}/summary.json"
   local critical_package_regex
   critical_package_regex="$(IFS='|'; printf '%s' "${selected_packages[*]}")"
+  critical_package_regex="${critical_package_regex//lash-internal-lashlang/lashlang}"
+  critical_package_regex="${critical_package_regex//lash-internal-/lash-}"
   awk -v critical_package_regex="$critical_package_regex" '
     /^SF:/ {
       file = substr($0, 4)
@@ -1977,7 +1979,7 @@ run_mutation_smoke() {
   local shard="${LASH_MUTATION_SMOKE_SHARD:-1/64}"
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
   for package in "${selected_packages[@]}"; do
-    if [ "$package" = "lash-postgres-store" ]; then
+    if [ "$package" = "lash-internal-postgres-store" ]; then
       run_postgres_mutants_recorded "$package smoke shard" "${out_dir}/mutants-${package}-smoke" \
         cargo mutants \
         -p "$package" \
@@ -2012,7 +2014,7 @@ run_area_targeted_mutation_evidence() {
   local package artifact
   for package in "${selected_packages[@]}"; do
     artifact="${out_dir}/mutants-${package}-area-${area}-targeted"
-    if [ "$package" = "lash-postgres-store" ]; then
+    if [ "$package" = "lash-internal-postgres-store" ]; then
       run_postgres_mutants_recorded "$package area:${area} targeted shard" "$artifact" \
         cargo mutants \
         -p "$package" \
@@ -2045,7 +2047,7 @@ run_lash_core_direct_model_mutation_evidence() {
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-180}"
   run_mutants_recorded "lash-core direct provider/direct request survivors" "${out_dir}/mutants-lash-core-direct-targeted" \
     cargo mutants \
-    -p lash-core \
+    -p lash-internal-core \
     --file crates/lash-core/src/direct.rs \
     --re 'DirectRequest::json_schema|DirectLlmClient::provider|DirectLlmClient::provider_mut|DirectLlmClient::complete|build_llm_request|transport_stream_events_for_direct' \
     --baseline skip \
@@ -2056,7 +2058,7 @@ run_lash_core_direct_model_mutation_evidence() {
     -- --locked direct
   run_mutants_recorded "lash-core model token-limit survivors" "${out_dir}/mutants-lash-core-model-targeted" \
     cargo mutants \
-    -p lash-core \
+    -p lash-internal-core \
     --file crates/lash-core/src/model.rs \
     --re 'ModelSpec::with_limits|ModelSpec::with_variant|ModelSpec::from_token_limits|ModelLimits::from_token_limits|ModelSpec::context_window_tokens|nonzero_token_limit|optional_nonzero_token_limit' \
     --baseline skip \
@@ -2111,7 +2113,7 @@ run_mutation_full() {
   require_tool cargo-mutants cargo-mutants 27.1.0
   local timeout="${LASH_MUTATION_TIMEOUT_SECONDS:-600}"
   for package in "${selected_packages[@]}"; do
-    if [ "$package" = "lash-postgres-store" ]; then
+    if [ "$package" = "lash-internal-postgres-store" ]; then
       run_postgres_mutants_recorded "$package full mutation" "${out_dir}/mutants-${package}-full" \
         cargo mutants \
         -p "$package" \

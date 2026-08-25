@@ -207,7 +207,7 @@ agent-workbench-restate-e2e:
   cargo test -p agent-workbench \
     live_restate_ -- --ignored --nocapture --test-threads=1 \
     2>&1 | tee "$test_output"
-  cargo test -p lash-core \
+  cargo test -p lash-internal-core \
     turn_input_claims_supersede_across_session_lease_generations \
     2>&1 | tee -a "$test_output"
   if grep -Fn 'panicked at' "$test_output" >&2; then
@@ -296,19 +296,19 @@ battery-fast:
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-core --locked store_contract_state_machine_properties -- --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance store_contract_state_machine_properties -- --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance store_contract_state_machine_properties_when_configured -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-core --locked session_graph_state_machine_properties -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance session_graph_state_machine_properties -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance session_graph_state_machine_properties_when_configured -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-core --locked store_contract_state_machine_properties -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance store_contract_state_machine_properties -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance store_contract_state_machine_properties_when_configured -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-core --locked session_graph_state_machine_properties -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance session_graph_state_machine_properties -- --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance session_graph_state_machine_properties_when_configured -- --nocapture
 
 # Opt-in runtime-persistence property soak. PostgreSQL executes when its
 # standard LASH_POSTGRES_DATABASE_URL configuration is present.
 runtime-persistence-soak cases='256':
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-core --locked runtime_persistence_state_machine_properties -- --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-sqlite-store --locked --test conformance runtime_persistence_state_machine_properties -- --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-postgres-store --locked --test conformance runtime_persistence_state_machine_properties_when_configured -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-core --locked runtime_persistence_state_machine_properties -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance runtime_persistence_state_machine_properties -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance runtime_persistence_state_machine_properties_when_configured -- --nocapture
 
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.
@@ -374,9 +374,9 @@ publish-order:
 # Dry-run the two leaf crates (no internal deps) — quick sanity check.
 # Non-leaf dry-runs only work after their deps are already on crates.io.
 publish-dry-run:
-  @echo "Dry-run on leaf crates (lash-sansio, lashlang)..."
-  cargo publish --dry-run --locked -p lash-sansio
-  cargo publish --dry-run --locked -p lashlang
+  @echo "Dry-run on leaf crates (lash-internal-sansio, lash-internal-lashlang)..."
+  cargo publish --dry-run --locked -p lash-internal-sansio
+  cargo publish --dry-run --locked -p lash-internal-lashlang
   @echo "OK."
 
 # Publish a single crate at the in-tree version. Idempotent: returns success if

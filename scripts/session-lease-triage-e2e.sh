@@ -45,7 +45,7 @@ echo "session-lease-triage backends: $backends" | tee "$test_output"
 
 # The lease trace transitions are contract, so their unit coverage is part of the
 # companion rather than something the judged run takes on trust.
-cargo test --locked --quiet -p lash-core --lib session_lease_observability \
+cargo test --locked --quiet -p lash-internal-core --lib session_lease_observability \
   2>&1 | tee "$artifact_dir/00-trace-event-tests.log" | tee -a "$test_output"
 # The facade read and its host-side classification, exercised through the example
 # that owns the operator endpoint.

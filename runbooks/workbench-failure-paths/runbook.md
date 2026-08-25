@@ -13,7 +13,7 @@ visible wording and final state are objective gates.
 
 **Deterministic companion.** `just agent-workbench-restate-e2e` asserts the auth terminal,
 same-session recovery, retry attempt reset, and single-copy live/replay observations.
-`cargo test -p lash-core --lib retryable_mid_stream_failure_preserves_paid_output_without_retry`
+`cargo test -p lash-internal-core --lib retryable_mid_stream_failure_preserves_paid_output_without_retry`
 asserts the paid-output refusal and single provider call. `cargo test -p agent-workbench
 process_work_tests` asserts the failed-process `/api/work` projection and UI error rendering.
 The browser run judges the actual transcript and work rail; it does not reproduce those

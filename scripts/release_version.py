@@ -210,6 +210,7 @@ def update_workspace_version(version: str) -> None:
 
 
 def update_workspace_dependency_versions(version: str) -> None:
+    """Stamp exact workspace pins, resolving Cargo aliases by `package =`."""
     workspace_packages = read_workspace_package_names()
     for manifest in sorted(ROOT.glob("**/Cargo.toml")):
         if "target" in manifest.relative_to(ROOT).parts:

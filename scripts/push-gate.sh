@@ -291,19 +291,19 @@ run_runtime_feature_boundary_check() {
   [ "$count" -ge 130 ] || { echo "default-build lash-runtime tests regressed: $count"; exit 1; }
 
   if cargo tree -p lash-runtime -e normal --no-default-features --locked \
-    | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then
+    | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
     echo "default-off lash-runtime pulled RLM/Lashlang dependencies" >&2
     exit 1
   fi
 
   if cargo tree -p lash-runtime -e normal --locked \
-    | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then
+    | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
     echo "default lash-runtime pulled RLM/Lashlang dependencies" >&2
     exit 1
   fi
 
   if cargo tree -p lash-runtime -e normal --no-default-features --features testing --locked \
-    | grep -E 'lash-protocol-rlm|lash-lashlang-runtime|lashlang'; then
+    | grep -E 'lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'; then
     echo "testing-only lash-runtime pulled RLM/Lashlang dependencies" >&2
     exit 1
   fi
@@ -350,7 +350,7 @@ run_postgres_conformance() {
   local database_url="postgres://lash:lash@127.0.0.1:${port}/lash"
   LASH_POSTGRES_DATABASE_URL="$database_url" \
     LASH_REQUIRE_POSTGRES=1 \
-    cargo test -p lash-postgres-store --locked
+    cargo test -p lash-internal-postgres-store --locked
 
   step "Cross-backend store differential"
   if cargo nextest --version >/dev/null 2>&1; then
@@ -403,7 +403,7 @@ run_minio_conformance() {
 
   LASH_MINIO_ENDPOINT="$endpoint" \
     LASH_REQUIRE_MINIO=1 \
-    cargo test -p lash-s3-store --locked
+    cargo test -p lash-internal-s3-store --locked
 
   LASH_MINIO_ENDPOINT="$endpoint" \
     LASH_REQUIRE_MINIO=1 \

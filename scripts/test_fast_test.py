@@ -59,7 +59,9 @@ class ClassifierTest(unittest.TestCase):
         self.assertTrue(SCRIPT.stat().st_mode & 0o111, f"{SCRIPT} is not executable")
 
     def test_crate_file_maps_to_its_crate(self) -> None:
-        self.assertEqual(classify("crates/lash-trace/src/lib.rs"), "CRATES lash-trace")
+        self.assertEqual(
+            classify("crates/lash-trace/src/lib.rs"), "CRATES lash-internal-trace"
+        )
 
     def test_crate_directory_name_is_not_assumed_to_be_the_package_name(self) -> None:
         # crates/lash/ publishes `lash-runtime`. Deriving the package from the
@@ -84,7 +86,7 @@ class ClassifierTest(unittest.TestCase):
                 "crates/lash-core/src/lib.rs",
                 "crates/lash-trace/src/other.rs",
             ),
-            "CRATES lash-core lash-trace",
+            "CRATES lash-internal-core lash-internal-trace",
         )
 
     def test_shared_inputs_fall_back_to_the_full_suite(self) -> None:
@@ -136,7 +138,7 @@ class ClassifierTest(unittest.TestCase):
                 "crates/lash-trace/fixtures/moved.txt",
                 "crates/lash-core/fixtures/moved.txt",
             ),
-            "CRATES lash-core lash-trace",
+            "CRATES lash-internal-core lash-internal-trace",
         )
 
     def test_one_shared_input_outvotes_any_number_of_crate_files(self) -> None:
