@@ -2401,9 +2401,10 @@ async fn drive_turn_control_scenarios(storage: &PostgresStorage, ingress_url: &s
     // engine's business, and it is routinely the restarted original one, because
     // the dead holder's session-execution lease has to age out first: the
     // recovered turn takes roughly one lease TTL (~38s) to settle. That latency
-    // is understood and recorded, not accidental: FIG-1825 tracks shortening it
-    // by letting a substrate that already guarantees invocation exclusivity
-    // short-circuit the lease TTL. What must hold is stricter than
+    // is understood and settled, not accidental: ADR 0080 rejects letting a
+    // substrate that already guarantees invocation exclusivity short-circuit the
+    // lease TTL, and leaves failover latency where ADR 0014 put it — the host's
+    // `LeaseTimings`. What must hold is stricter than
     // the old identity check: the turn completes exactly once, against exactly one
     // acceptance, with no duplicate or conflicting settlement anywhere.
     assert_recovered_turn_converged(storage.pool(), &recovery.workflow_id).await?;
@@ -3455,7 +3456,9 @@ async fn assert_failover(pool: &sqlx::PgPool, selection: SegmentSelection) -> Re
         // turn. That is exactly the retryable-by-contract behaviour the cede
         // ruling ratified, so the witness is the durable one: exactly one
         // completion, against exactly one acceptance, settled once. The ~38s
-        // lease-TTL residual these failovers now pay is tracked by FIG-1825.
+        // lease-TTL residual these failovers now pay is settled by ADR 0080:
+        // substrate exclusivity is not a lease short-circuit, and shortening the
+        // wait is the host's `LeaseTimings` decision (ADR 0014).
         //
         // The crash still has to happen — the marker read below fails the gate
         // if no worker ever exited for this workflow.
