@@ -4621,6 +4621,15 @@ disposition = "unused-add"
 reason = "The current example use of lash::QueuedTurnBuilder::drain_id is compile-only, setup-only, or reaches no executed assertion that independently observes its externally meaningful outcome; add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
+symbol = "lash::QueuedTurnBuilder::turn_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::prelude::QueuedTurnBuilder::turn_id", "lash::turn::QueuedTurnBuilder::turn_id"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add lash::QueuedTurnBuilder::turn_id to the docs-snippets embedding/turns example and assert that activity and exact cancellation use the host-supplied physical id."
+
+[[api]]
 symbol = "lash::QueuedTurnBuilder::effects"
 kind = "function"
 availability = "default+all-features"
@@ -66610,6 +66619,14 @@ disposition = "unused-add"
 reason = "Add lash::turn::ScopedQueuedTurnBuilder::drain_id to the docs-snippets embedding/turns example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::turn::ScopedQueuedTurnBuilder::turn_id"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add lash::turn::ScopedQueuedTurnBuilder::turn_id to the docs-snippets embedding/turns example and assert that activity uses the host-supplied physical id."
+
+[[api]]
 symbol = "lash::turn::ScopedQueuedTurnBuilder::run"
 kind = "function"
 availability = "default+all-features"
@@ -74154,7 +74171,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash/src/turn.rs:750#.queue_drain_scope(drain_id);"
+usage = "crates/lash/src/turn.rs:810#lash_core::facade_support::RuntimeSessionStateFacadeOps::queue_drain_scope("
 
 [[api]]
 symbol = "lash_core::facade_support::RuntimeSessionStateFacadeOps::turn_scope"
@@ -82629,6 +82646,15 @@ usage = "examples/agent-workbench/src/restate.rs:79#.drain_id("
 reason = "The Restate workbench supplies a stable selected-drain idempotency key; the scope identity is internal and has no direct host-visible assertion in that constructor."
 
 [[api]]
+symbol = "lash::SelectedQueuedTurnBuilder::turn_id"
+kind = "function"
+availability = "default+all-features"
+aliases = ["lash::turn::SelectedQueuedTurnBuilder::turn_id"]
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add lash::SelectedQueuedTurnBuilder::turn_id to the docs-snippets selected-drain example and assert that activity and exact cancellation use the host-supplied physical id."
+
+[[api]]
 symbol = "lash::SelectedQueuedTurnBuilder::effects"
 kind = "function"
 availability = "default+all-features"
@@ -82865,6 +82891,14 @@ availability = "default+all-features"
 area = "sessions-turns"
 disposition = "unused-add"
 reason = "Add an explicit drain-id override after controller scoping and assert the resulting durable effect scope."
+
+[[api]]
+symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder::turn_id"
+kind = "function"
+availability = "default+all-features"
+area = "sessions-turns"
+disposition = "unused-add"
+reason = "Add a scoped selected-drain example and assert that activity uses the host-supplied physical turn id."
 
 [[api]]
 symbol = "lash::turn::ScopedSelectedQueuedTurnBuilder::run"

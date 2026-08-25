@@ -427,6 +427,7 @@ lash::QueuedTurnBuilder::drain_id
 lash::QueuedTurnBuilder::effects
 lash::QueuedTurnBuilder::run
 lash::QueuedTurnBuilder::stream_to
+lash::QueuedTurnBuilder::turn_id
 lash::QueuedTurnDrain
 lash::QueuedTurnDrain::Empty
 lash::QueuedTurnDrain::Empty::0
@@ -476,6 +477,7 @@ lash::SelectedQueuedTurnBuilder::drain_id
 lash::SelectedQueuedTurnBuilder::effects
 lash::SelectedQueuedTurnBuilder::run
 lash::SelectedQueuedTurnBuilder::stream_to
+lash::SelectedQueuedTurnBuilder::turn_id
 lash::SelectedQueuedWorkBatchSatisfaction
 lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied
 lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied::batch_id
@@ -4093,6 +4095,7 @@ lash::prelude::QueuedTurnBuilder::drain_id
 lash::prelude::QueuedTurnBuilder::effects
 lash::prelude::QueuedTurnBuilder::run
 lash::prelude::QueuedTurnBuilder::stream_to
+lash::prelude::QueuedTurnBuilder::turn_id
 lash::prelude::Result
 lash::prelude::SessionBuilder
 lash::prelude::SessionBuilder::open
@@ -9947,6 +9950,7 @@ lash::turn::QueuedTurnBuilder::drain_id
 lash::turn::QueuedTurnBuilder::effects
 lash::turn::QueuedTurnBuilder::run
 lash::turn::QueuedTurnBuilder::stream_to
+lash::turn::QueuedTurnBuilder::turn_id
 lash::turn::ScopedQueuedTurnBuilder
 lash::turn::ScopedQueuedTurnBuilder::batch_ids
 lash::turn::ScopedQueuedTurnBuilder::cancel
@@ -9954,12 +9958,14 @@ lash::turn::ScopedQueuedTurnBuilder::cancel_with_origin
 lash::turn::ScopedQueuedTurnBuilder::drain_id
 lash::turn::ScopedQueuedTurnBuilder::run
 lash::turn::ScopedQueuedTurnBuilder::stream_to
+lash::turn::ScopedQueuedTurnBuilder::turn_id
 lash::turn::ScopedSelectedQueuedTurnBuilder
 lash::turn::ScopedSelectedQueuedTurnBuilder::cancel
 lash::turn::ScopedSelectedQueuedTurnBuilder::cancel_with_origin
 lash::turn::ScopedSelectedQueuedTurnBuilder::drain_id
 lash::turn::ScopedSelectedQueuedTurnBuilder::run
 lash::turn::ScopedSelectedQueuedTurnBuilder::stream_to
+lash::turn::ScopedSelectedQueuedTurnBuilder::turn_id
 lash::turn::ScopedTurnBuilder
 lash::turn::ScopedTurnBuilder::cancel
 lash::turn::ScopedTurnBuilder::cancel_with_origin
@@ -9982,6 +9988,7 @@ lash::turn::SelectedQueuedTurnBuilder::drain_id
 lash::turn::SelectedQueuedTurnBuilder::effects
 lash::turn::SelectedQueuedTurnBuilder::run
 lash::turn::SelectedQueuedTurnBuilder::stream_to
+lash::turn::SelectedQueuedTurnBuilder::turn_id
 lash::turn::SelectedQueuedWorkBatchSatisfaction
 lash::turn::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied
 lash::turn::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied::batch_id

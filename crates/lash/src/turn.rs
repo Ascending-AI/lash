@@ -224,7 +224,11 @@ impl TurnBuilder {
         self
     }
 
-    /// Configures the turn id and returns the updated builder.
+    /// Configures the physical turn id and returns the updated builder.
+    ///
+    /// Hosts must keep this id unique within the session. Reusing it addresses
+    /// the same trace, effects, and cancellation promises as the earlier turn;
+    /// Lash does not mint or check uniqueness for host-supplied ids.
     pub fn turn_id(mut self, id: impl Into<String>) -> Self {
         self.turn_id = Some(id.into());
         self
@@ -692,6 +696,7 @@ pub struct QueuedTurnBuilder {
     pub(crate) cancel: CancellationToken,
     pub(crate) cancel_origin_hint: TurnCancelOriginHint,
     pub(crate) cancels: TurnCancelRegistry,
+    pub(crate) turn_id: Option<String>,
     pub(crate) drain_id: Option<String>,
 }
 
@@ -713,6 +718,19 @@ impl QueuedTurnBuilder {
         self
     }
 
+    /// Configures the physical turn id and returns the updated builder.
+    ///
+    /// Hosts must keep this id unique within the session. Reusing it addresses
+    /// the same trace, effects, and cancellation promises as the earlier turn;
+    /// Lash does not mint or check uniqueness for host-supplied ids.
+    /// Do not combine this with [`Self::drain_id`]: keep `turn_id` for a
+    /// host-minted physical turn identity, or use `drain_id` as the durable
+    /// idempotency key for retried drains.
+    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
+        self.turn_id = Some(id.into());
+        self
+    }
+
     /// Replaces automatic queue selection with one exact, idempotent batch-ID set.
     ///
     /// Duplicate IDs are coalesced by first occurrence. Missing durable rows
@@ -728,7 +746,10 @@ impl QueuedTurnBuilder {
         }
     }
 
-    /// Sets the queued-work drain identifier.
+    /// Sets the durable idempotency key for a retried queued-work drain.
+    ///
+    /// Do not combine this with [`Self::turn_id`]: keep `drain_id` for retried
+    /// drains, or use `turn_id` for a host-minted physical turn identity.
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.drain_id = Some(drain_id.into());
         self
@@ -773,17 +794,52 @@ impl QueuedTurnBuilder {
         self.drain_id.clone().unwrap_or_else(fresh_queue_drain_id)
     }
 
+    fn validate_scope_identity_configuration(&self) -> Result<()> {
+        if self.drain_id.is_some() && self.turn_id.is_some() {
+            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                "`drain_id(...)` and `turn_id(...)` are mutually exclusive; keep `drain_id(...)` as the durable idempotency key for retried drains, or keep `turn_id(...)` as the host-minted physical turn identity",
+            )));
+        }
+        Ok(())
+    }
+
+    fn resolved_turn_id(
+        &self,
+        scoped_effect_controller: Option<&ScopedEffectController<'_>>,
+    ) -> Option<String> {
+        self.turn_id.clone().or_else(|| {
+            scoped_effect_controller
+                .filter(|controller| controller.execution_scope().validates_turn_trace_id())
+                .map(|controller| controller.scope_id().to_string())
+        })
+    }
+
+    fn turn_scope(&self, turn_id: &str) -> lash_core::ExecutionScope {
+        let observation = self.runtime.observe();
+        observation.persisted_state.turn_scope(turn_id)
+    }
+
+    fn execution_scope(&self, drain_id: String) -> Result<lash_core::ExecutionScope> {
+        self.validate_scope_identity_configuration()?;
+        Ok(self.resolved_turn_id(None).map_or_else(
+            || {
+                lash_core::facade_support::RuntimeSessionStateFacadeOps::queue_drain_scope(
+                    &self.runtime.observe().persisted_state,
+                    drain_id,
+                )
+            },
+            |turn_id| self.turn_scope(&turn_id),
+        ))
+    }
+
     async fn stream_to_with_effect_host(
         self,
         events: &dyn TurnActivitySink,
         effect_host: &dyn EffectHost,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
         let drain_id = self.resolved_drain_id();
-        let scope = self
-            .runtime
-            .observe()
-            .persisted_state
-            .queue_drain_scope(drain_id);
+        let scope = self.execution_scope(drain_id)?;
         let scoped_effect_controller = effect_host.scoped(scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
@@ -795,11 +851,7 @@ impl QueuedTurnBuilder {
         controller: &dyn RuntimeEffectController,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
         let drain_id = self.resolved_drain_id();
-        let scope = self
-            .runtime
-            .observe()
-            .persisted_state
-            .queue_drain_scope(drain_id);
+        let scope = self.execution_scope(drain_id)?;
         let scoped_effect_controller = ScopedEffectController::borrowed(controller, scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
@@ -810,12 +862,48 @@ impl QueuedTurnBuilder {
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
+        self.validate_scope_identity_configuration()?;
+        let turn_id = self.resolved_turn_id(Some(&scoped_effect_controller));
+        if let Some(turn_id) = turn_id.as_deref()
+            && !scoped_effect_controller
+                .execution_scope()
+                .validates_turn_trace_id()
+        {
+            let scoped_turn_controller = ScopedEffectController::borrowed(
+                scoped_effect_controller.controller(),
+                self.turn_scope(turn_id),
+            )?;
+            return self
+                .stream_to_with_resolved_scope(events, scoped_turn_controller)
+                .await;
+        }
+        if let Some(turn_id) = turn_id.as_deref()
+            && turn_id != scoped_effect_controller.scope_id()
+        {
+            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                format!(
+                    "input trace_turn_id `{turn_id}` does not match execution scope id `{}`",
+                    scoped_effect_controller.scope_id()
+                ),
+            )));
+        }
+        self.stream_to_with_resolved_scope(events, scoped_effect_controller)
+            .await
+    }
+
+    async fn stream_to_with_resolved_scope(
+        self,
+        events: &dyn TurnActivitySink,
+        scoped_effect_controller: ScopedEffectController<'_>,
+    ) -> Result<QueuedTurnDrain<TurnReport>> {
         let Self {
             runtime,
             effect_host: _,
             cancel,
             cancel_origin_hint,
             cancels,
+            turn_id: _,
             drain_id: _,
         } = self;
         let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
@@ -854,8 +942,20 @@ impl SelectedQueuedTurnBuilder {
         self
     }
 
+    /// Configures the physical id of any selected turn.
+    ///
+    /// Mutually exclusive with [`Self::drain_id`]. See
+    /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
+    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
+        self.builder = self.builder.turn_id(id);
+        self
+    }
+
     /// Sets the effect-scope identity for any selected turn. By default Lash
     /// uses the first batch ID, or a fresh identity for an empty selection.
+    ///
+    /// Mutually exclusive with [`Self::turn_id`]. See
+    /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.builder = self.builder.drain_id(drain_id);
         self
@@ -919,12 +1019,7 @@ impl SelectedQueuedTurnBuilder {
         effect_host: &dyn EffectHost,
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let drain_id = self.resolved_drain_id();
-        let scope = self
-            .builder
-            .runtime
-            .observe()
-            .persisted_state
-            .queue_drain_scope(drain_id);
+        let scope = self.builder.execution_scope(drain_id)?;
         let scoped_effect_controller = effect_host.scoped(scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
@@ -936,18 +1031,50 @@ impl SelectedQueuedTurnBuilder {
         controller: &dyn RuntimeEffectController,
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
         let drain_id = self.resolved_drain_id();
-        let scope = self
-            .builder
-            .runtime
-            .observe()
-            .persisted_state
-            .queue_drain_scope(drain_id);
+        let scope = self.builder.execution_scope(drain_id)?;
         let scoped_effect_controller = ScopedEffectController::borrowed(controller, scope)?;
         self.stream_to_with_scope(events, scoped_effect_controller)
             .await
     }
 
     async fn stream_to_with_scope(
+        self,
+        events: &dyn TurnActivitySink,
+        scoped_effect_controller: ScopedEffectController<'_>,
+    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
+        self.builder.validate_scope_identity_configuration()?;
+        let turn_id = self
+            .builder
+            .resolved_turn_id(Some(&scoped_effect_controller));
+        if let Some(turn_id) = turn_id.as_deref()
+            && !scoped_effect_controller
+                .execution_scope()
+                .validates_turn_trace_id()
+        {
+            let scoped_turn_controller = ScopedEffectController::borrowed(
+                scoped_effect_controller.controller(),
+                self.builder.turn_scope(turn_id),
+            )?;
+            return self
+                .stream_to_with_resolved_scope(events, scoped_turn_controller)
+                .await;
+        }
+        if let Some(turn_id) = turn_id.as_deref()
+            && turn_id != scoped_effect_controller.scope_id()
+        {
+            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                format!(
+                    "input trace_turn_id `{turn_id}` does not match execution scope id `{}`",
+                    scoped_effect_controller.scope_id()
+                ),
+            )));
+        }
+        self.stream_to_with_resolved_scope(events, scoped_effect_controller)
+            .await
+    }
+
+    async fn stream_to_with_resolved_scope(
         self,
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -959,6 +1086,7 @@ impl SelectedQueuedTurnBuilder {
             cancel,
             cancel_origin_hint,
             cancels,
+            turn_id: _,
             drain_id: _,
         } = builder;
         let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
@@ -999,6 +1127,15 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
         self
     }
 
+    /// Configures the physical id of the queued turn.
+    ///
+    /// Mutually exclusive with [`Self::drain_id`]. See
+    /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
+    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
+        self.builder = self.builder.turn_id(id);
+        self
+    }
+
     /// Replaces automatic queue selection with one exact, idempotent batch-ID set.
     ///
     /// The returned builder keeps this borrowed effect controller. Missing
@@ -1014,7 +1151,10 @@ impl<'run> ScopedQueuedTurnBuilder<'run> {
         }
     }
 
-    /// Sets the queued-work drain identifier.
+    /// Sets the queued-work drain's durable idempotency key.
+    ///
+    /// Mutually exclusive with [`Self::turn_id`]. See
+    /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.builder = self.builder.drain_id(drain_id);
         self
@@ -1062,7 +1202,19 @@ impl<'run> ScopedSelectedQueuedTurnBuilder<'run> {
         self
     }
 
-    /// Sets the durable effect-scope identity for any selected turn.
+    /// Configures the physical id of any selected turn.
+    ///
+    /// Mutually exclusive with [`Self::drain_id`]. See
+    /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
+    pub fn turn_id(mut self, id: impl Into<String>) -> Self {
+        self.builder = self.builder.turn_id(id);
+        self
+    }
+
+    /// Sets the durable idempotency key for a retried selected drain.
+    ///
+    /// Mutually exclusive with [`Self::turn_id`]. See
+    /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.builder = self.builder.drain_id(drain_id);
         self
