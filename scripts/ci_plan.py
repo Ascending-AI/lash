@@ -30,6 +30,24 @@ GATED_JOBS = {
     "functional-e2e": "functional_e2e",
 }
 
+# Jobs deferred to trunk runs (push / workflow_dispatch): their job-level
+# conditions skip them on pull_request and merge_group events per the
+# 2026-08-25 CI-scope ruling; reassess after the FIG-2169 test-prune sweep.
+TRUNK_ONLY_JOBS = {
+    "semver-advisory",
+    "lashlang-git-consumer",
+    "package-feature-checks",
+    "runtime-feature-boundary",
+    "stack-budget",
+    "confidence-fast",
+    "confidence-fast-summary",
+    "postgres-store",
+    "s3-store",
+    "functional-e2e",
+}
+
+DEFERRED_EVENTS = {"pull_request", "merge_group"}
+
 UNGATED_JOBS = {
     "plan",
     "facade-only-examples",
@@ -156,7 +174,9 @@ def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
     return outputs
 
 
-def evaluate_conclusion(needs: Mapping[str, Mapping[str, object]]) -> list[str]:
+def evaluate_conclusion(
+    needs: Mapping[str, Mapping[str, object]], event_name: str = ""
+) -> list[str]:
     expected_jobs = UNGATED_JOBS | set(GATED_JOBS)
     problems: list[str] = []
 
@@ -192,6 +212,13 @@ def evaluate_conclusion(needs: Mapping[str, Mapping[str, object]]) -> list[str]:
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
+        if job in TRUNK_ONLY_JOBS and event_name in DEFERRED_EVENTS:
+            if result != "skipped":
+                problems.append(
+                    f"trunk-only job {job} ended with {result!r} on a"
+                    f" {event_name} event, expected skipped"
+                )
+            continue
         if result in {"failure", "cancelled"}:
             problems.append(f"{job} ended with {result}")
             continue
@@ -264,7 +291,7 @@ def main() -> int:
     except (KeyError, json.JSONDecodeError) as error:
         print(f"Invalid needs JSON: {error}", file=sys.stderr)
         return 1
-    problems = evaluate_conclusion(needs)
+    problems = evaluate_conclusion(needs, os.environ.get("GITHUB_EVENT_NAME", ""))
     print(json.dumps(needs, indent=2, sort_keys=True))
     if problems:
         print("CI conclusion rejected:", file=sys.stderr)
