@@ -334,12 +334,10 @@ async fn custom_wire_config_controls_auth_header_and_prefix() {
             ..OpenAiWireConfig::default()
         })
         .with_transport(transport.clone());
-
     provider
         .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
         .await
         .expect("request succeeds");
-
     let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
     assert!(
@@ -353,6 +351,22 @@ async fn custom_wire_config_controls_auth_header_and_prefix() {
             .headers
             .iter()
             .all(|(name, _)| name != "Authorization")
+    );
+}
+
+#[tokio::test]
+async fn empty_auth_value_prefix_sends_raw_key_without_spacing() {
+    let transport = Arc::new(RecordingHttpTransport::default());
+    let mut provider = OpenAiCompatibleProvider::new("secret", "https://proxy.example/v1")
+        .with_transport(transport.clone());
+    provider.wire.auth_header_name = "x-api-key".to_string();
+    provider.wire.auth_value_prefix.clear();
+    provider.complete(request(vec![])).await.unwrap();
+    let requests = transport.requests.lock_recover();
+    assert!(
+        requests[0]
+            .headers
+            .contains(&("x-api-key".to_string(), "secret".to_string()))
     );
 }
 
@@ -743,6 +757,14 @@ fn providers_serialize_distinct_config_shapes() {
     assert_eq!(compatible_config["api_key"], "key");
     assert_eq!(compatible_config["base_url"], OPENROUTER_BASE_URL);
     assert!(compatible_config.get("wire_api").is_none());
+}
+
+#[test]
+fn openai_compatible_wire_config_serializes_only_when_customized() {
+    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1");
+    assert!(provider.serialize_config().get("wire").is_none());
+    provider.wire.query_params.push(("v".into(), "1".into()));
+    assert!(provider.serialize_config().get("wire").is_some());
 }
 
 #[test]

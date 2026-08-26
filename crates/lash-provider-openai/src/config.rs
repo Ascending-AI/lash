@@ -18,6 +18,9 @@ pub enum OpenAiCompatMaxTokensField {
 pub struct OpenAiWireConfig {
     pub auth_header_name: String,
     pub auth_value_prefix: String,
+    /// Static query parameters appended to every request. Values MUST be
+    /// non-secret because the assembled URL appears verbatim in persisted
+    /// transcript evidence (`LlmStreamEvidence` via `endpoint.http_summary`).
     pub query_params: Vec<(String, String)>,
 }
 
