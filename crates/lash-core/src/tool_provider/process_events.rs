@@ -37,6 +37,7 @@ pub(crate) async fn enqueue_wake_delivery(
     if let Some(host) = trace_host {
         let target_session_id = wake_delivery.target_session_id.clone();
         let request = crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: target_session_id.clone(),
             relation: crate::SessionRelation::default(),
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

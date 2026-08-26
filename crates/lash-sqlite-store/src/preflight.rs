@@ -68,9 +68,9 @@ pub enum SqliteDatabase {
 impl SqliteDatabase {
     /// The `PRAGMA user_version` this build requires of the database.
     ///
-    /// These are the same integers the open path enforces; reading one here and
-    /// finding a different one on disk is exactly the refusal an open would
-    /// have produced.
+    /// These are the same target integers the open path enforces. A durable-core
+    /// database at generation 43 is the one declared migration source; every
+    /// other different on-disk version is refused.
     pub fn expected_version(self) -> i64 {
         i64::from(match self {
             SqliteDatabase::DurableCore => SCHEMA_VERSION,
@@ -96,15 +96,19 @@ impl SqliteDatabase {
 ///
 /// This is SQLite's counterpart to `PostgresStorage::verify_schema_for`: it
 /// never provisions, never migrates, never stamps a version, and never fails on
-/// drift — a mismatch is the returned verdict, not an error. A database that
-/// exists but cannot be read yields [`StoreSchemaVerdict::Unreadable`] carrying
-/// SQLite's own words, because an unreadable database is undecided rather than
-/// refused.
+/// drift. It reports the durable-core generation-43 source as
+/// [`StoreSchemaVerdict::Migratable`] because the next open migrates it to 44;
+/// other mismatches are refusals, not errors. A database that exists but cannot
+/// be read yields [`StoreSchemaVerdict::Unreadable`] carrying SQLite's own
+/// words, because an unreadable database is undecided rather than refused.
 pub async fn verify_schema_at(path: &Path, database: SqliteDatabase) -> StoreSchemaDatabase {
     let verdict = read_user_version(path).await;
     let verdict = match verdict {
         Ok(None) => StoreSchemaVerdict::Absent,
         Ok(Some(found)) if found == database.expected_version() => StoreSchemaVerdict::Matches,
+        Ok(Some(43)) if database == SqliteDatabase::DurableCore => {
+            StoreSchemaVerdict::Migratable { found: 43 }
+        }
         Ok(Some(found)) => StoreSchemaVerdict::Mismatch { found },
         Err(reason) => StoreSchemaVerdict::Unreadable { reason },
     };

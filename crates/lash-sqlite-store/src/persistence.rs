@@ -576,6 +576,7 @@ impl SessionCommitStore for Store {
                         &SessionMeta {
                             session_id: commit.session_id.clone(),
                             relation: lash_core::SessionRelation::Root,
+                            pending_observer_intents: Vec::new(),
                         },
                         crate::session_meta::SessionMetaWrite::Insert,
                         now,
@@ -1260,6 +1261,7 @@ impl SessionCommitStore for Store {
         let meta = SessionMeta {
             session_id: session_id.clone(),
             relation: binding.relation.clone(),
+            pending_observer_intents: Vec::new(),
         };
         self.conn
             .write_flow(move |tx| {

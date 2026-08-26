@@ -288,6 +288,7 @@ async fn postgres_runtime_persistence_satisfies_conformance_when_configured() {
                     .await
                     .expect("open independent Postgres conformance pool");
                 let request = lash_core::SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
                     session_id,
                     relation: lash_core::SessionRelation::Root,
                     policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -906,6 +907,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let session_id = "wake-source-lock-target";
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -1308,6 +1310,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .with_clock(clock);
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: SESSION_ID.to_string(),
             relation: lash_core::SessionRelation::default(),
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -1388,7 +1391,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 62, "Postgres component schema pin");
+    assert_eq!(current_version, 63, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

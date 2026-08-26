@@ -11,27 +11,25 @@ pub(crate) fn stored_relation_from_row(
     Ok(StoredRelation {
         session_id: row.get(0)?,
         relation_kind: row.get(1)?,
-        observer_intent_depth: row.get(2)?,
-        parent_session_id: row.get(3)?,
+        parent_session_id: row.get(2)?,
         cause: CausalColumns {
-            kind: row.get(4)?,
-            session_id: row.get(5)?,
-            turn_id: row.get(6)?,
-            effect_id: row.get(7)?,
-            call_id: row.get(8)?,
-            process_id: row.get(9)?,
-            process_event_sequence: row.get(10)?,
-            occurrence_id: row.get(11)?,
-            subscription_id: row.get(12)?,
-            subscription_incarnation: row.get(13)?,
-            subscription_revision: row.get(14)?,
-            node_id: row.get(15)?,
+            kind: row.get(3)?,
+            session_id: row.get(4)?,
+            turn_id: row.get(5)?,
+            effect_id: row.get(6)?,
+            call_id: row.get(7)?,
+            process_id: row.get(8)?,
+            process_event_sequence: row.get(9)?,
+            occurrence_id: row.get(10)?,
+            subscription_id: row.get(11)?,
+            subscription_incarnation: row.get(12)?,
+            subscription_revision: row.get(13)?,
+            node_id: row.get(14)?,
         },
-        source_session_id: row.get(16)?,
-        source_node_id: row.get(17)?,
-        observer_inheritance_kind: row.get(18)?,
-        observer_intent_processes: Vec::new(),
-        fork_pending_processes: Vec::new(),
+        source_session_id: row.get(15)?,
+        source_node_id: row.get(16)?,
+        observer_inheritance_kind: row.get(17)?,
+        pending_observer_intents: Vec::new(),
         fork_inheritance_processes: Vec::new(),
     })
 }
@@ -39,7 +37,6 @@ pub(crate) fn stored_relation_from_row(
 pub(crate) fn decode_catalog_relation(
     stored: StoredRelation,
     observer_intent_rows_json: &str,
-    fork_pending_rows_json: &str,
     fork_inheritance_rows_json: &str,
 ) -> Result<lash_core::SessionRelation, StoreError> {
     let observer_intent_rows =
@@ -49,12 +46,6 @@ pub(crate) fn decode_catalog_relation(
                 format!("invalid observer-intent process rows JSON: {error}"),
             )
         })?;
-    let fork_pending_rows = serde_json::from_str(fork_pending_rows_json).map_err(|error| {
-        SessionMetaCodec::corrupt(
-            SESSION_META_CODEC,
-            format!("invalid fork pending process rows JSON: {error}"),
-        )
-    })?;
     let fork_inheritance_rows =
         serde_json::from_str(fork_inheritance_rows_json).map_err(|error| {
             SessionMetaCodec::corrupt(
@@ -66,14 +57,13 @@ pub(crate) fn decode_catalog_relation(
         SESSION_META_CODEC,
         stored,
         observer_intent_rows,
-        fork_pending_rows,
         fork_inheritance_rows,
     )?
     .relation)
 }
 
-const SELECT_COLUMNS: &str = "session_id, relation_kind, observer_intent_depth,
-    parent_session_id, caused_by_kind, caused_by_session_id, caused_by_turn_id,
+const SELECT_COLUMNS: &str = "session_id, relation_kind, parent_session_id,
+    caused_by_kind, caused_by_session_id, caused_by_turn_id,
     caused_by_effect_id, caused_by_call_id, caused_by_process_id,
     caused_by_process_event_sequence, caused_by_occurrence_id,
     caused_by_subscription_id, caused_by_subscription_incarnation,
@@ -90,30 +80,29 @@ pub(crate) fn write_session_meta(
     let sql = match mode {
         SessionMetaWrite::Insert => {
             "INSERT OR IGNORE INTO session_meta
-             (session_id, session_state_version, relation_kind, observer_intent_depth, parent_session_id,
+             (session_id, session_state_version, relation_kind, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
               source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES (?1, ?21, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, NULL)"
+             VALUES (?1, ?20, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)"
         }
         SessionMetaWrite::Replace => {
             "INSERT INTO session_meta
-             (session_id, session_state_version, relation_kind, observer_intent_depth, parent_session_id,
+             (session_id, session_state_version, relation_kind, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
               source_node_id, observer_inheritance_kind, created_at_ms, last_commit_at_ms)
-             VALUES (?1, ?21, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, NULL)
+             VALUES (?1, ?20, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, NULL)
              ON CONFLICT(session_id) DO UPDATE SET
                relation_kind = excluded.relation_kind,
-               observer_intent_depth = excluded.observer_intent_depth,
                parent_session_id = excluded.parent_session_id,
                caused_by_kind = excluded.caused_by_kind,
                caused_by_session_id = excluded.caused_by_session_id,
@@ -138,7 +127,6 @@ pub(crate) fn write_session_meta(
             params![
                 stored.session_id,
                 stored.relation_kind,
-                stored.observer_intent_depth,
                 stored.parent_session_id,
                 stored.cause.kind,
                 stored.cause.session_id,
@@ -164,8 +152,7 @@ pub(crate) fn write_session_meta(
         return Ok(false);
     }
     for table in [
-        "session_meta_observer_intent_processes",
-        "session_meta_fork_pending_observer_processes",
+        "session_meta_pending_observer_intents",
         "session_meta_fork_inheritance_processes",
     ] {
         conn.execute(
@@ -174,36 +161,25 @@ pub(crate) fn write_session_meta(
         )
         .map_err(sqlite_error)?;
     }
-    for (layer_index, process_ids) in stored.observer_intent_processes.iter().enumerate() {
-        for (process_index, process_id) in process_ids.iter().enumerate() {
-            conn.execute(
-                "INSERT INTO session_meta_observer_intent_processes
-                 (session_id, layer_index, process_index, process_id)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    stored.session_id,
-                    SessionMetaCodec::write_index(
-                        SESSION_META_CODEC,
-                        layer_index,
-                        "observer-intent layer"
-                    )?,
-                    SessionMetaCodec::write_index(
-                        SESSION_META_CODEC,
-                        process_index,
-                        "observer-intent process"
-                    )?,
-                    process_id,
-                ],
-            )
-            .map_err(sqlite_error)?;
-        }
+    for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO session_meta_pending_observer_intents
+             (session_id, process_index, process_id, process_incarnation, attribution)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                stored.session_id,
+                SessionMetaCodec::write_index(
+                    SESSION_META_CODEC,
+                    process_index,
+                    "observer-intent process"
+                )?,
+                intent.process_id,
+                intent.process_incarnation,
+                intent.attribution,
+            ],
+        )
+        .map_err(sqlite_error)?;
     }
-    write_process_list(
-        conn,
-        "session_meta_fork_pending_observer_processes",
-        &stored.session_id,
-        &stored.fork_pending_processes,
-    )?;
     write_process_list(
         conn,
         "session_meta_fork_inheritance_processes",
@@ -248,64 +224,46 @@ pub(crate) fn load_session_meta(
         tx.commit().map_err(sqlite_error)?;
         return Ok(None);
     };
-    let depth = SessionMetaCodec::read_index(
-        SESSION_META_CODEC,
-        stored.observer_intent_depth,
-        "observer_intent_depth",
-    )?;
-    stored.observer_intent_processes = vec![Vec::new(); depth];
     let mut stmt = tx
         .prepare(
-            "SELECT layer_index, process_index, process_id
-             FROM session_meta_observer_intent_processes
-             WHERE session_id = ?1 ORDER BY layer_index, process_index",
+            "SELECT process_index, process_id, process_incarnation, attribution
+             FROM session_meta_pending_observer_intents
+             WHERE session_id = ?1 ORDER BY process_index",
         )
         .map_err(sqlite_error)?;
     let observer_rows = stmt
         .query_map(params![stored.session_id], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })
         .map_err(sqlite_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite_error)?;
     drop(stmt);
-    for (layer_index, process_index, process_id) in observer_rows {
-        let layer_index = SessionMetaCodec::read_index(
-            SESSION_META_CODEC,
-            layer_index,
-            "observer-intent layer_index",
-        )?;
-        let layer = stored
-            .observer_intent_processes
-            .get_mut(layer_index)
-            .ok_or_else(|| {
-                SessionMetaCodec::corrupt(
-                    SESSION_META_CODEC,
-                    "observer-intent process names a missing layer",
-                )
-            })?;
+    for (process_index, process_id, process_incarnation, attribution) in observer_rows {
         if SessionMetaCodec::read_index(
             SESSION_META_CODEC,
             process_index,
             "observer-intent process_index",
-        )? != layer.len()
+        )? != stored.pending_observer_intents.len()
         {
             return Err(SessionMetaCodec::corrupt(
                 SESSION_META_CODEC,
                 "observer-intent process indexes are not contiguous",
             ));
         }
-        layer.push(process_id);
+        stored.pending_observer_intents.push(
+            lash_core::store_backend_support::StoredObserverIntent {
+                process_id,
+                process_incarnation,
+                attribution,
+            },
+        );
     }
-    stored.fork_pending_processes = read_process_list(
-        &tx,
-        "session_meta_fork_pending_observer_processes",
-        &stored.session_id,
-    )?;
     stored.fork_inheritance_processes = read_process_list(
         &tx,
         "session_meta_fork_inheritance_processes",

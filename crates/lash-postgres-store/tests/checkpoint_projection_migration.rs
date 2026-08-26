@@ -13,7 +13,7 @@ mod support;
 #[path = "schema_drift/harness.rs"]
 mod harness;
 
-use harness::{REWIND_PAST_56_ARTIFACTS, ScratchSchema};
+use harness::{REWIND_PAST_56_ARTIFACTS, REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS, ScratchSchema};
 use support::database_url;
 
 const SOURCE_SESSION: &str = "legacy-projection-source";
@@ -40,6 +40,7 @@ async fn postgres_56_to_57_backfill_preserves_legacy_fork_components_when_new_si
     scratch
         .apply(&format!(
             "{REWIND_PAST_56_ARTIFACTS}
+             {REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS}
              UPDATE lash_schema_versions
              SET version = 56
              WHERE component = 'lash-postgres-store'"
@@ -54,7 +55,7 @@ async fn postgres_56_to_57_backfill_preserves_legacy_fork_components_when_new_si
         },
     )
     .await
-    .expect("migrate seeded Postgres component 56 to 62");
+    .expect("migrate seeded Postgres component 56 to 63");
     let foreign_key_actions = sqlx::query_as::<_, (String, String)>(
         "SELECT conname, confdeltype::TEXT
          FROM pg_catalog.pg_constraint
@@ -149,6 +150,7 @@ async fn seed_legacy_fork(
     let shared = receipt.manifest.components[SHARED_COMPONENT].clone();
     factory
         .fork_at(&lash_core::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: LEGACY_FORK.to_string(),
             node_id: leaf_node_id.clone(),
             relation: SessionRelation::Root,
@@ -166,6 +168,7 @@ async fn publish_and_delete_post_migration_sibling(
 ) {
     factory
         .fork_at(&lash_core::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: POST_MIGRATION_SIBLING.to_string(),
             node_id: leaf_node_id.to_string(),
             relation: SessionRelation::Root,
@@ -203,6 +206,7 @@ async fn publish_and_delete_post_migration_sibling(
 
 fn request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

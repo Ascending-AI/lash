@@ -76,6 +76,12 @@ impl std::fmt::Display for StoreBackend {
 pub enum StoreSchemaVerdict {
     /// The found version equals the version this build expects.
     Matches,
+    /// A version was read that the next open will migrate to the expected
+    /// version. The preflight itself remains read-only and performs no DDL.
+    Migratable {
+        /// The version stamped in the store before migration.
+        found: i64,
+    },
     /// A version was read and it is not the expected one. This is the refusal
     /// a host would otherwise have discovered at open.
     Mismatch {
@@ -211,6 +217,11 @@ impl std::fmt::Display for StoreSchemaStatus {
                 StoreSchemaVerdict::Matches => {
                     writeln!(f, "{}: version {} (ok)", database.name, database.expected)?
                 }
+                StoreSchemaVerdict::Migratable { found } => writeln!(
+                    f,
+                    "{}: found version {found}, migrates to {} on open at {}",
+                    database.name, database.expected, database.location
+                )?,
                 StoreSchemaVerdict::Mismatch { found } => writeln!(
                     f,
                     "{}: found version {found}, expected {} at {}",
@@ -473,6 +484,7 @@ mod tests {
     fn only_a_version_mismatch_refuses_an_open() {
         assert!(StoreSchemaVerdict::Mismatch { found: 36 }.refuses_open());
         assert!(!StoreSchemaVerdict::Matches.refuses_open());
+        assert!(!StoreSchemaVerdict::Migratable { found: 36 }.refuses_open());
         assert!(!StoreSchemaVerdict::Absent.refuses_open());
         assert!(
             !StoreSchemaVerdict::Unreadable {
@@ -492,6 +504,7 @@ mod tests {
         assert!(!undecided.refuses_open());
         for decided in [
             StoreSchemaVerdict::Matches,
+            StoreSchemaVerdict::Migratable { found: 1 },
             StoreSchemaVerdict::Absent,
             StoreSchemaVerdict::Mismatch { found: 1 },
         ] {

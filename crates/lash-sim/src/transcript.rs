@@ -597,6 +597,7 @@ mod tests {
         );
         let store = factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: "mutation-session".to_string(),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

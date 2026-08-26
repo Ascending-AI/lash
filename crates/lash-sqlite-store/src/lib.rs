@@ -698,6 +698,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
+            pending_observer_intents: request.pending_observer_intents.clone(),
         };
         let created_at_ms = self.clock.timestamp_ms();
         store
@@ -926,8 +927,8 @@ fn list_session_summaries(
 ) -> rusqlite::Result<Vec<SessionSummary>> {
     let mut stmt = conn.prepare(
         "WITH catalog AS (
-             SELECT meta.session_id, meta.relation_kind, meta.observer_intent_depth,
-                    meta.parent_session_id, meta.caused_by_kind,
+             SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
+                    meta.caused_by_kind,
                     meta.caused_by_session_id, meta.caused_by_turn_id,
                     meta.caused_by_effect_id, meta.caused_by_call_id,
                     meta.caused_by_process_id, meta.caused_by_process_event_sequence,
@@ -940,7 +941,7 @@ fn list_session_summaries(
              FROM session_meta AS meta
              LEFT JOIN session_head AS head ON head.session_id = meta.session_id
              UNION ALL
-             SELECT session_id, COALESCE(relation_kind, 'root'), 0,
+             SELECT session_id, COALESCE(relation_kind, 'root'),
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     created_at_ms, last_commit_at_ms, head_revision, 1
@@ -948,19 +949,12 @@ fn list_session_summaries(
          )
          SELECT catalog.*,
                 CASE WHEN deleted = 1 THEN '[]' ELSE (
-                    SELECT json_group_array(json_array(layer_index, process_index, process_id))
-                    FROM (
-                        SELECT layer_index, process_index, process_id
-                        FROM session_meta_observer_intent_processes
-                        WHERE session_id = catalog.session_id
-                        ORDER BY layer_index, process_index
+                    SELECT json_group_array(
+                        json_array(process_index, process_id, process_incarnation, attribution)
                     )
-                ) END,
-                CASE WHEN deleted = 1 THEN '[]' ELSE (
-                    SELECT json_group_array(json_array(process_index, process_id))
                     FROM (
-                        SELECT process_index, process_id
-                        FROM session_meta_fork_pending_observer_processes
+                        SELECT process_index, process_id, process_incarnation, attribution
+                        FROM session_meta_pending_observer_intents
                         WHERE session_id = catalog.session_id
                         ORDER BY process_index
                     )
@@ -991,28 +985,27 @@ fn list_session_summaries(
             }
         };
         let parent_session_id = stored.parent_session_id.clone();
-        let deleted = row.get::<_, i64>(22)? != 0;
+        let deleted = row.get::<_, i64>(21)? != 0;
         let durable_relation = if deleted {
             None
         } else {
             Some(
                 crate::session_meta::decode_catalog_relation(
                     stored,
+                    &row.get::<_, String>(22)?,
                     &row.get::<_, String>(23)?,
-                    &row.get::<_, String>(24)?,
-                    &row.get::<_, String>(25)?,
                 )
                 .map_err(sqlite_conversion_error)?,
             )
         };
         Ok(SessionSummary {
             session_id: row.get(0)?,
-            created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(19)?)?,
+            created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(18)?)?,
             last_commit_at_ms: row
-                .get::<_, Option<i64>>(20)?
+                .get::<_, Option<i64>>(19)?
                 .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
                 .transpose()?,
-            head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(21)?)?,
+            head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(20)?)?,
             relation,
             durable_relation,
             parent_session_id,

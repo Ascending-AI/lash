@@ -442,6 +442,7 @@ async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
         inner: crate::InMemorySessionStoreFactory::new(),
     };
     let request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "create-only-factory".to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

@@ -589,6 +589,7 @@ async fn load_store_hardening_state(
 
 fn store_hardening_create_request(session_id: &str) -> lash_core::SessionStoreCreateRequest {
     lash_core::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

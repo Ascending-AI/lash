@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 62.
+-- lash-postgres-store schema, component version 63.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -110,7 +110,6 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     created_at_ms BIGINT,
     last_commit_at_ms BIGINT,
     relation_kind TEXT NOT NULL,
-    observer_intent_depth BIGINT NOT NULL,
     parent_session_id TEXT,
     caused_by_kind TEXT,
     caused_by_session_id TEXT,
@@ -133,20 +132,14 @@ CREATE INDEX IF NOT EXISTS idx_lash_session_meta_catalog
 CREATE INDEX IF NOT EXISTS idx_lash_session_meta_state_version
     ON lash_session_meta(session_state_version, session_id);
 
-CREATE TABLE IF NOT EXISTS lash_session_meta_observer_intent_processes (
-    session_id TEXT NOT NULL,
-    layer_index BIGINT NOT NULL,
-    process_index BIGINT NOT NULL,
-    process_id TEXT NOT NULL,
-    PRIMARY KEY (session_id, layer_index, process_index),
-    FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS lash_session_meta_fork_pending_observer_processes (
+CREATE TABLE IF NOT EXISTS lash_session_meta_pending_observer_intents (
     session_id TEXT NOT NULL,
     process_index BIGINT NOT NULL,
     process_id TEXT NOT NULL,
-    PRIMARY KEY (session_id, process_index),
+    process_incarnation BIGINT,
+    attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
+    PRIMARY KEY (session_id, process_id),
+    UNIQUE (session_id, process_index),
     FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
 );
 
@@ -572,7 +565,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 62)
+VALUES ('lash-postgres-store', 63)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

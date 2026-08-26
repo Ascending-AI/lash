@@ -262,6 +262,7 @@ async fn create_store(
 ) -> Arc<dyn crate::RuntimePersistence> {
     factory
         .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
@@ -304,6 +305,7 @@ async fn fork_and_advance(
 ) {
     factory
         .fork_at(&crate::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: child_session_id.to_string(),
             node_id: node_id.to_string(),
             relation: crate::SessionRelation::Root,
@@ -313,6 +315,7 @@ async fn fork_and_advance(
         .expect("fork at a live tip");
     let child = factory
         .open_existing_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: child_session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),

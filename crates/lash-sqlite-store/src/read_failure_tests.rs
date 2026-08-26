@@ -130,8 +130,8 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 
     raw.execute(
         "INSERT INTO session_meta
-         (session_id, relation_kind, observer_intent_depth)
-         VALUES ('corrupt', 'corrupt', 0)",
+         (session_id, relation_kind)
+         VALUES ('corrupt', 'corrupt')",
         [],
     )
     .expect("insert malformed relation");

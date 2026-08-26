@@ -440,6 +440,7 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
     let store_factory = storage.session_store_factory_with_shared_process_registry();
     let store = store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: SESSION_ID.to_string(),
             relation: lash::persistence::SessionRelation::Root,
             policy: session.policy_snapshot(),

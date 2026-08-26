@@ -168,6 +168,7 @@ pub async fn wake_delivery_crash_matrix(
 ) {
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: target_session_id.to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy {
@@ -270,6 +271,7 @@ pub async fn wake_delivery_crash_matrix(
     let authority_target_session_id = "wake-authority-target";
     let authority_target = factory
         .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: authority_target_session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy {
@@ -978,6 +980,7 @@ async fn missing_target_is_deferred_and_rearmed(
 
     factory
         .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: target_session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1022,6 +1025,7 @@ async fn sender_floor_lifetime(
     let target_session_id = "wake-allocation-floor-lifetime-target";
     let target = factory
         .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: target_session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1673,6 +1677,7 @@ async fn target_gone_is_a_typed_discard(
 ) {
     let target_session_id = "wake-target-gone-session";
     let target_request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: target_session_id.to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

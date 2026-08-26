@@ -138,6 +138,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
                 *store.session_meta.lock_recover() = Some(crate::SessionMeta {
                     session_id: request.session_id.clone(),
                     relation: binding.relation.clone(),
+                    pending_observer_intents: request.pending_observer_intents.clone(),
                 });
                 *store.session_state_version.lock_recover() =
                     Some(crate::store::CURRENT_SESSION_STATE_VERSION);
@@ -622,6 +623,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
         *store.session_meta.lock_recover() = Some(crate::SessionMeta {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
+            pending_observer_intents: request.pending_observer_intents.clone(),
         });
         *store.session_state_version.lock_recover() =
             Some(crate::store::CURRENT_SESSION_STATE_VERSION);
@@ -645,6 +647,7 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
             session_id: request.session_id.clone(),
             node_id: request.node_id.clone(),
             source_session_id,
+            observed_processes: Vec::new(),
         })
     }
 }

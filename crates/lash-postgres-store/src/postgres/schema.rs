@@ -230,6 +230,55 @@ const APPEND_IDENTITY_ALL_OR_NONE_DDL: &str = r#"ALTER TABLE lash_runtime_turn_c
                 AND (request_identity_hash IS NULL) = (identity_encoding_version IS NULL)
             )"#;
 
+const PENDING_OBSERVER_INTENTS_DDL: &str = r#"CREATE TABLE lash_session_meta_pending_observer_intents (
+            session_id TEXT NOT NULL,
+            process_index BIGINT NOT NULL,
+            process_id TEXT NOT NULL,
+            process_incarnation BIGINT,
+            attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
+            PRIMARY KEY (session_id, process_id),
+            UNIQUE (session_id, process_index),
+            FOREIGN KEY (session_id) REFERENCES lash_session_meta(session_id) ON DELETE CASCADE
+        )"#;
+
+const FOLD_PENDING_OBSERVER_INTENTS_DDL: &str = r#"WITH candidates AS (
+            SELECT session_id, process_id, 0 AS attribution_rank,
+                   layer_index AS source_group, process_index AS source_index,
+                   'host_requested'::TEXT AS attribution
+              FROM lash_session_meta_observer_intent_processes
+            UNION ALL
+            SELECT session_id, process_id, 1 AS attribution_rank,
+                   0 AS source_group, process_index AS source_index,
+                   'fork_inherited'::TEXT AS attribution
+              FROM lash_session_meta_fork_pending_observer_processes
+        ), occurrences AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY session_id, process_id
+                ORDER BY attribution_rank, source_group, source_index
+            ) AS occurrence
+              FROM candidates
+        ), indexed AS (
+            SELECT session_id, process_id, attribution,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY session_id
+                       ORDER BY attribution_rank, source_group, source_index, process_id
+                   ) - 1 AS process_index
+              FROM occurrences
+             WHERE occurrence = 1
+        )
+        INSERT INTO lash_session_meta_pending_observer_intents
+            (session_id, process_index, process_id, process_incarnation, attribution)
+        SELECT session_id, process_index, process_id, NULL, attribution
+          FROM indexed"#;
+
+const DROP_OBSERVER_INTENT_LAYERS_DDL: &str =
+    r#"DROP TABLE lash_session_meta_observer_intent_processes"#;
+const DROP_FORK_PENDING_OBSERVER_INTENTS_DDL: &str =
+    r#"DROP TABLE lash_session_meta_fork_pending_observer_processes"#;
+
+const DROP_OBSERVER_INTENT_DEPTH_DDL: &str =
+    r#"ALTER TABLE lash_session_meta DROP COLUMN observer_intent_depth"#;
+
 const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
     table: "lash_runtime_effect_replay",
     columns: &["group_key", "settlement_seq"],
@@ -258,12 +307,27 @@ const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "se
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        from: 62,
+        to: 63,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &["lash_session_meta_pending_observer_intents"],
+        statements: &[
+            PENDING_OBSERVER_INTENTS_DDL,
+            FOLD_PENDING_OBSERVER_INTENTS_DDL,
+            DROP_OBSERVER_INTENT_LAYERS_DDL,
+            DROP_FORK_PENDING_OBSERVER_INTENTS_DDL,
+            DROP_OBSERVER_INTENT_DEPTH_DDL,
+        ],
+    },
     // Component 61 is the append-identity recreate-only boundary. The receipt
     // table exists in every valid component-61 store, so this row always
     // classifies the source as divergent before source-shape preflight or DDL.
     SchemaMigration {
         from: 61,
-        to: 62,
+        to: 63,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -277,7 +341,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // It is refusal-only: it never runs DDL or advances the stamp.
     SchemaMigration {
         from: 60,
-        to: 62,
+        to: 63,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -286,7 +350,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 59,
-        to: 62,
+        to: 63,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
@@ -298,7 +362,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // second queue read.
     SchemaMigration {
         from: 58,
-        to: 62,
+        to: 63,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
@@ -318,7 +382,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // the documented legacy sentinel values.
     SchemaMigration {
         from: 57,
-        to: 62,
+        to: 63,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -347,7 +411,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // arm an indexed NOT EXISTS predicate.
     SchemaMigration {
         from: 56,
-        to: 62,
+        to: 63,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -383,7 +447,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // occurrence reclaim eligibility from 56 and checkpoint edges from 57.
     SchemaMigration {
         from: 55,
-        to: 62,
+        to: 63,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -426,7 +490,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // source shape a 54 store must present is the current one.
     SchemaMigration {
         from: 54,
-        to: 62,
+        to: 63,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -470,7 +534,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 62,
+        to: 63,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -527,7 +591,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 52,
-        to: 62,
+        to: 63,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -588,7 +652,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 51,
-        to: 62,
+        to: 63,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_runtime_effect_group",
@@ -654,7 +718,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 62,
+        to: 63,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
@@ -952,6 +1016,14 @@ async fn apply_schema_migration(
     else {
         return Ok(SchemaMigrationOutcome::NotApplicable);
     };
+    let introduced_relations = migration
+        .introduced_relations
+        .iter()
+        .copied()
+        .chain(std::iter::once(
+            "lash_session_meta_pending_observer_intents",
+        ))
+        .collect::<Vec<_>>();
     let mut artifacts = sqlx::query_scalar::<_, String>(
         r#"SELECT pg_catalog.format('%I.%I', namespace.nspname, class.relname)
            FROM pg_catalog.pg_class AS class
@@ -961,7 +1033,7 @@ async fn apply_schema_migration(
             AND class.relname = ANY($1)
           ORDER BY namespace.nspname, class.relname"#,
     )
-    .bind(migration.introduced_relations)
+    .bind(introduced_relations)
     .fetch_all(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -1001,11 +1073,12 @@ async fn apply_schema_migration(
     if !artifacts.is_empty() {
         return Ok(SchemaMigrationOutcome::Divergent { artifacts });
     }
-    // A zero-statement immediate-predecessor declaration represents a hard
-    // cutover, not an empty migration. It exists so an old relation can produce
-    // a precise divergence refusal above; without that witness the ordinary
-    // reject-and-recreate mismatch below is still the only valid outcome.
-    if migration.from == SCHEMA_VERSION - 1 && migration.statements.is_empty() {
+    // A zero-statement declaration represents a hard cutover, not an empty
+    // migration. Its introduced relation may produce a more precise divergence
+    // refusal above, but the boundary remains refusal-only if that witness is
+    // absent: source-shape matching and the shared historical DDL must never
+    // advance its stamp.
+    if migration.is_recreate_boundary() {
         return Ok(SchemaMigrationOutcome::NotApplicable);
     }
     if !apply {
@@ -1032,19 +1105,33 @@ async fn apply_schema_migration(
             .await
             .map_err(store_sqlx_error)?;
     }
-    for statement in [
-        SESSION_META_ENUMERATION_DDL,
-        DELETED_SESSION_ENUMERATION_DDL,
-        SESSION_META_ENUMERATION_INDEX_DDL,
-        DROP_REQUESTED_ANCESTOR_DDL,
-        APPEND_IDENTITY_ALL_OR_NONE_DDL,
-    ] {
-        sqlx::query(statement)
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
+    if migration.from < 62 {
+        for statement in [
+            SESSION_META_ENUMERATION_DDL,
+            DELETED_SESSION_ENUMERATION_DDL,
+            SESSION_META_ENUMERATION_INDEX_DDL,
+            DROP_REQUESTED_ANCESTOR_DDL,
+            APPEND_IDENTITY_ALL_OR_NONE_DDL,
+        ] {
+            sqlx::query(statement)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        backfill_checkpoint_blob_refs_tx(tx).await?;
+        for statement in [
+            PENDING_OBSERVER_INTENTS_DDL,
+            FOLD_PENDING_OBSERVER_INTENTS_DDL,
+            DROP_OBSERVER_INTENT_LAYERS_DDL,
+            DROP_FORK_PENDING_OBSERVER_INTENTS_DDL,
+            DROP_OBSERVER_INTENT_DEPTH_DDL,
+        ] {
+            sqlx::query(statement)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+        }
     }
-    backfill_checkpoint_blob_refs_tx(tx).await?;
     let stamped = sqlx::query(
         "UPDATE lash_schema_versions
          SET version = $1
@@ -1132,6 +1219,10 @@ async fn backfill_checkpoint_blob_refs_tx(
 }
 
 impl SchemaMigration {
+    fn is_recreate_boundary(&self) -> bool {
+        self.statements.is_empty()
+    }
+
     fn matches_source_shape(&self, report: &SchemaReport) -> bool {
         if report.found_version != Some(self.from) {
             return false;
@@ -1149,6 +1240,8 @@ impl SchemaMigration {
         let mut missing_guards = self.source_missing_guards.iter().collect::<Vec<_>>();
         let mut saw_version = false;
         let mut saw_requested_ancestor = false;
+        let mut saw_observer_intent_depth = false;
+        let mut saw_missing_pending_observer_intents = false;
         for finding in &report.findings {
             match finding {
                 SchemaFinding::VersionMismatch { expected, found }
@@ -1160,6 +1253,14 @@ impl SchemaMigration {
                     saw_version = true;
                 }
                 SchemaFinding::MissingTable { table } if missing_tables.remove(table.as_str()) => {}
+                SchemaFinding::MissingTable { table }
+                    if self.from <= 62 && table == "lash_session_meta_pending_observer_intents" =>
+                {
+                    if saw_missing_pending_observer_intents {
+                        return false;
+                    }
+                    saw_missing_pending_observer_intents = true;
+                }
                 SchemaFinding::MissingColumn { table, expected }
                     if is_creation_only_column(expected)
                         && missing_columns.remove(&(table.as_str(), expected.name.as_str())) => {}
@@ -1174,6 +1275,16 @@ impl SchemaMigration {
                     }
                     saw_requested_ancestor = true;
                 }
+                SchemaFinding::UnexpectedColumn { table, found }
+                    if self.from <= 62
+                        && table == "lash_session_meta"
+                        && found.name == "observer_intent_depth" =>
+                {
+                    if saw_observer_intent_depth {
+                        return false;
+                    }
+                    saw_observer_intent_depth = true;
+                }
                 _ => return false,
             }
         }
@@ -1181,7 +1292,9 @@ impl SchemaMigration {
             && missing_tables.is_empty()
             && missing_columns.is_empty()
             && missing_guards.is_empty()
-            && (self.from == 60 || saw_requested_ancestor)
+            && (self.from >= 62 || self.from == 60 || saw_requested_ancestor)
+            && saw_missing_pending_observer_intents
+            && saw_observer_intent_depth
     }
 }
 
@@ -1428,7 +1541,8 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
     StoreError::Backend(format!(
         "Postgres schema component `{SCHEMA_COMPONENT}` {found}, {expected}. \
          The component schema is normally a reject-and-recreate boundary. This build has \
-         creation-only declarations from component-50 through component-60 to 62, but every \
+         legacy declarations from component-50 through component-61 plus the component-62 \
+         forward migration, but every \
          published pre-61 graph shape carries the retired sequence column and is refused before \
          migration DDL can run. Component 61 is a hard append-identity cutover with no applicable \
          migration. This mismatch \
@@ -1442,241 +1556,5 @@ pub(crate) fn version_mismatch_error(found: Option<i32>) -> StoreError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn immediate_predecessor_is_a_recreate_boundary() {
-        let boundary = SCHEMA_MIGRATIONS
-            .iter()
-            .find(|migration| migration.from == SCHEMA_VERSION - 1)
-            .expect("the recreate boundary must be visible to the version-bump E2E");
-        assert!(boundary.statements.is_empty());
-        assert_eq!(
-            boundary.introduced_relations,
-            &["lash_runtime_turn_commits"],
-            "every component-61 store must be refused as divergence before DDL"
-        );
-    }
-
-    /// The declared 53 -> 62 migration, which every case below perturbs.
-    fn migration() -> &'static SchemaMigration {
-        SCHEMA_MIGRATIONS
-            .iter()
-            .find(|migration| migration.from == 53)
-            .expect("the component-53 migration is declared")
-    }
-
-    fn column(name: &str, nullable: bool, value_source: ColumnValueSource) -> ColumnShape {
-        ColumnShape {
-            name: name.to_string(),
-            sql_type: "text".to_string(),
-            nullable,
-            value_source,
-        }
-    }
-
-    fn guard(primary_key: bool, predicate: Option<&str>, nulls_not_distinct: bool) -> UniqueGuard {
-        UniqueGuard {
-            primary_key,
-            columns: vec!["group_key".to_string(), "settlement_seq".to_string()],
-            predicate: predicate.map(str::to_string),
-            nulls_not_distinct,
-        }
-    }
-
-    /// The exact partial guard the 54 generation adds, as the shape checker
-    /// renders it.
-    fn declared_guard() -> UniqueGuard {
-        guard(
-            false,
-            Some("(group_key is not null) and (settlement_seq is not null)"),
-            false,
-        )
-    }
-
-    fn report(findings: Vec<SchemaFinding>) -> SchemaReport {
-        SchemaReport {
-            schema: Some("public".to_string()),
-            expected_version: 62,
-            found_version: Some(53),
-            findings,
-        }
-    }
-
-    /// The full set of findings a genuine published component-53 database
-    /// produces against this build, which the migration must accept.
-    fn published_53_findings() -> Vec<SchemaFinding> {
-        vec![
-            SchemaFinding::VersionMismatch {
-                expected: 62,
-                found: Some(53),
-            },
-            SchemaFinding::UnexpectedColumn {
-                table: "lash_runtime_turn_commits".to_string(),
-                found: column(
-                    "requested_ancestor_node_id",
-                    true,
-                    ColumnValueSource::Supplied,
-                ),
-            },
-            SchemaFinding::MissingTable {
-                table: "lash_runtime_effect_group".to_string(),
-            },
-            SchemaFinding::MissingTable {
-                table: "lash_checkpoint_blob_refs".to_string(),
-            },
-            SchemaFinding::MissingTable {
-                table: "lash_turn_cancel_requests".to_string(),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_session_meta".to_string(),
-                expected: ColumnShape {
-                    name: "session_state_version".to_string(),
-                    sql_type: "integer".to_string(),
-                    nullable: true,
-                    value_source: ColumnValueSource::Supplied,
-                },
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_runtime_effect_replay".to_string(),
-                expected: column("group_key", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_runtime_effect_replay".to_string(),
-                expected: column("settlement_seq", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_trigger_occurrences".to_string(),
-                expected: ColumnShape {
-                    name: "reclaimable_at_ms".to_string(),
-                    sql_type: "bigint".to_string(),
-                    nullable: true,
-                    value_source: ColumnValueSource::Supplied,
-                },
-            },
-            SchemaFinding::MissingUniqueGuard {
-                table: "lash_runtime_effect_replay".to_string(),
-                expected: declared_guard(),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_session_meta".to_string(),
-                expected: column("created_at_ms", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_session_meta".to_string(),
-                expected: column("last_commit_at_ms", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_deleted_sessions".to_string(),
-                expected: column("created_at_ms", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_deleted_sessions".to_string(),
-                expected: column("last_commit_at_ms", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_deleted_sessions".to_string(),
-                expected: column("head_revision", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_deleted_sessions".to_string(),
-                expected: column("relation_kind", true, ColumnValueSource::Supplied),
-            },
-            SchemaFinding::MissingColumn {
-                table: "lash_deleted_sessions".to_string(),
-                expected: column("parent_session_id", true, ColumnValueSource::Supplied),
-            },
-        ]
-    }
-
-    #[test]
-    fn the_published_predecessor_shape_is_accepted() {
-        assert!(
-            migration().matches_source_shape(&report(published_53_findings())),
-            "the shape the migration exists for must pass its own preflight"
-        );
-    }
-
-    /// A declaration names a column; it does not license every column shape that
-    /// could wear the name. `NOT NULL` and a value source each make the `ALTER`
-    /// write a value into every existing row — a full table rewrite under lock,
-    /// which is the one thing the creation-only class promises never happens.
-    #[test]
-    fn a_column_that_would_rewrite_every_row_is_refused_by_the_creation_only_door() {
-        for (label, expected) in [
-            (
-                "NOT NULL",
-                column("group_key", false, ColumnValueSource::Supplied),
-            ),
-            (
-                "a default",
-                column("group_key", true, ColumnValueSource::Default),
-            ),
-            (
-                "an identity",
-                column("group_key", true, ColumnValueSource::IdentityByDefault),
-            ),
-            (
-                "a generated value",
-                column("group_key", true, ColumnValueSource::Generated),
-            ),
-        ] {
-            let mut findings = published_53_findings();
-            findings[5] = SchemaFinding::MissingColumn {
-                table: "lash_runtime_effect_replay".to_string(),
-                expected,
-            };
-            assert!(
-                !migration().matches_source_shape(&report(findings)),
-                "a missing column with {label} must not pass the creation-only door"
-            );
-        }
-    }
-
-    /// A declared partial guard is permission for that guard alone. A missing
-    /// `PRIMARY KEY` or full `UNIQUE` over the same columns guards strictly more
-    /// rows, so tolerating it would migrate a database that is genuinely drifted
-    /// — and silently drop a uniqueness guarantee lash depends on.
-    #[test]
-    fn a_stronger_missing_guard_over_the_same_columns_is_refused() {
-        for (label, expected) in [
-            ("a primary key", guard(true, None, false)),
-            ("a full unique guard", guard(false, None, false)),
-            (
-                "a differently-predicated guard",
-                guard(false, Some("(group_key is not null)"), false),
-            ),
-            (
-                "a NULLS NOT DISTINCT rebuild",
-                guard(
-                    false,
-                    Some("(group_key is not null) and (settlement_seq is not null)"),
-                    true,
-                ),
-            ),
-        ] {
-            let mut findings = published_53_findings();
-            findings[8] = SchemaFinding::MissingUniqueGuard {
-                table: "lash_runtime_effect_replay".to_string(),
-                expected,
-            };
-            assert!(
-                !migration().matches_source_shape(&report(findings)),
-                "{label} must not be consumed by the declaration for the partial guard"
-            );
-        }
-    }
-
-    /// The declaration is per table, not per column set: the same key columns on
-    /// a table the migration says nothing about is drift.
-    #[test]
-    fn a_declared_guard_does_not_travel_to_another_table() {
-        let mut findings = published_53_findings();
-        findings[8] = SchemaFinding::MissingUniqueGuard {
-            table: "lash_queued_work_batches".to_string(),
-            expected: declared_guard(),
-        };
-        assert!(!migration().matches_source_shape(&report(findings)));
-    }
-}
+#[path = "schema_tests.rs"]
+mod tests;

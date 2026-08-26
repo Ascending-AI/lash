@@ -682,6 +682,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let direct_meta = SessionMeta {
             session_id: commit.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
         };
         planner.validate_node_derivation()?;
         {
@@ -1198,6 +1199,7 @@ impl SessionCommitStore for PostgresSessionStore {
         let meta = SessionMeta {
             session_id: session_id.to_string(),
             relation: binding.relation.clone(),
+            pending_observer_intents: Vec::new(),
         };
         let created_at_ms = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;

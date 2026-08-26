@@ -91,8 +91,9 @@ pub use session_types::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, FrameNodeId,
     OpenAgentFrameRequest, OpenAgentFrameResult, PluginOwned, SessionContextOverlay,
     SessionCreateRequest, SessionHandle, SessionObservedProcessOutcome,
-    SessionObservedProcessReceipt, SessionPluginSource, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionToolAccess, SubagentSessionContext,
+    SessionObservedProcessReceipt, SessionObserverIntent, SessionObserverIntentAttribution,
+    SessionPluginSource, SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess,
+    SubagentSessionContext,
 };
 pub(crate) use snapshot::{InMemorySnapshotReader, InMemorySnapshotWriter};
 pub use snapshot::{

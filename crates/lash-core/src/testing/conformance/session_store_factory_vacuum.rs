@@ -56,6 +56,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
     );
     let fork_error = factory
         .fork_at(&crate::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "retained-tombstone-fork".to_string(),
             node_id: leaf_node_id.clone(),
             relation: crate::SessionRelation::Root,

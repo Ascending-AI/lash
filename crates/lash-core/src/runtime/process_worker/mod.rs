@@ -1477,6 +1477,7 @@ impl DurableProcessWorker {
             .config
             .session_store_factory
             .create_store(&crate::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::default(),
                 policy: policy.clone(),

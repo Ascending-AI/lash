@@ -25,6 +25,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
+            pending_observer_intents: request.pending_observer_intents.clone(),
         };
         let created_at_ms = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
@@ -496,6 +497,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let meta = SessionMeta {
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
+            pending_observer_intents: request.pending_observer_intents.clone(),
         };
         let created_at_ms = self.clock.timestamp_ms();
         crate::session_meta::write_session_meta_tx(
@@ -510,6 +512,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             session_id: request.session_id.clone(),
             node_id: request.node_id.clone(),
             source_session_id,
+            observed_processes: Vec::new(),
         })
     }
 

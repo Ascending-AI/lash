@@ -3,7 +3,9 @@
 use lash_core::{TriggerDeliveryRetentionCandidate, TriggerStore};
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaProvisioning};
 
-use crate::harness::{REWIND_PAST_55_ARTIFACTS, ScratchSchema};
+use crate::harness::{
+    REWIND_PAST_55_ARTIFACTS, REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS, ScratchSchema,
+};
 use crate::support::database_url;
 
 /// The immediate predecessor adds one nullable arming column and its partial
@@ -18,6 +20,7 @@ async fn main_component_55_store_upgrades_cleanly_to_57() {
     scratch
         .apply(&format!(
             "{REWIND_PAST_55_ARTIFACTS}
+             {REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS}
              UPDATE lash_schema_versions
                 SET version = 55
               WHERE component = 'lash-postgres-store'"
@@ -33,7 +36,7 @@ async fn main_component_55_store_upgrades_cleanly_to_57() {
         },
     )
     .await
-    .expect("the exact published component-55 shape migrates to 62");
+    .expect("the exact published component-55 shape migrates to 63");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -41,7 +44,7 @@ async fn main_component_55_store_upgrades_cleanly_to_57() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
     let column_present: bool = sqlx::query_scalar(
         "SELECT EXISTS (
              SELECT 1 FROM information_schema.columns
@@ -77,6 +80,7 @@ async fn populated_component_55_trigger_scope_arms_only_terminal_rows() {
     scratch
         .apply(&format!(
             "{REWIND_PAST_55_ARTIFACTS}
+             {REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS}
              INSERT INTO lash_trigger_occurrences (
                  occurrence_id, idempotency_key, source_type, source_key,
                  occurred_at_ms, record_json
@@ -112,14 +116,14 @@ async fn populated_component_55_trigger_scope_arms_only_terminal_rows() {
         },
     )
     .await
-    .expect("a populated component-55 trigger scope migrates to 62");
+    .expect("a populated component-55 trigger scope migrates to 63");
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
     )
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
     let zero_fanout_arm: Option<i64> = sqlx::query_scalar(
         "SELECT reclaimable_at_ms
          FROM lash_trigger_occurrences

@@ -178,6 +178,7 @@ impl GeneratedBackendFaultHarness {
     ) -> Result<Arc<dyn RuntimePersistence>, FixedScriptRunnerError> {
         self.factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: SessionRelation::Root,
                 policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),

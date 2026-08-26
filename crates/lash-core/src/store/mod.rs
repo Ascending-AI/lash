@@ -101,6 +101,8 @@ mod persisted_state_tests;
 pub struct SessionMeta {
     pub session_id: String,
     pub relation: crate::SessionRelation,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
 }
 
 impl SessionMeta {

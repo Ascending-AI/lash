@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 31;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 32;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -1279,6 +1279,7 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
 
 fn fixture_session_request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),

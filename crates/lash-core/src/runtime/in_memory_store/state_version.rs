@@ -84,6 +84,7 @@ impl InMemorySessionStore {
         *durable = Some(crate::SessionMeta {
             session_id: binding.session_id.clone(),
             relation: binding.relation.clone(),
+            pending_observer_intents: Vec::new(),
         });
         *self.session_state_version.lock_recover() =
             Some(crate::store::CURRENT_SESSION_STATE_VERSION);

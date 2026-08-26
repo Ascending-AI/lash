@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 62);
+    assert_eq!(PostgresStorage::schema_version(), 63);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -146,6 +146,31 @@ async fn regenerate_postgres_durable_fixture() {
     .expect("write Postgres fixture version");
     std::fs::write(destination.join("fixture.sql"), pg_dump(&database_url))
         .expect("write Postgres fixture dump");
+    drop_fixture_schema(&database_url).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "refreshes only the refusal fixture catalog; preserves its component-v1 checkpoint"]
+async fn regenerate_postgres_prior_component_fixture_catalog() {
+    assert_eq!(
+        std::env::var(REGENERATE_ENV).as_deref(),
+        Ok("1"),
+        "set {REGENERATE_ENV}=1 to acknowledge refreshing the refusal fixture catalog"
+    );
+    let database_url = support::database_url()
+        .expect("set LASH_POSTGRES_DATABASE_URL to an owned throwaway database");
+    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
+    restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
+    let fixture_database_url = fixture_database_url(&database_url);
+    let storage = PostgresStorage::connect(&fixture_database_url)
+        .await
+        .expect("migrate the refusal fixture catalog");
+    storage.pool().close().await;
+    std::fs::write(
+        prior_component_fixture_dir().join("fixture.sql"),
+        pg_dump(&database_url),
+    )
+    .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
 }
 

@@ -653,7 +653,6 @@ impl SessionGraphScenario {
             source_session_id,
             source_node_id: node_id.clone(),
             observer_inheritance: crate::ObserverInheritance::default(),
-            pending_observer_process_ids: Vec::new(),
         };
         let request = session_store_request(
             &physical_id,
@@ -663,6 +662,7 @@ impl SessionGraphScenario {
         let result = self
             .factory
             .fork_at(&crate::ForkSessionRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: physical_id.clone(),
                 node_id: node_id.clone(),
                 relation,
@@ -745,7 +745,6 @@ impl SessionGraphScenario {
             source_session_id: old_model.physical_id.clone(),
             source_node_id: node_id.clone(),
             observer_inheritance: crate::ObserverInheritance::default(),
-            pending_observer_process_ids: Vec::new(),
         };
         let request = session_store_request(
             &physical_id,
@@ -754,6 +753,7 @@ impl SessionGraphScenario {
         );
         self.factory
             .fork_at(&crate::ForkSessionRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: physical_id.clone(),
                 node_id: node_id.clone(),
                 relation,
@@ -1249,6 +1249,7 @@ impl SessionGraphScenario {
         );
         self.factory
             .fork_at(&crate::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: probe_id.clone(),
                 node_id: pinned_node_id.to_string(),
                 relation: request.relation.clone(),

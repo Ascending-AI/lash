@@ -255,6 +255,7 @@ async fn reset(storage: &PostgresStorage) {
 
 fn request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

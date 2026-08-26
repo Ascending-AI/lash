@@ -389,6 +389,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
     let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
     let root_store = Arc::new(RecordingStore::default());
     *root_store.session_meta.lock_recover() = Some(crate::SessionMeta {
+        pending_observer_intents: Vec::new(),
         session_id: "root".to_string(),
         relation: crate::SessionRelation::Root,
     });

@@ -895,11 +895,13 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         let session_id = session_id.clone();
         let turn_id = turn_id.clone();
         async move {
-            let (result, error_evidence) = run_workbench_turn_attempt_with_error_evidence(
-                &state,
-                &session_id,
-                &turn_id,
-                "admitted send",
+            let (result, error_evidence) = Box::pin(
+                run_workbench_turn_attempt_with_error_evidence(
+                    &state,
+                    &session_id,
+                    &turn_id,
+                    "admitted send",
+                ),
             )
             .await;
             let terminalized = crate::restate::terminalize_turn_execution(

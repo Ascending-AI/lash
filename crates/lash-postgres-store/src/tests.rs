@@ -103,8 +103,8 @@ async fn postgres_unbound_session_meta_refuses_ambiguous_resolution() {
     for session_id in ["unbound-session-meta-a", "unbound-session-meta-b"] {
         sqlx::query(
             "INSERT INTO lash_session_meta
-             (session_id, relation_kind, observer_intent_depth)
-             VALUES ($1, 'root', 0)",
+             (session_id, relation_kind)
+             VALUES ($1, 'root')",
         )
         .bind(session_id)
         .execute(storage.pool())
@@ -177,8 +177,8 @@ async fn bulk_delete_over_fork_lineage_retires_the_same_nodes_in_either_candidat
             .unwrap_or_else(|error| panic!("seed witness session `{session_id}`: {error}"));
             sqlx::query(
                 "INSERT INTO lash_session_meta
-                 (session_id, relation_kind, observer_intent_depth)
-                 VALUES ($1, 'root', 0)",
+                 (session_id, relation_kind)
+                 VALUES ($1, 'root')",
             )
             .bind(session_id)
             .execute(storage.pool())
@@ -440,6 +440,7 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
     let factory = storage.session_store_factory();
     let session_id = format!("postgres-first-commit-race:{}", uuid::Uuid::new_v4());
     let request = SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -744,6 +745,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
     let factory = storage.session_store_factory_with_shared_process_registry();
     let session_id = format!("postgres-delete-fence:{}", uuid::Uuid::new_v4());
     let request = SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -963,6 +965,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
 
     let live_factory = lash_core::runtime::InMemorySessionStoreFactory::new();
     let request = SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "postgres-wrong-database-live-attachment".to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

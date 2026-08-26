@@ -88,6 +88,7 @@ async fn bind_session_store(
         .create_store(&SessionStoreCreateRequest {
             session_id: plan.session_id.clone(),
             relation: plan.relation.clone(),
+            pending_observer_intents: plan.pending_observer_intents.clone(),
             policy: plan.policy.clone(),
         })
         .await

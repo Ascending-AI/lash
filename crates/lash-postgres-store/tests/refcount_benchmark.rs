@@ -17,6 +17,7 @@ const WIDE_SIBLING_COUNT: usize = 64;
 
 fn request(session_id: impl Into<String>) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.into(),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -77,6 +78,7 @@ async fn fork_store(
     session_id: &str,
 ) -> Arc<dyn RuntimePersistence> {
     let fork_request = ForkSessionRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         node_id: node_id.to_string(),
         relation: SessionRelation::Root,

@@ -688,6 +688,7 @@ pub(crate) async fn cancel_cron_jobs_for_session(
     let store = state
         .session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: lash::persistence::SessionRelation::Root,
             policy,

@@ -277,6 +277,7 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
 
     fn request(session_id: &str) -> crate::SessionStoreCreateRequest {
         crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -8741,6 +8742,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
 
 async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
+        pending_observer_intents: Vec::new(),
         session_id: "root".to_string(),
         relation: SessionRelation::Child {
             parent_session_id: "parent-session".to_string(),
@@ -8973,6 +8975,7 @@ async fn runtime_persistence_survives_reopen(factory: ReopenableRuntimePersisten
     session_execution_lease_first_claim_excludes_concurrent_reopen_handles(&factory).await;
 
     let meta = SessionMeta {
+        pending_observer_intents: Vec::new(),
         session_id: "root".to_string(),
         relation: SessionRelation::Root,
     };

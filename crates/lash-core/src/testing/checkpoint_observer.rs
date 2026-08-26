@@ -567,6 +567,7 @@ mod tests {
         );
         let store = factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: "observed-usage".to_string(),
                 relation: crate::SessionRelation::Root,
                 policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

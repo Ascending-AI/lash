@@ -13557,6 +13557,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
     let worker_a = recovery_worker(Arc::clone(&registry_a), Arc::clone(&store_factory));
     let _root_store = store_factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "root".to_string(),
             relation: lash_core::SessionRelation::default(),
             policy: recovery_session_policy(),
@@ -13637,6 +13638,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
     );
     let queue_store = store_factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "root".to_string(),
             relation: lash_core::SessionRelation::default(),
             policy: lash_core::SessionPolicy {

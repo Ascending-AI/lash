@@ -386,6 +386,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         let store = Arc::new(RecordingStore::default());
         if !self.defer_metadata_to_admission {
             *store.session_meta.lock_recover() = Some(crate::SessionMeta {
+                pending_observer_intents: Vec::new(),
                 session_id: request.session_id.clone(),
                 relation: request.relation.clone(),
             });
@@ -431,6 +432,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
 async fn recording_factory_root_set_keeps_committed_blob() {
     let factory = RecordingSessionStoreFactory::default();
     let request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "recording-factory-gc".to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

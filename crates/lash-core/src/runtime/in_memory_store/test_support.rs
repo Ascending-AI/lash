@@ -341,6 +341,7 @@ mod tests {
         let session_id = "missing-meta-relation";
         let store = factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: crate::SessionRelation::Root,
                 policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -378,6 +379,7 @@ mod tests {
     async fn factory_rejects_occupied_global_node_id_without_partial_usage() {
         let factory = super::super::InMemorySessionStoreFactory::new();
         let request = |session_id: &str| SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -701,6 +703,7 @@ mod tests {
         for round in 0..ROUNDS {
             let factory = Arc::new(super::super::InMemorySessionStoreFactory::new());
             let request = SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: format!("delete-create-race-{round}"),
                 relation: crate::SessionRelation::Root,
                 policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

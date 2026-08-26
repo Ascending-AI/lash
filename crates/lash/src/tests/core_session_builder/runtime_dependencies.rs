@@ -452,6 +452,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_request = lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
         session_id: "orphaned-fork-source".to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: source_policy.clone(),
@@ -495,6 +496,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     );
     let branch = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "orphaned-fork-branch".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -540,6 +542,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "fork-observer-source".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: policy.clone(),
@@ -604,9 +607,16 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("observe source process");
 
-    core.fork_at(&fork_node_id, "fork-observer-branch").await?;
+    let fork_receipt = core.fork_at(&fork_node_id, "fork-observer-branch").await?;
+    assert_eq!(fork_receipt.observed_processes.len(), 1);
+    assert_eq!(fork_receipt.observed_processes[0].process_id, "fork-visible-process");
+    assert_eq!(
+        fork_receipt.observed_processes[0].attribution,
+        lash_core::test_support::SessionObserverIntentAttribution::ForkInherited
+    );
     let branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "fork-observer-branch".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -648,6 +658,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     );
     let transient_branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "fork-transient-branch".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -660,14 +671,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("load transient-failure fork metadata")
         .expect("transient-failure fork metadata exists");
-    assert!(
-        matches!(
-            transient_meta.relation,
-            lash_core::SessionRelation::Fork {
-                ref pending_observer_process_ids,
-                ..
-            } if pending_observer_process_ids.is_empty()
-        ),
+    assert!(transient_meta.pending_observer_intents.is_empty(),
         "fork_at must consume transiently unavailable observer intents"
     );
 
@@ -676,27 +680,17 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("load published fork metadata")
         .expect("published fork metadata exists");
-    let lash_core::SessionRelation::Fork {
-        pending_observer_process_ids,
-        ..
-    } = &published_meta.relation
-    else {
-        panic!("branch metadata must retain its fork relation");
-    };
-    assert!(
-        pending_observer_process_ids.is_empty(),
+    assert!(matches!(published_meta.relation, lash_core::SessionRelation::Fork { .. }));
+    assert!(published_meta.pending_observer_intents.is_empty(),
         "successfully published observers must be consumed from the recovery intent"
     );
 
     let mut recovery_meta = published_meta;
-    let lash_core::SessionRelation::Fork {
-        pending_observer_process_ids,
-        ..
-    } = &mut recovery_meta.relation
-    else {
-        unreachable!("relation was checked above");
-    };
-    pending_observer_process_ids.push("fork-visible-process".to_string());
+    recovery_meta.pending_observer_intents.push(
+        lash_core::facade_support::SessionObserverIntent::fork_inherited(
+            "fork-visible-process",
+        ),
+    );
     registry
         .register_process(lash_core::ProcessRegistration::new(
             "fork-pruned-process",
@@ -726,7 +720,11 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         )
         .await
         .expect("prune inherited process before recovery");
-    pending_observer_process_ids.push("fork-pruned-process".to_string());
+    recovery_meta.pending_observer_intents.push(
+        lash_core::facade_support::SessionObserverIntent::fork_inherited(
+            "fork-pruned-process",
+        ),
+    );
     branch_store
         .save_session_meta(recovery_meta)
         .await
@@ -759,15 +757,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("load recovered fork metadata")
         .expect("recovered fork metadata exists");
-    let lash_core::SessionRelation::Fork {
-        pending_observer_process_ids,
-        ..
-    } = &recovered_meta.relation
-    else {
-        unreachable!("relation was checked above");
-    };
-    assert!(
-        pending_observer_process_ids.is_empty(),
+    assert!(recovered_meta.pending_observer_intents.is_empty(),
         "recovery must consume the intent after idempotent publication"
     );
     registry
@@ -880,6 +870,107 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     Ok(())
 }
 
+async fn duplicate_only_fork_intents_are_canonical(
+    case: &str,
+    factory: Arc<dyn lash_core::SessionStoreFactory>,
+) -> Result<()> {
+    use lash_core::ProcessRegistry as _;
+
+    let source_session_id = format!("duplicate-only-source-{case}");
+    let branch_session_id = format!("duplicate-only-branch-{case}");
+    let process_id = format!("duplicate-only-process-{case}");
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::clone(&factory))
+        .process_registry(Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>)
+        .build(crate::testing::runtime_lease_owner())?;
+    let policy = lash_core::SessionPolicy {
+        session_id: Some(source_session_id.clone()),
+        ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+    };
+    let source_store = factory
+        .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: source_session_id.clone(),
+            relation: lash_core::SessionRelation::Root,
+            policy: policy.clone(),
+        })
+        .await?;
+    let mut source_state = lash_core::RuntimeSessionState {
+        session_id: source_session_id.clone(),
+        policy,
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    source_state.ensure_agent_frame_initialized();
+    source_store
+        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
+            &source_state,
+            &[],
+        ))
+        .await?;
+    let fork_node_id = source_state
+        .session_graph
+        .leaf_node_id
+        .clone()
+        .expect("source has a forkable frame node");
+    core.pin(&fork_node_id).await?;
+
+    registry
+        .register_process_with_observers(
+            lash_core::ProcessRegistration::new(
+                &process_id,
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            ),
+            std::slice::from_ref(&source_session_id),
+        )
+        .await?;
+
+    let receipt = core
+        .fork_at_with_observer_inheritance(
+            &fork_node_id,
+            &branch_session_id,
+            lash_core::ObserverInheritance::Only(vec![process_id.clone(), process_id.clone()]),
+        )
+        .await?;
+
+    assert_eq!(
+        receipt.observed_processes.len(),
+        1,
+        "duplicate host selection must persist and settle one observer intent"
+    );
+    assert_eq!(receipt.observed_processes[0].process_id, process_id);
+    assert_eq!(
+        registry.list_observed_by(&branch_session_id).await?.len(),
+        1,
+        "the fork must expose one observer edge"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn duplicate_only_fork_intents_are_canonical_in_memory() -> Result<()> {
+    duplicate_only_fork_intents_are_canonical(
+        "in-memory",
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
+    let root = tempfile::tempdir().expect("create SQLite fixture directory");
+    duplicate_only_fork_intents_are_canonical("sqlite", durable_session_store_factory(root.path()))
+        .await
+}
+
 #[tokio::test]
 async fn session_create_observer_intent_replays_idempotently_on_open() -> Result<()> {
     use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
@@ -900,11 +991,11 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         .await?;
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: vec![
+                lash_core::facade_support::SessionObserverIntent::host_requested(process_id),
+            ],
             session_id: session_id.to_string(),
-            relation: lash_core::SessionRelation::ObserverIntent {
-                relation: Box::new(lash_core::SessionRelation::Root),
-                pending_observer_process_ids: vec![process_id.to_string()],
-            },
+            relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         })
         .await?;
@@ -970,7 +1061,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 }
 
 #[tokio::test]
-async fn nested_session_observer_intents_settle_every_layer_before_open_returns() -> Result<()> {
+async fn attributed_session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()> {
     use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
 
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
@@ -1000,15 +1091,19 @@ async fn nested_session_observer_intents_settle_every_layer_before_open_returns(
         }
         let store = factory
             .create_store(&lash_core::SessionStoreCreateRequest {
+                pending_observer_intents: vec![
+                    lash_core::facade_support::SessionObserverIntent::host_requested(
+                        create_process_id.clone(),
+                    ),
+                    lash_core::facade_support::SessionObserverIntent::fork_inherited(
+                        fork_process_id.clone(),
+                    ),
+                ],
                 session_id: session_id.clone(),
-                relation: lash_core::SessionRelation::ObserverIntent {
-                    relation: Box::new(lash_core::SessionRelation::Fork {
-                        source_session_id: format!("nested-source-{case}"),
-                        source_node_id: format!("nested-source-node-{case}"),
-                        observer_inheritance: lash_core::ObserverInheritance::All,
-                        pending_observer_process_ids: vec![fork_process_id.clone()],
-                    }),
-                    pending_observer_process_ids: vec![create_process_id.clone()],
+                relation: lash_core::SessionRelation::Fork {
+                    source_session_id: format!("nested-source-{case}"),
+                    source_node_id: format!("nested-source-node-{case}"),
+                    observer_inheritance: lash_core::ObserverInheritance::All,
                 },
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
             })
@@ -1045,21 +1140,15 @@ async fn nested_session_observer_intents_settle_every_layer_before_open_returns(
                 .await?,
             "open must settle the inner fork observer intent"
         );
-        let relation = store
+        let meta = store
             .load_session_meta()
             .await?
-            .expect("nested session metadata")
-            .relation;
+            .expect("attributed session metadata");
         assert!(
-            matches!(
-                relation,
-                lash_core::SessionRelation::Fork {
-                    ref pending_observer_process_ids,
-                    ..
-                } if pending_observer_process_ids.is_empty()
-            ),
-            "open must persist a fully settled base fork relation, got {relation:?}"
+            matches!(meta.relation, lash_core::SessionRelation::Fork { .. }),
+            "open must preserve the base fork relation, got {:?}", meta.relation
         );
+        assert!(meta.pending_observer_intents.is_empty());
 
         let create_events = registry
             .events_after(&create_process_id, 0)
@@ -1188,6 +1277,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "generation-fork-source".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: source_policy.clone(),

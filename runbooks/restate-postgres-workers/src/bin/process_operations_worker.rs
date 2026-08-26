@@ -99,6 +99,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     for session_id in [OLD_SESSION_ID, NEW_SESSION_ID] {
         factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -235,6 +236,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
     storage
         .session_store_factory_with_shared_process_registry()
         .create_store(&SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: SESSION_ID.to_string(),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

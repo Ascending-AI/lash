@@ -802,6 +802,7 @@ mod tests {
         let session_id = "deleted-during-runtime-binding";
         let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
         let request = crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
@@ -848,6 +849,7 @@ mod tests {
         let session_id = "deleted-during-park-commit";
         let policy = standard_test_policy();
         let request = crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
@@ -917,6 +919,7 @@ mod tests {
         let factory = crate::InMemorySessionStoreFactory::new();
         let store = factory
             .create_store(&crate::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: crate::SessionRelation::Root,
                 policy: policy.clone(),

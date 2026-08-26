@@ -24,12 +24,14 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
 
     let store = factory
         .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: vec![crate::SessionObserverIntent::fork_inherited(
+                PROCESS_ID,
+            )],
             session_id: SESSION_ID.to_string(),
             relation: crate::SessionRelation::Fork {
                 source_session_id: "fork-observer-transient-source".to_string(),
                 source_node_id: "fork-observer-transient-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::All,
-                pending_observer_process_ids: vec![PROCESS_ID.to_string()],
             },
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
@@ -64,13 +66,7 @@ pub async fn fork_observer_intent_transient_failure(factory: Arc<dyn crate::Sess
         .expect("load settled fork metadata")
         .expect("settled fork metadata exists");
     assert!(
-        matches!(
-            meta.relation,
-            crate::SessionRelation::Fork {
-                ref pending_observer_process_ids,
-                ..
-            } if pending_observer_process_ids.is_empty()
-        ),
+        meta.pending_observer_intents.is_empty(),
         "best-effort settlement must consume a transiently unavailable fork observer intent"
     );
 }

@@ -499,8 +499,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 43"),
-        "error must report the real expected version 43: {message}"
+        message.contains("schema version 44"),
+        "error must report the real expected version 44: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -536,7 +536,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 43);
+    assert_eq!(user_version, 44);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -576,6 +576,7 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
     let request = lash_core::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "unwired-process-owner".to_string(),
         relation: lash_core::SessionRelation::default(),
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -611,6 +612,7 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
         .expect("create non-registry Lash database");
     let factory = SqliteSessionStoreFactory::new_with_process_registry(&sessions, &foreign_path);
     let request = lash_core::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "validation-boundary".to_string(),
         relation: lash_core::SessionRelation::default(),
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

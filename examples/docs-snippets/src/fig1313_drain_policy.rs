@@ -67,6 +67,7 @@ async fn enqueue(
 ) -> anyhow::Result<String> {
     let store = store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session.session_id().to_string(),
             relation: lash::persistence::SessionRelation::Root,
             policy: session.policy_snapshot(),

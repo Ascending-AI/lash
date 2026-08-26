@@ -185,6 +185,7 @@ async fn committed_factory_attachment() -> (
 ) {
     let factory = crate::InMemorySessionStoreFactory::new();
     let request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "explicit-root-factory".to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1138,6 +1139,7 @@ struct FencedFixture {
 async fn fenced_fixture(session_id: &str) -> FencedFixture {
     let factory = crate::InMemorySessionStoreFactory::new();
     let request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

@@ -1371,6 +1371,7 @@ impl BackendRunner {
 
     fn create_request(&self) -> SessionStoreCreateRequest {
         SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -1533,13 +1534,13 @@ impl BackendRunner {
                     .expect("generated sequence committed a leaf before fork");
                 self.factory()
                     .fork_at(&ForkSessionRequest {
+                        pending_observer_intents: Vec::new(),
                         session_id: format!("{}:fork", self.session_id),
                         node_id: node_id.clone(),
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id,
                             observer_inheritance: lash_core::ObserverInheritance::None,
-                            pending_observer_process_ids: Vec::new(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -2050,6 +2051,7 @@ fn normalized_store_error(_backend: &str, error: &StoreError) -> String {
 
 async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &PostgresStorage) {
     let create_request = SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: format!("fig-1242-storage-failure:{}", run_nonce()),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -2191,11 +2193,13 @@ async fn runners_for_case_with_clock(
 ) -> Vec<BackendRunner> {
     let session_id = format!("fig-778-{run_nonce}-{}", case.as_str());
     let create_request = SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let expected_meta = SessionMeta {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: SessionRelation::Child {
             parent_session_id: format!("fig-778-{run_nonce}-parent"),
