@@ -6,6 +6,7 @@
 //! example worse than useless, because the migration it advertises would fail
 //! in production rather than here.
 
+use anyhow::Result;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -110,7 +111,8 @@ pub async fn chat_post_message(
         ok: true,
         channel: channel.id,
         ts: stored.ts.to_string(),
-        message: message_object(&stored, false),
+        message: message_object(&stored, false)
+            .map_err(|error| ApiError::internal("project posted message", error))?,
     }))
 }
 
@@ -274,12 +276,14 @@ pub async fn conversations_history(
     let next_cursor = has_more
         .then(|| page.last().map(|row| cursor::encode_ts(row.ts)))
         .flatten();
+    let messages = page
+        .iter()
+        .map(|row| message_object(row, include_metadata))
+        .collect::<Result<Vec<_>>>()
+        .map_err(|error| ApiError::internal("project channel history", error))?;
     Ok(Json(ConversationsHistoryResponse {
         ok: true,
-        messages: page
-            .iter()
-            .map(|row| message_object(row, include_metadata))
-            .collect(),
+        messages,
         has_more,
         // The platform has no pins. The field is part of the response contract,
         // so it is reported honestly as zero rather than omitted.
@@ -344,7 +348,8 @@ pub async fn conversations_replies(
         .flatten();
     let mut messages = Vec::with_capacity(page_size + 1);
     if paging.is_none() {
-        let mut parent_object = message_object(&parent, include_metadata);
+        let mut parent_object = message_object(&parent, include_metadata)
+            .map_err(|error| ApiError::internal("project thread parent", error))?;
         parent_object.thread_ts = Some(parent.ts.to_string());
         parent_object.reply_count = Some(summary.reply_count);
         parent_object.reply_users_count = Some(summary.reply_users_count);
@@ -355,12 +360,13 @@ pub async fn conversations_replies(
         Author::User { user_id } => Some(user_id.clone()),
         Author::App { .. } => None,
     };
-    messages.extend(replies.iter().take(page_size).map(|row| {
-        let mut object = message_object(row, include_metadata);
+    for row in replies.iter().take(page_size) {
+        let mut object = message_object(row, include_metadata)
+            .map_err(|error| ApiError::internal("project thread reply", error))?;
         object.thread_ts = Some(parent.ts.to_string());
         object.parent_user_id = parent_author.clone();
-        object
-    }));
+        messages.push(object);
+    }
 
     Ok(Json(ConversationsRepliesResponse {
         ok: true,
@@ -371,7 +377,7 @@ pub async fn conversations_replies(
 }
 
 /// Project a stored row onto the wire `message` object.
-pub(crate) fn message_object(row: &MessageRow, include_metadata: bool) -> MessageObject {
+pub(crate) fn message_object(row: &MessageRow, include_metadata: bool) -> Result<MessageObject> {
     let mut object = match &row.author {
         Author::User { user_id } => {
             MessageObject::from_user(user_id, &row.text, row.ts.to_string())
@@ -385,9 +391,18 @@ pub(crate) fn message_object(row: &MessageRow, include_metadata: bool) -> Messag
         object.metadata = row
             .metadata_json
             .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok());
+            .map(|raw| {
+                serde_json::from_str(raw).map_err(|error| {
+                    anyhow::anyhow!(
+                        "decode metadata for message row {}/{}: {error}",
+                        row.channel_id,
+                        row.ts
+                    )
+                })
+            })
+            .transpose()?;
     }
-    object
+    Ok(object)
 }
 
 /// Resolve Slack's `channel` argument, which accepts an id or a name.
@@ -464,5 +479,31 @@ fn map_write_error(context: &str, error: anyhow::Error) -> ApiError {
         "channel_not_found" => ApiError::new("channel_not_found"),
         "thread_not_found" => ApiError::new("thread_not_found"),
         _ => ApiError::internal(context, error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_persisted_metadata_is_rejected_with_row_and_cause() {
+        let row = MessageRow {
+            channel_id: "C1234567890".to_string(),
+            ts: Ts::parse("1700000000.000001").expect("valid test ts"),
+            author: Author::User {
+                user_id: "U1234567890".to_string(),
+            },
+            text: "persisted message".to_string(),
+            thread_ts: None,
+            reply_broadcast: false,
+            metadata_json: Some("not-json".to_string()),
+        };
+
+        let error = message_object(&row, true).expect_err("malformed metadata must fail decode");
+        assert_eq!(
+            error.to_string(),
+            "decode metadata for message row C1234567890/1700000000.000001: expected ident at line 1 column 2"
+        );
     }
 }

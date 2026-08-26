@@ -352,7 +352,10 @@ impl TestPlatform {
             .expect("read channel history");
         rows.iter()
             .rev()
-            .map(|row| crate::platform::web_api::message_object(row, true))
+            .map(|row| {
+                crate::platform::web_api::message_object(row, true)
+                    .expect("stored message metadata must decode")
+            })
             .collect()
     }
 
@@ -405,7 +408,10 @@ impl TestPlatform {
             .await
             .expect("read thread replies");
         rows.iter()
-            .map(|row| crate::platform::web_api::message_object(row, true))
+            .map(|row| {
+                crate::platform::web_api::message_object(row, true)
+                    .expect("stored message metadata must decode")
+            })
             .collect()
     }
 }

@@ -247,7 +247,8 @@ pub async fn post_as_user(
     Ok(Json(json!({
         "ok": true,
         "ts": stored.ts.to_string(),
-        "message": web_api::message_object(&stored, false),
+        "message": web_api::message_object(&stored, false)
+            .map_err(|error| ApiError::internal("project posted message", error))?,
     })))
 }
 
