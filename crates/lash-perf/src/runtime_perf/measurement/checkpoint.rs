@@ -264,16 +264,17 @@ async fn run_once_checkpoint_state_hot_paths(
         let turn_started = Instant::now();
         let mut phase_profile = BTreeMap::new();
         if turn_index == 0 {
-            phase_profile.insert(initial_capture_phase.0.clone(), initial_capture_phase.1.clone());
+            phase_profile.insert(
+                initial_capture_phase.0.clone(),
+                initial_capture_phase.1.clone(),
+            );
         }
 
-        let (_, phase) = measure_runtime_perf_phase(
-            "checkpoint_state.dirty_binding_update",
-            || {
+        let (_, phase) =
+            measure_runtime_perf_phase("checkpoint_state.dirty_binding_update", || {
                 fixture.absorb_dirty_assignments();
                 Ok(())
-            },
-        )?;
+            })?;
         phase_profile.insert(phase.0, phase.1);
 
         let (snapshot, phase) =
@@ -300,10 +301,7 @@ async fn run_once_checkpoint_state_hot_paths(
                 "incremental checkpoint captured {last_changed_components} changed components, expected 1"
             );
         }
-        lash_core::testing::stage_execution_state_components(
-            &mut runtime_state,
-            snapshot,
-        )?;
+        lash_core::testing::stage_execution_state_components(&mut runtime_state, snapshot)?;
         let commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
             &[],
@@ -318,22 +316,19 @@ async fn run_once_checkpoint_state_hot_paths(
         phase_profile.insert(phase.0, phase.1);
         last_checkpoint_bytes = budget_measurement.checkpoint_bytes as u64;
 
-        let (commit_result, phase) = measure_runtime_perf_async_phase(
-            "checkpoint_state.component_commit",
-            async {
+        let (commit_result, phase) =
+            measure_runtime_perf_async_phase("checkpoint_state.component_commit", async {
                 store
                     .commit_runtime_state(commit)
                     .await
                     .map_err(anyhow::Error::from)
-            },
-        )
-        .await?;
+            })
+            .await?;
         phase_profile.insert(phase.0, phase.1);
         runtime_state.apply_persisted_commit_result(commit_result);
 
-        let (loaded_execution_state, phase) = measure_runtime_perf_async_phase(
-            "checkpoint_state.component_load",
-            async {
+        let (loaded_execution_state, phase) =
+            measure_runtime_perf_async_phase("checkpoint_state.component_load", async {
                 let persisted = store
                     .load_session()
                     .await?
@@ -344,9 +339,8 @@ async fn run_once_checkpoint_state_hot_paths(
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("loaded session omitted checkpoint"))?,
                 )
-            },
-        )
-        .await?;
+            })
+            .await?;
         phase_profile.insert(phase.0, phase.1);
         last_hydrated_bytes = (loaded_execution_state.root.len()
             + loaded_execution_state
@@ -355,11 +349,10 @@ async fn run_once_checkpoint_state_hot_paths(
                 .map(Vec::len)
                 .sum::<usize>()) as u64;
 
-        let (_, phase) =
-            measure_runtime_perf_phase("checkpoint_state.execution_restore", || {
-                lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&loaded_execution_state)
-                    .map_err(anyhow::Error::from)
-            })?;
+        let (_, phase) = measure_runtime_perf_phase("checkpoint_state.execution_restore", || {
+            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&loaded_execution_state)
+                .map_err(anyhow::Error::from)
+        })?;
         phase_profile.insert(phase.0, phase.1);
 
         let run_turn_ms = elapsed_ms(turn_started);
@@ -406,9 +399,18 @@ async fn run_once_checkpoint_state_hot_paths(
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
     let last_turn_memory = turns.last().map(|turn| &turn.memory);
     let mut extra_counters = BTreeMap::new();
-    extra_counters.insert("execution_state_bindings".to_string(), CHECKPOINT_STATE_BINDINGS as u64);
-    extra_counters.insert("execution_state_components".to_string(), initial_component_count as u64);
-    extra_counters.insert("incremental_changed_components".to_string(), last_changed_components);
+    extra_counters.insert(
+        "execution_state_bindings".to_string(),
+        CHECKPOINT_STATE_BINDINGS as u64,
+    );
+    extra_counters.insert(
+        "execution_state_components".to_string(),
+        initial_component_count as u64,
+    );
+    extra_counters.insert(
+        "incremental_changed_components".to_string(),
+        last_changed_components,
+    );
     extra_counters.insert("checkpoint_bytes".to_string(), last_checkpoint_bytes);
     extra_counters.insert(
         "hydrated_execution_state_bytes".to_string(),
@@ -450,7 +452,9 @@ async fn run_once_checkpoint_state_hot_paths(
             seed_state: seed_state_alloc,
             run_turn: sum_allocation_deltas(turns.iter().map(|turn| &turn.allocations.run_turn)),
             await_background_work: sum_allocation_deltas(
-                turns.iter().map(|turn| &turn.allocations.await_background_work),
+                turns
+                    .iter()
+                    .map(|turn| &turn.allocations.await_background_work),
             ),
             export_state: export_state_alloc,
             total: total_alloc,
@@ -632,7 +636,10 @@ fn runtime_perf_turn_limit_final_message(message_id: String, max_turns: usize) -
     Message {
         id: message_id.clone(),
         role: MessageRole::System,
-        parts: shared_parts(vec![Part::error(format!("{message_id}.p0"), format!("Turn limit reached ({max_turns}) before runtime perf completion."))]),
+        parts: shared_parts(vec![Part::error(
+            format!("{message_id}.p0"),
+            format!("Turn limit reached ({max_turns}) before runtime perf completion."),
+        )]),
         origin: None,
     }
 }
@@ -973,10 +980,7 @@ pub(crate) async fn run_once_embed(
             async {
                 let effect_host = session.effect_host();
                 let scoped_effect_controller = effect_host
-                    .scoped(session.turn_scope(format!(
-                        "runtime-perf-embed-{}",
-                        turn_index + 1
-                    )))
+                    .scoped(session.turn_scope(format!("runtime-perf-embed-{}", turn_index + 1)))
                     .map_err(anyhow::Error::from)?;
                 session
                     .turn(lash_core::TurnInput::text(benchmark_prompt(

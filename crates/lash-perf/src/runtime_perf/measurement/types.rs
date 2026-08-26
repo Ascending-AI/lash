@@ -22,13 +22,19 @@ impl HighTrafficConfig {
     ) -> anyhow::Result<Self> {
         let mut weights = [0; HIGH_TRAFFIC_KINDS.len()];
         for entry in mix.split(',').filter(|entry| !entry.trim().is_empty()) {
-            let (kind, weight) = entry
-                .split_once('=')
-                .ok_or_else(|| anyhow::anyhow!("invalid high-traffic mix entry `{entry}`; expected kind=weight"))?;
+            let (kind, weight) = entry.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("invalid high-traffic mix entry `{entry}`; expected kind=weight")
+            })?;
             let index = HIGH_TRAFFIC_KINDS
                 .iter()
                 .position(|candidate| *candidate == kind.trim())
-                .ok_or_else(|| anyhow::anyhow!("unknown high-traffic mix kind `{}`; expected one of {}", kind.trim(), HIGH_TRAFFIC_KINDS.join(", ")))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unknown high-traffic mix kind `{}`; expected one of {}",
+                        kind.trim(),
+                        HIGH_TRAFFIC_KINDS.join(", ")
+                    )
+                })?;
             weights[index] = weight.trim().parse::<u64>().map_err(|_| {
                 anyhow::anyhow!("invalid high-traffic mix weight in `{entry}`; expected an integer")
             })?;
@@ -42,7 +48,9 @@ impl HighTrafficConfig {
             .filter(|value| !value.trim().is_empty())
             .map(|value| {
                 value.trim().parse::<usize>().map_err(|_| {
-                    anyhow::anyhow!("invalid knee population `{value}`; expected a positive integer")
+                    anyhow::anyhow!(
+                        "invalid knee population `{value}`; expected a positive integer"
+                    )
                 })
             })
             .collect::<anyhow::Result<Vec<_>>>()?;

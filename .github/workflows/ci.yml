@@ -1069,7 +1069,6 @@ jobs:
           # checked the moment it exists rather than when someone remembers to
           # add it here.
           python3 scripts/check_included_file_formatting.py
-          rustfmt --edition 2024 --check crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs
 
       - name: Clippy (workspace, all targets)
         run: |

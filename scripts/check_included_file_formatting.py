@@ -24,7 +24,7 @@ INCLUDE = re.compile(r'include!\("([^"]+)"\)')
 # repository has around sixty more that predate this check; adding a scope here
 # is how one becomes covered, and the intended direction is to add scopes, never
 # to remove them.
-DEFAULT_SCOPES = ("crates/lashlang",)
+DEFAULT_SCOPES = ("crates/lashlang", "crates/lash-perf")
 
 
 def repo_root() -> Path:

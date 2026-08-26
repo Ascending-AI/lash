@@ -19,8 +19,7 @@ async fn run_once_queued_work_claim_stress(
     let build_before_alloc = allocator_stats();
     let build_started = Instant::now();
     let store = Arc::new(RuntimePerfStore::default());
-    let _runtime =
-        build_runtime_with_store(scenario, Some(Arc::clone(&store)), None).await?;
+    let _runtime = build_runtime_with_store(scenario, Some(Arc::clone(&store)), None).await?;
     let mut commit_state = runtime_perf_commit_state(store.as_ref(), &session_id).await?;
     let build_runtime_ms = elapsed_ms(build_started);
     let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
@@ -123,7 +122,9 @@ async fn run_once_queued_work_claim_stress(
                         &lease.fence(),
                         &owner,
                         QueuedWorkClaimBoundary::Idle,
-                        lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
+                        lash_core::testing::queued_work_claim_policy(
+                            QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                        ),
                     )
                     .await?
                     .claim()
@@ -204,7 +205,9 @@ async fn run_once_queued_work_claim_stress(
                         &lease.fence(),
                         &owner,
                         QueuedWorkClaimBoundary::Idle,
-                        lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
+                        lash_core::testing::queued_work_claim_policy(
+                            QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                        ),
                     )
                     .await?
                     .claim()
@@ -400,9 +403,7 @@ async fn enqueue_queued_work_stress_turn(
         );
         let draft = lash_core::runtime::process_wake_batch_draft(wake)
             .with_merge_key("runtime-perf-queued-work-stress");
-        store
-            .enqueue_queued_work(draft)
-            .await?;
+        store.enqueue_queued_work(draft).await?;
     }
 
     let wake = queued_work_stress_wake(
@@ -550,8 +551,9 @@ async fn run_once_turn_input_ingress_interrupt(
         let (_, phase) =
             measure_runtime_perf_async_phase("turn_input_ingress.enqueue_next", async {
                 for input_index in 0..TURN_INPUT_INGRESS_NEXT_PER_TURN {
-                    let mut input =
-                        TurnInput::text(format!("queued next turn {turn_index} input {input_index}"));
+                    let mut input = TurnInput::text(format!(
+                        "queued next turn {turn_index} input {input_index}"
+                    ));
                     if input_index == 0 {
                         input = input.with_attachment(lash_core::AttachmentSource::inline(
                             lash_core::MediaType::parse("image/png").unwrap(),
@@ -678,9 +680,9 @@ async fn run_once_turn_input_ingress_interrupt(
             .await?;
         phase_profile.insert(phase.0, phase.1);
         next_claims += 1;
-        let expected_next =
-            TURN_INPUT_INGRESS_ACTIVE_PER_TURN - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN
-                + TURN_INPUT_INGRESS_NEXT_PER_TURN;
+        let expected_next = TURN_INPUT_INGRESS_ACTIVE_PER_TURN
+            - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN
+            + TURN_INPUT_INGRESS_NEXT_PER_TURN;
         if next_claim.inputs.len() != expected_next {
             anyhow::bail!(
                 "turn-input ingress expected {expected_next} next-turn inputs, got {}",
@@ -699,8 +701,9 @@ async fn run_once_turn_input_ingress_interrupt(
         phase_profile.insert(phase.0, phase.1);
         abandoned_claims += 1;
 
-        let (next_claim, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.reclaim_next_turn_inputs", async {
+        let (next_claim, phase) = measure_runtime_perf_async_phase(
+            "turn_input_ingress.reclaim_next_turn_inputs",
+            async {
                 store
                     .claim_next_turn_inputs(
                         &session_id,
@@ -710,8 +713,9 @@ async fn run_once_turn_input_ingress_interrupt(
                     )
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("expected reclaimed next-turn input claim"))
-            })
-            .await?;
+            },
+        )
+        .await?;
         phase_profile.insert(phase.0, phase.1);
         next_claims += 1;
         let next_turn_input = next_claim.materialize_turn_input();
@@ -727,8 +731,9 @@ async fn run_once_turn_input_ingress_interrupt(
             anyhow::bail!("turn-input ingress next claim lost attachment bytes");
         }
 
-        let (_, phase) =
-            measure_runtime_perf_async_phase("turn_input_ingress.complete_next_turn_inputs", async {
+        let (_, phase) = measure_runtime_perf_async_phase(
+            "turn_input_ingress.complete_next_turn_inputs",
+            async {
                 let result = store
                     .commit_runtime_state(
                         RuntimeCommit::persisted_state_for_test(&commit_state, &[])
@@ -737,8 +742,9 @@ async fn run_once_turn_input_ingress_interrupt(
                     .await?;
                 commit_state.apply_persisted_commit_result(result);
                 Ok::<(), anyhow::Error>(())
-            })
-            .await?;
+            },
+        )
+        .await?;
         phase_profile.insert(phase.0, phase.1);
         completed_inputs += next_claim.inputs.len();
 
@@ -885,7 +891,10 @@ fn queued_work_stress_commit(
     completed_queue_claims: Vec<QueuedWorkCompletion>,
 ) -> RuntimeCommit {
     RuntimeCommit {
-        graph: GraphAppend { nodes: Vec::new(), leaf_node_id: None },
+        graph: GraphAppend {
+            nodes: Vec::new(),
+            leaf_node_id: None,
+        },
         completed_queue_claims,
         ..RuntimeCommit::persisted_state_for_test(state, &[])
     }
@@ -897,7 +906,9 @@ async fn runtime_perf_commit_state(
 ) -> anyhow::Result<RuntimeSessionState> {
     let state = RuntimeSessionState {
         session_id: session_id.to_string(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))

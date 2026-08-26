@@ -97,13 +97,13 @@ async fn run_once_high_traffic(
                 Some(namespace.database_url())
             });
         let step_result = Box::pin(run_high_traffic_step(
-                scenario,
-                chat_turns,
-                population,
-                config,
-                step_database_url,
-            ))
-            .await;
+            scenario,
+            chat_turns,
+            population,
+            config,
+            step_database_url,
+        ))
+        .await;
         drop(postgres_namespace);
         steps.push(step_result?);
     }
@@ -173,11 +173,12 @@ async fn run_once_high_traffic(
         }
 
         if scenario.is_high_traffic_knee() {
-            let (base_population, base_p95, base_turns_per_second) = *knee_baseline.get_or_insert((
-                step.population,
-                latency.p95.max(f64::EPSILON),
-                turns_per_second.max(f64::EPSILON),
-            ));
+            let (base_population, base_p95, base_turns_per_second) =
+                *knee_baseline.get_or_insert((
+                    step.population,
+                    latency.p95.max(f64::EPSILON),
+                    turns_per_second.max(f64::EPSILON),
+                ));
             let p95_vs_base = latency.p95 / base_p95;
             let linear_throughput =
                 base_turns_per_second * step.population as f64 / base_population as f64;
@@ -190,10 +191,7 @@ async fn run_once_high_traffic(
                 format!("{prefix}.throughput_vs_linear_ratio_milli"),
                 (throughput_vs_linear.max(0.0) * 1_000.0).round() as u64,
             );
-            if step_index > 0
-                && p95_vs_base > config.knee_threshold
-                && detected_knee.is_none()
-            {
+            if step_index > 0 && p95_vs_base > config.knee_threshold && detected_knee.is_none() {
                 detected_knee = Some(step.population);
             }
         }
@@ -212,9 +210,7 @@ async fn run_once_high_traffic(
 
         for (step_sample_index, depth) in step.queue_depth_samples.iter().enumerate() {
             let key = if scenario.is_high_traffic_knee() {
-                format!(
-                    "{prefix}.queue_depth.inflight.sample.{step_sample_index:08}"
-                )
+                format!("{prefix}.queue_depth.inflight.sample.{step_sample_index:08}")
             } else {
                 format!("queue_depth.inflight.sample.{queue_sample_index:08}")
             };
@@ -346,7 +342,11 @@ async fn run_once_high_traffic(
         total_store_transaction,
     );
     insert_wait_phase(&mut phase_profile, "wait.claim_scan", total_claim_scan);
-    insert_wait_phase(&mut phase_profile, "wait.queue_enqueue", total_queue_enqueue);
+    insert_wait_phase(
+        &mut phase_profile,
+        "wait.queue_enqueue",
+        total_queue_enqueue,
+    );
 
     Ok(RuntimePerfRunResult {
         scenario: scenario.name().to_string(),
@@ -483,11 +483,7 @@ async fn run_high_traffic_step(
         &calls_after,
         "store_calls.commit_runtime_state",
     );
-    let store_transaction = timing_delta(
-        &timings_before,
-        &timings_after,
-        "store_transaction",
-    );
+    let store_transaction = timing_delta(&timings_before, &timings_after, "store_transaction");
     let claim_scan = timing_delta(&timings_before, &timings_after, "claim_scan");
     let queue_enqueue = timing_delta(&timings_before, &timings_after, "queue_enqueue");
     let queue_depth_samples = queue_depth_samples.lock_recover().clone();
@@ -562,18 +558,18 @@ async fn run_high_traffic_operation(
                 "title": "load",
                 "text": "runtime perf benchmark ok",
             }),
-            format!("runtime-perf-load-trigger:{}:{ordinal}", session.session_id()),
+            format!(
+                "runtime-perf-load-trigger:{}:{ordinal}",
+                session.session_id()
+            ),
         )
         .with_source(serde_json::json!({}))
         .for_session(session.session_id());
-        let trigger_controller =
-            lash::runtime::InlineRuntimeEffectController::default()
-                .allow_process_lifetime_completion_keys();
+        let trigger_controller = lash::runtime::InlineRuntimeEffectController::default()
+            .allow_process_lifetime_completion_keys();
         let controller = lash_core::ScopedEffectController::borrowed(
             &trigger_controller,
-            session.turn_scope(format!(
-                "runtime-perf-load-trigger-emission-{ordinal}"
-            )),
+            session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
         )?;
         let delivery_report = core.triggers().emit(request, controller).await?;
         let delivery_process_ids = delivery_report.started_process_ids();
@@ -669,10 +665,8 @@ fn high_traffic_turn_index(
 }
 
 fn scheduled_arrival(started: Instant, ordinal: usize, arrival_rate: u64) -> Option<Instant> {
-    (arrival_rate > 0).then(|| {
-        started
-            + Duration::from_secs_f64(ordinal as f64 / arrival_rate.max(1) as f64)
-    })
+    (arrival_rate > 0)
+        .then(|| started + Duration::from_secs_f64(ordinal as f64 / arrival_rate.max(1) as f64))
 }
 
 fn timing_delta(
@@ -688,11 +682,7 @@ fn timing_delta(
     }
 }
 
-fn counter_delta(
-    before: &BTreeMap<String, u64>,
-    after: &BTreeMap<String, u64>,
-    key: &str,
-) -> u64 {
+fn counter_delta(before: &BTreeMap<String, u64>, after: &BTreeMap<String, u64>, key: &str) -> u64 {
     after
         .get(key)
         .copied()
@@ -810,5 +800,4 @@ mod high_traffic_tests {
         );
         assert_eq!(high_traffic_turn_index(false, 7, 12).unwrap(), 12);
     }
-
 }
