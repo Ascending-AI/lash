@@ -293,6 +293,7 @@ impl SessionBuilder {
         policy: &SessionPolicy,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>> {
         let request = SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
             relation: self
                 .parent_session_id

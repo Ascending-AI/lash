@@ -1,4 +1,7 @@
-use crate::{CausalRef, ObserverInheritance, SessionMeta, SessionRelation, StoreError};
+use crate::{
+    CausalRef, ObserverInheritance, SessionMeta, SessionObserverIntent,
+    SessionObserverIntentAttribution, SessionRelation, StoreError,
+};
 
 const RECORD_KIND: &str = "SessionMeta relation";
 
@@ -144,18 +147,23 @@ impl CausalColumns {
     }
 }
 
+/// Backend-neutral representation of one stored observer intent.
+pub struct StoredObserverIntent {
+    pub process_id: String,
+    pub process_incarnation: Option<i64>,
+    pub attribution: String,
+}
+
 /// Backend-neutral representation of one stored session relation and its lists.
 pub struct StoredRelation {
     pub session_id: String,
     pub relation_kind: String,
-    pub observer_intent_depth: i64,
     pub parent_session_id: Option<String>,
     pub cause: CausalColumns,
     pub source_session_id: Option<String>,
     pub source_node_id: Option<String>,
     pub observer_inheritance_kind: Option<String>,
-    pub observer_intent_processes: Vec<Vec<String>>,
-    pub fork_pending_processes: Vec<String>,
+    pub pending_observer_intents: Vec<StoredObserverIntent>,
     pub fork_inheritance_processes: Vec<String>,
 }
 
@@ -175,37 +183,48 @@ impl SessionMetaCodec {
 
     /// Encode public session metadata into backend-neutral stored columns.
     pub fn encode(self, meta: &SessionMeta) -> Result<StoredRelation, StoreError> {
-        let mut relation = &meta.relation;
-        let mut observer_intent_processes = Vec::new();
-        while let SessionRelation::ObserverIntent {
-            relation: inner,
-            pending_observer_process_ids,
-        } = relation
-        {
-            observer_intent_processes.push(pending_observer_process_ids.clone());
-            relation = inner.as_ref();
+        let mut seen_processes = std::collections::BTreeSet::new();
+        let mut pending_observer_intents = Vec::with_capacity(meta.pending_observer_intents.len());
+        for intent in &meta.pending_observer_intents {
+            if !seen_processes.insert(intent.process_id.as_str()) {
+                return Err(StoreError::Backend(format!(
+                    "session `{}` has duplicate pending observer intent for process `{}`",
+                    meta.session_id, intent.process_id
+                )));
+            }
+            let process_incarnation = intent
+                .process_incarnation
+                .map(|value| {
+                    i64::try_from(value).map_err(|_| {
+                        StoreError::Backend(format!(
+                            "process incarnation does not fit {}",
+                            self.backend_integer_type
+                        ))
+                    })
+                })
+                .transpose()?;
+            let attribution = match intent.attribution {
+                SessionObserverIntentAttribution::HostRequested => "host_requested",
+                SessionObserverIntentAttribution::ForkInherited => "fork_inherited",
+            };
+            pending_observer_intents.push(StoredObserverIntent {
+                process_id: intent.process_id.clone(),
+                process_incarnation,
+                attribution: attribution.to_string(),
+            });
         }
-        let observer_intent_depth =
-            i64::try_from(observer_intent_processes.len()).map_err(|_| {
-                StoreError::Backend(format!(
-                    "observer-intent depth does not fit {}",
-                    self.backend_integer_type
-                ))
-            })?;
         let mut stored = StoredRelation {
             session_id: meta.session_id.clone(),
             relation_kind: String::new(),
-            observer_intent_depth,
             parent_session_id: None,
             cause: CausalColumns::default(),
             source_session_id: None,
             source_node_id: None,
             observer_inheritance_kind: None,
-            observer_intent_processes,
-            fork_pending_processes: Vec::new(),
+            pending_observer_intents,
             fork_inheritance_processes: Vec::new(),
         };
-        match relation {
+        match &meta.relation {
             SessionRelation::Root => stored.relation_kind = "root".to_string(),
             SessionRelation::Child {
                 parent_session_id,
@@ -219,12 +238,10 @@ impl SessionMetaCodec {
                 source_session_id,
                 source_node_id,
                 observer_inheritance,
-                pending_observer_process_ids,
             } => {
                 stored.relation_kind = "fork".to_string();
                 stored.source_session_id = Some(source_session_id.clone());
                 stored.source_node_id = Some(source_node_id.clone());
-                stored.fork_pending_processes = pending_observer_process_ids.clone();
                 match observer_inheritance {
                     ObserverInheritance::All => {
                         stored.observer_inheritance_kind = Some("all".to_string());
@@ -237,9 +254,6 @@ impl SessionMetaCodec {
                         stored.fork_inheritance_processes = process_ids.clone();
                     }
                 }
-            }
-            SessionRelation::ObserverIntent { .. } => {
-                unreachable!("observer-intent layers were peeled above")
             }
         }
         Ok(stored)
@@ -254,25 +268,21 @@ impl SessionMetaCodec {
     pub fn decode_with_process_rows(
         self,
         mut stored: StoredRelation,
-        observer_intent_rows: Vec<(i64, i64, String)>,
-        fork_pending_rows: Vec<(i64, String)>,
+        observer_intent_rows: Vec<(i64, String, Option<i64>, String)>,
         fork_inheritance_rows: Vec<(i64, String)>,
     ) -> Result<SessionMeta, StoreError> {
-        let depth = self.read_index(stored.observer_intent_depth, "observer_intent_depth")?;
-        stored.observer_intent_processes = vec![Vec::new(); depth];
-        for (layer_index, process_index, process_id) in observer_intent_rows {
-            let layer_index = self.read_index(layer_index, "observer-intent layer_index")?;
-            let layer = stored
-                .observer_intent_processes
-                .get_mut(layer_index)
-                .ok_or_else(|| self.corrupt("observer-intent process names a missing layer"))?;
-            if self.read_index(process_index, "observer-intent process_index")? != layer.len() {
+        for (process_index, process_id, process_incarnation, attribution) in observer_intent_rows {
+            if self.read_index(process_index, "observer-intent process_index")?
+                != stored.pending_observer_intents.len()
+            {
                 return Err(self.corrupt("observer-intent process indexes are not contiguous"));
             }
-            layer.push(process_id);
+            stored.pending_observer_intents.push(StoredObserverIntent {
+                process_id,
+                process_incarnation,
+                attribution,
+            });
         }
-        stored.fork_pending_processes =
-            self.decode_process_rows(fork_pending_rows, "fork pending process_index")?;
         stored.fork_inheritance_processes =
             self.decode_process_rows(fork_inheritance_rows, "fork inheritance process_index")?;
         self.decode(stored)
@@ -280,9 +290,8 @@ impl SessionMetaCodec {
 
     /// Decode and validate backend-neutral stored columns as public metadata.
     pub fn decode(self, stored: StoredRelation) -> Result<SessionMeta, StoreError> {
-        let mut relation = match stored.relation_kind.as_str() {
+        let relation = match stored.relation_kind.as_str() {
             "root" => {
-                self.require_empty(&stored.fork_pending_processes, "fork pending processes")?;
                 self.require_empty(
                     &stored.fork_inheritance_processes,
                     "fork inheritance processes",
@@ -290,7 +299,6 @@ impl SessionMetaCodec {
                 SessionRelation::Root
             }
             "child" => {
-                self.require_empty(&stored.fork_pending_processes, "fork pending processes")?;
                 self.require_empty(
                     &stored.fork_inheritance_processes,
                     "fork inheritance processes",
@@ -320,20 +328,42 @@ impl SessionMetaCodec {
                         .required(stored.source_session_id, "source_session_id")?,
                     source_node_id: self.required(stored.source_node_id, "source_node_id")?,
                     observer_inheritance,
-                    pending_observer_process_ids: stored.fork_pending_processes,
                 }
             }
             other => return Err(self.corrupt(format!("unknown relation_kind `{other}`"))),
         };
-        for pending_observer_process_ids in stored.observer_intent_processes.into_iter().rev() {
-            relation = SessionRelation::ObserverIntent {
-                relation: Box::new(relation),
-                pending_observer_process_ids,
+        let mut pending_observer_intents =
+            Vec::with_capacity(stored.pending_observer_intents.len());
+        for intent in stored.pending_observer_intents {
+            let process_incarnation = intent
+                .process_incarnation
+                .map(|value| {
+                    u64::try_from(value).map_err(|_| {
+                        self.corrupt(format!(
+                            "process_incarnation must be non-negative, got {value}"
+                        ))
+                    })
+                })
+                .transpose()?;
+            let attribution = match intent.attribution.as_str() {
+                "host_requested" => SessionObserverIntentAttribution::HostRequested,
+                "fork_inherited" => SessionObserverIntentAttribution::ForkInherited,
+                other => {
+                    return Err(
+                        self.corrupt(format!("unknown observer-intent attribution `{other}`"))
+                    );
+                }
             };
+            pending_observer_intents.push(SessionObserverIntent {
+                process_id: intent.process_id,
+                process_incarnation,
+                attribution,
+            });
         }
         Ok(SessionMeta {
             session_id: stored.session_id,
             relation,
+            pending_observer_intents,
         })
     }
 

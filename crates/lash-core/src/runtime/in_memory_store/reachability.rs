@@ -325,6 +325,7 @@ mod tests {
         let child_session_id = "orphan-fork-child".to_string();
         factory
             .fork_at(&crate::ForkSessionRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: child_session_id.clone(),
                 node_id: parent_leaf.clone(),
                 relation: crate::SessionRelation::Root,
@@ -335,6 +336,7 @@ mod tests {
         let child_leaf = {
             let child = factory
                 .open_existing_store(&crate::SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
                     session_id: child_session_id.clone(),
                     relation: crate::SessionRelation::Root,
                     policy: parent.policy.clone(),

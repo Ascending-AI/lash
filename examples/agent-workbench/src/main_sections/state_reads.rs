@@ -12,6 +12,7 @@ fn state_store_request(state: &AppState, session_id: &str) -> lash::persistence:
     policy.session_id = Some(session_id.to_string());
     policy.model = model_spec_from_selection(state.selected_model());
     lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: lash::persistence::SessionRelation::Root,
         policy,

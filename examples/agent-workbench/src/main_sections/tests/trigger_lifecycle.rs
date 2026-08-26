@@ -213,6 +213,7 @@
         let session_store =
             session_store_factory
                 .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: lash::persistence::SessionRelation::Root,
                     policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),

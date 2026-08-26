@@ -50,7 +50,9 @@ impl ManagedSessionCapability {
         }
         let observer_intent_source = match materialized.store_binding.as_deref() {
             Some(store) => crate::runtime::SessionObserverIntentSource::Persisted(store),
-            None => crate::runtime::SessionObserverIntentSource::Unstored(plan.relation.clone()),
+            None => crate::runtime::SessionObserverIntentSource::Unstored(
+                plan.pending_observer_intents.clone(),
+            ),
         };
         let observed_processes = crate::runtime::reconcile_session_process_observer_intents(
             current.host.process_registry.as_deref(),

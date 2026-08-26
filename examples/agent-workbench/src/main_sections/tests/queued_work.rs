@@ -69,6 +69,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         let cursor = session.observe().current_observation().cursor;
         let store = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -207,6 +208,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
             .expect("open selected-drain refusal session");
         let store = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -326,6 +328,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("open targeted wake session");
         let target = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -596,6 +599,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let deleted_target_id = "workbench-deleted-wake-target";
         store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: deleted_target_id.to_string(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -845,6 +849,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("open wake single-reply session");
         let target = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -1032,6 +1037,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
             .expect("open selected-drain outcome session");
         let store = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -1169,6 +1175,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
 
         let target = store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),

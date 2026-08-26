@@ -311,6 +311,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     await_terminal(&registry, PROCESS_ID).await;
 
     let request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: format!("process-env:{PROCESS_ID}"),
         relation: crate::SessionRelation::default(),
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

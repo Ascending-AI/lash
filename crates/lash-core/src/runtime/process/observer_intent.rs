@@ -1,6 +1,9 @@
 use super::{ProcessObserverBy, ProcessRegistry};
 use crate::store::{RuntimePersistence, StoreError};
-use crate::{SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionRelation};
+use crate::{
+    SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent,
+    SessionObserverIntentAttribution,
+};
 
 /// Source of the relation whose process-observer intents must be settled.
 pub enum SessionObserverIntentSource<'a> {
@@ -11,18 +14,17 @@ pub enum SessionObserverIntentSource<'a> {
     /// Opening a brand-new store has no relation to reconcile yet, so missing
     /// metadata is a no-op on that path.
     PersistedIfPresent(&'a dyn RuntimePersistence),
-    /// Settle an in-memory relation that has no persistence recovery path.
-    Unstored(SessionRelation),
+    /// Settle in-memory intents that have no persistence recovery path.
+    Unstored(Vec<SessionObserverIntent>),
 }
 
-/// Publish and consume every pending process-observer layer for a session.
+/// Publish and consume every pending process-observer intent for a session.
 ///
 /// Observer publication is best effort per process. The returned results cover
-/// `ObserverIntent` layers (the ids explicitly requested at session creation);
-/// fork-inheritance outcomes are consumed without changing session creation's
-/// public result shape. Unknown, pruned, or temporarily unavailable processes
-/// never prevent the relation from reaching its fully settled base form. This
-/// is deliberate: hosts can add an observer again after a transient failure,
+/// both host-requested and fork-inherited intents and preserve that attribution.
+/// Unknown, pruned, or temporarily unavailable processes never prevent the
+/// durable intent set from reaching its fully settled empty form. This is
+/// deliberate: hosts can add an observer again after a transient failure,
 /// while retaining an intent would make settlement behavior depend on which
 /// session-creation path happened to publish it.
 pub async fn reconcile_session_process_observer_intents(
@@ -30,95 +32,62 @@ pub async fn reconcile_session_process_observer_intents(
     session_id: &str,
     source: SessionObserverIntentSource<'_>,
 ) -> Result<Vec<SessionObservedProcessReceipt>, StoreError> {
-    let (mut relation, persisted) = match source {
+    let (pending_observer_intents, persisted) = match source {
         SessionObserverIntentSource::Persisted(store) => {
-            let meta = store.load_session_meta().await?.ok_or_else(|| {
+            let mut meta = store.load_session_meta().await?.ok_or_else(|| {
                 StoreError::Backend(format!(
                     "session `{session_id}` has no metadata for observer intent settlement"
                 ))
             })?;
-            (meta.relation.clone(), Some((store, meta)))
+            let pending = std::mem::take(&mut meta.pending_observer_intents);
+            (pending, Some((store, meta)))
         }
         SessionObserverIntentSource::PersistedIfPresent(store) => {
-            let Some(meta) = store.load_session_meta().await? else {
+            let Some(mut meta) = store.load_session_meta().await? else {
                 return Ok(Vec::new());
             };
-            (meta.relation.clone(), Some((store, meta)))
+            let pending = std::mem::take(&mut meta.pending_observer_intents);
+            (pending, Some((store, meta)))
         }
-        SessionObserverIntentSource::Unstored(relation) => (relation, None),
+        SessionObserverIntentSource::Unstored(intents) => (intents, None),
     };
-    let mut create_observer_results = Vec::new();
-    let mut settled_layer = false;
-
-    loop {
-        if matches!(relation, SessionRelation::ObserverIntent { .. }) {
-            let SessionRelation::ObserverIntent {
-                relation: inner,
-                pending_observer_process_ids,
-            } = relation
-            else {
-                unreachable!("relation variant was checked above");
-            };
-            create_observer_results.extend(
-                apply_process_observers(
-                    process_registry,
-                    session_id,
-                    &pending_observer_process_ids,
-                    ProcessObserverBy::host(format!("session-create:{session_id}")),
-                )
-                .await,
-            );
-            relation = *inner;
-            settled_layer = true;
-            continue;
-        }
-
-        let SessionRelation::Fork {
-            pending_observer_process_ids,
-            ..
-        } = &mut relation
-        else {
-            break;
-        };
-        if pending_observer_process_ids.is_empty() {
-            break;
-        }
-        let pending_observer_process_ids = std::mem::take(pending_observer_process_ids);
-        let _fork_observer_results = apply_process_observers(
-            process_registry,
-            session_id,
-            &pending_observer_process_ids,
-            ProcessObserverBy::ForkInheritance,
-        )
-        .await;
-        settled_layer = true;
+    if pending_observer_intents.is_empty() {
+        return Ok(Vec::new());
     }
 
-    if settled_layer && let Some((store, mut meta)) = persisted {
-        meta.relation = relation;
+    let results =
+        apply_process_observers(process_registry, session_id, &pending_observer_intents).await;
+
+    if let Some((store, meta)) = persisted {
         store.save_session_meta(meta).await?;
     }
 
-    Ok(create_observer_results)
+    Ok(results)
 }
 
 async fn apply_process_observers(
     process_registry: Option<&dyn ProcessRegistry>,
     session_id: &str,
-    process_ids: &[crate::ProcessId],
-    observer_by: ProcessObserverBy,
+    intents: &[SessionObserverIntent],
 ) -> Vec<SessionObservedProcessReceipt> {
-    let mut results = Vec::with_capacity(process_ids.len());
-    for process_id in process_ids {
+    let mut results = Vec::with_capacity(intents.len());
+    for intent in intents {
+        let observer_by = match intent.attribution {
+            SessionObserverIntentAttribution::HostRequested => {
+                ProcessObserverBy::host(format!("session-create:{session_id}"))
+            }
+            SessionObserverIntentAttribution::ForkInherited => ProcessObserverBy::ForkInheritance,
+        };
         let outcome = apply_process_observer(
             process_registry,
             session_id,
-            process_id,
-            observer_by.clone(),
+            &intent.process_id,
+            observer_by,
         )
         .await;
         results.push(SessionObservedProcessReceipt {
-            process_id: process_id.clone(),
+            process_id: intent.process_id.clone(),
+            attribution: intent.attribution,
             outcome,
         });
     }
@@ -186,5 +155,80 @@ async fn apply_process_observer(
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn noproc_receipts_preserve_both_attributions() {
+        let registry = crate::TestLocalProcessRegistry::default();
+        registry
+            .register_process(crate::ProcessRegistration::new(
+                "pruned-process",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+            ))
+            .await
+            .expect("register process before pruning");
+        let pruned = registry
+            .complete_process(
+                "pruned-process",
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete process before pruning");
+        registry
+            .prune_terminal_processes(
+                pruned.updated_at_ms.saturating_add(1),
+                None,
+                crate::ProjectionWatermark::NoProjector,
+            )
+            .await
+            .expect("prune terminal process");
+
+        let receipts = reconcile_session_process_observer_intents(
+            Some(&registry),
+            "noproc-session",
+            SessionObserverIntentSource::Unstored(vec![
+                SessionObserverIntent::host_requested("unknown-host"),
+                SessionObserverIntent::fork_inherited("unknown-fork"),
+                SessionObserverIntent::host_requested("pruned-process"),
+                SessionObserverIntent::fork_inherited("pruned-process"),
+            ]),
+        )
+        .await
+        .expect("noproc settlement remains best effort");
+
+        assert_eq!(receipts.len(), 4);
+        assert_eq!(
+            receipts
+                .iter()
+                .map(|receipt| receipt.attribution)
+                .collect::<Vec<_>>(),
+            vec![
+                SessionObserverIntentAttribution::HostRequested,
+                SessionObserverIntentAttribution::ForkInherited,
+                SessionObserverIntentAttribution::HostRequested,
+                SessionObserverIntentAttribution::ForkInherited,
+            ]
+        );
+        assert!(
+            receipts[..2]
+                .iter()
+                .all(|receipt| receipt.outcome == SessionObservedProcessOutcome::NotFound)
+        );
+        assert!(receipts[2..].iter().all(|receipt| matches!(
+            receipt.outcome,
+            SessionObservedProcessOutcome::NoLongerRetained { .. }
+        )));
     }
 }

@@ -21,7 +21,60 @@ pub struct SessionHandle {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionObservedProcessReceipt {
     pub process_id: crate::ProcessId,
+    pub attribution: SessionObserverIntentAttribution,
     pub outcome: SessionObservedProcessOutcome,
+}
+
+/// Why a session still owes one process-observer edge.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionObserverIntentAttribution {
+    HostRequested,
+    ForkInherited,
+}
+
+/// One durable, not-yet-settled process-observer edge.
+///
+/// `process_incarnation` is reserved for the structural process incarnation
+/// identity. Until that identity lands, `None` means the host-facing process
+/// name must be resolved by the settlement boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SessionObserverIntent {
+    pub process_id: crate::ProcessId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_incarnation: Option<u64>,
+    pub attribution: SessionObserverIntentAttribution,
+}
+
+impl SessionObserverIntent {
+    pub fn host_requested(process_id: impl Into<crate::ProcessId>) -> Self {
+        Self {
+            process_id: process_id.into(),
+            process_incarnation: None,
+            attribution: SessionObserverIntentAttribution::HostRequested,
+        }
+    }
+
+    pub fn fork_inherited(process_id: impl Into<crate::ProcessId>) -> Self {
+        Self {
+            process_id: process_id.into(),
+            process_incarnation: None,
+            attribution: SessionObserverIntentAttribution::ForkInherited,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -507,15 +560,6 @@ pub enum SessionRelation {
         source_node_id: String,
         #[serde(default)]
         observer_inheritance: crate::ObserverInheritance,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pending_observer_process_ids: Vec<crate::ProcessId>,
-    },
-    /// Durable session-create intent for observer edges that are published
-    /// after the session's initial state commit.
-    ObserverIntent {
-        relation: Box<SessionRelation>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pending_observer_process_ids: Vec<crate::ProcessId>,
     },
 }
 
@@ -529,37 +573,6 @@ impl SessionRelation {
                 parent_session_id, ..
             } => Some(parent_session_id),
             Self::Fork { .. } => None,
-            Self::ObserverIntent { relation, .. } => relation.parent_session_id(),
-        }
-    }
-
-    pub(crate) fn with_observer_intent(
-        self,
-        pending_observer_process_ids: Vec<crate::ProcessId>,
-    ) -> Self {
-        if pending_observer_process_ids.is_empty() {
-            self
-        } else {
-            match self {
-                Self::ObserverIntent {
-                    relation,
-                    pending_observer_process_ids: mut pending,
-                } => {
-                    for process_id in pending_observer_process_ids {
-                        if !pending.contains(&process_id) {
-                            pending.push(process_id);
-                        }
-                    }
-                    Self::ObserverIntent {
-                        relation,
-                        pending_observer_process_ids: pending,
-                    }
-                }
-                relation => Self::ObserverIntent {
-                    relation: Box::new(relation),
-                    pending_observer_process_ids,
-                },
-            }
         }
     }
 }
@@ -785,4 +798,44 @@ pub struct SubagentSessionContext {
     pub capability: String,
     pub depth: u8,
     pub max_depth: u8,
+}
+
+#[cfg(test)]
+mod observer_intent_relation_cutover_tests {
+    use super::SessionRelation;
+
+    #[test]
+    fn create_relation_rejects_empty_observer_intent_wrapper() {
+        let error = serde_json::from_value::<SessionRelation>(serde_json::json!({
+            "kind": "observer_intent",
+            "relation": { "kind": "root" }
+        }))
+        .expect_err("an empty wrapper over root is no longer a relation");
+        assert_eq!(error.classify(), serde_json::error::Category::Data);
+        assert!(
+            error
+                .to_string()
+                .contains("unknown variant `observer_intent`")
+        );
+    }
+
+    #[test]
+    fn create_relation_rejects_nested_observer_intent_wrappers() {
+        let error = serde_json::from_value::<SessionRelation>(serde_json::json!({
+            "kind": "observer_intent",
+            "relation": {
+                "kind": "observer_intent",
+                "relation": { "kind": "root" },
+                "pending_observer_process_ids": ["inner-process"]
+            },
+            "pending_observer_process_ids": ["outer-process"]
+        }))
+        .expect_err("nested observer-intent wrappers are no longer relations");
+        assert_eq!(error.classify(), serde_json::error::Category::Data);
+        assert!(
+            error
+                .to_string()
+                .contains("unknown variant `observer_intent`")
+        );
+    }
 }

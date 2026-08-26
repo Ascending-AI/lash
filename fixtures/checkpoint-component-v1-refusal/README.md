@@ -9,7 +9,7 @@ durable-read fixture advances.
   all six manifest-component edges projected in `checkpoint_blob_refs`; the
   fixture was re-armed through the same transactional 37 -> 38 backfill as a
   deployed legacy catalog.
-- `postgres/fixture.sql` uses the schema-62 PostgreSQL catalog while
+- `postgres/fixture.sql` uses the schema-63 PostgreSQL catalog while
   retaining the checkpoint blob from the same commit.
 
 Both contain the `durable-read-fixture` session with an `execution_state`

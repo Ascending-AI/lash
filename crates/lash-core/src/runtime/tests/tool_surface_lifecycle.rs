@@ -205,6 +205,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     let env = runtime_environment(plugin_host);
     let store = Arc::new(RecordingStore::default());
     *store.session_meta.lock_recover() = Some(crate::SessionMeta {
+        pending_observer_intents: Vec::new(),
         session_id: "parked-session".to_string(),
         relation: crate::SessionRelation::Root,
     });
@@ -260,6 +261,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
     let target_store = factory
         .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: crate::SessionRelation::Root,
             policy: standard_test_policy(),
@@ -718,6 +720,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         crate::SessionObservedProcessReceipt {
             process_id: "named-process".to_string(),
             outcome: crate::SessionObservedProcessOutcome::Observed,
+            attribution: crate::SessionObserverIntentAttribution::HostRequested,
         }
     );
     assert_eq!(
@@ -725,6 +728,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         crate::SessionObservedProcessReceipt {
             process_id: "missing-process".to_string(),
             outcome: crate::SessionObservedProcessOutcome::NotFound,
+            attribution: crate::SessionObserverIntentAttribution::HostRequested,
         }
     );
     assert_eq!(child.observed_processes[2].process_id, "pruned-process");
@@ -761,6 +765,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     );
     let child_store = factory
         .open_existing_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "observer-child".to_string(),
             relation: crate::SessionRelation::Root,
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

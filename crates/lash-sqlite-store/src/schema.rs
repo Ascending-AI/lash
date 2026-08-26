@@ -123,7 +123,6 @@ CREATE TABLE IF NOT EXISTS session_meta (
     created_at_ms                    INTEGER NOT NULL DEFAULT 0,
     last_commit_at_ms                INTEGER,
     relation_kind                    TEXT NOT NULL,
-    observer_intent_depth            INTEGER NOT NULL,
     parent_session_id                TEXT,
     caused_by_kind                   TEXT,
     caused_by_session_id             TEXT,
@@ -142,20 +141,14 @@ CREATE TABLE IF NOT EXISTS session_meta (
     observer_inheritance_kind         TEXT
 );
 
-CREATE TABLE IF NOT EXISTS session_meta_observer_intent_processes (
-    session_id    TEXT NOT NULL,
-    layer_index   INTEGER NOT NULL,
-    process_index INTEGER NOT NULL,
-    process_id    TEXT NOT NULL,
-    PRIMARY KEY (session_id, layer_index, process_index),
-    FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS session_meta_fork_pending_observer_processes (
+CREATE TABLE IF NOT EXISTS session_meta_pending_observer_intents (
     session_id    TEXT NOT NULL,
     process_index INTEGER NOT NULL,
     process_id    TEXT NOT NULL,
-    PRIMARY KEY (session_id, process_index),
+    process_incarnation INTEGER,
+    attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
+    PRIMARY KEY (session_id, process_id),
+    UNIQUE (session_id, process_index),
     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
 );
 
@@ -440,7 +433,57 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 43 makes runtime append receipt identity columns all-or-none and
 /// removes the readerless requested-ancestor receipt column. Older stores are
 /// rejected and recreated; there is no compatibility read or migration path.
-pub(crate) const SCHEMA_VERSION: i32 = 43;
+/// Version 44 folds the two pending observer-intent encodings into one
+/// attributed table and removes the relation-wrapper depth counter. Version 43
+/// is migrated forward in place; older stores remain recreate-only.
+pub(crate) const SCHEMA_VERSION: i32 = 44;
+
+const SESSION_43_TO_44_MIGRATION: &str = "
+CREATE TABLE session_meta_pending_observer_intents (
+    session_id          TEXT NOT NULL,
+    process_index       INTEGER NOT NULL,
+    process_id          TEXT NOT NULL,
+    process_incarnation INTEGER,
+    attribution         TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited')),
+    PRIMARY KEY (session_id, process_id),
+    UNIQUE (session_id, process_index),
+    FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
+);
+
+WITH candidates AS (
+    SELECT session_id, process_id, 0 AS attribution_rank,
+           layer_index AS source_group, process_index AS source_index,
+           'host_requested' AS attribution
+      FROM session_meta_observer_intent_processes
+    UNION ALL
+    SELECT session_id, process_id, 1 AS attribution_rank,
+           0 AS source_group, process_index AS source_index,
+           'fork_inherited' AS attribution
+      FROM session_meta_fork_pending_observer_processes
+), occurrences AS (
+    SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY session_id, process_id
+        ORDER BY attribution_rank, source_group, source_index
+    ) AS occurrence
+      FROM candidates
+), indexed AS (
+    SELECT session_id, process_id, attribution,
+           ROW_NUMBER() OVER (
+               PARTITION BY session_id
+               ORDER BY attribution_rank, source_group, source_index, process_id
+           ) - 1 AS process_index
+      FROM occurrences
+     WHERE occurrence = 1
+)
+INSERT INTO session_meta_pending_observer_intents
+    (session_id, process_index, process_id, process_incarnation, attribution)
+SELECT session_id, process_index, process_id, NULL, attribution
+  FROM indexed;
+
+DROP TABLE session_meta_observer_intent_processes;
+DROP TABLE session_meta_fork_pending_observer_processes;
+ALTER TABLE session_meta DROP COLUMN observer_intent_depth;
+";
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -932,6 +975,12 @@ fn prepare_versioned_schema<'connection>(
         tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);
     }
+    if database_kind == "session" && user_version == 43 && schema_version == 44 {
+        tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
+        tx.execute_batch(schema)?;
+        tx.pragma_update(None, "user_version", schema_version)?;
+        return Ok(tx);
+    }
     Err(rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISUSE),
         Some(unsupported_schema_message(
@@ -978,4 +1027,122 @@ pub(crate) fn unsupported_schema_message(
          {expected_version}, but the database reports version {found_version}. There is no \
          migration chain — {remedy}"
     )
+}
+
+#[cfg(test)]
+mod observer_intent_migration_tests {
+    use super::*;
+
+    #[test]
+    fn component_43_folds_layer_and_fork_intents_with_attribution() {
+        let mut connection = Connection::open_in_memory().expect("open migration fixture");
+        prepare_versioned_schema(&mut connection, "session", SCHEMA, SCHEMA_VERSION)
+            .expect("create current fixture")
+            .commit()
+            .expect("commit current fixture");
+        connection
+            .execute_batch(
+                "ALTER TABLE session_meta ADD COLUMN observer_intent_depth INTEGER NOT NULL DEFAULT 0;
+                 DROP TABLE session_meta_pending_observer_intents;
+                 CREATE TABLE session_meta_observer_intent_processes (
+                     session_id TEXT NOT NULL,
+                     layer_index INTEGER NOT NULL,
+                     process_index INTEGER NOT NULL,
+                     process_id TEXT NOT NULL,
+                     PRIMARY KEY (session_id, layer_index, process_index),
+                     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
+                 );
+                 CREATE TABLE session_meta_fork_pending_observer_processes (
+                     session_id TEXT NOT NULL,
+                     process_index INTEGER NOT NULL,
+                     process_id TEXT NOT NULL,
+                     PRIMARY KEY (session_id, process_index),
+                     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
+                 );
+                 INSERT INTO session_meta
+                     (session_id, relation_kind, observer_intent_depth)
+                     VALUES ('fold-session', 'root', 2);
+                 INSERT INTO session_meta_observer_intent_processes VALUES
+                     ('fold-session', 0, 0, 'shared-process'),
+                     ('fold-session', 1, 0, 'host-only-process');
+                 INSERT INTO session_meta_fork_pending_observer_processes VALUES
+                     ('fold-session', 0, 'shared-process'),
+                     ('fold-session', 1, 'fork-only-process');
+                 PRAGMA user_version = 43;",
+            )
+            .expect("build component-43 observer-intent fixture");
+
+        prepare_versioned_schema(&mut connection, "session", SCHEMA, SCHEMA_VERSION)
+            .expect("migrate component 43")
+            .commit()
+            .expect("commit component-44 migration");
+
+        let rows = connection
+            .prepare(
+                "SELECT process_index, process_id, process_incarnation, attribution
+                 FROM session_meta_pending_observer_intents
+                 WHERE session_id = 'fold-session' ORDER BY process_index",
+            )
+            .expect("prepare folded intent read")
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .expect("read folded intents")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode folded intents");
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    0,
+                    "shared-process".to_string(),
+                    None,
+                    "host_requested".to_string()
+                ),
+                (
+                    1,
+                    "host-only-process".to_string(),
+                    None,
+                    "host_requested".to_string()
+                ),
+                (
+                    2,
+                    "fork-only-process".to_string(),
+                    None,
+                    "fork_inherited".to_string()
+                ),
+            ]
+        );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
+                .expect("read migrated version"),
+            44
+        );
+        assert!(
+            connection
+                .execute(
+                    "UPDATE session_meta SET observer_intent_depth = 1 WHERE session_id = 'fold-session'",
+                    [],
+                )
+                .is_err(),
+            "the removed depth counter cannot represent a rows/counter disagreement"
+        );
+        assert!(
+            connection
+                .execute(
+                    "INSERT INTO session_meta_pending_observer_intents
+                     (session_id, process_index, process_id, attribution)
+                     VALUES ('fold-session', 3, 'invalid-process', 'relation_injected')",
+                    [],
+                )
+                .is_err(),
+            "the attribution CHECK must reject relation-borne intent labels"
+        );
+    }
 }

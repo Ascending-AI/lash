@@ -336,6 +336,7 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
 ) {
     let committed = committed_checkpoint(&handles.factory, "delete-shared-source").await;
     let fork_request = crate::ForkSessionRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "delete-shared-fork".to_string(),
         node_id: committed.leaf_node_id,
         relation: crate::SessionRelation::Root,

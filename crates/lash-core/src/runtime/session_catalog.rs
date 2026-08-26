@@ -30,7 +30,6 @@ impl SessionRelationKind {
             SessionRelation::Root => Self::Root,
             SessionRelation::Child { .. } => Self::Child,
             SessionRelation::Fork { .. } => Self::Fork,
-            SessionRelation::ObserverIntent { relation, .. } => Self::from_relation(relation),
         }
     }
 }

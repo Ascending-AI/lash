@@ -4,6 +4,7 @@ use crate::{SessionPolicy, SessionRelation};
 pub struct SessionStoreCreateRequest {
     pub session_id: String,
     pub relation: SessionRelation,
+    pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     pub policy: SessionPolicy,
 }
 
@@ -38,6 +39,7 @@ pub struct ForkSessionRequest {
     pub session_id: String,
     pub node_id: String,
     pub relation: SessionRelation,
+    pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     pub policy: SessionPolicy,
 }
 
@@ -49,4 +51,6 @@ pub struct ForkSessionReceipt {
     /// Session that originally wrote `node_id`. This is process-observer
     /// provenance, not a required source-session argument to the fork.
     pub source_session_id: String,
+    /// Uniform settlement receipts for every fork-inherited observer intent.
+    pub observed_processes: Vec<crate::plugin::SessionObservedProcessReceipt>,
 }

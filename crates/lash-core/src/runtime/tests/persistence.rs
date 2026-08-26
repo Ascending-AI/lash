@@ -148,6 +148,7 @@ async fn recording_store_satisfies_runtime_persistence_conformance() {
             let store = RecordingStore::with_clock(store_clock.clone());
             *store.bound_session_id.lock_recover() = Some(session_id.to_string());
             *store.session_meta.lock_recover() = Some(crate::SessionMeta {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: crate::SessionRelation::Root,
             });

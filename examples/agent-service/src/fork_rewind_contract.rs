@@ -58,6 +58,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     };
     let source = stores
         .create_store(&SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: SOURCE_SESSION.to_string(),
             relation: SessionRelation::Root,
             policy: source_policy.clone(),
@@ -66,6 +67,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .expect("create source session");
     stores
         .create_store(&SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: FOREIGN_TARGET.to_string(),
             relation: SessionRelation::Root,
             policy: SessionPolicy {

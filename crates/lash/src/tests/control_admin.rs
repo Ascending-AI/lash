@@ -865,7 +865,7 @@ async fn session_control_manages_child_session_lifecycle() -> Result<()> {
 }
 
 #[tokio::test]
-async fn managed_create_publishes_create_and_fork_observers_before_returning() -> Result<()> {
+async fn managed_create_publishes_host_observers_before_returning() -> Result<()> {
     use lash_core::ProcessRegistry as _;
 
     let sqlite_dir = tempfile::tempdir().expect("create managed-create SQLite directory");
@@ -889,8 +889,6 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
         let parent_session_id = format!("managed-observer-parent-{case}");
         let child_session_id = format!("managed-observer-child-{case}");
         let create_process_id = format!("managed-create-process-{case}");
-        let fork_process_id = format!("managed-fork-process-{case}");
-        let missing_fork_process_id = format!("managed-missing-fork-process-{case}");
         let registry = Arc::new(TestLocalProcessRegistry::default());
         let driver = lash_core::facade_support::ProcessWorkDriver::new(
             registry.clone(),
@@ -907,18 +905,16 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
         let core = builder.build(crate::testing::runtime_lease_owner())?;
         let session = core.session(&parent_session_id).open().await?;
 
-        for process_id in [&create_process_id, &fork_process_id] {
-            registry
-                .register_process(lash_core::ProcessRegistration::new(
-                    process_id,
-                    lash_core::ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
-                    lash_core::RecoveryContract::ExternallyOwned,
-                    lash_core::ProcessProvenance::host(),
-                ))
-                .await?;
-        }
+        registry
+            .register_process(lash_core::ProcessRegistration::new(
+                &create_process_id,
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::host(),
+            ))
+            .await?;
 
         let mut request = SessionCreateRequest::root(
             lash_core::SessionStartPoint::Empty,
@@ -930,10 +926,6 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
             source_session_id: format!("managed-observer-source-{case}"),
             source_node_id: format!("managed-observer-source-node-{case}"),
             observer_inheritance: lash_core::ObserverInheritance::All,
-            pending_observer_process_ids: vec![
-                fork_process_id.clone(),
-                missing_fork_process_id.clone(),
-            ],
         };
 
         let child = session.admin().children().create_session(request).await?;
@@ -944,6 +936,8 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
             vec![lash_core::test_support::SessionObservedProcessReceipt {
                 process_id: create_process_id.clone(),
                 outcome: lash_core::test_support::SessionObservedProcessOutcome::Observed,
+                attribution:
+                    lash_core::test_support::SessionObserverIntentAttribution::HostRequested,
             }]
         );
         assert!(
@@ -952,19 +946,6 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
                 .await?,
             "the returned live session must have its create observer edge"
         );
-        assert!(
-            registry
-                .is_observer(&child.session_id, &fork_process_id)
-                .await?,
-            "the returned live session must have its inherited fork observer edge"
-        );
-        assert!(
-            !registry
-                .is_observer(&child.session_id, &missing_fork_process_id)
-                .await?,
-            "an unavailable inherited process must not fail managed creation"
-        );
-
         let create_events = registry.events_after(&create_process_id, 0).await?;
         assert!(create_events.iter().any(|event| {
             event.event_type == "process.observer_added"
@@ -974,15 +955,10 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
                         "operation_id": format!("session-create:{child_session_id}")
                     })
         }));
-        let fork_events = registry.events_after(&fork_process_id, 0).await?;
-        assert!(fork_events.iter().any(|event| {
-            event.event_type == "process.observer_added"
-                && event.payload["by"] == serde_json::json!({"kind": "fork_inheritance"})
-        }));
-
         if let Some(store_factory) = store_factory {
             let child_store = store_factory
                 .open_existing_store(&lash_core::SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
                     session_id: child_session_id,
                     relation: lash_core::SessionRelation::Root,
                     policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -994,16 +970,11 @@ async fn managed_create_publishes_create_and_fork_observers_before_returning() -
                 .load_session_meta()
                 .await?
                 .expect("managed child metadata exists");
-            assert!(
-                matches!(
-                    child_meta.relation,
-                    lash_core::SessionRelation::Fork {
-                        ref pending_observer_process_ids,
-                        ..
-                    } if pending_observer_process_ids.is_empty()
-                ),
-                "managed creation must persist a fully settled base fork relation"
-            );
+            assert!(matches!(
+                child_meta.relation,
+                lash_core::SessionRelation::Fork { .. }
+            ));
+            assert!(child_meta.pending_observer_intents.is_empty());
         }
     }
     Ok(())

@@ -60,6 +60,7 @@ mod tests {
         };
         let store = factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: SESSION_ID.to_string(),
                 relation: relation.clone(),
                 policy: policy.clone(),

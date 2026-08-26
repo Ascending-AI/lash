@@ -69,6 +69,7 @@ impl BackendRunner {
                 let error = self
                     .factory()
                     .fork_at(&ForkSessionRequest {
+                        pending_observer_intents: Vec::new(),
                         session_id: self.session_id.clone(),
                         node_id: format!("{}:missing-fork-node", self.session_id),
                         relation: SessionRelation::Root,
@@ -91,13 +92,13 @@ impl BackendRunner {
                 let result = self
                     .factory()
                     .fork_at(&ForkSessionRequest {
+                        pending_observer_intents: Vec::new(),
                         session_id: format!("{}:foreign-lineage", self.session_id),
                         node_id: node_id.clone(),
                         relation: SessionRelation::Fork {
                             source_session_id: format!("{}:foreign-source", self.session_id),
                             source_node_id: format!("{}:foreign-node", self.session_id),
                             observer_inheritance: lash_core::ObserverInheritance::None,
-                            pending_observer_process_ids: Vec::new(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -118,13 +119,13 @@ impl BackendRunner {
                 let branch = self
                     .factory()
                     .fork_at(&ForkSessionRequest {
+                        pending_observer_intents: Vec::new(),
                         session_id: branch_session_id.clone(),
                         node_id: node_id.clone(),
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
                             source_node_id: node_id.clone(),
                             observer_inheritance: lash_core::ObserverInheritance::None,
-                            pending_observer_process_ids: Vec::new(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })
@@ -141,13 +142,13 @@ impl BackendRunner {
                 let rewound = self
                     .factory()
                     .fork_at(&ForkSessionRequest {
+                        pending_observer_intents: Vec::new(),
                         session_id: format!("{}:rewind", self.session_id),
                         node_id,
                         relation: SessionRelation::Fork {
                             source_session_id: branch_session_id,
                             source_node_id: format!("{}:rewind-source-node", self.session_id),
                             observer_inheritance: lash_core::ObserverInheritance::None,
-                            pending_observer_process_ids: Vec::new(),
                         },
                         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
                     })

@@ -4,6 +4,8 @@ use crate::facade_support::SessionGraphFacadeOps;
 pub(in crate::runtime::session_manager) struct SessionCreatePlan {
     pub(in crate::runtime::session_manager) session_id: String,
     pub(in crate::runtime::session_manager) relation: SessionRelation,
+    pub(in crate::runtime::session_manager) pending_observer_intents:
+        Vec<crate::SessionObserverIntent>,
     pub(in crate::runtime::session_manager) parent_session_id: Option<String>,
     pub(in crate::runtime::session_manager) policy: SessionPolicy,
     pub(in crate::runtime::session_manager) initial_runtime_state: RuntimeSessionState,
@@ -52,13 +54,18 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         protocol_turn_options: initial_runtime_state.protocol_turn_options.clone(),
     };
 
-    let relation = request
-        .relation
-        .clone()
-        .with_observer_intent(request.observed_processes.clone());
+    let mut seen_observed_processes = std::collections::HashSet::new();
+    let pending_observer_intents = request
+        .observed_processes
+        .iter()
+        .filter(|process_id| seen_observed_processes.insert(process_id.as_str()))
+        .cloned()
+        .map(crate::SessionObserverIntent::host_requested)
+        .collect();
     Ok(SessionCreatePlan {
         session_id,
-        relation,
+        relation: request.relation.clone(),
+        pending_observer_intents,
         parent_session_id,
         policy,
         initial_runtime_state,

@@ -195,6 +195,7 @@ impl LashCore {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
         let request = lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: self.policy.clone(),
@@ -387,6 +388,7 @@ impl LashCore {
         policy.session_id = Some(session_id.clone());
         let store = store_factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: SessionRelation::default(),
                 policy,
@@ -507,8 +509,9 @@ impl LashCore {
                     .into_iter()
                     .map(|record| record.id)
                     .collect::<std::collections::HashSet<_>>();
+                let mut seen_inherited = std::collections::HashSet::new();
                 ids.iter()
-                    .filter(|id| observed.contains(*id))
+                    .filter(|id| observed.contains(*id) && seen_inherited.insert(id.as_str()))
                     .cloned()
                     .collect()
             }
@@ -522,6 +525,11 @@ impl LashCore {
         let mut fork_policy = self.policy.clone();
         fork_policy.provider_id = point.config.provider_id;
         fork_policy.model = point.config.model;
+        let pending_observer_intents = inherited
+            .iter()
+            .cloned()
+            .map(facade_support::SessionObserverIntent::fork_inherited)
+            .collect();
         let request = lash_core::ForkSessionRequest {
             session_id,
             node_id,
@@ -529,14 +537,15 @@ impl LashCore {
                 source_session_id: point.source_session_id,
                 source_node_id: point.node_id,
                 observer_inheritance: resolved_observer_inheritance,
-                pending_observer_process_ids: inherited.clone(),
             },
+            pending_observer_intents,
             policy: fork_policy,
         };
-        let fork = store_factory.fork_at(&request).await?;
+        let mut fork = store_factory.fork_at(&request).await?;
         let create_request = lash_core::SessionStoreCreateRequest {
             session_id: request.session_id,
             relation: request.relation,
+            pending_observer_intents: request.pending_observer_intents,
             policy: request.policy,
         };
         let branch_store = store_factory
@@ -554,7 +563,7 @@ impl LashCore {
                     create_request.session_id
                 ))
             })?;
-        lash_core::runtime::reconcile_session_process_observer_intents(
+        fork.observed_processes = lash_core::runtime::reconcile_session_process_observer_intents(
             self.process_registry().as_deref(),
             &fork.session_id,
             lash_core::runtime::SessionObserverIntentSource::Persisted(branch_store.as_ref()),

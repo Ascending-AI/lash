@@ -1464,6 +1464,7 @@ async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -> Result<()
 
         let store = store_factory
             .create_store(&crate::persistence::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session.session_id().to_string(),
                 relation: crate::persistence::SessionRelation::Root,
                 policy: session.policy_snapshot(),
@@ -4980,6 +4981,7 @@ async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability
     .expect("the conservatively admitted queued turn reaches the provider");
 
     let request = lash_core::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "create-only-factory-idles".to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -5125,6 +5127,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
     .await
     .expect("the hydrated runtime drains every queued input");
     let request = lash_core::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "queued-work-hydration-burst".to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -8160,6 +8163,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .expect("dropped runtime releases its session lane");
 
     let store_request = lash_core::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -8763,6 +8767,7 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
     let dead_boot_store = lash_core::SessionStoreFactory::create_store(
         store_factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),

@@ -156,6 +156,7 @@ impl LashCore {
             return Err(EmbedError::MissingSessionStoreFactory);
         };
         let request = lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::default(),
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

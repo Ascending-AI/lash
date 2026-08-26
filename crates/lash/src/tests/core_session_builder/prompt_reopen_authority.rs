@@ -362,6 +362,7 @@ async fn sqlite_prompt_probe_store(
     policy.prompt = prompt;
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: policy.clone(),

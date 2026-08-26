@@ -416,6 +416,7 @@ async fn vacuum_session_store(
     session_id: &str,
 ) -> Result<SessionVacuumReport, AppError> {
     let request = lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: lash::persistence::SessionRelation::Root,
         policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),

@@ -24,6 +24,7 @@ fn state_with_one_pending_node(session_id: &str) -> RuntimeSessionState {
 async fn perf_factory_reopens_created_root_session_by_id() {
     let factory = RuntimePerfStoreFactory::new(Arc::new(RuntimePerfStore::default()));
     let request = SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "runtime-perf-turn_cancel_round_trip".to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

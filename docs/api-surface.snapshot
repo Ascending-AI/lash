@@ -1849,10 +1849,12 @@ lash::persistence::ForkPoint::pinned
 lash::persistence::ForkPoint::source_session_id
 lash::persistence::ForkSessionReceipt
 lash::persistence::ForkSessionReceipt::node_id
+lash::persistence::ForkSessionReceipt::observed_processes
 lash::persistence::ForkSessionReceipt::session_id
 lash::persistence::ForkSessionReceipt::source_session_id
 lash::persistence::ForkSessionRequest
 lash::persistence::ForkSessionRequest::node_id
+lash::persistence::ForkSessionRequest::pending_observer_intents
 lash::persistence::ForkSessionRequest::policy
 lash::persistence::ForkSessionRequest::relation
 lash::persistence::ForkSessionRequest::session_id
@@ -2424,6 +2426,7 @@ lash::persistence::SessionLeaseRenewal::Lapsed::expired_for_ms
 lash::persistence::SessionLeaseRenewal::Unheld
 lash::persistence::SessionMeta
 lash::persistence::SessionMeta::parent_session_id
+lash::persistence::SessionMeta::pending_observer_intents
 lash::persistence::SessionMeta::relation
 lash::persistence::SessionMeta::session_id
 lash::persistence::SessionNodePayload
@@ -2474,12 +2477,8 @@ lash::persistence::SessionRelation::Child::caused_by
 lash::persistence::SessionRelation::Child::parent_session_id
 lash::persistence::SessionRelation::Fork
 lash::persistence::SessionRelation::Fork::observer_inheritance
-lash::persistence::SessionRelation::Fork::pending_observer_process_ids
 lash::persistence::SessionRelation::Fork::source_node_id
 lash::persistence::SessionRelation::Fork::source_session_id
-lash::persistence::SessionRelation::ObserverIntent
-lash::persistence::SessionRelation::ObserverIntent::pending_observer_process_ids
-lash::persistence::SessionRelation::ObserverIntent::relation
 lash::persistence::SessionRelation::Root
 lash::persistence::SessionRelation::parent_session_id
 lash::persistence::SessionStateAdmission
@@ -2488,6 +2487,7 @@ lash::persistence::SessionStateAdmission::session_id
 lash::persistence::SessionStateAdmission::version
 lash::persistence::SessionStoreCreateRequest
 lash::persistence::SessionStoreCreateRequest::parent_session_id
+lash::persistence::SessionStoreCreateRequest::pending_observer_intents
 lash::persistence::SessionStoreCreateRequest::policy
 lash::persistence::SessionStoreCreateRequest::relation
 lash::persistence::SessionStoreCreateRequest::session_id
@@ -2718,6 +2718,8 @@ lash::persistence::StoreSchemaStatus::undecided
 lash::persistence::StoreSchemaVerdict
 lash::persistence::StoreSchemaVerdict::Absent
 lash::persistence::StoreSchemaVerdict::Matches
+lash::persistence::StoreSchemaVerdict::Migratable
+lash::persistence::StoreSchemaVerdict::Migratable::found
 lash::persistence::StoreSchemaVerdict::Mismatch
 lash::persistence::StoreSchemaVerdict::Mismatch::found
 lash::persistence::StoreSchemaVerdict::Unreadable

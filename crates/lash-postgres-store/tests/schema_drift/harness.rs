@@ -183,6 +183,26 @@ pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests
          DROP COLUMN relation_kind,
          DROP COLUMN parent_session_id;";
 
+/// Reconstructs the observer-intent portion common to every published
+/// component through 62 so migration tests exercise the real forward fold.
+pub const REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS: &str =
+    "ALTER TABLE lash_session_meta ADD COLUMN observer_intent_depth BIGINT NOT NULL DEFAULT 0;
+     ALTER TABLE lash_session_meta ALTER COLUMN observer_intent_depth DROP DEFAULT;
+     DROP TABLE lash_session_meta_pending_observer_intents;
+     CREATE TABLE lash_session_meta_observer_intent_processes (
+         session_id TEXT NOT NULL REFERENCES lash_session_meta(session_id) ON DELETE CASCADE,
+         layer_index BIGINT NOT NULL,
+         process_index BIGINT NOT NULL,
+         process_id TEXT NOT NULL,
+         PRIMARY KEY (session_id, layer_index, process_index)
+     );
+     CREATE TABLE lash_session_meta_fork_pending_observer_processes (
+         session_id TEXT NOT NULL REFERENCES lash_session_meta(session_id) ON DELETE CASCADE,
+         process_index BIGINT NOT NULL,
+         process_id TEXT NOT NULL,
+         PRIMARY KEY (session_id, process_index)
+     );";
+
 /// Reads `server_version_num`, for the one assertion that needs a PostgreSQL
 /// feature not present on every major in the support matrix.
 pub async fn postgres_server_version_num() -> i32 {

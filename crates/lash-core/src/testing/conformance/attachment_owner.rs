@@ -508,6 +508,7 @@ async fn commit_with_lease(
 
 fn session_request(session_id: &str) -> crate::SessionStoreCreateRequest {
     crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy {

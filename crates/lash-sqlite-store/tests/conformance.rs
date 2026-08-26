@@ -1208,6 +1208,7 @@ async fn sqlite_store_satisfies_runtime_persistence_conformance() {
                 let factory = SqliteSessionStoreFactory::new(factory_dir)
                     .with_clock(clock as Arc<dyn lash_core::Clock>);
                 let request = lash_core::SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
                     session_id,
                     relation: lash_core::SessionRelation::Root,
                     policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -1385,6 +1386,7 @@ async fn sqlite_cancelled_queued_append_publishes_usage_exactly_once() {
     let factory = SqliteSessionStoreFactory::new(dir.path()).with_fault_injector(injector.clone());
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "root".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

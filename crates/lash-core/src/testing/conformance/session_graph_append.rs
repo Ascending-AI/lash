@@ -210,6 +210,7 @@ async fn abandoned_branch_scenario(
         append_conformance_plugin_node(&mut source_runtime, "abandoned-base", 1).await;
 
     let branch_request = crate::ForkSessionRequest {
+        pending_observer_intents: Vec::new(),
         session_id: format!("{prefix}-branch"),
         node_id: fork_point.clone(),
         relation: crate::SessionRelation::Root,
@@ -220,6 +221,7 @@ async fn abandoned_branch_scenario(
         .await
         .expect("create the rewound session at the retained node");
     let branch_open_request = crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: branch_request.session_id.clone(),
         relation: branch_request.relation.clone(),
         policy: branch_request.policy.clone(),

@@ -55,7 +55,9 @@ pub mod store_backend_support {
     mod session_meta;
 
     pub use append_identity::decode_append_request_identity;
-    pub use session_meta::{CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredRelation};
+    pub use session_meta::{
+        CausalColumns, SessionMetaCodec, SessionMetaWrite, StoredObserverIntent, StoredRelation,
+    };
 
     /// Reserved runtime-receipt identity used as the durable completion marker
     /// for one settled session-command batch. Backends write one marker for
@@ -281,6 +283,8 @@ pub mod facade_support {
     pub use crate::plugin::SessionCreationConfig;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
+    pub use crate::plugin::SessionObserverIntent;
+    pub use crate::plugin::SessionObserverIntentAttribution;
     pub use crate::plugin::SessionParam;
     pub use crate::plugin::SessionPlugin;
     pub use crate::plugin::SessionStateChangedContext;
@@ -551,6 +555,7 @@ pub(crate) use crate::attachments::{
 };
 pub(crate) use crate::plugin::{
     RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
+    SessionObserverIntent, SessionObserverIntentAttribution,
 };
 pub(crate) use crate::runtime::UnavailableProcessService;
 pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};

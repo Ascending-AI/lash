@@ -231,17 +231,17 @@ PostgreSQL tables. The operations runbook reset consequently clears
 `lash_process_wake_deliveries`, `lash_wake_allocation_floors`, and
 `lash_wake_redelivery_fences`.
 
-Figments coordination is one Lash revision. SQLite durable-core schema <span data-format-version="SQLITE_SCHEMA_VERSION">43</span> includes
+Figments coordination is one Lash revision. SQLite durable-core schema <span data-format-version="SQLITE_SCHEMA_VERSION">44</span> includes
 the read-only session-catalog projection and keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover, plus durable turn-cancel disposition and outcome records, the session-state admission marker, and structural append receipt identities; graph generation is the sole persisted ordering authority. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">62</span> includes those cutovers,
+immutable graph-generation cutover, plus durable turn-cancel disposition and outcome records, the session-state admission marker, structural append receipt identities, and one attributed pending-observer-intent table; graph generation is the sole persisted ordering authority. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">63</span> includes those cutovers,
 the indexed recovery worklist, the session-metadata payload cutover, the
 durable effect-group journal, and the loser drain's unsettled-children index
-over it, plus the same turn-cancel records, admission marker, and structural append receipt identities. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> adds atomic pending
+over it, plus the same turn-cancel records, admission marker, structural append receipt identities, and attributed observer intent. SQLite 43-to-44 and PostgreSQL 62-to-63 migrate the split legacy observer rows forward, preferring host-requested attribution for duplicate process ids. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">24</span> adds atomic pending
 process-parent teardown to the v3 process-environment reference cutover; trigger
 schema <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">6</span> carries durable trigger-occurrence reclaim eligibility. Effect schema <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">12</span> carries the
 agent-frame-key and recorded tool-intent cutovers plus the effect-group journal,
 which SQLite reaches by reject-and-recreate.
-Development/test stores must be recreated.
+Stores older than the explicit observer-intent migration window must be recreated.
 Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.
 

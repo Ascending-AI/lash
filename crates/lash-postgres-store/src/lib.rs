@@ -224,7 +224,10 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 // Version 62 makes runtime append receipt identity columns all-or-none and
 // removes the readerless requested-ancestor receipt column. Component-61 stores
 // are rejected and recreated; there is no 61 -> 62 compatibility read or migration path.
-const SCHEMA_VERSION: i32 = 62;
+// Version 63 replaces the observer-intent relation wrapper, depth counter, and
+// split pending tables with one attributed pending-intent table. Component-62
+// stores are folded forward in place.
+const SCHEMA_VERSION: i32 = 63;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

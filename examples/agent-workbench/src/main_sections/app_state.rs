@@ -338,6 +338,7 @@ impl AppState {
         let store = self
             .session_store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy,

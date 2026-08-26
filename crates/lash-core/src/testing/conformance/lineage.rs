@@ -90,6 +90,7 @@ async fn assert_readability_equals_edge_reachability(
 
 fn request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -142,6 +143,7 @@ async fn fork(
 ) -> Arc<dyn RuntimePersistence> {
     factory
         .fork_at(&ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.to_string(),
             node_id: node_id.to_string(),
             relation: SessionRelation::Root,

@@ -139,7 +139,7 @@ const POST_FLOOR_ARTIFACTS: [&str; 19] = [
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_runtime_turn_commits"];
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_session_meta_pending_observer_intents"];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -351,6 +351,7 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
     for session_id in SESSION_IDS {
         factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

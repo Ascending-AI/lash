@@ -14,6 +14,7 @@ async fn sqlite_direct_turn_store(dir: &TempDir) -> Arc<dyn RuntimePersistence> 
     let factory = SqliteSessionStoreFactory::new(dir.path().to_path_buf());
     factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "root".to_string(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

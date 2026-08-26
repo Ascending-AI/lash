@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 const SQLITE_SCHEMA_SOURCE: &str = include_str!("../../lash-sqlite-store/src/schema.rs");
+const POSTGRES_SCHEMA_SOURCE: &str = include_str!("../../lash-postgres-store/schema.sql");
 const POSTGRES_SCHEMA_SHAPE: &str = include_str!("../../lash-postgres-store/schema-shape.txt");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,12 +89,8 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "lash_session_meta_fork_inheritance_processes",
     ),
     pair(
-        "session_meta_fork_pending_observer_processes",
-        "lash_session_meta_fork_pending_observer_processes",
-    ),
-    pair(
-        "session_meta_observer_intent_processes",
-        "lash_session_meta_observer_intent_processes",
+        "session_meta_pending_observer_intents",
+        "lash_session_meta_pending_observer_intents",
     ),
     pair("session_head", "lash_sessions"),
     pair("tool_intent_submissions", "lash_tool_intent_submissions"),
@@ -195,6 +192,13 @@ fn sqlite_table_names(source: &str) -> BTreeSet<String> {
                 .and_then(|source| consume_keyword(source, "EXISTS"))
                 .unwrap_or(source);
             consume_identifier(source)
+        })
+        .filter(|table| {
+            !matches!(
+                table.as_str(),
+                "session_meta_observer_intent_processes"
+                    | "session_meta_fork_pending_observer_processes"
+            )
         })
         .collect()
 }
@@ -433,6 +437,25 @@ fn schema_congruence_no_space_table_constraint_is_not_a_column() {
     let columns = sqlite_table_columns(SQLITE_SCHEMA_SOURCE, "trigger_subscriptions");
     assert!(!columns.contains("UNIQUE"));
     assert!(!columns.iter().any(|column| column.starts_with("UNIQUE(")));
+}
+
+#[test]
+fn pending_observer_intent_attribution_check_is_registered_on_both_backends() {
+    fn normalized(source: &str) -> String {
+        source.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    let expected =
+        "attribution TEXT NOT NULL CHECK (attribution IN ('host_requested', 'fork_inherited'))";
+    for (backend, source) in [
+        ("SQLite", SQLITE_SCHEMA_SOURCE),
+        ("Postgres", POSTGRES_SCHEMA_SOURCE),
+    ] {
+        assert!(
+            normalized(source).contains(expected),
+            "{backend} pending-observer-intent attribution CHECK drifted from the registered contract"
+        );
+    }
 }
 
 #[test]

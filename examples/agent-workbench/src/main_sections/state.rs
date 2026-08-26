@@ -1380,6 +1380,7 @@ impl WorkbenchQueuedWorkSubmitter {
         let store = self
             .store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: lash::persistence::SessionRelation::default(),
                 policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),

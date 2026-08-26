@@ -34,6 +34,7 @@ impl InMemorySessionStore {
         session_meta.get_or_insert_with(|| crate::SessionMeta {
             session_id: commit.session_id.clone(),
             relation: crate::SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
         });
         let mut version = self.session_state_version.lock_recover();
         version.get_or_insert(crate::store::CURRENT_SESSION_STATE_VERSION);

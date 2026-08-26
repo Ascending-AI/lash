@@ -495,7 +495,6 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     created_at_ms bigint,
     last_commit_at_ms bigint,
     relation_kind text NOT NULL,
-    observer_intent_depth bigint NOT NULL,
     parent_session_id text,
     caused_by_kind text,
     caused_by_session_id text,
@@ -527,25 +526,16 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta_fork_inheritance_proces
 
 
 --
--- Name: lash_session_meta_fork_pending_observer_processes; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_session_meta_pending_observer_intents; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
-CREATE TABLE lash_durable_read_fixture.lash_session_meta_fork_pending_observer_processes (
+CREATE TABLE lash_durable_read_fixture.lash_session_meta_pending_observer_intents (
     session_id text NOT NULL,
     process_index bigint NOT NULL,
-    process_id text NOT NULL
-);
-
-
---
--- Name: lash_session_meta_observer_intent_processes; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE TABLE lash_durable_read_fixture.lash_session_meta_observer_intent_processes (
-    session_id text NOT NULL,
-    layer_index bigint NOT NULL,
-    process_index bigint NOT NULL,
-    process_id text NOT NULL
+    process_id text NOT NULL,
+    process_incarnation bigint,
+    attribution text NOT NULL,
+    CONSTRAINT lash_session_meta_pending_observer_intents_attribution_check CHECK ((attribution = ANY (ARRAY['host_requested'::text, 'fork_inherited'::text])))
 );
 
 
@@ -936,7 +926,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 62);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 63);
 
 
 --
@@ -950,7 +940,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 0, 1700000000000, 1700000000000, 'root', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 0, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 
 --
@@ -960,13 +950,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fi
 
 
 --
--- Data for Name: lash_session_meta_fork_pending_observer_processes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
---
-
-
-
---
--- Data for Name: lash_session_meta_observer_intent_processes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+-- Data for Name: lash_session_meta_pending_observer_intents; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1341,19 +1325,19 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_fork_inheritance_pr
 
 
 --
--- Name: lash_session_meta_fork_pending_observer_processes lash_session_meta_fork_pending_observer_processes_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_session_meta_pending_observer_intents lash_session_meta_pending_observer_intents_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_fork_pending_observer_processes
-    ADD CONSTRAINT lash_session_meta_fork_pending_observer_processes_pkey PRIMARY KEY (session_id, process_index);
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_pending_observer_intents
+    ADD CONSTRAINT lash_session_meta_pending_observer_intents_pkey PRIMARY KEY (session_id, process_id);
 
 
 --
--- Name: lash_session_meta_observer_intent_processes lash_session_meta_observer_intent_processes_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_session_meta_pending_observer_intents lash_session_meta_pending_observer_session_id_process_index_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_observer_intent_processes
-    ADD CONSTRAINT lash_session_meta_observer_intent_processes_pkey PRIMARY KEY (session_id, layer_index, process_index);
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_pending_observer_intents
+    ADD CONSTRAINT lash_session_meta_pending_observer_session_id_process_index_key UNIQUE (session_id, process_index);
 
 
 --
@@ -1843,19 +1827,11 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_fork_inheritance_pr
 
 
 --
--- Name: lash_session_meta_fork_pending_observer_processes lash_session_meta_fork_pending_observer_process_session_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_session_meta_pending_observer_intents lash_session_meta_pending_observer_intents_session_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_fork_pending_observer_processes
-    ADD CONSTRAINT lash_session_meta_fork_pending_observer_process_session_id_fkey FOREIGN KEY (session_id) REFERENCES lash_durable_read_fixture.lash_session_meta(session_id) ON DELETE CASCADE;
-
-
---
--- Name: lash_session_meta_observer_intent_processes lash_session_meta_observer_intent_processes_session_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_observer_intent_processes
-    ADD CONSTRAINT lash_session_meta_observer_intent_processes_session_id_fkey FOREIGN KEY (session_id) REFERENCES lash_durable_read_fixture.lash_session_meta(session_id) ON DELETE CASCADE;
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_pending_observer_intents
+    ADD CONSTRAINT lash_session_meta_pending_observer_intents_session_id_fkey FOREIGN KEY (session_id) REFERENCES lash_durable_read_fixture.lash_session_meta(session_id) ON DELETE CASCADE;
 
 
 --

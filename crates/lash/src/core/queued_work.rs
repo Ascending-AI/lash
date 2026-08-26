@@ -40,6 +40,7 @@ impl InlineQueuedWorkRunHandle {
             .config
             .store_factory
             .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: SessionRelation::default(),
                 policy: policy.clone(),
@@ -172,6 +173,7 @@ impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
             .store_factory
             .has_claimable_queued_work(
                 &SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
                     session_id: session_id.to_string(),
                     relation: SessionRelation::default(),
                     policy,

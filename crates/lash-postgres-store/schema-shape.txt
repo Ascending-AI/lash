@@ -24,7 +24,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 62
+version 63
 table lash_attachment_condemnations
   column attachment_id text not-null
   column phase text not-null
@@ -294,7 +294,6 @@ table lash_session_meta
   column created_at_ms bigint nullable
   column last_commit_at_ms bigint nullable
   column observer_inheritance_kind text nullable
-  column observer_intent_depth bigint not-null
   column parent_session_id text nullable
   column relation_kind text not-null
   column session_id text not-null
@@ -308,18 +307,14 @@ table lash_session_meta_fork_inheritance_processes
   column session_id text not-null
   primary-key (session_id, process_index)
   foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
-table lash_session_meta_fork_pending_observer_processes
+table lash_session_meta_pending_observer_intents
+  column attribution text not-null
   column process_id text not-null
+  column process_incarnation bigint nullable
   column process_index bigint not-null
   column session_id text not-null
-  primary-key (session_id, process_index)
-  foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
-table lash_session_meta_observer_intent_processes
-  column layer_index bigint not-null
-  column process_id text not-null
-  column process_index bigint not-null
-  column session_id text not-null
-  primary-key (session_id, layer_index, process_index)
+  unique (session_id, process_index)
+  primary-key (session_id, process_id)
   foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
 table lash_sessions
   column checkpoint_ref text nullable

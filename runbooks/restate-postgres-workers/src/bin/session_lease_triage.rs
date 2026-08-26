@@ -382,6 +382,7 @@ impl TurnCore {
 
 fn request(session_id: &str) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation: lash::persistence::SessionRelation::default(),
         policy: lash::runtime::SessionPolicy::new(lash_core::TurnBudget::Unbounded),

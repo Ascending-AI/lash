@@ -49,32 +49,22 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
 }
 
 #[tokio::test]
-async fn preflight_reports_the_previous_recreate_only_version_that_open_would_refuse() {
+async fn durable_core_generation_43_is_reported_as_migratable() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
-    // Version 43 is a reject-and-recreate boundary with no migration from 42.
-    let unsupported = expected - 1;
+    assert_eq!(expected, 44, "the pinned migration target changed");
 
-    rewind_user_version(&path, unsupported);
+    rewind_user_version(&path, 43);
 
     let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
-    assert_eq!(
-        found.verdict,
-        StoreSchemaVerdict::Mismatch { found: unsupported }
-    );
+    assert_eq!(found.verdict, StoreSchemaVerdict::Migratable { found: 43 });
     assert_eq!(found.expected, expected);
-    assert!(found.verdict.refuses_open());
-
-    // The verdict is the refusal the open would have produced, reached without
-    // producing it.
-    let refusal = match Store::open(&path).await {
-        Ok(_) => panic!("a rewound database must be refused at open"),
-        Err(err) => err.to_string(),
-    };
-    assert!(refusal.contains(&unsupported.to_string()), "{refusal}");
-    assert!(refusal.contains(&expected.to_string()), "{refusal}");
+    assert!(
+        !found.verdict.refuses_open(),
+        "generation 43 is the declared 43 -> 44 migration source"
+    );
 }
 
 #[tokio::test]
@@ -115,7 +105,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     .expect("preflight answers while the write lock is held");
     assert_eq!(
         answered.verdict,
-        StoreSchemaVerdict::Mismatch {
+        StoreSchemaVerdict::Migratable {
             found: expected - 1
         }
     );

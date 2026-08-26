@@ -6,8 +6,8 @@ pub(crate) async fn list_sessions(
 ) -> Result<Vec<SessionSummary>, StoreError> {
     let rows = sqlx::query(
         "WITH catalog AS (
-             SELECT meta.session_id, meta.relation_kind, meta.observer_intent_depth,
-                    meta.parent_session_id, meta.caused_by_kind,
+             SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
+                    meta.caused_by_kind,
                     meta.caused_by_session_id, meta.caused_by_turn_id,
                     meta.caused_by_effect_id, meta.caused_by_call_id,
                     meta.caused_by_process_id, meta.caused_by_process_event_sequence,
@@ -23,7 +23,7 @@ pub(crate) async fn list_sessions(
              FROM lash_session_meta AS meta
              LEFT JOIN lash_sessions AS session ON session.session_id = meta.session_id
              UNION ALL
-             SELECT session_id, COALESCE(relation_kind, 'root'), 0::BIGINT,
+             SELECT session_id, COALESCE(relation_kind, 'root'),
                     parent_session_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                     COALESCE(created_at_ms, 0), last_commit_at_ms,
@@ -33,20 +33,14 @@ pub(crate) async fn list_sessions(
          SELECT catalog.*,
                 CASE WHEN deleted THEN '[]' ELSE COALESCE((
                     SELECT jsonb_agg(
-                               jsonb_build_array(layer_index, process_index, process_id)
-                               ORDER BY layer_index, process_index
-                           )::TEXT
-                    FROM lash_session_meta_observer_intent_processes
-                    WHERE session_id = catalog.session_id
-                ), '[]') END AS observer_intent_rows_json,
-                CASE WHEN deleted THEN '[]' ELSE COALESCE((
-                    SELECT jsonb_agg(
-                               jsonb_build_array(process_index, process_id)
+                               jsonb_build_array(
+                                   process_index, process_id, process_incarnation, attribution
+                               )
                                ORDER BY process_index
                            )::TEXT
-                    FROM lash_session_meta_fork_pending_observer_processes
+                    FROM lash_session_meta_pending_observer_intents
                     WHERE session_id = catalog.session_id
-                ), '[]') END AS fork_pending_rows_json,
+                ), '[]') END AS observer_intent_rows_json,
                 CASE WHEN deleted THEN '[]' ELSE COALESCE((
                     SELECT jsonb_agg(
                                jsonb_build_array(process_index, process_id)
@@ -84,7 +78,6 @@ pub(crate) async fn list_sessions(
             Some(crate::session_meta::decode_catalog_relation(
                 stored,
                 row.get("observer_intent_rows_json"),
-                row.get("fork_pending_rows_json"),
                 row.get("fork_inheritance_rows_json"),
             )?)
         };

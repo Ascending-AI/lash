@@ -696,6 +696,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         .enumerate()
     {
         let request = crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::default(),
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -943,6 +944,7 @@ pub(crate) fn session_store_request(
     relation: crate::SessionRelation,
 ) -> crate::SessionStoreCreateRequest {
     crate::SessionStoreCreateRequest {
+        pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
         relation,
         policy: crate::SessionPolicy {
@@ -1409,19 +1411,6 @@ async fn session_store_factory_round_trips_every_relation_shape(
                 source_session_id: "declared-missing-session".to_string(),
                 source_node_id: "declared-missing-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::All,
-                pending_observer_process_ids: Vec::new(),
-            },
-        ),
-        (
-            "fork-pending",
-            crate::SessionRelation::Fork {
-                source_session_id: "declared-source".to_string(),
-                source_node_id: "declared-node".to_string(),
-                observer_inheritance: crate::ObserverInheritance::None,
-                pending_observer_process_ids: vec![
-                    "pending-a".to_string(),
-                    "pending-b".to_string(),
-                ],
             },
         ),
         (
@@ -1430,7 +1419,6 @@ async fn session_store_factory_round_trips_every_relation_shape(
                 source_session_id: "declared-source".to_string(),
                 source_node_id: "declared-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::Only(Vec::new()),
-                pending_observer_process_ids: Vec::new(),
             },
         ),
         (
@@ -1442,40 +1430,6 @@ async fn session_store_factory_round_trips_every_relation_shape(
                     "inherit-a".to_string(),
                     "inherit-b".to_string(),
                 ]),
-                pending_observer_process_ids: vec!["pending".to_string()],
-            },
-        ),
-        (
-            "observer-intent-root",
-            crate::SessionRelation::ObserverIntent {
-                relation: Box::new(crate::SessionRelation::Root),
-                pending_observer_process_ids: vec!["observer-a".to_string()],
-            },
-        ),
-        (
-            "observer-intent-empty-child",
-            crate::SessionRelation::ObserverIntent {
-                relation: Box::new(child(Some(crate::CausalRef::Process {
-                    process_id: "observer-cause".to_string(),
-                }))),
-                pending_observer_process_ids: Vec::new(),
-            },
-        ),
-        (
-            "observer-intent-nested-fork",
-            crate::SessionRelation::ObserverIntent {
-                relation: Box::new(crate::SessionRelation::ObserverIntent {
-                    relation: Box::new(crate::SessionRelation::Fork {
-                        source_session_id: "nested-source".to_string(),
-                        source_node_id: "nested-node".to_string(),
-                        observer_inheritance: crate::ObserverInheritance::Only(vec![
-                            "nested-inherit".to_string(),
-                        ]),
-                        pending_observer_process_ids: vec!["nested-fork-pending".to_string()],
-                    }),
-                    pending_observer_process_ids: vec!["nested-inner".to_string()],
-                }),
-                pending_observer_process_ids: Vec::new(),
             },
         ),
     ];
@@ -1492,6 +1446,10 @@ async fn session_store_factory_round_trips_every_relation_shape(
             .await
             .unwrap_or_else(|error| panic!("create {label} relation store: {error}"));
         let expected = SessionMeta {
+            pending_observer_intents: vec![
+                crate::SessionObserverIntent::host_requested("observer-a"),
+                crate::SessionObserverIntent::fork_inherited("observer-b"),
+            ],
             session_id: session_id.clone(),
             relation,
         };
@@ -1534,6 +1492,7 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
         .expect("create stable session");
     created
         .save_session_meta(SessionMeta {
+            pending_observer_intents: Vec::new(),
             session_id: "stable-session".to_string(),
             relation: crate::SessionRelation::Child {
                 parent_session_id: "custom-parent".to_string(),
@@ -1768,6 +1727,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("remove concurrent pin");
 
     let delete_first_request = crate::ForkSessionRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "aaa-fork-delete-first".to_string(),
         node_id: source_tip_node_id.clone(),
         relation: crate::SessionRelation::Root,
@@ -1803,6 +1763,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
 
     let unretained_error = factory
         .fork_at(&crate::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "fork-unretained".to_string(),
             node_id: unpinned_past_node_id.clone(),
             relation: crate::SessionRelation::Root,
@@ -1817,6 +1778,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     ));
 
     let fork_request = crate::ForkSessionRequest {
+        pending_observer_intents: Vec::new(),
         session_id: "fork-branch".to_string(),
         node_id: root_node_id.clone(),
         relation: crate::SessionRelation::Root,
@@ -1833,13 +1795,13 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     // rewinds legitimately name superseded intermediate sessions (FIG-1174).
     let lineage_relation_fork = factory
         .fork_at(&crate::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: "fork-relation-lineage".to_string(),
             node_id: root_node_id.clone(),
             relation: crate::SessionRelation::Fork {
                 source_session_id: "no-such-session".to_string(),
                 source_node_id: "no-such-node".to_string(),
                 observer_inheritance: crate::ObserverInheritance::default(),
-                pending_observer_process_ids: Vec::new(),
             },
             policy: source_request.policy.clone(),
         })
@@ -1855,6 +1817,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("remove lineage fork");
     let branch = factory
         .open_existing_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
             session_id: fork_request.session_id.clone(),
             relation: fork_request.relation.clone(),
             policy: fork_request.policy.clone(),
@@ -1955,6 +1918,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
 
     let fork_reuse_error = factory
         .fork_at(&crate::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
             session_id: source_request.session_id.clone(),
             node_id: root_node_id,
             relation: crate::SessionRelation::Root,
