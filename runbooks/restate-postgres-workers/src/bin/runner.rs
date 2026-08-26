@@ -294,6 +294,10 @@ fn selected_workflow_ids(selection: SegmentSelection) -> Vec<&'static str> {
         .collect()
 }
 
+fn completed_workflow_manifest_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.filter(|path| !path.is_empty()).map(PathBuf::from)
+}
+
 fn write_completed_workflow_manifest(selection: SegmentSelection) -> Result<()> {
     let expected = selected_workflow_ids(selection)
         .into_iter()
@@ -308,10 +312,11 @@ fn write_completed_workflow_manifest(selection: SegmentSelection) -> Result<()> 
         completed.difference(&expected).collect::<Vec<_>>()
     );
 
-    let Some(path) = std::env::var_os("LASH_E2E_COMPLETED_WORKFLOW_MANIFEST") else {
+    let Some(path) =
+        completed_workflow_manifest_path(std::env::var_os("LASH_E2E_COMPLETED_WORKFLOW_MANIFEST"))
+    else {
         return Ok(());
     };
-    let path = PathBuf::from(path);
     let contents = WORKFLOW_INVENTORY
         .iter()
         .filter(|workflow| selection.includes(workflow.segment))
@@ -3897,4 +3902,23 @@ async fn assert_traces(trace_dir: &Path, selection: SegmentSelection) -> Result<
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     anyhow::bail!("no trace JSONL files appeared in `{}`", trace_dir.display())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn completed_workflow_manifest_path_resolves_unset_empty_and_set_values() {
+        assert_eq!(completed_workflow_manifest_path(None), None);
+        assert_eq!(
+            completed_workflow_manifest_path(Some(OsString::new())),
+            None
+        );
+        assert_eq!(
+            completed_workflow_manifest_path(Some(OsString::from("/tmp/completed.txt"))),
+            Some(PathBuf::from("/tmp/completed.txt"))
+        );
+    }
 }
