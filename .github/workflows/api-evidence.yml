@@ -1,27 +1,9 @@
 name: API example evidence (advisory)
 
 on:
+  # Advisory evidence only: dispatch on demand (2026-08-26 ruling) instead
+  # of spending a compile on every PR and push.
   workflow_dispatch:
-  pull_request:
-    paths:
-      - Cargo.lock
-      - Cargo.toml
-      - crates/**
-      - examples/**
-      - scripts/api_evidence.py
-      - scripts/check_api_example_coverage.py
-      - .github/workflows/api-evidence.yml
-  push:
-    branches:
-      - main
-    paths:
-      - Cargo.lock
-      - Cargo.toml
-      - crates/**
-      - examples/**
-      - scripts/api_evidence.py
-      - scripts/check_api_example_coverage.py
-      - .github/workflows/api-evidence.yml
 
 permissions:
   contents: read

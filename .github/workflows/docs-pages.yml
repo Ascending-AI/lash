@@ -1,12 +1,10 @@
 name: Docs Pages
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "docs/**"
-      - ".github/workflows/docs-pages.yml"
+  # Docs publish at release cadence (2026-08-26 ruling): on the published
+  # release that stamps the docs version pin, or on demand.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +19,6 @@ concurrency:
 jobs:
   publish:
     name: Publish docs
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
