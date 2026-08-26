@@ -137,6 +137,15 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
+    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 6] = [
+        Self::DurableStandardToolTurnSqlite,
+        Self::DurableStandardToolTurnPostgres,
+        Self::DurableRlmCheckpointTurnSqlite,
+        Self::DurableRlmCheckpointTurnPostgres,
+        Self::DurableAgentChildTurnSqlite,
+        Self::DurableAgentChildTurnPostgres,
+    ];
+
     pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 57] = [
         runtime_perf_metadata!(
             Standard,
@@ -584,21 +593,16 @@ impl RuntimePerfScenario {
     }
 
     pub(crate) fn is_durable(self) -> bool {
-        matches!(
-            self,
-            Self::DurableStandardToolTurnSqlite
-                | Self::DurableStandardToolTurnPostgres
-                | Self::DurableRlmCheckpointTurnSqlite
-                | Self::DurableRlmCheckpointTurnPostgres
-                | Self::DurableAgentChildTurnSqlite
-                | Self::DurableAgentChildTurnPostgres
-                | Self::DurableCheckpointCurveSqlite
-                | Self::DurableCheckpointCurvePostgres
-                | Self::HighTrafficLoadSqlite
-                | Self::HighTrafficLoadPostgres
-                | Self::HighTrafficKneeSqlite
-                | Self::HighTrafficKneePostgres
-        )
+        Self::DURABLE_REPRESENTATIVE_TURNS.contains(&self)
+            || matches!(
+                self,
+                Self::DurableCheckpointCurveSqlite
+                    | Self::DurableCheckpointCurvePostgres
+                    | Self::HighTrafficLoadSqlite
+                    | Self::HighTrafficLoadPostgres
+                    | Self::HighTrafficKneeSqlite
+                    | Self::HighTrafficKneePostgres
+            )
     }
 
     pub(crate) fn uses_postgres(self) -> bool {
