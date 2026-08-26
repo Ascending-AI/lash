@@ -627,10 +627,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         smoke = smoke[: smoke.index("- name: Check core/UI boundary")]
         self.assertNotIn("--scenario all", smoke)
         self.assertIn(
-            "rustfmt --edition 2024 --check "
-            "crates/lash-perf/src/runtime_perf/measurement/store_hardening.rs",
+            "python3 scripts/check_included_file_formatting.py",
             lint,
         )
+        formatting_scan = (ROOT / "scripts" / "check_included_file_formatting.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"crates/lash-perf"', formatting_scan)
 
     def test_workflow_graph_example_is_in_functional_matrix(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
