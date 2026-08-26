@@ -5563,6 +5563,14 @@ lash::provider::SamplingCapability::is_default
 lash::provider::StreamTermination
 lash::provider::StreamTermination::EofTolerated
 lash::provider::StreamTermination::RequireTerminalEvidence
+lash::provider::TransportRetryVerdict
+lash::provider::TransportRetryVerdict::Forbidden
+lash::provider::TransportRetryVerdict::NotRetryable
+lash::provider::TransportRetryVerdict::RetryableThrottle
+lash::provider::TransportRetryVerdict::RetryableThrottle::retry_after
+lash::provider::TransportRetryVerdict::RetryableTransient
+lash::provider::TransportRetryVerdict::is_retryable
+lash::provider::TransportRetryVerdict::retry_after
 lash::recoverable_chat::RecoverableChatEventId
 lash::recoverable_chat::RecoverableChatEventId::cursor
 lash::recoverable_chat::RecoverableChatEventId::replay_incarnation_id

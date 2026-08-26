@@ -310,14 +310,19 @@ impl Provider for DevFailureProvider {
             DevProviderScenario::AuthFailureOnce => {
                 Ok(streamed_response(&request, &self.cell(call)))
             }
-            DevProviderScenario::RateLimitOnce if call == 0 => Err(LlmTransportError::new(
-                "development provider rate limit; retry is safe",
-            )
-            .with_status(429)
-            .with_retry_verdict(TransportRetryVerdict::RetryableThrottle {
-                retry_after: Some(std::time::Duration::ZERO),
-            })
-            .with_code("dev_rate_limited")),
+            DevProviderScenario::RateLimitOnce if call == 0 => {
+                let retry_verdict = TransportRetryVerdict::RetryableThrottle {
+                    retry_after: Some(std::time::Duration::ZERO),
+                };
+                debug_assert!(retry_verdict.is_retryable());
+                debug_assert_eq!(retry_verdict.retry_after(), Some(std::time::Duration::ZERO));
+                Err(
+                    LlmTransportError::new("development provider rate limit; retry is safe")
+                        .with_status(429)
+                        .with_retry_verdict(retry_verdict)
+                        .with_code("dev_rate_limited"),
+                )
+            }
             DevProviderScenario::RateLimitOnce => Ok(streamed_response(
                 &request,
                 &format!("retry observer single-copy marker\n{}", self.cell(call)),
