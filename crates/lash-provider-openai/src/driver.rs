@@ -12,7 +12,148 @@ struct ResponseContext {
     stream_events: Option<LlmEventSender>,
     provider_trace: Option<LlmProviderTraceSender>,
     url: String,
+    http_summary: String,
     stream_termination: StreamTermination,
+    responses_resume: Option<ResponsesResumeCheckpoint>,
+    request_key: ResponsesRequestKey,
+}
+
+pub(crate) type ResponsesRequestFingerprint = [u8; 32];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResponsesRequestKey {
+    pub(crate) request_id: String,
+    pub(crate) fingerprint: ResponsesRequestFingerprint,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ResponsesResumeCheckpoint {
+    pub(crate) request_key: ResponsesRequestKey,
+    response_id: String,
+    starting_after: u64,
+    state: ResponsesStreamState,
+}
+
+fn responses_resume_url(
+    base_url: &str,
+    response_id: &str,
+    starting_after: u64,
+    query_params: &[(String, String)],
+) -> Result<String, LlmTransportError> {
+    let mut url = reqwest::Url::parse(base_url.trim_end_matches('/')).map_err(|error| {
+        LlmTransportError::new(format!("Invalid OpenAI Responses resume URL: {error}"))
+            .with_kind(ProviderFailureKind::Validation)
+            .with_code("invalid_provider_endpoint")
+    })?;
+    url.path_segments_mut()
+        .map_err(|_| {
+            LlmTransportError::new("OpenAI Responses resume URL cannot carry path segments")
+                .with_kind(ProviderFailureKind::Validation)
+                .with_code("invalid_provider_endpoint")
+        })?
+        .push("responses")
+        .push(response_id);
+    url.query_pairs_mut()
+        .extend_pairs(query_params.iter())
+        .append_pair("starting_after", &starting_after.to_string())
+        .append_pair("stream", "true");
+    Ok(url.into())
+}
+
+fn responses_event_sequence_number(raw: &str) -> Option<u64> {
+    serde_json::from_str::<Value>(raw.trim())
+        .ok()?
+        .get("sequence_number")?
+        .as_u64()
+}
+
+fn responses_stream_failure(
+    provider: &mut OpenAiCompatibleProvider,
+    request_key: ResponsesRequestKey,
+    state: ResponsesStreamState,
+    last_sequence_number: Option<u64>,
+    sequence_cursor_valid: bool,
+    http_summary: String,
+    error: LlmTransportError,
+) -> LlmTransportError {
+    let output_started = state.output_started();
+    let mut partial = shared_response_from_state(state.clone(), http_summary);
+    partial.terminal_reason = LlmTerminalReason::Unknown;
+
+    let response_id = state
+        .execution_evidence
+        .as_ref()
+        .and_then(|evidence| evidence.provider_response_id.clone());
+    provider.responses_resume =
+        if error.is_retryable() && !state.terminal_event_seen && sequence_cursor_valid {
+            response_id
+                .zip(last_sequence_number)
+                .map(|(response_id, starting_after)| ResponsesResumeCheckpoint {
+                    request_key,
+                    response_id,
+                    starting_after,
+                    state,
+                })
+        } else {
+            None
+        };
+
+    error
+        .with_output_started(output_started)
+        .with_partial_response(partial)
+}
+
+fn build_request_body(
+    provider: &OpenAiCompatibleProvider,
+    req: &LlmRequest,
+    endpoint: CompletionEndpoint,
+    stream: bool,
+    origin_route: &ProviderRouteIdentity,
+) -> Result<Value, LlmTransportError> {
+    let mut body = match endpoint {
+        CompletionEndpoint::Responses => {
+            provider.build_responses_request_body_for_route(req, stream, origin_route)?
+        }
+        CompletionEndpoint::ChatCompletions => provider.build_chat_request_body(req, stream)?,
+    };
+    if provider.resolved_compat(endpoint).cache_session_affinity {
+        body["session_id"] = Value::String(
+            req.scope
+                .session_id
+                .chars()
+                .take(CACHE_SESSION_ID_MAX_CHARS)
+                .collect(),
+        );
+    }
+    Ok(body)
+}
+
+fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
+    use sha2::Digest as _;
+
+    sha2::Sha256::digest(body).into()
+}
+
+pub(crate) fn responses_request_fingerprint(
+    provider: &OpenAiCompatibleProvider,
+    req: &LlmRequest,
+) -> Option<ResponsesRequestFingerprint> {
+    let endpoint = CompletionEndpoint::Responses;
+    let origin_route = ProviderRouteIdentity::for_endpoint(
+        endpoint.provider_kind(),
+        &provider.base_url,
+        req.model.clone(),
+    );
+    let body = build_request_body(
+        provider,
+        req,
+        endpoint,
+        req.stream_events.is_some(),
+        &origin_route,
+    )
+    .ok()?;
+    let body_bytes = serde_json::to_vec(&body).ok()?;
+    Some(request_fingerprint(&body_bytes))
 }
 
 impl CompletionEndpoint {
@@ -114,24 +255,28 @@ pub(crate) async fn complete(
         .model_capability
         .stream_termination
         .unwrap_or(compat.stream_termination);
-    let mut body = match endpoint {
-        CompletionEndpoint::Responses => {
-            provider.build_responses_request_body_for_route(&req, stream, &origin_route)?
-        }
-        CompletionEndpoint::ChatCompletions => provider.build_chat_request_body(&req, stream)?,
-    };
-    if compat.cache_session_affinity {
-        body["session_id"] = Value::String(
-            req.scope
-                .session_id
-                .chars()
-                .take(CACHE_SESSION_ID_MAX_CHARS)
-                .collect(),
-        );
-    }
+    let body = build_request_body(provider, &req, endpoint, stream, &origin_route)?;
     let generation_disposition = Some(generation_disposition(&req, &body));
     let body_bytes = serde_json::to_vec(&body)
         .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
+    let request_fingerprint = request_fingerprint(&body_bytes);
+    let request_key = ResponsesRequestKey {
+        request_id: req.scope.request_id.clone(),
+        fingerprint: request_fingerprint,
+    };
+    let responses_resume = if endpoint == CompletionEndpoint::Responses && stream {
+        let matches_request = provider
+            .responses_resume
+            .as_ref()
+            .is_some_and(|resume| resume.request_key == request_key);
+        if !matches_request {
+            provider.responses_resume = None;
+        }
+        provider.responses_resume.clone()
+    } else {
+        provider.responses_resume = None;
+        None
+    };
     emit_provider_request_trace(
         provider_trace.as_ref(),
         "openai_compatible",
@@ -141,12 +286,12 @@ pub(crate) async fn complete(
     let request_body = bytes::Bytes::from(body_bytes);
     let request_body_for_error = String::from_utf8_lossy(&request_body).into_owned();
     let base_url = provider.base_url.trim_end_matches('/');
-    let mut url = match base_url.split_once('?') {
+    let mut creation_url = match base_url.split_once('?') {
         Some((base_path, query)) => format!("{}/{}?{}", base_path, endpoint.path(), query),
         None => format!("{}/{}", base_url, endpoint.path()),
     };
     if !provider.wire.query_params.is_empty() {
-        let mut parsed = reqwest::Url::parse(&url).map_err(|error| {
+        let mut parsed = reqwest::Url::parse(&creation_url).map_err(|error| {
             LlmTransportError::new(format!("Invalid OpenAI-compatible request URL: {error}"))
                 .with_kind(ProviderFailureKind::Validation)
                 .with_code("invalid_provider_endpoint")
@@ -154,8 +299,27 @@ pub(crate) async fn complete(
         parsed
             .query_pairs_mut()
             .extend_pairs(provider.wire.query_params.iter());
-        url = parsed.into();
+        creation_url = parsed.into();
     }
+    let (http_method, url, wire_body) = if let Some(resume) = responses_resume.as_ref() {
+        (
+            LlmHttpMethod::Get,
+            responses_resume_url(
+                &provider.base_url,
+                &resume.response_id,
+                resume.starting_after,
+                &provider.wire.query_params,
+            )?,
+            bytes::Bytes::new(),
+        )
+    } else {
+        (LlmHttpMethod::Post, creation_url, request_body.clone())
+    };
+    let http_summary = if http_method == LlmHttpMethod::Get {
+        format!("HTTP GET {url} (stream)")
+    } else {
+        endpoint.http_summary(&url, stream)
+    };
     let mut headers = vec![
         (
             provider.wire.auth_header_name.clone(),
@@ -171,21 +335,40 @@ pub(crate) async fn complete(
         ));
     }
     let http_request = LlmHttpRequest {
-        method: LlmHttpMethod::Post,
+        method: http_method,
         url: url.clone(),
         headers,
-        body: request_body.clone(),
-        body_for_error: Some(request_body_for_error.clone()),
+        body: wire_body,
+        body_for_error: responses_resume
+            .is_none()
+            .then_some(request_body_for_error.clone()),
         response_start_timeout_message: Some(endpoint.response_start_timeout_error().to_string()),
     };
     let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &provider.options);
-    let resp = provider
+    let resp = match provider
         .transport
         .send(
             http_request,
             response_start_timeout(timeouts.request_timeout, timeouts.chunk_timeout, stream),
         )
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let Some(resume) = responses_resume else {
+                return Err(error);
+            };
+            return Err(responses_stream_failure(
+                provider,
+                resume.request_key,
+                resume.state,
+                Some(resume.starting_after),
+                true,
+                http_summary,
+                error,
+            ));
+        }
+    };
 
     let status = resp.status;
     if !resp.is_success() {
@@ -210,15 +393,32 @@ pub(crate) async fn complete(
         if let Ok(value) = serde_json::from_str::<Value>(&text) {
             failure = classify_openai_error(&value, failure);
         }
+        if let Some(resume) = responses_resume {
+            failure = responses_stream_failure(
+                provider,
+                resume.request_key,
+                resume.state,
+                Some(resume.starting_after),
+                true,
+                http_summary,
+                failure,
+            );
+        }
         return Err(failure);
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
     let mut capture = ResponseMetadataCapture::from_response(&provider.options, &resp.headers);
-    if let Some(tx) = &stream_events {
+    // Reattachment is another HTTP request for the same logical generation.
+    // Its transport request id belongs in the per-attempt record, but sending
+    // a second response-start Evidence event would conflict with the live
+    // stream's already-established request identity and request summary.
+    if responses_resume.is_none()
+        && let Some(tx) = &stream_events
+    {
         tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
             request_body: Some(request_body_for_error.clone()),
-            http_summary: Some(endpoint.http_summary(&url, stream)),
+            http_summary: Some(http_summary.clone()),
             execution_evidence: provider_request_id.clone().map(|provider_request_id| {
                 ExecutionEvidence {
                     provider_request_id: Some(provider_request_id),
@@ -231,12 +431,29 @@ pub(crate) async fn complete(
         }));
     }
     let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
+    if !is_sse && let Some(resume) = responses_resume.clone() {
+        return Err(responses_stream_failure(
+            provider,
+            resume.request_key,
+            resume.state,
+            Some(resume.starting_after),
+            true,
+            http_summary,
+            LlmTransportError::new("OpenAI Responses reattachment did not return an event stream")
+                .with_kind(ProviderFailureKind::Stream)
+                .with_code("responses_resume_not_streaming")
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable),
+        ));
+    }
 
     let response_context = ResponseContext {
         stream_events,
         provider_trace,
         url,
+        http_summary,
         stream_termination,
+        responses_resume,
+        request_key,
     };
     let response = if is_sse {
         drive_streaming_response(
@@ -261,7 +478,12 @@ pub(crate) async fn complete(
         .await
     };
     let mut response = match response {
-        Ok(response) => response,
+        Ok(response) => {
+            if endpoint == CompletionEndpoint::Responses {
+                provider.responses_resume = None;
+            }
+            response
+        }
         Err(mut failure) => {
             let response_metadata = capture.into_metadata();
             if failure.request_body.is_none() {
@@ -340,16 +562,22 @@ async fn complete_buffered_response(
         stream_events,
         provider_trace,
         url,
+        http_summary,
         stream_termination,
+        ..
     } = context;
     let stream_termination = stream_events.is_some().then_some(stream_termination);
     let text = read_http_body_text(body, timeout, endpoint.response_body_timeout_error()).await?;
     capture.capture_body_text(&text);
     emit_provider_trace(provider_trace.as_ref(), "openai_compatible", &text);
     match endpoint {
-        CompletionEndpoint::Responses => {
-            complete_buffered_responses(provider, text, stream_events, url, stream_termination)
-        }
+        CompletionEndpoint::Responses => complete_buffered_responses(
+            provider,
+            text,
+            stream_events,
+            http_summary,
+            stream_termination,
+        ),
         CompletionEndpoint::ChatCompletions => {
             complete_buffered_chat(provider, text, stream_events, url, stream_termination)
         }
@@ -360,7 +588,7 @@ fn complete_buffered_responses(
     provider: &OpenAiCompatibleProvider,
     text: String,
     stream_events: Option<LlmEventSender>,
-    url: String,
+    http_summary: String,
     stream_termination: Option<StreamTermination>,
 ) -> Result<LlmResponse, LlmTransportError> {
     let mut state = ResponsesStreamState::default();
@@ -387,10 +615,7 @@ fn complete_buffered_responses(
         && !terminal_event_seen
     {
         let output_started = state.output_started();
-        let mut partial = shared_response_from_state(
-            state,
-            CompletionEndpoint::Responses.http_summary(&url, false),
-        );
+        let mut partial = shared_response_from_state(state, http_summary);
         partial.terminal_reason = LlmTerminalReason::Unknown;
         return Err(LlmTransportError::new(
             "OpenAI Responses stream ended before a terminal response event",
@@ -447,7 +672,7 @@ fn complete_buffered_responses(
         terminal_diagnostic: None,
         provider_usage: state.provider_usage,
         request_body: None,
-        http_summary: Some(CompletionEndpoint::Responses.http_summary(&url, false)),
+        http_summary: Some(http_summary),
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
@@ -552,7 +777,7 @@ fn complete_buffered_chat(
 }
 
 async fn drive_streaming_response(
-    provider: &OpenAiCompatibleProvider,
+    provider: &mut OpenAiCompatibleProvider,
     endpoint: CompletionEndpoint,
     body: LlmHttpBody,
     chunk_timeout: std::time::Duration,
@@ -587,7 +812,7 @@ async fn drive_streaming_response(
 }
 
 async fn drive_streaming_responses(
-    provider: &OpenAiCompatibleProvider,
+    provider: &mut OpenAiCompatibleProvider,
     body: LlmHttpBody,
     chunk_timeout: std::time::Duration,
     stream_bounds: SseStreamBounds,
@@ -597,10 +822,20 @@ async fn drive_streaming_responses(
     let ResponseContext {
         stream_events,
         provider_trace,
-        url,
+        url: _,
+        http_summary,
         stream_termination,
+        responses_resume,
+        request_key,
     } = context;
-    let mut state = ResponsesStreamState::default();
+    let resume_after = responses_resume
+        .as_ref()
+        .map(|resume| resume.starting_after);
+    let mut last_sequence_number = resume_after;
+    let mut sequence_cursor_valid = true;
+    let mut state = responses_resume
+        .map(|resume| resume.state)
+        .unwrap_or_default();
     let mut emitted_parts = Vec::new();
     let expose_thinking = provider.options.expose_thinking;
     let stream_result = drive_sse_response(
@@ -612,8 +847,30 @@ async fn drive_streaming_responses(
         capture,
         |raw| {
             emit_provider_trace(provider_trace.as_ref(), "openai_compatible", raw);
+            let sequence_number = responses_event_sequence_number(raw);
+            if let Some(resume_after) = resume_after {
+                if raw.trim() != "[DONE]" && sequence_number.is_none() {
+                    sequence_cursor_valid = false;
+                    return Err(LlmTransportError::new(
+                        "OpenAI Responses resume event omitted sequence_number",
+                    )
+                    .with_kind(ProviderFailureKind::Stream)
+                    .with_code("responses_resume_event_missing_sequence")
+                    .with_retry_verdict(TransportRetryVerdict::NotRetryable));
+                }
+                if sequence_number.is_some_and(|sequence| sequence <= resume_after) {
+                    return Ok(());
+                }
+            } else if raw.trim() != "[DONE]" && sequence_number.is_none() {
+                sequence_cursor_valid = false;
+            }
             let prev_usage = state.usage.clone();
             OpenAiCompatibleProvider::process_sse_event(raw, &mut state, Some(&mut emitted_parts))?;
+            if let Some(sequence_number) = sequence_number {
+                last_sequence_number = Some(
+                    last_sequence_number.map_or(sequence_number, |last| last.max(sequence_number)),
+                );
+            }
             if let Some(tx) = &stream_events
                 && (state.provider_usage.is_some() || state.execution_evidence.is_some())
             {
@@ -651,34 +908,34 @@ async fn drive_streaming_responses(
     .await;
 
     if let Err(error) = stream_result {
-        let output_started = state.output_started();
-        let mut partial = shared_response_from_state(
-            state.clone(),
-            CompletionEndpoint::Responses.http_summary(&url, true),
-        );
-        partial.terminal_reason = LlmTerminalReason::Unknown;
-        return Err(error
-            .with_output_started(output_started)
-            .with_partial_response(partial));
+        return Err(responses_stream_failure(
+            provider,
+            request_key,
+            state,
+            last_sequence_number,
+            sequence_cursor_valid,
+            http_summary,
+            error,
+        ));
     }
 
     if stream_termination == StreamTermination::RequireTerminalEvidence
         && !state.terminal_event_seen
     {
-        let output_started = state.output_started();
-        let mut partial = shared_response_from_state(
-            state.clone(),
-            CompletionEndpoint::Responses.http_summary(&url, true),
-        );
-        partial.terminal_reason = LlmTerminalReason::Unknown;
-        return Err(LlmTransportError::new(
-            "OpenAI Responses stream ended before a terminal response event",
-        )
-        .with_kind(ProviderFailureKind::Stream)
-        .with_code("stream_ended_before_terminal_response")
-        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
-        .with_output_started(output_started)
-        .with_partial_response(partial));
+        return Err(responses_stream_failure(
+            provider,
+            request_key,
+            state,
+            last_sequence_number,
+            sequence_cursor_valid,
+            http_summary,
+            LlmTransportError::new(
+                "OpenAI Responses stream ended before a terminal response event",
+            )
+            .with_kind(ProviderFailureKind::Stream)
+            .with_code("stream_ended_before_terminal_response")
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+        ));
     }
 
     let parts = state.response_parts();
@@ -711,7 +968,7 @@ async fn drive_streaming_responses(
         terminal_diagnostic: None,
         provider_usage: state.provider_usage,
         request_body: None,
-        http_summary: Some(CompletionEndpoint::Responses.http_summary(&url, true)),
+        http_summary: Some(http_summary),
         execution_evidence: state.execution_evidence,
         generation_disposition: None,
         response_metadata: Default::default(),
@@ -730,7 +987,9 @@ async fn drive_streaming_chat(
         stream_events,
         provider_trace,
         url,
+        http_summary: _,
         stream_termination,
+        ..
     } = context;
     let mut state = ChatStreamState::default();
     let expose_thinking = provider.options.expose_thinking;

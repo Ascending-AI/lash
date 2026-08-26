@@ -9,6 +9,7 @@ impl OpenAiCompatibleProvider {
             compat: OpenAiCompat::default(),
             wire: OpenAiWireConfig::default(),
             transport: DEFAULT_HTTP_TRANSPORT.clone(),
+            responses_resume: None,
         }
     }
 
@@ -180,6 +181,20 @@ impl Provider for OpenAiProvider {
 
     async fn complete(&mut self, req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         complete(&mut self.inner, req, CompletionEndpoint::Responses).await
+    }
+
+    fn generation_retry_guarantee(&self, request: &LlmRequest) -> GenerationRetryGuarantee {
+        self.inner
+            .responses_resume
+            .as_ref()
+            .filter(|resume| {
+                resume.request_key.request_id == request.scope.request_id
+                    && responses_request_fingerprint(&self.inner, request)
+                        .is_some_and(|fingerprint| fingerprint == resume.request_key.fingerprint)
+            })
+            .map_or(GenerationRetryGuarantee::None, |_| {
+                GenerationRetryGuarantee::Resumable
+            })
     }
 
     fn clone_boxed(&self) -> Box<dyn Provider> {
