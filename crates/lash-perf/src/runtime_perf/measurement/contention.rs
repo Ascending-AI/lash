@@ -31,7 +31,9 @@ async fn run_writer_operation(
 ) -> anyhow::Result<()> {
     match operation {
         WriterContentionOperation::Configure => {
-            session.configure(lash::SessionConfigPatch::default()).await?;
+            session
+                .configure(lash::SessionConfigPatch::default())
+                .await?;
         }
         WriterContentionOperation::ProcessRefresh => {
             session.refresh_background_graph().await?;
@@ -69,9 +71,8 @@ async fn run_contention_wave(
 ) -> anyhow::Result<ContentionWave> {
     let mut execution_ms = Vec::with_capacity(target_sessions.len());
     for (ordinal, session) in target_sessions.iter().enumerate() {
-        execution_ms.push(
-            measure_writer_operation(session.clone(), scenario, operation, ordinal).await?,
-        );
+        execution_ms
+            .push(measure_writer_operation(session.clone(), scenario, operation, ordinal).await?);
     }
 
     control.arm();
@@ -187,9 +188,7 @@ mod contention_tests {
         .await
         .expect("async settlement smoke");
 
-        assert!(
-            result.extra_counters["async_settlement.open_spans_before_settle"] >= 2
-        );
+        assert!(result.extra_counters["async_settlement.open_spans_before_settle"] >= 2);
         assert_eq!(
             result.extra_counters["async_settlement.open_spans_after_drain"],
             0
@@ -252,7 +251,12 @@ fn contention_phase_profile(
                 && !key.contains(".process_refresh.")
                 && !key.contains(".second_turn.")
         })
-        .map(|(key, samples)| (key.trim_end_matches("_ms").to_string(), metric_phase(samples)))
+        .map(|(key, samples)| {
+            (
+                key.trim_end_matches("_ms").to_string(),
+                metric_phase(samples),
+            )
+        })
         .collect()
 }
 
@@ -280,10 +284,7 @@ pub(crate) async fn run_once_writer_contention(
     for worker in 0..workers {
         peer_sessions.push(
             runtime
-                .open_child_session(format!(
-                    "runtime-perf-{}-peer-{worker}",
-                    scenario.name()
-                ))
+                .open_child_session(format!("runtime-perf-{}-peer-{worker}", scenario.name()))
                 .await?,
         );
     }
@@ -460,7 +461,10 @@ pub(crate) async fn run_once_async_process_settlement(
         let session = session.clone();
         terminals.spawn(async move {
             let started = Instant::now();
-            session.processes().await_output(&process.process_id).await?;
+            session
+                .processes()
+                .await_output(&process.process_id)
+                .await?;
             anyhow::Result::<f64>::Ok(elapsed_ms(started))
         });
     }
@@ -481,11 +485,17 @@ pub(crate) async fn run_once_async_process_settlement(
     let open_spans_after_drain = phase_probe.open_span_count();
     let mut phase_profile = phase_probe.take_completed_after_settlement()?;
     let mut metric_samples_ms = BTreeMap::from([
-        ("async_settlement.parent_return_ms".to_string(), vec![parent_return_ms]),
+        (
+            "async_settlement.parent_return_ms".to_string(),
+            vec![parent_return_ms],
+        ),
         ("async_settlement.spawn_ms".to_string(), vec![spawn_ms]),
         ("async_settlement.settle_ms".to_string(), vec![settle_ms]),
         ("async_settlement.drain_ms".to_string(), vec![drain_ms]),
-        ("async_settlement.child_terminal_ms".to_string(), child_terminal_ms),
+        (
+            "async_settlement.child_terminal_ms".to_string(),
+            child_terminal_ms,
+        ),
     ]);
     metric_samples_ms.insert(
         "async_settlement.child_pending_ms".to_string(),
@@ -912,7 +922,9 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let run_turn_ms = elapsed_ms(run_started);
     let run_turn_alloc = alloc_delta(run_before_alloc, allocator_stats());
     let after_turn_memory = process_memory_sample();
-    store.release_session_execution_lease(&session_fence).await?;
+    store
+        .release_session_execution_lease(&session_fence)
+        .await?;
 
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
@@ -932,7 +944,10 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         .load(std::sync::atomic::Ordering::Relaxed);
     let throughput = rate_per_second(completed, run_turn_ms);
     let metric_samples_ms = BTreeMap::from([
-        ("durable_contention.claim_wait_ms".to_string(), claim_wait_ms),
+        (
+            "durable_contention.claim_wait_ms".to_string(),
+            claim_wait_ms,
+        ),
         ("durable_contention.service_ms".to_string(), service_ms),
         ("durable_contention.pool_wait_ms".to_string(), Vec::new()),
     ]);
@@ -956,7 +971,10 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             "durable_contention.seeded_batches".to_string(),
             target_completions as u64,
         ),
-        ("durable_contention.completed_batches".to_string(), completed),
+        (
+            "durable_contention.completed_batches".to_string(),
+            completed,
+        ),
         (
             "durable_contention.throughput_per_second_milli".to_string(),
             scaled_rate(throughput),

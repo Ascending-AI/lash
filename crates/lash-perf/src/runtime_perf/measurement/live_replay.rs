@@ -1,4 +1,3 @@
-
 const LIVE_REPLAY_EVENTS_PER_TURN: usize = 96;
 const LIVE_REPLAY_MAIN_CAPACITY: usize = 256;
 const LIVE_REPLAY_TRIM_CAPACITY: usize = 8;
@@ -115,9 +114,9 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                         Duration::from_secs(1),
                         futures_util::StreamExt::next(&mut subscription),
                     )
-                        .await
-                        .context("timed out reading buffered live replay event")?
-                        .context("live replay subscription closed")??;
+                    .await
+                    .context("timed out reading buffered live replay event")?
+                    .context("live replay subscription closed")??;
                     buffered_count += 1;
                 }
                 publish_one(
@@ -131,9 +130,9 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     Duration::from_secs(1),
                     futures_util::StreamExt::next(&mut subscription),
                 )
-                    .await
-                    .context("timed out reading live replay event")?
-                    .context("live replay subscription closed")??;
+                .await
+                .context("timed out reading live replay event")?
+                .context("live replay subscription closed")??;
                 Ok((buffered_count, 1usize))
             })
             .await?;
@@ -185,7 +184,9 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     )))?;
                 let mut gaps = 0usize;
                 match store.replay_after_cursor(&ahead_cursor)? {
-                    LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,
+                    LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => {
+                        gaps += 1
+                    }
                     LiveReplayOutcome::Gap(reason) => {
                         anyhow::bail!("ahead replay returned wrong gap {reason:?}")
                     }
@@ -195,9 +196,9 @@ async fn run_once_live_replay_pressure(chat_turns: usize) -> anyhow::Result<Runt
                     ),
                 }
                 match store.subscribe_after_cursor(&ahead_cursor)? {
-                    LiveReplaySubscribeOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => {
-                        gaps += 1
-                    }
+                    LiveReplaySubscribeOutcome::Gap(
+                        lash_core::LiveReplayGapReason::Unavailable,
+                    ) => gaps += 1,
                     LiveReplaySubscribeOutcome::Gap(reason) => {
                         anyhow::bail!("ahead subscribe returned wrong gap {reason:?}")
                     }

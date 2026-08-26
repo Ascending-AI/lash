@@ -33,9 +33,7 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
             .add_observer(
                 &session_scope.session_id,
                 &process_id,
-                lash_core::ProcessObserverBy::host(format!(
-                    "process-list-stress-{index:05}"
-                )),
+                lash_core::ProcessObserverBy::host(format!("process-list-stress-{index:05}")),
             )
             .await?;
         if index % 2 == 1 {
@@ -102,7 +100,10 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
                 ),
             },
         );
-        if live_entries.iter().any(lash_core::ProcessRecord::is_terminal) {
+        if live_entries
+            .iter()
+            .any(lash_core::ProcessRecord::is_terminal)
+        {
             anyhow::bail!("process_list_stress live listing included a terminal process");
         }
 

@@ -1,4 +1,3 @@
-
 use lash_sansio::sync::MutexExt;
 #[derive(Clone, Copy)]
 struct PhaseStart {
@@ -58,12 +57,7 @@ impl RuntimePerfPhaseProbe {
     }
 
     pub(crate) fn open_span_count(&self) -> usize {
-        self.state
-            .lock_recover()
-            .open
-            .values()
-            .map(Vec::len)
-            .sum()
+        self.state.lock_recover().open.values().map(Vec::len).sum()
     }
 
     pub(crate) fn take_completed_after_settlement(
@@ -72,9 +66,7 @@ impl RuntimePerfPhaseProbe {
         let mut state = self.state.lock_recover();
         let open_span_count = state.open.values().map(Vec::len).sum::<usize>();
         if open_span_count != 0 {
-            anyhow::bail!(
-                "async settlement finished with {open_span_count} open phase spans"
-            );
+            anyhow::bail!("async settlement finished with {open_span_count} open phase spans");
         }
         Ok(std::mem::take(&mut state.completed))
     }
@@ -129,7 +121,10 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
         let mut state = self.state.lock_recover();
         state.first_started_at.get_or_insert_with(Instant::now);
         if state.deferred_closes.contains(phase)
-            && state.open.get(phase).is_some_and(|starts| !starts.is_empty())
+            && state
+                .open
+                .get(phase)
+                .is_some_and(|starts| !starts.is_empty())
         {
             return;
         }
@@ -138,11 +133,7 @@ impl RuntimeTurnPhaseProbe for RuntimePerfPhaseProbe {
             alloc_before: allocator_stats(),
             memory_before: process_memory_sample(),
         };
-        state
-            .open
-            .entry(phase.to_string())
-            .or_default()
-            .push(start);
+        state.open.entry(phase.to_string()).or_default().push(start);
     }
 
     fn end_named(&self, phase: &str) {
@@ -516,8 +507,13 @@ async fn run_once_inner(
             runtime.resume_tool_catalog_composition_counting();
         }
 
-        let deep_turn_id = matches!(scenario, RuntimePerfScenario::DeepTurnComposition)
-            .then(|| format!("runtime-perf-deep-turn-{}", lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0));
+        let deep_turn_id =
+            matches!(scenario, RuntimePerfScenario::DeepTurnComposition).then(|| {
+                format!(
+                    "runtime-perf-deep-turn-{}",
+                    lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
+                )
+            });
         if let Some(turn_id) = deep_turn_id.as_deref() {
             runtime
                 .enqueue_active_turn_input(
@@ -671,8 +667,14 @@ async fn run_once_inner(
             )
         })?;
         if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {
-            if !matches!(turn.outcome, TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })) {
-                anyhow::bail!("cancel round-trip turn did not finish cancelled: {:?}", turn.outcome);
+            if !matches!(
+                turn.outcome,
+                TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
+            ) {
+                anyhow::bail!(
+                    "cancel round-trip turn did not finish cancelled: {:?}",
+                    turn.outcome
+                );
             }
         } else {
             validate_runtime_perf_turn(scenario, turn_index, &turn)?;
@@ -825,7 +827,10 @@ async fn run_once_inner(
     extra_counters.extend(store_metrics.call_counters());
     let metric_samples = store_metrics.observed_latency_samples();
     if let Some(commit) = store_metrics.commit_measurements().last() {
-        extra_counters.insert("durable_commit.logical_bytes".to_string(), commit.total_bytes);
+        extra_counters.insert(
+            "durable_commit.logical_bytes".to_string(),
+            commit.total_bytes,
+        );
         extra_counters.insert(
             "durable_commit.checkpoint_bytes".to_string(),
             commit.checkpoint_bytes,
