@@ -1065,9 +1065,6 @@ pub(crate) mod facade_ops {
     /// This is not integrator surface, carries no stability promise, and exists
     /// only for the `lash` facade. See [ADR 0051](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0051-the-facade-is-the-host-api-core-is-integrator-seams.md).
     pub trait RuntimeSessionStateFacadeOps {
-        // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
-        fn empty_for(session_id: impl Into<String>, policy: SessionPolicy) -> RuntimeSessionState;
-
         fn turn_state(&self) -> PersistedTurnState;
 
         // APIT is intentionally non-dyn-compatible; this trait has one static-dispatch impl.
@@ -1083,13 +1080,6 @@ pub(crate) mod facade_ops {
     }
 
     impl RuntimeSessionStateFacadeOps for RuntimeSessionState {
-        fn empty_for(session_id: impl Into<String>, policy: SessionPolicy) -> RuntimeSessionState {
-            RuntimeSessionState {
-                session_id: session_id.into(),
-                ..RuntimeSessionState::new(policy)
-            }
-        }
-
         fn turn_state(&self) -> PersistedTurnState {
             PersistedTurnState {
                 turn_index: self.turn_index,

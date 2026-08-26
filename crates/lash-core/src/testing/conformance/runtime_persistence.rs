@@ -561,11 +561,14 @@ where
     commit_rejects_leaf_without_frame_open_ancestor(make("missing-frame-root")).await;
     // [`SessionExecutionLeaseStore`]: single-writer lane fencing.
     session_execution_lease_contract(make("root")).await;
-    borrowed_session_execution_lease_commit_contract(make("borrowed-commit-fence")).await;
-    same_incarnation_rotation_gates_claims_not_commits(make("root")).await;
-    same_host_distinct_executors_are_lane_less_without_revoking_holder(make(
-        "fig1133-same-host-session",
+    crate::testing::conformance::borrowed_session_execution_lease_commit_contract(make(
+        "borrowed-commit-fence",
     ))
+    .await;
+    same_incarnation_rotation_gates_claims_not_commits(make("root")).await;
+    crate::testing::conformance::same_host_distinct_executors_are_lane_less_without_revoking_holder(
+        make("fig1133-same-host-session"),
+    )
     .await;
     session_execution_lease_fence_authority(make("lease-fence-authority").as_ref()).await;
     concurrent_session_execution_lease_rotation_and_stale_renewal_are_linearizable(make(
@@ -573,7 +576,11 @@ where
     ))
     .await;
     session_execution_lease_expires_by_ttl_contract(&|| make("ttl-expiry"), lease_timing).await;
-    super::durable_queued_drain_wait_contract(make("durable-queued-drain"), lease_timing).await;
+    crate::testing::conformance::durable_queued_drain_wait_contract(
+        make("durable-queued-drain"),
+        lease_timing,
+    )
+    .await;
     session_execution_lease_diagnostic_read_contract(make("lease-diagnostic")).await;
     session_execution_lease_displacement_contract(make("lease-displacement")).await;
     // [`QueuedWorkStore`]: durable queued-work ingress, ordering, and claim
@@ -634,7 +641,10 @@ where
         "selected-multi-identity",
     ))
     .await;
-    queued_work_exact_claim_preserves_physical_order_and_key_breaks(make("physical-order")).await;
+    crate::testing::conformance::queued_work_exact_claim_preserves_physical_order_and_key_breaks(
+        make("physical-order"),
+    )
+    .await;
     process_wakes_batch_by_default(make("wake-default-batch")).await;
     queued_work_completion_is_lease_guarded(make("root")).await;
     queued_wake_delivery_is_source_key_idempotent_and_claimed_once(make("root")).await;
@@ -656,7 +666,10 @@ where
         .await;
     pending_turn_input_cancel_covers_active_and_deferred_states(make("root")).await;
     pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(make("root")).await;
-    a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(make("root")).await;
+    crate::testing::conformance::a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(make(
+        "root",
+    ))
+    .await;
 }
 
 async fn session_prompt_layer_round_trips_through_the_committed_head(

@@ -477,7 +477,12 @@ pub(super) fn run_standard_protocol_contract(
                     })?;
                 machine.handle_response(lash_core::sansio::Response::Checkpoint {
                     id: checkpoint_id,
-                    delivery: lash_core::sansio::CheckpointDelivery::default(),
+                    delivery: lash_core::CheckpointDelivery {
+                        committed_user_messages: Vec::new(),
+                        messages: Vec::new(),
+                        transient_messages: Vec::new(),
+                        turn_causes: Vec::new(),
+                    },
                 });
             }
         }

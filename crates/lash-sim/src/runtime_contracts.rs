@@ -381,9 +381,11 @@ pub fn runtime_agent_frame_invariant_facts(
         .current_frame_node_id
         .as_ref()
         .is_some_and(|frame| frame_ids.contains(frame.as_str()));
-    let canonical_frame_node_id = snapshot
-        .session_graph
-        .nearest_frame_node_id(snapshot.session_graph.leaf_node_id.as_deref());
+    let canonical_frame_node_id =
+        lash_core::facade_support::SessionGraphFacadeOps::nearest_frame_node_id(
+            &snapshot.session_graph,
+            snapshot.session_graph.leaf_node_id.as_deref(),
+        );
     let current_frame_active = snapshot.current_frame_node_id.as_deref() == canonical_frame_node_id;
     let nodes_without_agent_frame = snapshot
         .session_graph
