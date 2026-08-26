@@ -201,6 +201,23 @@ def test_exempt_pr_without_notes_is_valid() -> None:
     assert release_notes.validate_pr_notes(["scripts/release_notes.py"], []) == []
 
 
+def test_none_marker_is_valid_and_renders_nothing() -> None:
+    for note in ("none", "None", "none (CI-only)", "none  (test-only)"):
+        assert release_notes.is_none_marker(note)
+        assert release_notes.validate_pr_notes(["scripts/x.py"], [note]) == []
+        assert release_notes.render_notes([note]) == ""
+    assert not release_notes.is_none_marker("none whatsoever")
+    assert not release_notes.is_none_marker("Internal: none")
+
+
+def test_none_marker_does_not_satisfy_the_product_note_requirement() -> None:
+    errors = release_notes.validate_pr_notes(["crates/lash/src/lib.rs"], ["none"])
+    assert errors == [
+        "product changes under `crates/` require at least one categorized "
+        "release note"
+    ]
+
+
 def test_pr_summary_is_clear_when_exempt_pr_has_no_notes() -> None:
     with tempfile.TemporaryDirectory() as directory:
         summary = Path(directory) / "summary.md"

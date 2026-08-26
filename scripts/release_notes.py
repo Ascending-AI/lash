@@ -50,6 +50,7 @@ CATEGORY_COLON_RE = re.compile(
     r"^(Breaking|Added|Fixed|Changed|Removed|Internal):\s*(.*)$", re.IGNORECASE
 )
 LEGACY_CATEGORY_RE = re.compile(r"^(Fixed|Changed)\s+-\s+(.*)$", re.IGNORECASE)
+NONE_NOTE_RE = re.compile(r"^none(\s*\(.*\))?$", re.IGNORECASE)
 MALFORMED_CATEGORY_ERROR = (
     "every release note must start with one of: "
     "Breaking:, Added:, Fixed:, Changed:, Removed:, Internal:"
@@ -121,6 +122,18 @@ def extract_notes(body: str) -> list[str]:
     return notes
 
 
+def is_none_marker(note: str) -> bool:
+    """Whether a note is the explicit no-release-note marker.
+
+    `Release-Notes: none` (optionally with a parenthetical, e.g.
+    `none (CI-only)`) states deliberately that a change needs no note. The
+    marker passes the shape check and is dropped from every rendering; it
+    does not satisfy the product-note requirement for `crates/` changes,
+    which want `Internal:` at minimum.
+    """
+    return NONE_NOTE_RE.fullmatch(note.strip()) is not None
+
+
 def categorize_note(note: str) -> tuple[str | None, str]:
     """Return the normalized category and note text without its prefix."""
     first_line, separator, remainder = note.partition("\n")
@@ -143,6 +156,8 @@ def render_notes(notes: list[str]) -> str:
     grouped: dict[str, list[str]] = {category: [] for category in CATEGORIES}
     grouped["Other"] = []
     for note in notes:
+        if is_none_marker(note):
+            continue
         category, text = categorize_note(note)
         grouped[category or "Other"].append(text)
 
@@ -196,7 +211,9 @@ def collect_notes_for_range(range_spec: str) -> list[str]:
     for subject, body in commit_messages(range_spec):
         if is_automated_docs_stamp(subject):
             continue
-        notes.extend(extract_notes(body))
+        notes.extend(
+            note for note in extract_notes(body) if not is_none_marker(note)
+        )
     return notes
 
 
@@ -222,14 +239,19 @@ def changed_paths(range_spec: str) -> list[str]:
 def validate_pr_notes(paths: list[str], notes: list[str]) -> list[str]:
     """Validate the product-note requirement and every note's category."""
     errors: list[str] = []
-    if any(path.startswith("crates/") for path in paths) and not notes:
+    categorized = [note for note in notes if not is_none_marker(note)]
+    if any(path.startswith("crates/") for path in paths) and not categorized:
         errors.append(
             "product changes under `crates/` require at least one categorized "
             "release note"
         )
     if any(
         category is None or not text
-        for category, text in (categorize_note(note) for note in notes)
+        for category, text in (
+            categorize_note(note)
+            for note in notes
+            if not is_none_marker(note)
+        )
     ):
         errors.append(MALFORMED_CATEGORY_ERROR)
     return errors
@@ -261,6 +283,8 @@ def write_check_pr_failure(range_spec: str, errors: list[str]) -> None:
         "\nAdd a categorized note to a commit body in this PR.\n"
         "Accepted categories: Breaking, Added, Fixed, Changed, Internal.\n"
         "Use Internal for a product change with no public-facing release note.\n"
+        "Use `Release-Notes: none` for a change that needs no note at all\n"
+        "(not accepted for product changes under crates/).\n"
         "\nAccepted inline shape:\n"
         "Release-Notes: Fixed: Describe the user-visible change.\n"
         "\nAccepted block shape:\n"
