@@ -542,9 +542,9 @@ async fn measure_process_prune(
                     metadata: serde_json::json!({"index": index}),
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::new(
-                    lash_core::ProcessOriginator::host_scoped(&prune_scope),
-                ),
+                lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
+                    &prune_scope,
+                )),
             ))
             .await?;
         registry
@@ -637,9 +637,9 @@ mod store_hardening_tests {
                     metadata: serde_json::json!({}),
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::new(
-                    lash_core::ProcessOriginator::host_scoped("unrelated"),
-                ),
+                lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
+                    "unrelated",
+                )),
             ))
             .await
             .expect("register unrelated process");
