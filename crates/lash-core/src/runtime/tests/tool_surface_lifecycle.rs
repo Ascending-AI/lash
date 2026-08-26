@@ -506,10 +506,9 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     let terminal = registry
         .complete_process(
             process_id,
-            crate::ProcessAwaitOutput::Success {
-                value: serde_json::json!("previous turn result"),
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("previous turn result"),
+            )),
             crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -665,10 +664,9 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     let pruned = registry
         .complete_process(
             "pruned-process",
-            crate::ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -1379,11 +1377,12 @@ impl crate::ProcessEngine for PayloadGatedEngine {
         _context: crate::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        Ok(crate::ProcessAwaitOutput::Success {
-            value: json!({"ran": true}),
-            control: None,
-        }
-        .into())
+        Ok(
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                json!({"ran": true}),
+            ))
+            .into(),
+        )
     }
 
     fn identity(&self, payload: &serde_json::Value) -> crate::ProcessIdentity {

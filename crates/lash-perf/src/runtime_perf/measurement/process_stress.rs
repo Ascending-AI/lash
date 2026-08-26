@@ -42,10 +42,9 @@ async fn run_once_process_list_stress(chat_turns: usize) -> anyhow::Result<Runti
             registry
                 .complete_process(
                     &process_id,
-                    lash_core::ProcessAwaitOutput::Success {
-                        value: serde_json::json!({ "index": index }),
-                        control: None,
-                    },
+                    lash_core::ProcessAwaitOutput::from_tool_output(
+                        lash_core::ToolCallOutput::success(serde_json::json!({ "index": index })),
+                    ),
                     lash_core::ProcessCompletionAuthority::external_owner(),
                 )
                 .await?;

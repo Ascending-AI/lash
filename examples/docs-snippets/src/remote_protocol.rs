@@ -7,16 +7,16 @@ fn remote_turn_request(
     trace_turn_id: String,
 ) -> anyhow::Result<()> {
     // docs:start:remote-turn-request
-    use lash::remote::REMOTE_PROTOCOL_VERSION;
+    use lash::remote::Envelope;
     use lash::remote::turn_input::{RemoteInputItem, RemoteTurnInput, RemoteTurnRequest};
 
-    let request = RemoteTurnRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
+    let request = Envelope::new(RemoteTurnRequest {
+        // The standalone wire envelope owns the protocol version.
         session_id: chat_id.clone(),
         turn_id: turn_id.clone(),
         idempotency_key: Some(idempotency_key.clone()),
         input: RemoteTurnInput {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Nested protocol bodies are intentionally bare.
             items: vec![RemoteInputItem::Text {
                 text: "Summarize this task.".to_string(),
             }],
@@ -26,9 +26,9 @@ fn remote_turn_request(
         },
         tool_grants: Vec::new(),
         metadata: Default::default(),
-    };
+    });
 
-    request.validate()?;
+    request.body.validate()?;
     // docs:end:remote-turn-request
     Ok(())
 }
@@ -37,7 +37,7 @@ fn remote_process_start_request() -> anyhow::Result<()> {
     // docs:start:remote-process-start-request
     use std::collections::BTreeMap;
 
-    use lash::remote::REMOTE_PROTOCOL_VERSION;
+    use lash::remote::Envelope;
     use lash::remote::processes::{
         RemoteProcessExecutionEnvSpec, RemoteProcessExecutionPolicy, RemoteProcessInput,
         RemoteProcessModelLimits, RemoteProcessModelSpec, RemoteProcessOriginator,
@@ -46,8 +46,8 @@ fn remote_process_start_request() -> anyhow::Result<()> {
     };
     use serde_json::json;
 
-    let request = RemoteProcessStartRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
+    let request = Envelope::new(RemoteProcessStartRequest {
+        // The standalone wire envelope owns the protocol version.
         id: "process-01".to_string(),
         input: RemoteProcessInput::External {
             metadata: json!({ "source": "scheduler" }),
@@ -80,10 +80,91 @@ fn remote_process_start_request() -> anyhow::Result<()> {
         wake_session_id: None,
         observers: Vec::new(),
         event_types: Vec::new(),
-    };
+    });
 
-    request.validate()?;
+    request.body.validate()?;
     // docs:end:remote-process-start-request
+    Ok(())
+}
+
+fn remote_process_await_outputs() -> anyhow::Result<()> {
+    use lash::remote::processes::{
+        RemoteProcessAwaitOutput, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
+        RemoteProcessToolCancellation, RemoteProcessToolFailure, RemoteProcessToolFailureSource,
+        RemoteProcessToolRetryStatus, RemoteToolFailureClass,
+    };
+    use serde_json::json;
+    let success = RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Success(json!({ "artifact": "invoices.csv" })),
+            control: None,
+        },
+    };
+    let failure = RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                class: RemoteToolFailureClass::External,
+                code: "plugin_busy".to_string(),
+                message: "plugin asked the host to retry".to_string(),
+                source: RemoteProcessToolFailureSource::Plugin,
+                retry: RemoteProcessToolRetryStatus::Safe { after_ms: Some(41) },
+                raw: Some(json!({ "status": 503 })),
+            }),
+            control: Some(json!({ "type": "finish", "value": null })),
+        },
+    };
+    let cancelled = RemoteProcessAwaitOutput::Settled {
+        output: RemoteProcessToolCallOutput {
+            outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                message: "operator cancelled".to_string(),
+                source: RemoteProcessToolFailureSource::Cancellation,
+                raw: Some(json!({ "completed_rows": 8 })),
+            }),
+            control: None,
+        },
+    };
+    for output in [&success, &failure, &cancelled] {
+        output.validate("RemoteProcessAwaitOutput")?;
+    }
+    let success_json = serde_json::to_value(&success)?;
+    let success_payload = &success_json["output"]["outcome"]["payload"];
+    assert_eq!(success_payload["artifact"], "invoices.csv");
+    let failure_json = serde_json::to_value(&failure)?;
+    let failure_payload = &failure_json["output"]["outcome"]["payload"];
+    assert_eq!(failure_payload["class"], "external");
+    assert_eq!(failure_payload["code"], "plugin_busy");
+    assert_eq!(failure_payload["message"], "plugin asked the host to retry");
+    assert_eq!(failure_payload["source"], "plugin");
+    assert_eq!(failure_payload["retry"]["after_ms"], 41);
+    assert_eq!(failure_payload["raw"]["status"], 503);
+    assert_eq!(failure_json["output"]["control"]["type"], "finish");
+    let cancelled_json = serde_json::to_value(&cancelled)?;
+    let cancelled_payload = &cancelled_json["output"]["outcome"]["payload"];
+    assert_eq!(cancelled_payload["message"], "operator cancelled");
+    assert_eq!(cancelled_payload["source"], "cancellation");
+    assert_eq!(cancelled_payload["raw"]["completed_rows"], 8);
+    let sources = [
+        RemoteProcessToolFailureSource::Runtime,
+        RemoteProcessToolFailureSource::Tool,
+        RemoteProcessToolFailureSource::Plugin,
+        RemoteProcessToolFailureSource::Policy,
+        RemoteProcessToolFailureSource::Cancellation,
+        RemoteProcessToolFailureSource::UnknownLegacy,
+    ];
+    assert_eq!(
+        serde_json::to_string(&sources)?,
+        r#"["runtime","tool","plugin","policy","cancellation","unknown_legacy"]"#
+    );
+    let retry_states = [
+        RemoteProcessToolRetryStatus::Never,
+        RemoteProcessToolRetryStatus::Safe { after_ms: None },
+        RemoteProcessToolRetryStatus::Exhausted { attempts: 3 },
+        RemoteProcessToolRetryStatus::UnknownLegacy,
+    ];
+    assert_eq!(
+        serde_json::to_string(&retry_states)?,
+        r#"[{"type":"never"},{"type":"safe"},{"type":"exhausted","attempts":3},{"type":"unknown_legacy"}]"#
+    );
     Ok(())
 }
 
@@ -91,7 +172,7 @@ fn remote_process_start_request() -> anyhow::Result<()> {
 mod asserted_process_examples {
     use std::collections::BTreeMap;
 
-    use lash::remote::REMOTE_PROTOCOL_VERSION;
+    // Process examples construct bare bodies; transport owns the envelope.
     use lash::remote::processes::{
         RemoteAbandonEvidence, RemoteAbandonRequest, RemoteAbandonWriter, RemoteObservedProcess,
         RemoteObservedProcessEvent, RemotePersistProcessEnvReceipt, RemotePersistProcessEnvRequest,
@@ -106,7 +187,9 @@ mod asserted_process_examples {
         RemoteProcessProvenance, RemoteProcessSignalReceipt, RemoteProcessSignalRequest,
         RemoteProcessStartReceipt, RemoteProcessStartRequest, RemoteProcessStarted,
         RemoteProcessStatus, RemoteProcessStatusFilter, RemoteProcessTerminalSemantics,
-        RemoteProcessTerminalSpec, RemoteProcessValueSelector, RemoteProcessWaitKind,
+        RemoteProcessTerminalSpec, RemoteProcessToolCallOutcome, RemoteProcessToolCallOutput,
+        RemoteProcessToolCancellation, RemoteProcessToolFailure, RemoteProcessToolFailureSource,
+        RemoteProcessToolRetryStatus, RemoteProcessValueSelector, RemoteProcessWaitKind,
         RemoteProcessWaitState, RemoteProcessWake, RemoteProcessWakeSpec, RemoteProcessWorkItem,
         RemoteProcessWorkSnapshot, RemoteRecoveryContract, RemoteRuntimeEffectKind,
         RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeScope, RemoteRuntimeSubject,
@@ -363,7 +446,7 @@ mod asserted_process_examples {
         assert_eq!(env_spec.policy.turn_budget, expected_budget);
 
         let request = RemoteProcessStartRequest {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             id: "invoice-export".to_string(),
             input: RemoteProcessInput::Engine {
                 kind: "report-export".to_string(),
@@ -460,13 +543,13 @@ mod asserted_process_examples {
         assert!(RemoteProcessStartRequest::validate(&invalid_request).is_err());
 
         let persist = RemotePersistProcessEnvRequest {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             env_spec,
         };
         RemotePersistProcessEnvRequest::validate(&persist)
             .expect("valid environment persist request");
         let persisted = RemotePersistProcessEnvReceipt {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             env_ref: env_ref.clone(),
         };
         RemotePersistProcessEnvReceipt::validate(&persisted)
@@ -474,7 +557,7 @@ mod asserted_process_examples {
         assert_eq!(persisted.env_ref, env_ref);
 
         let start_result = RemoteProcessStartReceipt {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             record: running_record(),
             summary: Some(RemoteProcessHandleView {
                 handle_type: "process".to_string(),
@@ -527,7 +610,7 @@ mod asserted_process_examples {
     #[test]
     fn remote_process_work_projection_preserves_events_and_runtime_provenance() {
         let snapshot = RemoteProcessWorkSnapshot {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             session_id: "session-finance".to_string(),
             visible_process_ids: vec!["invoice-export".to_string()],
             items: vec![RemoteProcessWorkItem {
@@ -610,7 +693,7 @@ mod asserted_process_examples {
         assert_eq!(snapshot_json["items"][0]["label"], "Nightly invoice export");
 
         let signal = RemoteProcessSignalRequest {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
             signal_name: "approval".to_string(),
             signal_id: "approval-1".to_string(),
@@ -624,7 +707,7 @@ mod asserted_process_examples {
             Some("invoice-export:signal:approval:1")
         );
         let signal_result = RemoteProcessSignalReceipt {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             event: signal_event(),
         };
         RemoteRuntimeScope::validate(
@@ -706,13 +789,13 @@ mod asserted_process_examples {
         );
 
         let events_request = RemoteProcessEventsRequest {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
             after_sequence: 2,
         };
         RemoteProcessEventsRequest::validate(&events_request).expect("valid event-tail request");
         let events_response = RemoteProcessEventsResponse {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
             events: vec![signal_event()],
         };
@@ -727,7 +810,7 @@ mod asserted_process_examples {
     #[test]
     fn remote_process_controls_cover_filters_terminal_outputs_and_inputs() {
         let list_filter = RemoteProcessListFilter {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             definition: Some(RemoteProcessDefinitionIdentity {
                 value: json!({ "workflow": "invoice-export", "revision": 7 }),
             }),
@@ -757,7 +840,7 @@ mod asserted_process_examples {
         assert_eq!(list_json["created_at_start_ms"], 1_720_000_000_000_u64);
         assert_eq!(list_json["created_at_end_ms"], 1_720_000_001_000_u64);
         let list_response = RemoteProcessListResponse {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             records: vec![observed_process()],
         };
         RemoteProcessListResponse::validate(&list_response).expect("valid process list response");
@@ -768,31 +851,38 @@ mod asserted_process_examples {
         );
 
         let await_request = RemoteProcessAwaitRequest {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
         };
         RemoteProcessAwaitRequest::validate(&await_request).expect("valid process await request");
         let await_result = RemoteProcessAwaitOutcome {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
-            output: RemoteProcessAwaitOutput::Success {
-                value: json!({ "artifact": "invoices.csv", "rows": 12 }),
-                control: None,
+            output: RemoteProcessAwaitOutput::Settled {
+                output: RemoteProcessToolCallOutput {
+                    outcome: RemoteProcessToolCallOutcome::Success(
+                        json!({ "artifact": "invoices.csv", "rows": 12 }),
+                    ),
+                    control: None,
+                },
             },
         };
         RemoteProcessAwaitOutcome::validate(&await_result).expect("valid process await result");
         let await_json = serde_json::to_value(&await_result).expect("await result serializes");
-        assert_eq!(await_json["output"]["type"], "success");
-        assert_eq!(await_json["output"]["value"]["artifact"], "invoices.csv");
+        assert_eq!(await_json["output"]["type"], "settled");
+        assert_eq!(
+            await_json["output"]["output"]["outcome"]["payload"]["artifact"],
+            "invoices.csv"
+        );
 
         let cancel_request = RemoteProcessCancelRequest {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
             reason: Some("operator requested cancellation".to_string()),
         };
         RemoteProcessCancelRequest::validate(&cancel_request).expect("valid cancellation request");
         let cancel_result = RemoteProcessCancelReceipt {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
+            // Bare body: the standalone transport call supplies the envelope.
             process_id: "invoice-export".to_string(),
             status: RemoteProcessStatus::Cancelled,
             record: None,
@@ -827,19 +917,30 @@ mod asserted_process_examples {
             Some(RemoteProcessValueSelector::Payload)
         ));
 
-        let failure = RemoteProcessAwaitOutput::Failure {
-            class: RemoteToolFailureClass::External,
-            code: "export_failed".to_string(),
-            message: "the batch service rejected the export".to_string(),
-            raw: Some(json!({ "retryable": false })),
-            control: None,
+        let failure = RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                    class: RemoteToolFailureClass::External,
+                    code: "export_failed".to_string(),
+                    message: "the batch service rejected the export".to_string(),
+                    source: RemoteProcessToolFailureSource::Plugin,
+                    retry: RemoteProcessToolRetryStatus::Never,
+                    raw: Some(json!({ "retryable": false })),
+                }),
+                control: None,
+            },
         };
         RemoteProcessAwaitOutput::validate(&failure, "RemoteProcessAwaitOutput")
             .expect("valid failure output");
-        let cancelled = RemoteProcessAwaitOutput::Cancelled {
-            message: "operator cancelled the export".to_string(),
-            raw: Some(json!({ "completed_rows": 8 })),
-            control: None,
+        let cancelled = RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Cancelled(RemoteProcessToolCancellation {
+                    message: "operator cancelled the export".to_string(),
+                    source: RemoteProcessToolFailureSource::Cancellation,
+                    raw: Some(json!({ "completed_rows": 8 })),
+                }),
+                control: None,
+            },
         };
         RemoteProcessAwaitOutput::validate(&cancelled, "RemoteProcessAwaitOutput")
             .expect("valid cancellation output");
@@ -859,19 +960,27 @@ mod asserted_process_examples {
         };
         RemoteProcessAwaitOutput::validate(&no_longer_retained, "RemoteProcessAwaitOutput")
             .expect("valid retention information output");
-        assert_eq!(serde_json::to_value(&failure).unwrap()["class"], "external");
         assert_eq!(
-            serde_json::to_value(&cancelled).unwrap()["raw"]["completed_rows"],
+            serde_json::to_value(&failure).unwrap()["output"]["outcome"]["payload"]["class"],
+            "external"
+        );
+        assert_eq!(
+            serde_json::to_value(&cancelled).unwrap()["output"]["outcome"]["payload"]["raw"]["completed_rows"],
             8
         );
+        let abandoned_json = serde_json::to_value(&abandoned).unwrap();
+        assert_eq!(abandoned_json["evidence"]["writer"], "owner_drain");
         assert_eq!(
-            serde_json::to_value(&abandoned).unwrap()["evidence"]["writer"],
-            "owner_drain"
+            abandoned_json["evidence"]["owner"]["owner_id"],
+            "worker-berlin"
         );
         assert_eq!(
-            serde_json::to_value(&no_longer_retained).unwrap()["terminal_label"],
-            "completed"
+            abandoned_json["evidence"]["epoch_ms"],
+            1_720_000_060_000_u64
         );
+        let retained_json = serde_json::to_value(&no_longer_retained).unwrap();
+        assert_eq!(retained_json["terminal_label"], "completed");
+        assert_eq!(retained_json["pruned_at_ms"], 1_720_086_400_000_u64);
 
         let terminal_semantics = RemoteProcessTerminalSemantics {
             status: RemoteProcessStatus::Failed,
@@ -1059,12 +1168,12 @@ mod asserted_process_examples {
 
 #[cfg(test)]
 mod asserted_tool_examples {
+    use lash::remote::RemoteProtocolError;
     use lash::remote::tools::{
         RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,
         RemoteToolOutputContract, RemoteToolRegistry, RemoteToolRetryPolicy,
         assert_remote_tool_registry_reopenable,
     };
-    use lash::remote::{REMOTE_PROTOCOL_VERSION, RemoteProtocolError};
     use lash::tools::{
         DeferredToolGrant as ToolGrant, LASHLANG_TOOL_BINDING_KEY, PLUGIN_TOOL_SOURCE_ID,
         RemoteToolGrantBindingExt, ToolBinding, ToolDefinition, ToolExecutionGrant, ToolId,
@@ -1081,7 +1190,7 @@ mod asserted_tool_examples {
 
     fn remote_grant(name: &str, operation: &str) -> RemoteToolGrant {
         serde_json::from_value(serde_json::json!({
-            "protocol_version": REMOTE_PROTOCOL_VERSION,
+            // Remote tool grants are bare bodies, including when nested.
             "id": format!("remote-tool:{name}"),
             "name": name,
             "description": "Search the host knowledge base.",
@@ -1125,7 +1234,7 @@ mod asserted_tool_examples {
     fn remote_tool_grants_reopen_with_stable_authority_and_project_into_execution_grants() {
         let binding = ToolBinding::new(["knowledge", "docs"], "search");
         let grant = remote_grant("search_docs", "search").with_tool_binding(binding);
-        assert_eq!(grant.protocol_version, REMOTE_PROTOCOL_VERSION);
+        // No per-grant version exists; enclosing messages own the envelope.
         assert_eq!(grant.id, "remote-tool:search_docs");
         assert_eq!(grant.name, "search_docs");
         assert_eq!(grant.description, "Search the host knowledge base.");
@@ -1379,8 +1488,8 @@ mod replay_provenance_examples {
             "model_intent": { "model": "gpt-5.4" }
         }))
         .expect("request serializes");
-        let decoded =
-            RemoteLlmRequest::decode_json(&request_wire).expect("current request decodes");
+        let decoded = RemoteLlmRequest::decode_json(&request_wire).expect("request decodes");
+        assert!(!decoded.encode_json().expect("re-encode").is_empty());
         assert_eq!(decoded.request_id, "request-version-first");
 
         let reasoning = RemoteProviderReasoningReplay {
@@ -1463,5 +1572,28 @@ mod replay_provenance_examples {
         let legacy: RemoteProviderReasoningReplay =
             serde_json::from_value(stripped).expect("legacy metadata remains readable");
         assert!(legacy.origin.is_none());
+    }
+}
+
+#[cfg(test)]
+mod envelope_examples {
+    use lash::remote::turn_input::RemoteTurnInput;
+    use lash::remote::{Envelope, REMOTE_PROTOCOL_VERSION};
+
+    #[test]
+    fn shared_envelope_stamps_once_and_round_trips() {
+        let input = RemoteTurnInput::text("hello");
+        let wire = input.encode_json().expect("encode");
+        let value: serde_json::Value = serde_json::from_slice(&wire).expect("JSON");
+        assert_eq!(value["protocol_version"], REMOTE_PROTOCOL_VERSION);
+        let decoded = RemoteTurnInput::decode_json(&wire).expect("decode");
+        assert_eq!(decoded, input);
+
+        let envelope = Envelope::new(decoded);
+        assert_eq!(envelope.protocol_version(), REMOTE_PROTOCOL_VERSION);
+        let wire = envelope.encode_json().expect("encode envelope");
+        let decoded = Envelope::<RemoteTurnInput>::decode_json(&wire).expect("decode envelope");
+        assert_eq!(decoded.body, input);
+        assert_eq!(decoded.into_body(), input);
     }
 }

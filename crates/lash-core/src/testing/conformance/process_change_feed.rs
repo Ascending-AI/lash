@@ -105,10 +105,9 @@ pub(super) async fn process_change_feed_never_misses_concurrent_terminal_writers
             writer_registry
                 .complete_process(
                     &process_id,
-                    ProcessAwaitOutput::Success {
-                        value: serde_json::json!({ "writer": writer_index }),
-                        control: None,
-                    },
+                    ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                        serde_json::json!({ "writer": writer_index }),
+                    )),
                     crate::ProcessCompletionAuthority::external_owner(),
                 )
                 .await

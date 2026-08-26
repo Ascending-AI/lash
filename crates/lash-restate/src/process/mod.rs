@@ -124,27 +124,27 @@ pub(crate) fn restate_process_terminal_output(
                 "invalid terminal output for process `{process_id}`: {err}"
             ))
         }),
-        Resolution::Err(err) => Ok(ProcessAwaitOutput::Failure {
-            class: lash_core::ToolFailureClass::Execution,
-            code: err.code,
-            message: err.message,
-            raw: None,
-            control: None,
-        }),
-        Resolution::Timeout => Ok(ProcessAwaitOutput::Failure {
-            class: lash_core::ToolFailureClass::Execution,
-            code: "process_await_timeout".to_string(),
-            message: format!("awaiting process `{process_id}` timed out"),
-            raw: None,
-            control: None,
-        }),
-        Resolution::Cancelled => Ok(ProcessAwaitOutput::Failure {
-            class: lash_core::ToolFailureClass::Execution,
-            code: "process_await_cancelled".to_string(),
-            message: format!("awaiting process `{process_id}` was cancelled"),
-            raw: None,
-            control: None,
-        }),
+        Resolution::Err(err) => Ok(ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
+                lash_core::ToolFailureClass::Execution,
+                err.code,
+                err.message,
+            )),
+        )),
+        Resolution::Timeout => Ok(ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
+                lash_core::ToolFailureClass::Execution,
+                "process_await_timeout",
+                format!("awaiting process `{process_id}` timed out"),
+            )),
+        )),
+        Resolution::Cancelled => Ok(ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
+                lash_core::ToolFailureClass::Execution,
+                "process_await_cancelled",
+                format!("awaiting process `{process_id}` was cancelled"),
+            )),
+        )),
     }
 }
 

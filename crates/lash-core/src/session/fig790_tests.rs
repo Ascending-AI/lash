@@ -113,10 +113,11 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                 }
                 Ok(crate::RuntimeEffectOutcome::Process {
                     result: crate::ProcessEffectOutcome::Await {
-                        output: Box::new(crate::ProcessAwaitOutput::Success {
-                            value: serde_json::json!({ "process_id": process_id }),
-                            control: None,
-                        }),
+                        output: Box::new(crate::ProcessAwaitOutput::from_tool_output(
+                            crate::ToolCallOutput::success(
+                                serde_json::json!({ "process_id": process_id }),
+                            ),
+                        )),
                     },
                 })
             }

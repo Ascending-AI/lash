@@ -105,10 +105,9 @@ pub async fn process_continuation_store(
     let terminal = registry
         .complete_process(
             pruned_process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await

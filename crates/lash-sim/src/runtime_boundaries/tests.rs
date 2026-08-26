@@ -652,10 +652,9 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
             .ensure_worker_process_registry()
             .await
             .expect("final registry");
-        let terminal = ProcessAwaitOutput::Success {
-            value: json!({"effects": effect_count, "seed": seed}),
-            control: None,
-        };
+        let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            json!({"effects": effect_count, "seed": seed}),
+        ));
         registry
             .complete_process(
                 &process_id,

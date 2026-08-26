@@ -726,15 +726,15 @@ finish "gap source"
                 .expect("timed out waiting for stream item")
                 .expect("stream item");
             if let ObservationStreamItem::ReplayGap { observation, gap } = item {
-                assert_eq!(gap.requested_cursor, requested_cursor);
+                assert_eq!(gap.body.requested_cursor, requested_cursor);
                 assert!(
-                    !gap.latest_cursor.is_empty(),
+                    !gap.body.latest_cursor.is_empty(),
                     "gap should include the latest recoverable cursor"
                 );
-                assert_eq!(observation.cursor, gap.latest_cursor);
-                assert_eq!(observation.session_id, "workbench-observation-gap");
+                assert_eq!(observation.body.cursor, gap.body.latest_cursor);
+                assert_eq!(observation.body.session_id, "workbench-observation-gap");
                 assert_eq!(
-                    gap.reason,
+                    gap.body.reason,
                     lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed
                 );
                 saw_gap = true;

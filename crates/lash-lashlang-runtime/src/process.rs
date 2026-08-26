@@ -1073,16 +1073,19 @@ impl LashlangProcessExecutionTrace {
 
     fn emit_finished(&self, output: &lash_core::ProcessAwaitOutput) {
         let (status, error) = match output {
-            lash_core::ProcessAwaitOutput::Success { .. } => {
-                (TraceLanguageExecutionStatus::Completed, None)
-            }
-            lash_core::ProcessAwaitOutput::Failure { message, .. } => {
-                (TraceLanguageExecutionStatus::Failed, Some(message.clone()))
-            }
-            lash_core::ProcessAwaitOutput::Cancelled { message, .. } => (
-                TraceLanguageExecutionStatus::Cancelled,
-                Some(message.clone()),
-            ),
+            lash_core::ProcessAwaitOutput::Settled { output } => match &output.outcome {
+                lash_core::ToolCallOutcome::Success(_) => {
+                    (TraceLanguageExecutionStatus::Completed, None)
+                }
+                lash_core::ToolCallOutcome::Failure(failure) => (
+                    TraceLanguageExecutionStatus::Failed,
+                    Some(failure.message.clone()),
+                ),
+                lash_core::ToolCallOutcome::Cancelled(cancellation) => (
+                    TraceLanguageExecutionStatus::Cancelled,
+                    Some(cancellation.message.clone()),
+                ),
+            },
             // `emit_finished` fires after an actual execution, whose outcome is
             // Success/Failure/Cancelled — abandonment is written out-of-band by the
             // sweep, never returned by a run. Map it defensively to Failed.
@@ -1392,11 +1395,12 @@ fn process_lashlang_execution_result(
     result: Result<lashlang::ExecutionOutcome, lashlang::RuntimeError>,
 ) -> lash_core::ProcessAwaitOutput {
     match result {
-        Ok(lashlang::ExecutionOutcome::Finished(value)) => lash_core::ProcessAwaitOutput::Success {
-            value: lashlang_value_to_json(&value)
-                .unwrap_or_else(|err| serde_json::json!({ "error": err.to_string() })),
-            control: None,
-        },
+        Ok(lashlang::ExecutionOutcome::Finished(value)) => {
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                lashlang_value_to_json(&value)
+                    .unwrap_or_else(|err| serde_json::json!({ "error": err.to_string() })),
+            ))
+        }
         Ok(lashlang::ExecutionOutcome::Failed(value)) => process_lashlang_failure(
             LashlangProcessFailureCode::ProcessFailed,
             value.to_string(),
@@ -1405,10 +1409,11 @@ fn process_lashlang_execution_result(
                     .unwrap_or_else(|err| serde_json::json!({ "error": err.to_string() })),
             ),
         ),
-        Ok(lashlang::ExecutionOutcome::Continued) => lash_core::ProcessAwaitOutput::Success {
-            value: serde_json::Value::Null,
-            control: None,
-        },
+        Ok(lashlang::ExecutionOutcome::Continued) => {
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            ))
+        }
         Err(err) => {
             let exhausted = err.is_execution_bound_exhausted();
             #[cfg(any(test, feature = "testing"))]
@@ -1434,21 +1439,19 @@ fn process_lashlang_failure(
     message: impl Into<String>,
     raw: Option<serde_json::Value>,
 ) -> lash_core::ProcessAwaitOutput {
-    lash_core::ProcessAwaitOutput::Failure {
-        class: lash_core::ToolFailureClass::Execution,
-        code: code.as_str().to_string(),
-        message: message.into(),
-        raw,
-        control: None,
-    }
+    let mut failure = lash_core::ToolFailure::runtime(
+        lash_core::ToolFailureClass::Execution,
+        code.as_str(),
+        message,
+    );
+    failure.raw = raw.map(lash_core::ToolValue::untrusted_json);
+    lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(failure))
 }
 
 fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessAwaitOutput {
-    lash_core::ProcessAwaitOutput::Cancelled {
-        message: message.into(),
-        raw: None,
-        control: None,
-    }
+    lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
+        lash_core::ToolCancellation::runtime(message),
+    ))
 }
 
 fn process_id_from_lashlang_handle(handle: &lashlang::Value) -> Result<String, ExecutionHostError> {

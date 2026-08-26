@@ -18,6 +18,26 @@ use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 const REOPEN_BASELINE_SPAWNS: usize = 55;
 const REOPEN_BASELINE_PRUNED: usize = 6;
 
+fn settled_success(value: serde_json::Value) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
+}
+
+fn settled_failure(
+    class: crate::ToolFailureClass,
+    code: &str,
+    message: &str,
+) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+        crate::ToolFailure::runtime(class, code, message),
+    ))
+}
+
+fn settled_cancellation(message: &str) -> ProcessAwaitOutput {
+    ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+        crate::ToolCancellation::runtime(message),
+    ))
+}
+
 /// Run the process-registry contract against a fresh backend.
 pub async fn process_registry<F>(make: F)
 where
@@ -76,10 +96,7 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
         .expect("claim leased replay repair process")
         .acquired()
         .expect("leased replay repair lease acquired");
-    let output = ProcessAwaitOutput::Success {
-        value: serde_json::json!({"repaired": true}),
-        control: None,
-    };
+    let output = settled_success(serde_json::json!({"repaired": true}));
     let committed = registry
         .complete_process_with_lease(&lease, output.clone())
         .await
@@ -142,10 +159,7 @@ pub async fn process_prune_scoped_by_originator(registry: Arc<dyn ProcessRegistr
         registry
             .complete_process(
                 process_id,
-                ProcessAwaitOutput::Success {
-                    value: serde_json::Value::Null,
-                    control: None,
-                },
+                settled_success(serde_json::Value::Null),
                 ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -242,30 +256,21 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
     let cases = [
         (
             "batch-prune-a",
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            settled_success(serde_json::Value::Null),
             "completed",
         ),
         (
             "batch-prune-b",
-            ProcessAwaitOutput::Failure {
-                class: crate::ToolFailureClass::External,
-                code: "batch_failure".to_string(),
-                message: "batch failure".to_string(),
-                raw: None,
-                control: None,
-            },
+            settled_failure(
+                crate::ToolFailureClass::External,
+                "batch_failure",
+                "batch failure",
+            ),
             "failed",
         ),
         (
             "batch-prune-c",
-            ProcessAwaitOutput::Cancelled {
-                message: "batch cancellation".to_string(),
-                raw: None,
-                control: None,
-            },
+            settled_cancellation("batch cancellation"),
             "cancelled",
         ),
     ];
@@ -502,10 +507,7 @@ async fn lifecycle_transition_refusals_are_backend_invariant(registry: Arc<dyn P
     registry
         .complete_process(
             departed_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            settled_success(serde_json::Value::Null),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -602,10 +604,7 @@ async fn terminal_completion_atomically_retains_parent_end_plan(
     let completion = registry
         .complete_process_with_lease_and_parent_end(
             &lease,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"parent": "done"}),
-                control: None,
-            },
+            settled_success(serde_json::json!({"parent": "done"})),
             vec![action.clone()],
         )
         .await
@@ -723,10 +722,7 @@ pub async fn process_registry_pagination(registry: Arc<dyn ProcessRegistry>) {
     registry
         .complete_process(
             &boundary_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"completed_between_pages": true}),
-                control: None,
-            },
+            settled_success(serde_json::json!({"completed_between_pages": true})),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -810,10 +806,7 @@ pub async fn worklist_excludes_rows_terminalized_before_a_later_page(
     registry
         .complete_process(
             terminalized_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"terminalized_before_page": true}),
-                control: None,
-            },
+            settled_success(serde_json::json!({"terminalized_before_page": true})),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -1076,10 +1069,7 @@ async fn refolded_process_record_matches_stored_projection(
     writer
         .complete_process(
             process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"refolded": true}),
-                control: None,
-            },
+            settled_success(serde_json::json!({"refolded": true})),
             ProcessCompletionAuthority::workflow_key(format!("refold:{process_id}")),
         )
         .await
@@ -1583,10 +1573,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         registry
             .complete_process_with_lease(
                 &stale,
-                ProcessAwaitOutput::Success {
-                    value: serde_json::json!({"writer": "stale"}),
-                    control: None,
-                },
+                settled_success(serde_json::json!({"writer": "stale"})),
             )
             .await
             .is_err(),
@@ -1631,10 +1618,7 @@ async fn process_lease_fencing_contract(registry: Arc<dyn ProcessRegistry>) {
         registry
             .complete_process_with_lease(
                 &expired,
-                ProcessAwaitOutput::Success {
-                    value: serde_json::json!({"writer": "expired"}),
-                    control: None,
-                },
+                settled_success(serde_json::json!({"writer": "expired"})),
             )
             .await
             .is_err(),
@@ -1823,10 +1807,7 @@ async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry>) {
         .register_process(registration(process_id))
         .await
         .expect("register terminal process");
-    let expected = ProcessAwaitOutput::Success {
-        value: serde_json::json!({"done": true}),
-        control: None,
-    };
+    let expected = settled_success(serde_json::json!({"done": true}));
     let terminal = registry
         .complete_process(
             process_id,
@@ -1974,10 +1955,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
     let terminal = registry
         .complete_process(
             process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            settled_success(serde_json::Value::Null),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -2069,10 +2047,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         registry
             .complete_process(
                 process_id,
-                ProcessAwaitOutput::Success {
-                    value: serde_json::Value::Null,
-                    control: None,
-                },
+                settled_success(serde_json::Value::Null),
                 ProcessCompletionAuthority::external_owner(),
             )
             .await,
@@ -2322,10 +2297,7 @@ async fn caller_departure_state_machine(registry: Arc<dyn ProcessRegistry>) {
     registry
         .complete_process(
             process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"reconciled": true}),
-                control: None,
-            },
+            settled_success(serde_json::json!({"reconciled": true})),
             ProcessCompletionAuthority::external_owner(),
         )
         .await

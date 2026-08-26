@@ -358,10 +358,9 @@ impl StaticToolExecute for InternalProbe {
         let complete = admin
             .complete_external(
                 "docs-missing",
-                lash::process::ProcessAwaitOutput::Success {
-                    value: serde_json::Value::Null,
-                    control: None,
-                },
+                lash::process::ProcessAwaitOutput::from_tool_output(
+                    lash::tools::ToolCallOutput::success(serde_json::Value::Null),
+                ),
             )
             .await;
         let _events = context.process_events();

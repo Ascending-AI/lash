@@ -16,7 +16,6 @@ impl RemoteLlmRequest {
             resolved_stored: _,
         } = value;
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             request_id: request_id.into(),
             scope: scope.into(),
             model_intent: RemoteModelIntent {
@@ -43,7 +42,6 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
     fn try_from(value: RemoteLlmRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteLlmRequest {
-            protocol_version: _,
             request_id: _,
             model_intent,
             messages,
@@ -320,7 +318,6 @@ impl RemoteLlmResponse {
             });
         }
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             request_id: request_id.into(),
             full_text,
             output_parts: parts.into_iter().map(Into::into).collect(),
@@ -342,7 +339,6 @@ impl RemoteLlmResponse {
 impl From<RemoteLlmResponse> for core_llm::LlmResponse {
     fn from(value: RemoteLlmResponse) -> Self {
         let RemoteLlmResponse {
-            protocol_version: _,
             request_id: _,
             full_text,
             output_parts,

@@ -428,10 +428,9 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
         .process_registry
         .complete_process(
             PROCESS_ID,
-            crate::ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             crate::ProcessCompletionAuthority::external_owner(),
         )
         .await

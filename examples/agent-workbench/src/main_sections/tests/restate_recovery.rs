@@ -397,7 +397,9 @@ finish (await handle)?
     assert!(
         matches!(
             process_terminal,
-            lash::process::ProcessAwaitOutput::Cancelled { .. }
+            lash::process::ProcessAwaitOutput::Settled { ref output }
+                if !output.is_success()
+                    && output.value_for_projection()["source"] == "cancellation"
         ),
         "Stop-over-process settled the process incorrectly: {process_terminal:#?}"
     );
@@ -989,8 +991,9 @@ finish (await handle)?
     assert!(
         matches!(
             &process_terminal,
-            lash::process::ProcessAwaitOutput::Success { value, .. }
-                if value == &json!("survived session deletion")
+            lash::process::ProcessAwaitOutput::Settled { output }
+                if output.is_success()
+                    && output.value_for_projection() == json!("survived session deletion")
         ),
         "session revocation changed the process terminal: {process_terminal:#?}"
     );
@@ -1156,7 +1159,9 @@ finish "started lifecycle gates"
     assert!(
         matches!(
             cancelled,
-            lash::process::ProcessAwaitOutput::Cancelled { .. }
+            lash::process::ProcessAwaitOutput::Settled { ref output }
+                if !output.is_success()
+                    && output.value_for_projection()["source"] == "cancellation"
         ),
         "process cancellation settled with the wrong outcome: {cancelled:#?}"
     );
@@ -1174,8 +1179,9 @@ finish "started lifecycle gates"
     assert!(
         matches!(
             &survived,
-            lash::process::ProcessAwaitOutput::Success { value, .. }
-                if value == &json!("survived session deletion")
+            lash::process::ProcessAwaitOutput::Settled { output }
+                if output.is_success()
+                    && output.value_for_projection() == json!("survived session deletion")
         ),
         "session-independent process did not complete successfully: {survived:#?}"
     );

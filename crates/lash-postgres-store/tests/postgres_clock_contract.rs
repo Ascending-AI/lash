@@ -596,10 +596,9 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     let completion = registry
         .complete_process_with_lease(
             &renewed,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"clock": "postgres"}),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({"clock": "postgres"}),
+            )),
         )
         .await
         .expect("future-skewed client clock must not invalidate a live process lease");

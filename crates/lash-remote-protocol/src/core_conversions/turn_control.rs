@@ -45,7 +45,6 @@ impl RemoteTurnCancelRequest {
     ) -> Result<lash_core::facade_support::TurnCancelRequest, RemoteProtocolError> {
         self.validate()?;
         let Self {
-            protocol_version: _,
             session_id,
             turn_id,
             request_id,
@@ -76,7 +75,6 @@ impl From<lash_core::facade_support::TurnCancelRequest> for RemoteTurnCancelRequ
             undelivered,
         } = value;
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: address.session_id,
             turn_id: address.turn_id,
             request_id,

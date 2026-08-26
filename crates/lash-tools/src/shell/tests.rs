@@ -1239,10 +1239,9 @@ mod tests {
         registry
             .complete_process(
                 "detached-production",
-                lash_core::ProcessAwaitOutput::Success {
-                    value: json!({"pid": 1234}),
-                    control: None,
-                },
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(json!({"pid": 1234})),
+                ),
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -1349,10 +1348,9 @@ mod tests {
         registry
             .complete_process(
                 "pruned-production",
-                lash_core::ProcessAwaitOutput::Success {
-                    value: json!({"pid": 1234}),
-                    control: None,
-                },
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(json!({"pid": 1234})),
+                ),
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )
             .await

@@ -176,10 +176,9 @@ async fn fixtures() -> Fixtures {
     registry
         .complete_process(
             TERMINAL_PROCESS,
-            crate::ProcessAwaitOutput::Success {
-                value: serde_json::json!("done"),
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
             crate::ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -936,10 +935,9 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         .registry
         .complete_process(
             LIVE_PROCESS,
-            crate::ProcessAwaitOutput::Success {
-                value: serde_json::json!("terminal after first drain"),
-                control: None,
-            },
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("terminal after first drain"),
+            )),
             crate::ProcessCompletionAuthority::workflow_key("live-mutation-law"),
         )
         .await

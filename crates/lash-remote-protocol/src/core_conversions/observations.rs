@@ -10,7 +10,6 @@ impl RemoteTurnActivity {
             event,
         } = activity;
         Ok(Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             sequence,
             id: id.to_string(),
             correlation_id: correlation_id.to_string(),
@@ -87,7 +86,6 @@ impl From<lash_core::facade_support::SessionObservation> for RemoteSessionObserv
     fn from(value: lash_core::facade_support::SessionObservation) -> Self {
         let lash_core::facade_support::SessionObservation { read_view, cursor } = value;
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: read_view.session_id().to_string(),
             cursor: cursor.to_string(),
             turn_index: read_view.turn_index() as u64,
@@ -187,7 +185,6 @@ impl RemoteSessionObservationEvent {
         let revision = lash_core::SessionObservationEvent::revision(event.as_ref()).as_u64();
         let cursor = cursor.to_string();
         Ok(Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id,
             replay_incarnation_id,
             turn_id,
@@ -217,7 +214,6 @@ impl From<lash_core::facade_support::LiveReplayGap> for RemoteLiveReplayGap {
             reason,
         } = value;
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id,
             requested_cursor: requested_cursor.to_string(),
             latest_cursor: latest_cursor.to_string(),
@@ -461,7 +457,7 @@ impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink for 
                 let mut writer = self
                     .writer
                     .lock_recover();
-                serde_json::to_writer(&mut *writer, &remote)
+                serde_json::to_writer(&mut *writer, &Envelope::new(remote))
                     .and_then(|_| {
                         writer
                             .write_all(b"\n")

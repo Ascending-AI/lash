@@ -628,11 +628,9 @@ mod tests {
             ProcessProvenance::host(),
         ));
         record.status = ProcessStatus::Cancelled;
-        record.outcome = Some(ProcessAwaitOutput::Cancelled {
-            message: "cancelled".to_string(),
-            raw: None,
-            control: None,
-        });
+        record.outcome = Some(ProcessAwaitOutput::from_tool_output(
+            crate::ToolCallOutput::cancelled(crate::ToolCancellation::runtime("cancelled")),
+        ));
         record
     }
 

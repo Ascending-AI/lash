@@ -254,7 +254,6 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     let remote: RemoteLlmRequest =
         serde_json::from_value(remote_json).expect("deserialize remote request");
     remote.validate().expect("valid remote request");
-    assert_eq!(remote.protocol_version, REMOTE_PROTOCOL_VERSION);
     assert_eq!(remote.request_id, "request-1");
     assert_eq!(remote.scope.agent_frame_id, "session-1:frame:test");
     let core = core_llm::LlmRequest::try_from(remote).expect("core request");
@@ -523,7 +522,6 @@ fn trigger_subscription_dtos_round_trip_core_values() {
     );
 
     let request = RemoteTriggerRegisterSubscriptionRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         draft: RemoteTriggerSubscriptionDraft::try_from(draft).expect("remote request draft"),
     };
     let core = lash_core::TriggerSubscriptionDraft::try_from(request).expect("register request");
@@ -619,10 +617,9 @@ fn process_start_requests_round_trip_core_values() {
 fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let mut record = process_record("process:record");
     record.status = lash_core::ProcessStatus::Completed;
-    record.outcome = Some(lash_core::ProcessAwaitOutput::Success {
-        value: serde_json::json!({ "done": true }),
-        control: None,
-    });
+    record.outcome = Some(lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(serde_json::json!({ "done": true })),
+    ));
     let remote = RemoteProcessRecord::try_from(record.clone()).expect("remote record");
     remote
         .validate("RemoteProcessRecord")
@@ -706,11 +703,9 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let await_result = RemoteProcessAwaitOutcome::try_from((
         "process:await".to_string(),
-        lash_core::ProcessAwaitOutput::Cancelled {
-            message: "stopped".to_string(),
-            raw: None,
-            control: None,
-        },
+        lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
+            lash_core::ToolCancellation::runtime("stopped"),
+        )),
     ))
     .expect("remote await result");
     let (process_id, output) =
@@ -718,7 +713,8 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(process_id, "process:await");
     assert!(matches!(
         output,
-        lash_core::ProcessAwaitOutput::Cancelled { .. }
+        lash_core::ProcessAwaitOutput::Settled { ref output }
+            if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))
     ));
 
     let events_response =
@@ -728,6 +724,41 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
         .expect("events response");
     assert_eq!(process_id, "process:record");
     assert_eq!(events.len(), 1);
+}
+
+#[test]
+fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
+    let failure = lash_core::ToolFailure {
+        class: lash_core::ToolFailureClass::External,
+        code: "plugin_busy".to_string(),
+        message: "plugin asked the host to retry".to_string(),
+        source: lash_core::ToolFailureSource::Plugin,
+        retry: lash_core::ToolRetryStatus::Safe { after_ms: Some(41) },
+        raw: Some(lash_core::ToolValue::untrusted_json(
+            serde_json::json!({ "status": 503 }),
+        )),
+    };
+    let core = lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
+        failure,
+    ));
+
+    let remote = RemoteProcessAwaitOutput::try_from(core.clone()).expect("remote await output");
+    assert!(matches!(
+        &remote,
+        RemoteProcessAwaitOutput::Settled {
+            output: RemoteProcessToolCallOutput {
+                outcome: RemoteProcessToolCallOutcome::Failure(RemoteProcessToolFailure {
+                    source: RemoteProcessToolFailureSource::Plugin,
+                    retry: RemoteProcessToolRetryStatus::Safe { after_ms: Some(41) },
+                    ..
+                }),
+                ..
+            }
+        }
+    ));
+
+    let round_trip = lash_core::ProcessAwaitOutput::try_from(remote).expect("core await output");
+    assert_eq!(round_trip, core);
 }
 
 #[test]
@@ -762,7 +793,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     assert!(core.definition.is_some());
 
     let cancel = RemoteProcessCancelRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:cancel".to_string(),
         reason: Some("host requested".to_string()),
     };
@@ -774,7 +804,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     ));
 
     let signal = RemoteProcessSignalRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:signal".to_string(),
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
@@ -794,7 +823,6 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     ));
 
     let await_request = RemoteProcessAwaitRequest {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         process_id: "process:await".to_string(),
     };
     await_request.validate().expect("valid await");
@@ -934,7 +962,6 @@ fn remote_turn_result_maps_core_semantics() {
         [
             result_activity,
             RemoteTurnActivity {
-                protocol_version: REMOTE_PROTOCOL_VERSION,
                 sequence: 1,
                 id: "intent-activity".to_string(),
                 correlation_id: "intent-correlation".to_string(),
@@ -1033,7 +1060,7 @@ fn assert_terminal_call_record_converts_and_validates(
     activity
         .validate()
         .expect("ModelCallRecorded conversion validates");
-    let activity_json = serde_json::to_vec(&activity).expect("encode activity");
+    let activity_json = activity.encode_json().expect("encode activity envelope");
     RemoteTurnActivity::decode_json(&activity_json).expect("activity decoder validates");
 
     let turn = lash_core::facade_support::AssembledTurn {
@@ -1391,10 +1418,10 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         .cloned()
         .enumerate()
         .map(|(sequence, activity)| {
-            serde_json::to_string(
-                &RemoteTurnActivity::from_core(sequence as u64, activity)
+            serde_json::to_string(&Envelope::new(
+                RemoteTurnActivity::from_core(sequence as u64, activity)
                     .expect("remote turn activity"),
-            )
+            ))
             .expect("serialize expected remote activity")
         })
         .collect::<Vec<_>>()
@@ -1434,9 +1461,10 @@ fn remote_turn_activity_sink_writes_exact_newline_delimited_json() {
         .collect::<Vec<_>>();
     assert_eq!(lines.len(), 2);
     for line in lines {
-        let activity: RemoteTurnActivity =
-            serde_json::from_str(line).expect("each NDJSON line is one remote activity");
-        activity.validate().expect("valid remote activity");
+        let activity = Envelope::<RemoteTurnActivity>::decode_json(line.as_bytes())
+            .expect("each NDJSON line is one remote activity envelope")
+            .into_body();
+        activity.validate().expect("valid remote activity body");
     }
 }
 
@@ -1782,7 +1810,6 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
 
 fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
     RemoteToolGrant {
-        protocol_version: REMOTE_PROTOCOL_VERSION,
         id: format!("remote-tool:{name}"),
         name: name.to_string(),
         description: "demo".to_string(),
@@ -1980,10 +2007,9 @@ fn process_event(process_id: &str) -> lash_core::ProcessEvent {
         semantics: lash_core::runtime::ProcessEventSemantics {
             terminal: Some(lash_core::facade_support::ProcessTerminalSemantics {
                 status: lash_core::ProcessStatus::Completed,
-                outcome: lash_core::ProcessAwaitOutput::Success {
-                    value: serde_json::json!(true),
-                    control: None,
-                },
+                outcome: lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(serde_json::json!(true)),
+                ),
             }),
             wake: Some(lash_core::facade_support::ProcessWake {
                 input: "wake".to_string(),

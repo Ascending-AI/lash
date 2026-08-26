@@ -29,7 +29,6 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
     // A version 43 report is refused before its removed status value reaches
     // the current body decoder.
     let mut payload = serde_json::to_value(RemoteTurnReport {
-        protocol_version: 43,
         session_id: "session".to_string(),
         turn_id: "turn".to_string(),
         status: RemoteTurnStatus::Completed,
@@ -49,6 +48,7 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
         metadata: HashMap::new(),
     })
     .expect("serialize version 43 report");
+    payload["protocol_version"] = serde_json::json!(43);
 
     let wire = serde_json::to_vec(&payload).expect("serialize version 43 report");
     assert!(matches!(

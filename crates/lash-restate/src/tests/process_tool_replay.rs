@@ -42,7 +42,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     assert!(matches!(
         first,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Success { .. })
+            if matches!(*output, ProcessAwaitOutput::Settled { ref output } if output.is_success())
     ));
     assert_eq!(executions.load(Ordering::SeqCst), 1);
 
@@ -69,7 +69,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     assert!(matches!(
         replayed,
         lash_core::ProcessRunOutcome::Terminal { output, .. }
-            if matches!(*output, ProcessAwaitOutput::Success { .. })
+            if matches!(*output, ProcessAwaitOutput::Settled { ref output } if output.is_success())
     ));
     assert_eq!(
         executions.load(Ordering::SeqCst),

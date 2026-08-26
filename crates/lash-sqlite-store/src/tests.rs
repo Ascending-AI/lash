@@ -676,10 +676,9 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
         registry
             .complete_process(
                 "proc-persist",
-                ProcessAwaitOutput::Success {
-                    value: serde_json::json!({"ok": true}),
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                    serde_json::json!({"ok": true}),
+                )),
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -708,10 +707,9 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
             .await_terminal("proc-persist")
             .await
             .expect("await persisted"),
-        ProcessAwaitOutput::Success {
-            value: serde_json::json!({"ok": true}),
-            control: None,
-        }
+        ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            serde_json::json!({"ok": true}),
+        ))
     );
     assert_eq!(
         registry

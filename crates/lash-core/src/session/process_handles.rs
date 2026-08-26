@@ -799,10 +799,9 @@ mod tests {
         host.process_registry
             .complete_process(
                 "local-await",
-                crate::ProcessAwaitOutput::Success {
-                    value: json!("local done"),
-                    control: None,
-                },
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
+                    "local done"
+                ))),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -848,10 +847,9 @@ mod tests {
         host.process_registry
             .complete_process(
                 "hidden-process",
-                crate::ProcessAwaitOutput::Success {
-                    value: json!("done"),
-                    control: None,
-                },
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
+                    "done"
+                ))),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await

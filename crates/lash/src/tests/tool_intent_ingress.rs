@@ -1406,11 +1406,12 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
         _context: lash_core::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
     ) -> std::result::Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Ok(lash_core::ProcessAwaitOutput::Success {
-            value: serde_json::json!({"ingress_engine": "ran"}),
-            control: None,
-        }
-        .into())
+        Ok(
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({"ingress_engine": "ran"}),
+            ))
+            .into(),
+        )
     }
 
     fn identity(&self, payload: &serde_json::Value) -> lash_core::ProcessIdentity {

@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::usage_activity::{RemoteTurnActivity, RemoteUsage};
-use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
 /// Stable identity proving an admitted input became canonical turn input.
 ///
@@ -45,27 +44,23 @@ pub enum RemoteTurnInputCheckpoint {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionCursor {
-    pub protocol_version: u32,
     pub cursor: String,
 }
 
 impl RemoteSessionCursor {
     pub fn new(cursor: impl Into<String>) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             cursor: cursor.into(),
         }
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteSessionCursor", "cursor", &self.cursor)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionObservation {
-    pub protocol_version: u32,
     pub session_id: String,
     pub cursor: String,
     pub turn_index: u64,
@@ -74,7 +69,6 @@ pub struct RemoteSessionObservation {
 
 impl RemoteSessionObservation {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteSessionObservation", "session_id", &self.session_id)?;
         require_non_empty("RemoteSessionObservation", "cursor", &self.cursor)
     }
@@ -82,7 +76,6 @@ impl RemoteSessionObservation {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteSessionObservationEvent {
-    pub protocol_version: u32,
     pub session_id: String,
     pub replay_incarnation_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -94,23 +87,31 @@ pub struct RemoteSessionObservationEvent {
 }
 
 impl RemoteSessionObservationEvent {
+    /// Encodes one observation event inside the shared protocol envelope.
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
     /// Decodes one JSON observation after refusing a mismatched protocol
     /// version, before the flattened event vocabulary is deserialized.
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        Self::decode_json_expecting_protocol_version(bytes, REMOTE_PROTOCOL_VERSION)
+        Self::decode_json_expecting_protocol_version(bytes, crate::REMOTE_PROTOCOL_VERSION)
     }
 
     pub(crate) fn decode_json_expecting_protocol_version(
         bytes: &[u8],
         expected_version: u32,
     ) -> Result<Self, RemoteProtocolError> {
-        let event: Self = crate::decode_versioned_json(bytes, expected_version)?;
+        let event = crate::Envelope::<Self>::decode_json_expecting_protocol_version(
+            bytes,
+            expected_version,
+        )?
+        .into_body();
         event.validate()?;
         Ok(event)
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty(
             "RemoteSessionObservationEvent",
             "session_id",
@@ -127,14 +128,6 @@ impl RemoteSessionObservationEvent {
         require_non_empty("RemoteSessionObservationEvent", "cursor", &self.cursor)?;
         if let RemoteSessionObservationEventPayload::TurnActivity { activity } = &self.event {
             activity.validate()?;
-            if activity.protocol_version != self.protocol_version {
-                return Err(RemoteProtocolError::MismatchedNestedProtocolVersion {
-                    parent: "RemoteSessionObservationEvent",
-                    child: "activity",
-                    parent_version: self.protocol_version,
-                    child_version: activity.protocol_version,
-                });
-            }
             if let crate::usage_activity::RemoteTurnEvent::TurnInputApplied { applications } =
                 &activity.event
             {
@@ -184,7 +177,6 @@ pub enum RemoteSessionProcessEventKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteLiveReplayGap {
-    pub protocol_version: u32,
     pub session_id: String,
     pub requested_cursor: String,
     pub latest_cursor: String,
@@ -194,7 +186,6 @@ pub struct RemoteLiveReplayGap {
 
 impl RemoteLiveReplayGap {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteLiveReplayGap", "session_id", &self.session_id)?;
         require_non_empty(
             "RemoteLiveReplayGap",

@@ -28,7 +28,7 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
     let observable = session.observe();
     let current = observable.current_remote_observation();
     assert_eq!(current.session_id, "workbench-remote-recovery-facades");
-    assert_eq!(current.protocol_version, lash::remote::REMOTE_PROTOCOL_VERSION);
+    // Core observations stay bare; only standalone wire messages are enveloped.
     assert_eq!(observable.current_remote_observation(), current);
 
     let snapshot = observable.recoverable_chat_snapshot();

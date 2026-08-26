@@ -182,6 +182,7 @@ async fn stream_turn_as_ndjson(session: &LashSession) -> anyhow::Result<Vec<u8>>
 
 // docs:start:remote-session-event
 use lash::observe::RemoteSessionObservationStreamItem;
+use lash::remote::Envelope;
 
 async fn stream_remote_session_observations(
     session: &LashSession,
@@ -204,13 +205,13 @@ async fn stream_remote_session_observations(
         match item? {
             RemoteSessionObservationStreamItem::Event(event) => {
                 cursor = lash::remote::observations::RemoteSessionCursor::new(event.cursor.clone());
-                send_remote_session_line(serde_json::to_string(&event)?).await?;
+                send_remote_session_line(serde_json::to_string(&Envelope::new(event))?).await?;
             }
             RemoteSessionObservationStreamItem::Gap { observation, gap } => {
                 cursor =
                     lash::remote::observations::RemoteSessionCursor::new(gap.latest_cursor.clone());
                 replace_from_remote_observation(&observation).await?;
-                send_remote_session_line(serde_json::to_string(&gap)?).await?;
+                send_remote_session_line(serde_json::to_string(&Envelope::new(gap))?).await?;
             }
         }
         persist_remote_cursor(&cursor).await?;

@@ -71,7 +71,6 @@ impl RemoteTurnReport {
         let outcome = RemoteTurnOutcome::from(outcome);
         let status = RemoteTurnStatus::from(&outcome);
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: session_id.into(),
             turn_id: turn_id.into(),
             status,

@@ -442,10 +442,9 @@ async fn concurrent_parent_end_scanners_cancel_once_on_postgres() {
     registry
         .complete_process_with_parent_end(
             PARENT,
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::json!({"parent": "done"}),
-                control: None,
-            },
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({"parent": "done"}),
+            )),
             lash_core::ProcessCompletionAuthority::external_owner(),
             vec![action.clone()],
         )

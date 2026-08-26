@@ -328,10 +328,9 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
     registry
         .complete_process(
             &process_id,
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::json!("done"),
-                control: None,
-            },
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await?;
@@ -410,10 +409,9 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
     registry
         .complete_process(
             &orphaned_process_id,
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::json!("done"),
-                control: None,
-            },
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await?;
@@ -564,10 +562,11 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
         .await?;
     assert_eq!(event.event_type, "signal.ready");
     let output = core.processes().await_output(triggered_process_id).await?;
-    let lash_core::ProcessAwaitOutput::Success { value, .. } = output else {
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("triggered process did not succeed: {output:#?}");
     };
-    assert_eq!(value, serde_json::json!({ "ok": true }));
+    assert_eq!(value.to_json_value(), serde_json::json!({ "ok": true }));
     let signal_events = core.processes().events(triggered_process_id, 0).await?;
     assert!(
         signal_events
@@ -669,10 +668,11 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
         )
         .await?;
     let output = core.processes().await_output(process_id).await?;
-    let lash_core::ProcessAwaitOutput::Success { value, .. } = output else {
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("process did not succeed after valid signal: {output:#?}");
     };
-    assert_eq!(value, serde_json::json!("done"));
+    assert_eq!(value.to_json_value(), serde_json::json!("done"));
     Ok(())
 }
 
@@ -750,10 +750,14 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
         .await?;
 
     let output = core.processes().await_output(process_id).await?;
-    let lash_core::ProcessAwaitOutput::Success { value, .. } = output else {
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("process did not succeed: {output:#?}");
     };
-    assert_eq!(value, serde_json::json!({ "first": 1, "second": 2 }));
+    assert_eq!(
+        value.to_json_value(),
+        serde_json::json!({ "first": 1, "second": 2 })
+    );
 
     // The suspension history is on the event log: two waits, two resumes.
     let events = core.processes().events(process_id, 0).await?;
@@ -808,9 +812,11 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
         )
         .await?;
     let output = core.processes().await_output(process_id).await?;
-    let lash_core::ProcessAwaitOutput::Success { value, .. } = output else {
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("parent process did not succeed: {output:#?}");
     };
+    let value = value.to_json_value();
     // `await handle` yields the await envelope: success flag plus the child's
     // finish value.
     assert_eq!(
@@ -1020,9 +1026,11 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         )
         .await?;
     let output = core.processes().await_output(process_id).await?;
-    let lash_core::ProcessAwaitOutput::Success { value, .. } = output else {
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("outliving process did not succeed: {output:#?}");
     };
+    let value = value.to_json_value();
     assert_eq!(
         value,
         serde_json::json!({ "resumed": { "after_delete": true } })
@@ -1157,9 +1165,11 @@ async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
         .expect("held await_terminal resolves within bound")
         .expect("join await task")?;
     let elapsed = started.elapsed();
-    let lash_core::ProcessAwaitOutput::Success { value, .. } = output else {
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("process did not succeed: {output:#?}");
     };
+    let value = value.to_json_value();
     assert_eq!(
         value, payload,
         "the held await_terminal yields exactly the process's finish value"

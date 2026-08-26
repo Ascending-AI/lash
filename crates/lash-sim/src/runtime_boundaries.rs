@@ -1221,10 +1221,10 @@ impl RuntimeBoundaryHarness {
             .acquired()
             .ok_or_else(|| RuntimeBoundaryError::new("process B takeover was busy"))?;
 
-        let stale_output = ProcessAwaitOutput::Success {
-            value: json!({"writer": "stale", "must_not_persist": true}),
-            control: None,
-        };
+        let stale_output =
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                json!({"writer": "stale", "must_not_persist": true}),
+            ));
         let stale_rejected = registry
             .complete_process_with_lease(&stale_lease, stale_output)
             .await
@@ -1243,10 +1243,11 @@ impl RuntimeBoundaryHarness {
             ));
         }
 
-        let successor_output = ProcessAwaitOutput::Success {
-            value: json!({"writer": "successor", "completed": true}),
-            control: None,
-        };
+        let successor_output =
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(json!({
+                "writer": "successor",
+                "completed": true
+            })));
         registry
             .complete_process_with_lease(&live_lease, successor_output.clone())
             .await
@@ -1455,10 +1456,14 @@ async fn terminal_writer(
 fn terminal_writer_from_events(events: &[lash_core::ProcessEvent]) -> Option<String> {
     events.iter().find_map(|event| {
         let terminal = event.semantics.terminal.as_ref()?;
-        let ProcessAwaitOutput::Success { value, .. } = &terminal.outcome else {
+        let ProcessAwaitOutput::Settled { output } = &terminal.outcome else {
+            return None;
+        };
+        let lash_core::ToolCallOutcome::Success(value) = &output.outcome else {
             return None;
         };
         value
+            .to_json_value()
             .get("writer")
             .and_then(Value::as_str)
             .map(str::to_string)

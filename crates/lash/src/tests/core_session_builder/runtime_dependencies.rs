@@ -711,10 +711,9 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     let pruned_terminal = registry
         .complete_process(
             "fork-pruned-process",
-            lash_core::ProcessAwaitOutput::Success {
-                value: serde_json::Value::Null,
-                control: None,
-            },
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await

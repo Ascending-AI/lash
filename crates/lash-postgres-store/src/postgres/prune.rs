@@ -112,10 +112,9 @@ mod tests {
         registry
             .complete_process(
                 &process_id,
-                ProcessAwaitOutput::Success {
-                    value: serde_json::Value::Null,
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )
             .await

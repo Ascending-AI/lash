@@ -314,16 +314,9 @@ impl StandardShell {
                     .processes()
                     .complete_external(
                         detached_process_id,
-                        lash_core::ProcessAwaitOutput::Failure {
-                            class: failure.class.clone(),
-                            code: failure.code.clone(),
-                            message: failure.message.clone(),
-                            raw: failure
-                                .raw
-                                .as_ref()
-                                .and_then(|raw| serde_json::to_value(raw).ok()),
-                            control: None,
-                        },
+                        lash_core::ProcessAwaitOutput::from_tool_output(
+                            lash_core::ToolCallOutput::failure((*failure).clone()),
+                        ),
                     )
                     .await;
                 audit.resolved();
@@ -344,10 +337,9 @@ impl StandardShell {
             .processes()
             .complete_external(
                 detached_process_id,
-                lash_core::ProcessAwaitOutput::Success {
-                    value: launch_value.clone(),
-                    control: None,
-                },
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(launch_value.clone()),
+                ),
             )
             .await
         {

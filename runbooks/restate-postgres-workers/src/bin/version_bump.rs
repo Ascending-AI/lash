@@ -561,10 +561,9 @@ async fn fire_trigger(storage: &PostgresStorage, tag: &str) -> Result<FiredTrigg
     registry
         .complete_process(
             &process_id,
-            ProcessAwaitOutput::Success {
-                value: json!("trigger-delivered process finished"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(json!(
+                "trigger-delivered process finished"
+            ))),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -1024,10 +1023,9 @@ async fn health(database_url: &str) -> Result<()> {
     registry
         .complete_process(
             PROCESS_ID,
-            ProcessAwaitOutput::Success {
-                value: json!("post-bump process finished"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(json!(
+                "post-bump process finished"
+            ))),
             ProcessCompletionAuthority::external_owner(),
         )
         .await

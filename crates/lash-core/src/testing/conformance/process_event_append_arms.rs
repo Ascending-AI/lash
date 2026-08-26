@@ -73,10 +73,9 @@ pub(super) async fn process_event_append_arms_are_ordered(registry: Arc<dyn Proc
         )
         .await
         .expect("register unleased-completion arm process");
-    let unleased_output = ProcessAwaitOutput::Success {
-        value: serde_json::json!({"append_arm": "unleased"}),
-        control: None,
-    };
+    let unleased_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+        serde_json::json!({"append_arm": "unleased"}),
+    ));
     assert!(matches!(
         registry
             .complete_process(
@@ -133,10 +132,9 @@ pub(super) async fn process_event_append_arms_are_ordered(registry: Arc<dyn Proc
         .expect("claim leased-completion arm lease")
         .acquired()
         .expect("leased-completion arm lease acquired");
-    let leased_output = ProcessAwaitOutput::Success {
-        value: serde_json::json!({"append_arm": "leased"}),
-        control: None,
-    };
+    let leased_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+        serde_json::json!({"append_arm": "leased"}),
+    ));
     assert!(matches!(
         registry
             .complete_process_with_lease(&lease, leased_output.clone())

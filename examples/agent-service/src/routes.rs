@@ -18,7 +18,7 @@ use lash::{
     TurnInput, TurnOutput,
 };
 use lash_remote_protocol::{
-    RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
+    Envelope, RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
     RemoteSessionObservationEvent, RemoteSessionObservationEventPayload,
 };
 use serde::{Deserialize, Serialize};
@@ -88,14 +88,14 @@ pub(crate) struct AppSettings {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum StreamItem {
     Observation {
-        event: Box<RemoteSessionObservationEvent>,
+        event: Box<Envelope<RemoteSessionObservationEvent>>,
     },
     ReplayCursor {
         cursor: String,
     },
     ReplayGap {
-        observation: Box<RemoteSessionObservation>,
-        gap: Box<RemoteLiveReplayGap>,
+        observation: Box<Envelope<RemoteSessionObservation>>,
+        gap: Box<Envelope<RemoteLiveReplayGap>>,
     },
     Message {
         message: ChatMessage,
@@ -742,7 +742,7 @@ async fn forward_live_replay_until_commit(
                 );
                 if tx
                     .send(StreamItem::Observation {
-                        event: Box::new(event),
+                        event: Box::new(Envelope::new(event)),
                     })
                     .await
                     .is_err()
@@ -756,8 +756,8 @@ async fn forward_live_replay_until_commit(
             RemoteSessionObservationStreamItem::Gap { observation, gap } => {
                 let _ = tx
                     .send(StreamItem::ReplayGap {
-                        observation: Box::new(observation),
-                        gap: Box::new(gap),
+                        observation: Box::new(Envelope::new(observation)),
+                        gap: Box::new(Envelope::new(gap)),
                     })
                     .await;
             }
@@ -1056,21 +1056,21 @@ finish "done through route"
     #[test]
     fn replay_gap_stream_item_uses_remote_gap_payload() {
         let item = StreamItem::ReplayGap {
-            observation: Box::new(RemoteSessionObservation {
-                protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,
+            observation: Box::new(Envelope::new(RemoteSessionObservation {
+                // Standalone stream payloads carry one shared protocol envelope.
                 session_id: "session-1".to_string(),
                 cursor: "cursor-after".to_string(),
                 turn_index: 3,
                 usage: lash_remote_protocol::RemoteUsage::default(),
-            }),
-            gap: Box::new(RemoteLiveReplayGap {
-                protocol_version: lash_remote_protocol::REMOTE_PROTOCOL_VERSION,
+            })),
+            gap: Box::new(Envelope::new(RemoteLiveReplayGap {
+                // Nested DTOs remain bare inside that envelope body.
                 session_id: "session-1".to_string(),
                 requested_cursor: "cursor-before".to_string(),
                 latest_cursor: "cursor-after".to_string(),
                 latest_revision: 7,
                 reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,
-            }),
+            })),
         };
         let value = serde_json::to_value(item).expect("json");
 

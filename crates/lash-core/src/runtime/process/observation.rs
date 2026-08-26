@@ -314,13 +314,14 @@ impl From<ProcessEvent> for ObservedProcessEvent {
 
 fn terminal_error(outcome: Option<&ProcessAwaitOutput>) -> Option<String> {
     match outcome? {
-        ProcessAwaitOutput::Failure { message, .. }
-        | ProcessAwaitOutput::Cancelled { message, .. } => Some(message.clone()),
+        ProcessAwaitOutput::Settled { output } => match &output.outcome {
+            crate::ToolCallOutcome::Failure(failure) => Some(failure.message.clone()),
+            crate::ToolCallOutcome::Cancelled(cancellation) => Some(cancellation.message.clone()),
+            crate::ToolCallOutcome::Success(_) => None,
+        },
         // Abandonment is not a reported failure; the status label conveys it and
         // the evidence rides the terminal event. No derived error string here.
-        ProcessAwaitOutput::Success { .. }
-        | ProcessAwaitOutput::Abandoned { .. }
-        | ProcessAwaitOutput::NoLongerRetained { .. } => None,
+        ProcessAwaitOutput::Abandoned { .. } | ProcessAwaitOutput::NoLongerRetained { .. } => None,
     }
 }
 
@@ -520,13 +521,13 @@ mod tests {
         registry
             .complete_process(
                 "failed",
-                ProcessAwaitOutput::Failure {
-                    class: ToolFailureClass::External,
-                    code: "boom".to_string(),
-                    message: "failed loudly".to_string(),
-                    raw: None,
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+                    crate::ToolFailure::runtime(
+                        ToolFailureClass::External,
+                        "boom",
+                        "failed loudly",
+                    ),
+                )),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
@@ -534,11 +535,9 @@ mod tests {
         registry
             .complete_process(
                 "cancelled",
-                ProcessAwaitOutput::Cancelled {
-                    message: "cancelled intentionally".to_string(),
-                    raw: None,
-                    control: None,
-                },
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
+                    crate::ToolCancellation::runtime("cancelled intentionally"),
+                )),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await

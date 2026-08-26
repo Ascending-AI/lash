@@ -326,10 +326,9 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
         .registry
         .complete_process(
             &process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!("done"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -601,10 +600,9 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
         .registry
         .complete_process(
             &pruned_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!("done"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -676,10 +674,9 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
         .registry
         .complete_process(
             &process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!("done"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -751,10 +748,9 @@ async fn reregistered_between_classification_and_delete_preserves_delivery(
         .registry
         .complete_process(
             &process_id,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!("done"),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!("done"),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await

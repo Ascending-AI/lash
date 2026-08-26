@@ -116,7 +116,6 @@ impl TryFrom<RemoteTurnInput> for lash_core::TurnInput {
     fn try_from(value: RemoteTurnInput) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteTurnInput {
-            protocol_version: _,
             items,
             protocol_turn_options,
             trace_turn_id,
@@ -145,7 +144,6 @@ impl TryFrom<RemoteTurnRequest> for lash_core::TurnInput {
         // Identity/routing fields are consumed by the transport layer, not the
         // core turn input; tool grants are applied separately.
         let RemoteTurnRequest {
-            protocol_version: _,
             session_id: _,
             turn_id: _,
             idempotency_key: _,
@@ -189,7 +187,6 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
         let prompt_layer = (!turn_context.prompt_layer().is_empty())
             .then(|| RemotePromptLayer::from(turn_context.prompt_layer().clone()));
         Ok(Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             items: items
                 .into_iter()
                 .map(TryInto::try_into)

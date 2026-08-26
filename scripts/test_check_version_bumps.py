@@ -969,6 +969,31 @@ class VersionBumpFixtureTest(unittest.TestCase):
             ("src/lib.rs:WIRE_VERSION",),
         )
 
+    def test_an_atomic_stack_can_reserve_its_bump_on_the_lower_branch(self) -> None:
+        fixture = self.fixture()
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("lower stack branch already bumped the version")
+        fixture.write(LIB_V1, WIRE_CHANGED)
+        head = fixture.commit("upper stack branch lands the reserved shape")
+        surfaces = MODULE.load_config(fixture.root / "surface.toml")
+
+        with unittest.mock.patch.dict(MODULE.STACKED_VERSION_BASELINES, {}, clear=True):
+            unburned = MODULE.check_surfaces(fixture.root, base, head, surfaces)
+        fingerprint = unburned.failures[0].fingerprint
+        with unittest.mock.patch.dict(
+            MODULE.STACKED_VERSION_BASELINES,
+            {"src/lib.rs:WIRE_VERSION": fingerprint},
+            clear=True,
+        ):
+            result = MODULE.check_surfaces(fixture.root, base, head, surfaces)
+
+        self.assertEqual(result.failures, ())
+        self.assertEqual(result.identifier_renames, ())
+        self.assertEqual(
+            tuple(surface.key for surface in result.stacked_versions),
+            ("src/lib.rs:WIRE_VERSION",),
+        )
+
     def test_a_burned_rename_baseline_does_not_cover_a_later_change(self) -> None:
         """The single-use property: the baseline pins one head shape, not a surface.
 

@@ -325,10 +325,9 @@ mod walk {
         registry
             .complete_process(
                 process_id,
-                lash_core::ProcessAwaitOutput::Success {
-                    value: serde_json::json!({"ok": true}),
-                    control: None,
-                },
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(serde_json::json!({"ok": true})),
+                ),
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )
             .await

@@ -4,7 +4,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
-use crate::{REMOTE_PROTOCOL_VERSION, ensure_protocol_version};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -38,7 +37,6 @@ impl RemoteTurnCancellationEvidence {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnCancelRequest {
-    pub protocol_version: u32,
     pub session_id: String,
     pub turn_id: String,
     pub request_id: String,
@@ -57,7 +55,6 @@ fn remote_disposition_is_defer(value: &RemoteTurnCancelDisposition) -> bool {
 
 impl RemoteTurnCancelRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnCancelRequest", "session_id", &self.session_id)?;
         require_non_empty("RemoteTurnCancelRequest", "turn_id", &self.turn_id)?;
         require_non_empty("RemoteTurnCancelRequest", "request_id", &self.request_id)
@@ -90,7 +87,6 @@ impl RemoteTurnCancelOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTurnCancelReceipt {
-    pub protocol_version: u32,
     pub session_id: String,
     pub turn_id: String,
     pub outcome: RemoteTurnCancelOutcome,
@@ -103,7 +99,6 @@ impl RemoteTurnCancelReceipt {
         outcome: RemoteTurnCancelOutcome,
     ) -> Self {
         Self {
-            protocol_version: REMOTE_PROTOCOL_VERSION,
             session_id: session_id.into(),
             turn_id: turn_id.into(),
             outcome,
@@ -111,7 +106,6 @@ impl RemoteTurnCancelReceipt {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         require_non_empty("RemoteTurnCancelReceipt", "session_id", &self.session_id)?;
         require_non_empty("RemoteTurnCancelReceipt", "turn_id", &self.turn_id)?;
         self.outcome.validate()

@@ -313,10 +313,9 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .processes
         .complete_process(
             TOMBSTONE_PROCESS_ID,
-            ProcessAwaitOutput::Success {
-                value: serde_json::json!({"fixture": "retired"}),
-                control: None,
-            },
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({ "fixture": "retired" }),
+            )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await

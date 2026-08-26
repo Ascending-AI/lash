@@ -166,11 +166,12 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
             .await
             .expect("process attachment after nested turn");
         drop(runtime);
-        Ok(crate::ProcessAwaitOutput::Success {
-            value: serde_json::Value::Null,
-            control: None,
-        }
-        .into())
+        Ok(
+            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            ))
+            .into(),
+        )
     }
 }
 

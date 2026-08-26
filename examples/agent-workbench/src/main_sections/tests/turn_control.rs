@@ -591,7 +591,9 @@ finish (await handle)?
                 .expect("process record after Stop")
                 .expect("Stop keeps the process record present")
                 .outcome,
-            Some(lash::process::ProcessAwaitOutput::Cancelled { .. })
+            Some(lash::process::ProcessAwaitOutput::Settled { ref output })
+                if !output.is_success()
+                    && output.value_for_projection()["source"] == "cancellation"
         ));
         assert!(state.active_turns.for_session(&session_id).is_empty());
         let _ = std::fs::remove_dir_all(data_dir);

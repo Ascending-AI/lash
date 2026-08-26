@@ -312,11 +312,13 @@ where
                 self.confirm_process_cancel_requested(&process_id).await?;
                 let _ = runner.await;
                 Ok(lash_core::ProcessRunOutcome::Terminal {
-                    output: Box::new(ProcessAwaitOutput::Cancelled {
-                        message: format!("process `{process_id}` was cancelled"),
-                        raw: None,
-                        control: None,
-                    }),
+                    output: Box::new(ProcessAwaitOutput::from_tool_output(
+                        lash_core::ToolCallOutput::cancelled(
+                            lash_core::ToolCancellation::runtime(format!(
+                                "process `{process_id}` was cancelled"
+                            )),
+                        ),
+                    )),
                     actions: Vec::new(),
                 })
             }

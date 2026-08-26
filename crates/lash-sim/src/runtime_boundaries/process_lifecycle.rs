@@ -22,11 +22,12 @@ impl lash_core::ProcessEngine for LifecycleSuccessEngine {
         _context: lash_core::ProcessEngineRunContext<'_>,
         _payload: Value,
     ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
-        Ok(ProcessAwaitOutput::Success {
-            value: json!({"recovered": true}),
-            control: None,
-        }
-        .into())
+        Ok(
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                json!({"recovered": true}),
+            ))
+            .into(),
+        )
     }
 }
 

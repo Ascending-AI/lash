@@ -5,13 +5,11 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ensure_protocol_version;
 use crate::llm::{RemoteSchemaContract, default_remote_input_schema};
 use crate::registry_errors::RemoteProtocolError;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteToolGrant {
-    pub protocol_version: u32,
     pub id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -45,7 +43,6 @@ impl RemoteToolGrant {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        ensure_protocol_version(self.protocol_version)?;
         if self.id.trim().is_empty() {
             return Err(RemoteProtocolError::InvalidToolGrant {
                 tool_name: self.name.clone(),
