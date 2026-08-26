@@ -134,11 +134,11 @@ async fn google_per_minute_throttle_is_retryable_and_honors_retry_info() {
         .complete(request("gemini-3.1-pro-preview", false, false))
         .await
         .expect_err("recorded 429");
-    assert_eq!(failure.retry_after, Some(Duration::from_secs(55)));
+    assert_eq!(failure.retry_after(), Some(Duration::from_secs(55)));
     let failure = classify(failure);
     assert_eq!(failure.kind, ProviderFailureKind::Quota);
-    assert!(failure.retryable);
-    assert_eq!(failure.retry_after, Some(Duration::from_secs(55)));
+    assert!(failure.is_retryable());
+    assert_eq!(failure.retry_after(), Some(Duration::from_secs(55)));
 }
 
 #[tokio::test]
@@ -161,8 +161,8 @@ async fn google_hard_quota_is_not_retried_as_a_per_minute_throttle() {
             .expect_err("recorded hard quota"),
     );
     assert_eq!(failure.kind, ProviderFailureKind::Quota);
-    assert!(!failure.retryable);
-    assert_eq!(failure.retry_after, None);
+    assert!(!failure.is_retryable());
+    assert_eq!(failure.retry_after(), None);
 }
 
 #[tokio::test]
@@ -176,8 +176,8 @@ async fn openai_per_minute_throttle_stays_retryable_without_inventing_backoff() 
             .expect_err("recorded OpenAI throttle"),
     );
     assert_eq!(failure.kind, ProviderFailureKind::Quota);
-    assert!(failure.retryable);
-    assert_eq!(failure.retry_after, None);
+    assert!(failure.is_retryable());
+    assert_eq!(failure.retry_after(), None);
     assert!(
         failure
             .raw
@@ -197,8 +197,8 @@ async fn openai_insufficient_quota_is_non_retryable() {
             .expect_err("recorded OpenAI hard quota"),
     );
     assert_eq!(failure.kind, ProviderFailureKind::Quota);
-    assert!(!failure.retryable);
-    assert_eq!(failure.retry_after, None);
+    assert!(!failure.is_retryable());
+    assert_eq!(failure.retry_after(), None);
 }
 
 #[tokio::test]
@@ -213,8 +213,8 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
             .expect_err("recorded Anthropic rate limit"),
     );
     assert_eq!(rate_failure.kind, ProviderFailureKind::Quota);
-    assert!(rate_failure.retryable);
-    assert_eq!(rate_failure.retry_after, None);
+    assert!(rate_failure.is_retryable());
+    assert_eq!(rate_failure.retry_after(), None);
 
     let mut exhausted = AnthropicProvider::new("test-key")
         .with_base_url(Some("https://provider.test".to_string()))
@@ -226,7 +226,7 @@ async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths()
             .expect_err("recorded Anthropic credit exhaustion"),
     );
     assert_eq!(quota_failure.kind, ProviderFailureKind::Quota);
-    assert!(!quota_failure.retryable);
+    assert!(!quota_failure.is_retryable());
 }
 
 async fn classify_oauth_fixture(script: &str) -> CredentialError {

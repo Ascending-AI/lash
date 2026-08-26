@@ -129,7 +129,7 @@ impl GoogleOAuthProvider {
             let value: Value = serde_json::from_str(&text).map_err(|e| {
                 LlmTransportError::new(format!("Invalid Cloud Code response JSON: {e}"))
                     .with_raw(text.clone())
-                    .retryable(false)
+                    .with_retry_verdict(TransportRetryVerdict::NotRetryable)
             })?;
             let origin_model = request.get("model").and_then(Value::as_str);
             let parts = self.response_parts_from_value(&value, origin_model);
@@ -298,7 +298,7 @@ impl GoogleOAuthProvider {
                 LlmTransportError::new("Google stream ended without finishReason")
                     .with_kind(ProviderFailureKind::Stream)
                     .with_code("stream_ended_before_finish_reason")
-                    .retryable(true)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_partial_response(partial_response()),
             );
         }

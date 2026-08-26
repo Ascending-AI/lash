@@ -325,10 +325,18 @@ fn typed_provider_error(
     kind: ProviderFailureKind,
     message: impl Into<String>,
 ) -> lash::provider::LlmTransportError {
+    let retry_verdict = if matches!(
+        kind,
+        ProviderFailureKind::Auth | ProviderFailureKind::Validation
+    ) {
+        lash::provider::TransportRetryVerdict::Forbidden
+    } else {
+        lash::provider::TransportRetryVerdict::NotRetryable
+    };
     lash::provider::LlmTransportError::new(message)
         .with_code(code)
         .with_kind(kind)
-        .retryable(false)
+        .with_retry_verdict(retry_verdict)
 }
 
 struct MeteredProvider {

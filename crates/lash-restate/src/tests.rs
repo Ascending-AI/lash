@@ -11613,7 +11613,9 @@ impl HttpTransport for CeilingCancelWatchTransport {
             HttpTransportError::new("cancel watch attach ceiling elapsed")
                 .with_kind(lash_core::ProviderFailureKind::Timeout)
                 .with_code("timeout")
-                .retryable(true),
+                .with_retry_verdict(
+                    lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                ),
         )
     }
 }
@@ -15341,7 +15343,7 @@ fn assert_retryable_timeout(error: RestateHttpError, expected_message: &str) {
     };
     assert_eq!(source.kind, lash_core::ProviderFailureKind::Timeout);
     assert_eq!(source.code.as_deref(), Some("timeout"));
-    assert!(source.retryable);
+    assert!(source.is_retryable());
     assert!(source.message.contains(expected_message), "{source}");
 }
 

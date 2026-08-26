@@ -2660,9 +2660,10 @@ fn retrying_visible_stream_provider() -> ProviderHandle {
                 )));
                 stream.send(LlmStreamEvent::Delta(format!("prose-{attempt}")));
                 if attempt < 3 {
-                    return Err(
-                        LlmTransportError::new(format!("retry attempt {attempt}")).retryable(true)
-                    );
+                    return Err(LlmTransportError::new(format!("retry attempt {attempt}"))
+                        .with_retry_verdict(
+                            lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                        ));
                 }
                 Ok(LlmResponse {
                     full_text: "prose-3".to_string(),
@@ -2711,7 +2712,6 @@ fn output_then_failing_rlm_prose_provider(
                     return Err(
                         LlmTransportError::new("deterministic rate limit")
                             .with_status(429)
-                            .retryable(true)
                             .with_output_started(true),
                     );
                 }

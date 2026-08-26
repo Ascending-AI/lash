@@ -531,11 +531,11 @@ async fn run_mutation_script(
         }
     }
     if let Some(expected_retryable) = spec.expected_retryable
-        && classified.retryable != expected_retryable
+        && classified.is_retryable() != expected_retryable
     {
         return Err(ProviderMutationExecutionError::new(format!(
             "mutated provider script `{script_name}` classified retryable={}, expected {expected_retryable}",
-            classified.retryable
+            classified.is_retryable()
         )));
     }
     let exchanges = transport.exchanges()?;
@@ -549,11 +549,11 @@ async fn run_mutation_script(
         "response_events": exchanges.first().map(|exchange| exchange.response.event_names.clone()).unwrap_or_default(),
         "status": err.status,
         "kind": format!("{:?}", err.kind),
-        "retryable": err.retryable,
+        "retryable": err.is_retryable(),
         "terminal_reason": err.terminal_reason.code(),
         "classification": {
             "kind": format!("{:?}", classified.kind),
-            "retryable": classified.retryable,
+            "retryable": classified.is_retryable(),
             "status": classified.status,
             "terminal_reason": classified.terminal_reason.code(),
         },

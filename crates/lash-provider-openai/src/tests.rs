@@ -590,7 +590,7 @@ fn responses_body_rejects_numeric_reasoning_from_budget_encoding() {
         error.code.as_deref(),
         Some("reasoning_encoding_unrepresentable")
     );
-    assert!(!error.retryable);
+    assert!(!error.is_retryable());
     assert!(error.message.contains("openai"));
     assert!(error.message.contains("Responses"));
     assert!(error.message.contains("Budget(16384)"));
@@ -733,7 +733,7 @@ fn chat_body_openai_format_rejects_budget() {
         error.code.as_deref(),
         Some("reasoning_encoding_unrepresentable")
     );
-    assert!(!error.retryable);
+    assert!(!error.is_retryable());
     assert!(error.message.contains("openai"));
     assert!(error.message.contains("ChatCompletions"));
     assert!(error.message.contains("Budget(16384)"));
@@ -767,7 +767,7 @@ fn chat_body_reasoning_toggle_false_respects_dialect() {
         error.code.as_deref(),
         Some("reasoning_encoding_unrepresentable")
     );
-    assert!(!error.retryable);
+    assert!(!error.is_retryable());
     assert!(error.message.contains("ToggleFalse"));
 
     let openrouter = openrouter_provider()
@@ -1823,7 +1823,7 @@ fn response_failed_server_error_is_retryable() {
     )
     .unwrap_err();
 
-    assert!(err.retryable);
+    assert!(err.is_retryable());
     assert_eq!(err.message, "internal stream ended unexpectedly");
 }
 
@@ -2082,7 +2082,7 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
         failure.code.as_deref(),
         Some("unsafe_retry_after_output_started")
     );
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
 }
 
 #[tokio::test]
@@ -2119,7 +2119,7 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
         failure.code.as_deref(),
         Some("unsafe_retry_after_output_started")
     );
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
 }
 
 #[tokio::test]
@@ -2236,7 +2236,7 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
         error.code.as_deref(),
         Some("stream_ended_before_finish_reason")
     );
-    assert!(error.retryable);
+    assert!(error.is_retryable());
     let partial = error.partial_response.as_deref().expect("partial response");
     assert_eq!(partial.full_text, "partial");
     assert_eq!(partial.usage.input_tokens, 9);

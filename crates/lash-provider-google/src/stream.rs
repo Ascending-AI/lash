@@ -316,7 +316,8 @@ impl GoogleOAuthProvider {
             return Ok(());
         }
         let event: Value = serde_json::from_str(raw).map_err(|e| {
-            LlmTransportError::new(format!("Invalid Cloud Code SSE payload: {e}")).retryable(false)
+            LlmTransportError::new(format!("Invalid Cloud Code SSE payload: {e}"))
+                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
         })?;
         ExecutionEvidence::merge_optional(
             execution_evidence,

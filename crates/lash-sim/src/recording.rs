@@ -257,7 +257,7 @@ impl RecordingExchange {
             _ => ProviderWireEvent::TransportError {
                 at,
                 message: self.scrubber.redact_text(&error.message),
-                retryable: Some(error.retryable),
+                retryable: Some(error.is_retryable()),
             },
         };
         self.write_script(vec![event])
@@ -547,12 +547,12 @@ fn recorded_stream_error(
         ProviderFailureKind::Stream => ProviderWireEvent::Disconnect {
             at,
             message: Some(scrubber.redact_text(&error.message)),
-            retryable: Some(error.retryable),
+            retryable: Some(error.is_retryable()),
         },
         _ => ProviderWireEvent::TransportError {
             at,
             message: scrubber.redact_text(&error.message),
-            retryable: Some(error.retryable),
+            retryable: Some(error.is_retryable()),
         },
     }
 }
@@ -615,7 +615,7 @@ fn elapsed_millis(duration: Duration) -> u64 {
 fn recording_error(message: impl Into<String>) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Transport)
-        .retryable(false)
+        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable)
 }
 
 #[cfg(test)]

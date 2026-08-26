@@ -24,7 +24,7 @@ async fn typed_context_length_error_is_authoritative_at_provider_handle() {
     assert_eq!(failure.code.as_deref(), Some("context_length_exceeded"));
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ContextOverflow);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
 }
 
 #[tokio::test]
@@ -37,7 +37,7 @@ async fn typed_validation_error_is_not_overridden_by_user_text_echo() {
     assert_eq!(failure.code.as_deref(), Some("invalid_request_error"));
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
 }
 
 #[tokio::test]
@@ -50,7 +50,7 @@ async fn typed_hard_quota_code_is_authoritative_at_provider_handle() {
     assert_eq!(failure.code.as_deref(), Some("insufficient_quota"));
     assert_eq!(failure.kind, ProviderFailureKind::Quota);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
 }
 
 #[tokio::test]
@@ -63,7 +63,7 @@ async fn typed_content_filter_code_is_authoritative_at_provider_handle() {
     assert_eq!(failure.code.as_deref(), Some("content_filter"));
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ContentFilter);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
 }
 
 #[tokio::test]
@@ -76,5 +76,5 @@ async fn typed_unsupported_model_code_is_authoritative_at_provider_handle() {
     assert_eq!(failure.code.as_deref(), Some("model_not_found"));
     assert_eq!(failure.kind, ProviderFailureKind::Unsupported);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
-    assert!(!failure.retryable);
+    assert!(!failure.is_retryable());
 }

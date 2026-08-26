@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::responses_shared::ResponsesStreamState;
 use crate::responses_stream_event::ResponsesStreamEvent;
-use crate::schema::{classify_openai_error, responses_error_is_retryable};
+use crate::schema::{classify_openai_error, responses_error_retry_verdict};
 
 pub(super) fn response_failed_error(provider: &str, event: &Value) -> LlmTransportError {
     let error = event
@@ -16,10 +16,10 @@ pub(super) fn response_failed_error(provider: &str, event: &Value) -> LlmTranspo
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| format!("{provider} response failed"));
-    let retryable = error.is_some_and(responses_error_is_retryable);
+    let retry_verdict = error.map(responses_error_retry_verdict).unwrap_or_default();
     let failure = LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Stream)
-        .retryable(retryable)
+        .with_retry_verdict(retry_verdict)
         .with_raw(event.to_string());
     classify_openai_error(event, failure)
 }

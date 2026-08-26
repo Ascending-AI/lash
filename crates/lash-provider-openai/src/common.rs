@@ -58,7 +58,7 @@ pub(crate) fn has_response_content(parts: &[lash_core::llm::types::LlmOutputPart
 
 pub(crate) fn empty_response_error(raw: String) -> lash_core::llm::transport::LlmTransportError {
     lash_core::llm::transport::LlmTransportError::new("OpenAI-compatible empty_response")
-        .retryable(true)
+        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable)
         .with_code("empty_response")
         .with_raw(raw)
 }

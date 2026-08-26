@@ -1,5 +1,5 @@
 use crate::driver::CompletionEndpoint;
-use lash_core::llm::transport::LlmTransportError;
+use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
 use std::fmt;
@@ -217,5 +217,5 @@ pub(crate) fn reasoning_encode_transport_error(
         error.dialect, error.detail
     ))
     .with_code("reasoning_encoding_unrepresentable")
-    .retryable(false)
+    .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }

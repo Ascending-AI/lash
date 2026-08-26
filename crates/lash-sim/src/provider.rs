@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
-use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
+use lash_core::{
+    ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,
+};
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport, run_with_timeout,
 };
@@ -1408,25 +1410,35 @@ fn chunk_bytes(
 }
 
 fn disconnect_error(message: Option<String>, retryable: Option<bool>) -> LlmTransportError {
+    let retry_verdict = if retryable.unwrap_or(true) {
+        TransportRetryVerdict::RetryableTransient
+    } else {
+        TransportRetryVerdict::NotRetryable
+    };
     LlmTransportError::new(format!(
         "Stream read failed: {}",
         message.unwrap_or_else(|| "scripted disconnect".to_string())
     ))
     .with_kind(ProviderFailureKind::Stream)
-    .retryable(retryable.unwrap_or(true))
+    .with_retry_verdict(retry_verdict)
 }
 
 fn timeout_error(message: Option<String>) -> LlmTransportError {
     LlmTransportError::new(message.unwrap_or_else(|| "scripted provider timeout".to_string()))
         .with_kind(ProviderFailureKind::Timeout)
         .with_code("timeout")
-        .retryable(true)
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
 }
 
 fn transport_error(message: String, retryable: Option<bool>) -> LlmTransportError {
+    let retry_verdict = if retryable.unwrap_or(true) {
+        TransportRetryVerdict::RetryableTransient
+    } else {
+        TransportRetryVerdict::NotRetryable
+    };
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Transport)
-        .retryable(retryable.unwrap_or(true))
+        .with_retry_verdict(retry_verdict)
 }
 
 fn select_path<'a>(root: &'a Value, path: &str) -> Result<Option<&'a Value>, LlmTransportError> {
@@ -1599,15 +1611,20 @@ mod tests {
                 .count(),
             2
         );
-        assert_eq!(err.retry_after, Some(Duration::from_secs(7)));
+        assert_eq!(err.retry_after(), Some(Duration::from_secs(7)));
         assert_eq!(request_body_json(&err)["model"], "openai/gpt-5.4");
         assert_eq!(request_body_json(&err)["stream"], false);
-        assert!(!err.retryable);
+        assert_eq!(
+            err.retry_verdict,
+            TransportRetryVerdict::RetryableThrottle {
+                retry_after: Some(Duration::from_secs(7)),
+            }
+        );
 
         let classified = DefaultProviderFailureClassifier.classify(err);
         assert_eq!(classified.kind, ProviderFailureKind::Quota);
-        assert!(classified.retryable);
-        assert_eq!(classified.retry_after, Some(Duration::from_secs(7)));
+        assert!(classified.is_retryable());
+        assert_eq!(classified.retry_after(), Some(Duration::from_secs(7)));
     }
 
     #[tokio::test]
@@ -1635,11 +1652,11 @@ mod tests {
             request_body_json(&err)["tools"][0]["function"]["name"],
             "lookup"
         );
-        assert!(!err.retryable);
+        assert!(!err.is_retryable());
 
         let classified = DefaultProviderFailureClassifier.classify(err);
         assert_eq!(classified.kind, ProviderFailureKind::Validation);
-        assert!(!classified.retryable);
+        assert!(!classified.is_retryable());
     }
 
     #[tokio::test]
@@ -1653,7 +1670,7 @@ mod tests {
             .expect_err("mid-stream disconnect");
 
         assert_eq!(err.kind, ProviderFailureKind::Stream);
-        assert!(err.retryable);
+        assert!(err.is_retryable());
         assert!(err.message.contains("scripted socket closed"));
         assert_eq!(text_deltas(&events), vec!["partial".to_string()]);
     }
@@ -1725,7 +1742,7 @@ mod tests {
 
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
         assert_eq!(err.code.as_deref(), Some("timeout"));
-        assert!(err.retryable);
+        assert!(err.is_retryable());
         assert!(err.status.is_none());
         assert!(
             events.lock_recover().is_empty(),

@@ -88,7 +88,7 @@ async fn raw_provider_complete_rejects_endpoint_userinfo_before_transport() {
         .expect_err("userinfo-bearing routes must fail closed");
     assert_eq!(error.code.as_deref(), Some("invalid_provider_endpoint"));
     assert_eq!(error.kind, ProviderFailureKind::Validation);
-    assert!(!error.retryable);
+    assert!(!error.is_retryable());
     assert!(!error.to_string().contains("route-secret"));
     assert!(transport.requests.lock_recover().is_empty());
 }

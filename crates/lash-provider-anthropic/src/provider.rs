@@ -79,7 +79,7 @@ impl Provider for AnthropicProvider {
         let request_body_bytes = serde_json::to_vec(&body).map_err(|err| {
             LlmTransportError::new(format!("Failed to serialize Anthropic body: {err}"))
                 .with_kind(ProviderFailureKind::Validation)
-                .retryable(false)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
         })?;
         emit_provider_request_trace(
             provider_trace.as_ref(),
@@ -227,7 +227,7 @@ impl Provider for AnthropicProvider {
                 LlmTransportError::new("Anthropic stream ended before message_stop")
                     .with_kind(ProviderFailureKind::Stream)
                     .with_code("stream_ended_before_message_stop")
-                    .retryable(true)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                     .with_partial_response(partial),
             );
         }
@@ -265,7 +265,7 @@ fn replay_origin_conflict_error(
     LlmTransportError::new(conflict.to_string())
         .with_kind(ProviderFailureKind::Validation)
         .with_code("provider_replay_origin_conflict")
-        .retryable(false)
+        .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
 impl AnthropicProvider {

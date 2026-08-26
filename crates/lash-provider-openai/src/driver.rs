@@ -386,7 +386,7 @@ fn complete_buffered_responses(
         )
         .with_kind(ProviderFailureKind::Stream)
         .with_code("stream_ended_before_terminal_response")
-        .retryable(true)
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
         .with_output_started(output_started)
         .with_partial_response(partial));
     }
@@ -482,7 +482,7 @@ fn complete_buffered_chat(
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
             .with_code("stream_ended_before_finish_reason")
-            .retryable(true)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(chat_response_from_state(state, &url)));
     }
     if !has_response_content(&parts) {
@@ -661,7 +661,7 @@ async fn drive_streaming_responses(
         )
         .with_kind(ProviderFailureKind::Stream)
         .with_code("stream_ended_before_terminal_response")
-        .retryable(true)
+        .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
         .with_output_started(output_started)
         .with_partial_response(partial));
     }
@@ -774,7 +774,7 @@ async fn drive_streaming_chat(
         return Err(LlmTransportError::new("Stream ended without finish_reason")
             .with_kind(ProviderFailureKind::Stream)
             .with_code("stream_ended_before_finish_reason")
-            .retryable(true)
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(chat_response_from_state(state, &url)));
     }
     let parts = state.parts();

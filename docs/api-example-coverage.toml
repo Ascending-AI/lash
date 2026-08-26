@@ -10154,7 +10154,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:488#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:495#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs::send_delta#`events.send(LlmStreamEvent::Delta(text.to_string()));`, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs::live_restate_process_llm_query_with_typed_output_succeeds_inner#`assert!(request.stream_events.is_none());` asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -10171,7 +10171,7 @@ kind = "function"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:488#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:495#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Used by the agent-workbench example at examples/agent-workbench/src/failure_provider.rs::send_delta#`events.send(LlmStreamEvent::Delta(text.to_string()));`, inside `send_delta`, but the assertion anchor recorded for it is not evidence about this item: examples/agent-workbench/src/main_sections/tests/restate_recovery.rs::live_restate_process_llm_query_with_typed_output_succeeds_inner#`assert!(request.stream_events.is_none());` asserts an unrelated expression in `live_restate_process_llm_query_with_typed_output_succeeds_inner`, and `send_delta` contains no assertion naming this item or a local carrying its result. Downgraded from used-asserted: assert this item's outcome in the example before claiming asserted usage."
 
 [[api]]
@@ -10309,7 +10309,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "protocol"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:488#events.send(LlmStreamEvent::Delta(text.to_string()));"
+usage = "examples/agent-workbench/src/failure_provider.rs:495#events.send(LlmStreamEvent::Delta(text.to_string()));"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion independently observes this API contract. Add an outcome-driven example test before claiming asserted usage."
 
 [[api]]
@@ -12156,7 +12156,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::reopen_preserving_history"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3796#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
+usage = "crates/lash/src/tests/turn_streaming.rs:3792#let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);"
 reason = "Relocate: this all-features-only handle is implemented in lash_core::testing and exists solely so the importable replay law can distinguish preserved history from a fresh incarnation."
 
 [[api]]
@@ -12184,7 +12184,7 @@ availability = "all-features"
 aliases = ["lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing"]
 area = "observation-admin"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:4009#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
+usage = "crates/lash/src/tests/turn_streaming.rs:4005#lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing("
 reason = "Relocate: this all-features-only method is implemented in lash_core::testing and consumed only to pin the distinct replay-visible and pre-notification cuts in the snapshot-subscribe conformance law."
 
 [[api]]
@@ -31692,7 +31692,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:48#lash::provider::DefaultProviderFailureClassifier.classify("
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.retryable);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.is_retryable());"
 
 [[api]]
 symbol = "lash::provider::ExecutionEvidence"
@@ -32722,7 +32722,7 @@ availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
 usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:48#let classified = lash::provider::DefaultProviderFailureClassifier.classify("
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.retryable);"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.is_retryable());"
 reason = "Assertion relationship: classify produces classified in facade_exports_resolve_to_expected_contracts, and the assertion observes that the classified HTTP 429 failure is retryable."
 
 [[api]]
@@ -32731,8 +32731,8 @@ kind = "function"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-asserted"
-usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.retryable);"
-assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.retryable);"
+usage = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.is_retryable());"
+assertion = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs:51#assert!(classified.is_retryable());"
 reason = "Reanchored to the existing direct outcome assertion; the former assigned-result line was setup evidence only."
 
 [[api]]
@@ -33791,6 +33791,80 @@ area = "plugins"
 disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/architecture_providers.rs:134#stream_termination: Some(StreamTermination::RequireTerminalEvidence),"
 reason = "Syntax-only evidence: the recorded example anchor is a variant pattern, which only distinguishes an enum shape; no executed assertion directly observes this API contract. Add an outcome-driven example test before claiming asserted usage."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict"
+kind = "enum"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:314#let retry_verdict = TransportRetryVerdict::RetryableThrottle {"
+reason = "The agent-workbench retry example constructs the typed verdict that drives its simulated provider throttle."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict::Forbidden"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/slack-clone/src/live_e2e.rs:332#lash::provider::TransportRetryVerdict::Forbidden"
+reason = "The slack-clone transport example classifies authentication and validation failures as structurally forbidden retries."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict::NotRetryable"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/slack-clone/src/live_e2e.rs:334#lash::provider::TransportRetryVerdict::NotRetryable"
+reason = "The slack-clone transport example classifies other terminal provider failures as non-retryable."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict::RetryableThrottle"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:314#let retry_verdict = TransportRetryVerdict::RetryableThrottle {"
+reason = "The agent-workbench rate-limit scenario supplies an explicit throttle verdict to the transport error."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict::RetryableThrottle::retry_after"
+kind = "field"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:315#retry_after: Some(std::time::Duration::ZERO),"
+reason = "The agent-workbench rate-limit scenario supplies the provider-requested retry delay through the typed throttle field."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict::RetryableTransient"
+kind = "variant"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-unasserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:337#.with_retry_verdict(TransportRetryVerdict::RetryableTransient)"
+reason = "The agent-workbench partial-output failure scenario marks its simulated interrupted transport as transient."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict::is_retryable"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:317#debug_assert!(retry_verdict.is_retryable());"
+assertion = "examples/agent-workbench/src/failure_provider.rs:317#debug_assert!(retry_verdict.is_retryable());"
+reason = "The agent-workbench rate-limit scenario asserts that its typed throttle verdict authorizes retry."
+
+[[api]]
+symbol = "lash::provider::TransportRetryVerdict::retry_after"
+kind = "function"
+availability = "default+all-features"
+area = "plugins"
+disposition = "used-asserted"
+usage = "examples/agent-workbench/src/failure_provider.rs:318#debug_assert_eq!(retry_verdict.retry_after(), Some(std::time::Duration::ZERO));"
+assertion = "examples/agent-workbench/src/failure_provider.rs:318#debug_assert_eq!(retry_verdict.retry_after(), Some(std::time::Duration::ZERO));"
+reason = "The agent-workbench rate-limit scenario asserts that the typed throttle verdict exposes its requested delay."
 
 [[api]]
 symbol = "lash::recoverable_chat::RecoverableChatEventId"
@@ -49435,7 +49509,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectKind::ExecCode"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:729#if invocation.effect_kind() != Some(RuntimeEffectKind::ExecCode) {"
+usage = "crates/lash-protocol-rlm/src/executor.rs:728#if invocation.effect_kind() != Some(RuntimeEffectKind::ExecCode) {"
 
 [[api]]
 symbol = "lash::runtime::RuntimeEffectKind::LlmCall"
@@ -49617,7 +49691,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectLocalExecutor::into_trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2590#lash_core::RuntimeEffectLocalExecutor::into_trigger(local_executor)?"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2575#lash_core::RuntimeEffectLocalExecutor::into_trigger(local_executor)?"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -50055,7 +50129,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2594#Ok(lash_core::RuntimeEffectOutcome::Trigger { result })"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2579#Ok(lash_core::RuntimeEffectOutcome::Trigger { result })"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -50065,7 +50139,7 @@ availability = "default+all-features"
 aliases = ["lash_core::RuntimeEffectOutcome::Trigger::result"]
 area = "triggers"
 disposition = "internal-test-only"
-usage = "crates/lash-protocol-rlm/src/executor.rs:2594#Ok(lash_core::RuntimeEffectOutcome::Trigger { result })"
+usage = "crates/lash-protocol-rlm/src/executor.rs:2579#Ok(lash_core::RuntimeEffectOutcome::Trigger { result })"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -56539,7 +56613,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash/src/tests/turn_streaming.rs:3797#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
+usage = "crates/lash/src/tests/turn_streaming.rs:3793#    lash_core::testing::conformance::incarnation_change_invalidates_cursor("
 reason = "Importable live-replay law exercised by the runtime's in-memory conformance test; only test code invokes it, which is the purpose of the `testing` feature."
 
 [[api]]
@@ -68060,7 +68134,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::duration_ms"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:563#duration_ms: start.elapsed().as_millis() as u64,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:562#duration_ms: start.elapsed().as_millis() as u64,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::error"
@@ -68069,7 +68143,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::error"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:562#error: Some(error.into()),"
+usage = "crates/lash-protocol-rlm/src/executor.rs:561#error: Some(error.into()),"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::observation_truncation"
@@ -68078,7 +68152,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::observation_truncation"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:578#observation_truncation: collected.observation_truncation,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:577#observation_truncation: collected.observation_truncation,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::observations"
@@ -68087,7 +68161,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::observations"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:577#observations: collected.observations,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:576#observations: collected.observations,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::printed_images"
@@ -68096,7 +68170,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::printed_images"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:581#printed_images: collected.printed_images,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:580#printed_images: collected.printed_images,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::terminal_finish"
@@ -68105,7 +68179,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::terminal_finish"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:565#terminal_finish: None,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:564#terminal_finish: None,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::tool_calls"
@@ -68490,7 +68564,7 @@ availability = "default+all-features"
 aliases = ["lash_core::Part"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-provider-anthropic/src/stream.rs:337#tx.send(LlmStreamEvent::Part(part));"
+usage = "crates/lash-provider-anthropic/src/stream.rs:343#tx.send(LlmStreamEvent::Part(part));"
 
 [[api]]
 symbol = "lash::messages::Part::attachment"
@@ -96438,7 +96512,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:477#LlmContentBlock::Text { text, .. }"
+usage = "examples/agent-workbench/src/failure_provider.rs:484#LlmContentBlock::Text { text, .. }"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
@@ -96487,7 +96561,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:477#LlmContentBlock::Text { text, .. }"
+usage = "examples/agent-workbench/src/failure_provider.rs:484#LlmContentBlock::Text { text, .. }"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
@@ -96512,7 +96586,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:477#LlmContentBlock::Text { text, .. }"
+usage = "examples/agent-workbench/src/failure_provider.rs:484#LlmContentBlock::Text { text, .. }"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
@@ -96593,7 +96667,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:469#fn next_replay_route_turn(messages: &[LlmMessage]) -> usize {"
+usage = "examples/agent-workbench/src/failure_provider.rs:476#fn next_replay_route_turn(messages: &[LlmMessage]) -> usize {"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
@@ -96602,7 +96676,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:474#message.blocks.iter().any(|block| {"
+usage = "examples/agent-workbench/src/failure_provider.rs:481#message.blocks.iter().any(|block| {"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
@@ -96627,7 +96701,7 @@ kind = "field"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:472#.filter(|message| message.role == LlmRole::Assistant)"
+usage = "examples/agent-workbench/src/failure_provider.rs:479#.filter(|message| message.role == LlmRole::Assistant)"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
@@ -96644,7 +96718,7 @@ kind = "enum"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:472#.filter(|message| message.role == LlmRole::Assistant)"
+usage = "examples/agent-workbench/src/failure_provider.rs:479#.filter(|message| message.role == LlmRole::Assistant)"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
@@ -96653,7 +96727,7 @@ kind = "variant"
 availability = "default+all-features"
 area = "plugins"
 disposition = "used-unasserted"
-usage = "examples/agent-workbench/src/failure_provider.rs:472#.filter(|message| message.role == LlmRole::Assistant)"
+usage = "examples/agent-workbench/src/failure_provider.rs:479#.filter(|message| message.role == LlmRole::Assistant)"
 reason = "Migrated example code uses this facade item, but no assertion directly isolates its contract."
 
 [[api]]
