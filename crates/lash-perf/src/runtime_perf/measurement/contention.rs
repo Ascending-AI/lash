@@ -589,7 +589,8 @@ pub(crate) async fn run_once_async_process_settlement(
 struct DurableContentionCounters {
     claim_attempts: std::sync::atomic::AtomicU64,
     claim_refusals: std::sync::atomic::AtomicU64,
-    lease_failures: std::sync::atomic::AtomicU64,
+    successful_claims: std::sync::atomic::AtomicU64,
+    lease_probe_busy: std::sync::atomic::AtomicU64,
     renewals: std::sync::atomic::AtomicU64,
     abandons: std::sync::atomic::AtomicU64,
     reclaims: std::sync::atomic::AtomicU64,
@@ -666,55 +667,56 @@ async fn run_durable_contention_worker(
         lash_core::SessionExecutionLeaseClaimOutcome::Busy { .. }
     ) {
         counters
-            .lease_failures
+            .lease_probe_busy
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     } else {
         anyhow::bail!("contention worker {worker} unexpectedly acquired the controller lease");
     }
 
-    let mut empty_claims = 0usize;
-    while counters
+    'worker: while counters
         .completions
         .load(std::sync::atomic::Ordering::Acquire)
         < target_completions
     {
-        let sequence = counters
-            .claim_attempts
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            + 1;
         let claim_started = Instant::now();
-        let outcome = store
-            .claim_ready_queued_work(
-                &session_id,
-                &session_fence,
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(1),
-            )
-            .await?;
-        let Some(mut claim) = outcome.claim() else {
+        let claim_deadline = claim_started + Duration::from_secs(60);
+        let mut claim = loop {
+            counters
+                .claim_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let outcome = store
+                .claim_ready_queued_work(
+                    &session_id,
+                    &session_fence,
+                    &owner,
+                    QueuedWorkClaimBoundary::Idle,
+                    lash_core::testing::queued_work_claim_policy(1),
+                )
+                .await?;
+            if let Some(claim) = outcome.claim() {
+                break claim;
+            }
+
             counters
                 .claim_refusals
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            empty_claims += 1;
             if counters
                 .completions
                 .load(std::sync::atomic::Ordering::Acquire)
                 >= target_completions
             {
-                break;
+                break 'worker;
             }
-            if empty_claims >= 1_024 {
-                anyhow::bail!(
-                    "contention worker {worker} observed 1024 empty claims before completion"
-                );
+            if Instant::now() >= claim_deadline {
+                anyhow::bail!("contention worker {worker} waited 60 seconds for a claim");
             }
             tokio::task::yield_now().await;
-            continue;
         };
-        empty_claims = 0;
         let claim_wait_ms = elapsed_ms(claim_started);
-        samples.claim_wait_ms.lock_recover().push(claim_wait_ms);
+        let sequence = counters
+            .successful_claims
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
         let service_started = Instant::now();
         if sequence.is_multiple_of(3) {
             match store
@@ -727,9 +729,6 @@ async fn run_durable_contention_worker(
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 Err(error) => {
-                    counters
-                        .lease_failures
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return Err(error.into());
                 }
             }
@@ -759,10 +758,6 @@ async fn run_durable_contention_worker(
                 counters
                     .reclaim_conflicts
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                samples
-                    .service_ms
-                    .lock_recover()
-                    .push(elapsed_ms(service_started));
                 continue;
             };
             claim = reclaimed;
@@ -775,6 +770,7 @@ async fn run_durable_contention_worker(
         counters
             .completions
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        samples.claim_wait_ms.lock_recover().push(claim_wait_ms);
         samples
             .service_ms
             .lock_recover()
@@ -994,6 +990,12 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
+            "durable_contention.successful_claims".to_string(),
+            counters
+                .successful_claims
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
             "durable_contention.renewals".to_string(),
             counters.renewals.load(std::sync::atomic::Ordering::Relaxed),
         ),
@@ -1018,9 +1020,9 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
-            "durable_contention.lease_failures".to_string(),
+            "durable_contention.lease_probe_busy".to_string(),
             counters
-                .lease_failures
+                .lease_probe_busy
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
@@ -1030,9 +1032,8 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         // RuntimePersistence brackets include connection checkout but expose no
-        // checkout subspan. Preserve an explicit unavailable observation instead
-        // of relabeling whole-call time as pool wait.
-        ("durable_contention.pool_wait_micros".to_string(), 0),
+        // checkout subspan. The observability flag is the complete observation;
+        // no value key is emitted for an unavailable measurement.
         ("durable_contention.pool_wait_observable".to_string(), 0),
         ("durable_contention.remaining_batches".to_string(), 0),
     ]);

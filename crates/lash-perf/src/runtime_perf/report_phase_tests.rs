@@ -330,14 +330,22 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         result.extra_counters["durable_contention.pool_wait_observable"],
         0
     );
+    assert!(
+        !result
+            .extra_counters
+            .contains_key("durable_contention.pool_wait_micros"),
+        "pool wait value must be absent when it is unobservable"
+    );
     for counter in [
         "durable_contention.claim_attempts",
+        "durable_contention.claim_refusals",
+        "durable_contention.successful_claims",
         "durable_contention.renewals",
         "durable_contention.abandons",
         "durable_contention.reclaims",
         "durable_contention.reclaim_conflicts",
         "durable_contention.store_contention_retries",
-        "durable_contention.lease_failures",
+        "durable_contention.lease_probe_busy",
         "durable_contention.cas_failures",
     ] {
         assert!(
@@ -345,16 +353,70 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
             "missing {counter}"
         );
     }
-    for metric in [
-        "durable_contention.claim_wait_ms",
-        "durable_contention.service_ms",
-        "durable_contention.pool_wait_ms",
-    ] {
+    let completed = result.extra_counters["durable_contention.completed_batches"];
+    let claim_attempts = result.extra_counters["durable_contention.claim_attempts"];
+    let claim_refusals = result.extra_counters["durable_contention.claim_refusals"];
+    let cas_failures = result.extra_counters["durable_contention.cas_failures"];
+    assert!(
+        workers == 1 || claim_attempts > completed,
+        "multiple workers must poll concurrently: claim_attempts={claim_attempts}, completed_batches={completed}"
+    );
+    assert!(
+        workers == 1 || claim_refusals + cas_failures > 0,
+        "multiple workers must witness contention: claim_refusals={claim_refusals}, cas_failures={cas_failures}"
+    );
+
+    let successful_claims = result.extra_counters["durable_contention.successful_claims"];
+    let renewals = result.extra_counters["durable_contention.renewals"];
+    let abandons = result.extra_counters["durable_contention.abandons"];
+    let reclaims = result.extra_counters["durable_contention.reclaims"];
+    let reclaim_conflicts = result.extra_counters["durable_contention.reclaim_conflicts"];
+    assert_eq!(
+        abandons,
+        reclaims + reclaim_conflicts,
+        "every abandon must end in a reclaim or reclaim conflict"
+    );
+    assert_eq!(
+        renewals,
+        successful_claims / 3,
+        "renewals must follow every third successful claim"
+    );
+    assert_eq!(
+        abandons,
+        successful_claims / 2,
+        "abandons must follow every second successful claim"
+    );
+    assert_eq!(
+        result.extra_counters["durable_contention.lease_probe_busy"], workers as u64,
+        "each worker must witness the controller fence rejecting a foreign owner"
+    );
+
+    let claim_wait = &result.metric_samples_ms["durable_contention.claim_wait_ms"];
+    let service = &result.metric_samples_ms["durable_contention.service_ms"];
+    assert_eq!(
+        claim_wait.len(),
+        service.len(),
+        "claim-wait and service samples must describe the same completed units"
+    );
+    assert!(
+        claim_wait.len() >= completed as usize,
+        "latency samples must cover every completed batch: samples={}, completed_batches={completed}",
+        claim_wait.len()
+    );
+    for (metric, samples) in [("claim_wait_ms", claim_wait), ("service_ms", service)] {
         assert!(
-            result.metric_samples_ms.contains_key(metric),
-            "missing {metric}"
+            samples
+                .iter()
+                .all(|sample| sample.is_finite() && *sample >= 0.0),
+            "{metric} samples must be finite and non-negative"
         );
     }
+    assert!(
+        result
+            .metric_samples_ms
+            .contains_key("durable_contention.pool_wait_ms"),
+        "missing durable_contention.pool_wait_ms"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
