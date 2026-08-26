@@ -1083,67 +1083,6 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
 }
 
 #[test]
-fn legacy_product_event_file_defaults_new_fields_and_keeps_them_omitted() {
-    let data_dir = tempfile::tempdir().expect("legacy product event tempdir");
-    let path = data_dir.path().join("product-events.json");
-    let fixture = r#"{
-        "legacy-session": {
-            "cursor": 2,
-            "events": [
-                {
-                    "event_id": "legacy-message",
-                    "sequence": 1,
-                    "type": "message",
-                    "message": {
-                        "id": "legacy-user",
-                        "role": "user",
-                        "text": "before FIG-994",
-                        "at": ""
-                    }
-                },
-                {
-                    "event_id": "legacy-done",
-                    "sequence": 2,
-                    "type": "done",
-                    "turn_id": "legacy-turn"
-                }
-            ]
-        }
-    }"#;
-    std::fs::write(&path, fixture).expect("write hand-authored legacy product events");
-
-    let registry =
-        SessionEventRegistry::persistent(path.clone(), 4).expect("parse legacy product events");
-    let snapshot = registry.snapshot("legacy-session");
-    let StreamItem::Message { message } = &snapshot.events[0].item else {
-        panic!("first legacy event must be a message");
-    };
-    assert!(message.attachments.is_empty());
-    let StreamItem::Done { outcome, .. } = snapshot.events[1].item else {
-        panic!("second legacy event must be Done");
-    };
-    assert_eq!(outcome, TurnDoneOutcome::Completed);
-
-    registry.publish(
-        "legacy-session",
-        StreamItem::Done {
-            turn_id: None,
-            outcome: TurnDoneOutcome::Completed,
-        },
-    );
-    let persisted: Value = serde_json::from_slice(
-        &std::fs::read(&path).expect("read reserialized product events"),
-    )
-    .expect("decode reserialized product events");
-    assert_eq!(persisted["format_version"], 1);
-    let events = persisted["histories"]["legacy-session"]["events"]
-        .as_array()
-        .expect("persisted legacy events");
-    assert!(events[0]["message"].get("attachments").is_none());
-    assert!(events[1].get("outcome").is_none());
-}
-
-#[test]
 fn attachment_urls_percent_encode_the_id_path_segment() {
     let attachment = ChatAttachment::from_id("sha256:folder/image 1.png");
     assert_eq!(

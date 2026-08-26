@@ -567,8 +567,10 @@ enum ProductEventLogDecodeError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("unversioned product event log mixes legacy event arrays with history objects")]
-    MixedUnversionedShapes,
+    #[error(
+        "unversioned product event log is not supported; expected a root object with `format_version` and `histories`"
+    )]
+    UnversionedRoot,
     #[error("product event log root must be a JSON object")]
     InvalidRoot,
 }
@@ -625,47 +627,7 @@ fn decode_product_event_histories(
             });
     }
 
-    let values = root.values().collect::<Vec<_>>();
-    let all_histories = values.iter().all(|value| value.is_object());
-    let all_legacy = values.iter().all(|value| value.is_array());
-    if all_histories {
-        return serde_json::from_value::<HashMap<String, ProductEventHistory>>(value)
-            .map(|histories| {
-                histories
-                    .into_iter()
-                    .map(|(session_id, history)| (session_id, history.normalized()))
-                    .collect()
-            })
-            .map_err(|source| ProductEventLogDecodeError::Field {
-                field: "histories",
-                source,
-            });
-    }
-    if all_legacy {
-        return serde_json::from_value::<HashMap<String, Vec<ProductEvent>>>(value)
-            .map(|histories| {
-                histories
-                    .into_iter()
-                    .map(|(session_id, events)| {
-                        let cursor = events.last().map_or(0, |event| event.sequence);
-                        (
-                            session_id,
-                            ProductEventHistory {
-                                cursor,
-                                events,
-                                event_ids: BTreeSet::new(),
-                            }
-                            .normalized(),
-                        )
-                    })
-                    .collect()
-            })
-            .map_err(|source| ProductEventLogDecodeError::Field {
-                field: "histories",
-                source,
-            });
-    }
-    Err(ProductEventLogDecodeError::MixedUnversionedShapes)
+    Err(ProductEventLogDecodeError::UnversionedRoot)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1007,14 +969,10 @@ struct ActiveTurnPrompt {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum PersistedActiveTurns {
-    Current {
-        turns: BTreeSet<(String, String)>,
-        #[serde(default)]
-        prompts: Vec<PersistedActiveTurnPrompt>,
-    },
-    Legacy(BTreeSet<(String, String)>),
+struct PersistedActiveTurns {
+    turns: BTreeSet<(String, String)>,
+    #[serde(default)]
+    prompts: Vec<PersistedActiveTurnPrompt>,
 }
 
 #[derive(Serialize)]
@@ -1044,12 +1002,24 @@ struct PersistedActiveTurnPromptRef<'a> {
 impl ActiveTurns {
     fn persistent(path: PathBuf) -> AnyhowResult<Self> {
         let (turns, prompts) = match std::fs::read(&path) {
-            Ok(bytes) => match serde_json::from_slice(&bytes)
-                .with_context(|| format!("decode active turns `{}`", path.display()))?
-            {
-                PersistedActiveTurns::Current { turns, prompts } => (
-                    turns,
-                    prompts
+            Ok(bytes) => {
+                let persisted: PersistedActiveTurns = serde_json::from_slice(&bytes)
+                    .map_err(|error| {
+                        let hint = serde_json::from_slice::<serde_json::Value>(&bytes)
+                            .ok()
+                            .filter(serde_json::Value::is_array)
+                            .map(|_| {
+                                "; legacy bare active turn set is no longer supported; \
+                                 expected an object with `turns` and `prompts`"
+                            })
+                            .unwrap_or("");
+                        anyhow::anyhow!("{error}{hint}")
+                    })
+                    .with_context(|| format!("decode active turns `{}`", path.display()))?;
+                (
+                    persisted.turns,
+                    persisted
+                        .prompts
                         .into_iter()
                         .map(|prompt| {
                             (
@@ -1061,9 +1031,8 @@ impl ActiveTurns {
                             )
                         })
                         .collect(),
-                ),
-                PersistedActiveTurns::Legacy(turns) => (turns, BTreeMap::new()),
-            },
+                )
+            }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 (BTreeSet::new(), BTreeMap::new())
             }
