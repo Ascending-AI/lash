@@ -1442,12 +1442,14 @@ async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn Runtim
     )];
     let (first, _) = append_request_commit(&mut state, "count-cross-check", &nodes, None);
     let mut corrupt_retry = first.clone();
-    corrupt_retry
-        .turn_commit
-        .append_request_identity
-        .as_mut()
-        .expect("append identity")
-        .requested_node_count += 1;
+    let crate::AppendRequestIdentity::Append {
+        requested_node_count,
+        ..
+    } = &mut corrupt_retry.turn_commit.append_request_identity
+    else {
+        panic!("append identity");
+    };
+    *requested_node_count += 1;
     commit_runtime_state_for_test(&store, first, "count-cross-check-first")
         .await
         .expect("first count-cross-check append");
@@ -1724,19 +1726,21 @@ async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(
     )];
     let (mut future_version, _) =
         append_request_commit(&mut state, "version-mismatch", &nodes, None);
-    future_version
-        .turn_commit
-        .append_request_identity
-        .as_mut()
-        .expect("append identity")
-        .encoding_version += 1;
+    let crate::AppendRequestIdentity::Append {
+        encoding_version, ..
+    } = &mut future_version.turn_commit.append_request_identity
+    else {
+        panic!("append identity");
+    };
+    *encoding_version += 1;
     let mut exact_retry = future_version.clone();
-    exact_retry
-        .turn_commit
-        .append_request_identity
-        .as_mut()
-        .expect("append identity")
-        .encoding_version = 1;
+    let crate::AppendRequestIdentity::Append {
+        encoding_version, ..
+    } = &mut exact_retry.turn_commit.append_request_identity
+    else {
+        panic!("append identity");
+    };
+    *encoding_version = 1;
     commit_runtime_state_for_test(&store, future_version, "version-mismatch-first")
         .await
         .expect("first future-version receipt");

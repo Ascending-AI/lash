@@ -1181,23 +1181,22 @@ impl SessionCommitStore for Store {
                     {
                         let receipt = plan.receipt_write(&result);
                         let result_json = encode_json(receipt.result)?;
+                        let identity = append_identity_columns(receipt.append_request_identity);
                         tx.execute(
                             "INSERT INTO runtime_turn_commits (
                                 session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-                                request_identity_hash, requested_node_count,
-                                requested_ancestor_node_id, identity_encoding_version
+                                request_identity_hash, requested_node_count, identity_encoding_version
                              )
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                             params![
                                 receipt.session_id,
                                 receipt.operation_key,
                                 receipt.turn_commit_hash,
                                 result_json,
                                 now as i64,
-                                receipt.append_request_identity.map(|identity| identity.request_hash.as_str()),
-                                receipt.append_request_identity.map(|identity| identity.requested_node_count as i64),
-                                receipt.append_request_identity.and_then(|identity| identity.requested_ancestor_node_id.as_deref()),
-                                receipt.append_request_identity.map(|identity| i64::from(identity.encoding_version)),
+                                identity.0,
+                                identity.1,
+                                identity.2,
                             ],
                         )
                         .map_err(sqlite_error)?;
@@ -1215,9 +1214,8 @@ impl SessionCommitStore for Store {
                                     "INSERT INTO runtime_turn_commits (
                                         session_id, turn_id, turn_commit_hash, result_json,
                                         committed_at_ms, request_identity_hash,
-                                        requested_node_count, requested_ancestor_node_id,
-                                        identity_encoding_version
-                                     ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, NULL)",
+                                        requested_node_count, identity_encoding_version
+                                     ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL)",
                                     params![
                                         commit.session_id,
                                         marker,
@@ -1230,9 +1228,6 @@ impl SessionCommitStore for Store {
                             }
                         }
                     }
-                    // Receipt SQL remains the same four nullable identity columns.
-                    // The aggregate exists only in Rust; no durable layout moved.
-                    // An absent aggregate still writes four NULL values for legacy receipts.
                     if let Some(completion) = commit.release_session_execution_lease.as_ref() {
                         let _release_was_current =
                             release_session_execution_lease_conn(tx, completion)?;
@@ -4425,8 +4420,29 @@ fn release_session_execution_lease_conn(
 }
 
 fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Option<&str> {
-    stamp
-        .append_request_identity
-        .as_ref()
-        .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
+    match &stamp.append_request_identity {
+        lash_core::AppendRequestIdentity::Append {
+            requested_ancestor_node_id,
+            ..
+        } => requested_ancestor_node_id.as_deref(),
+        lash_core::AppendRequestIdentity::PlainCommit => None,
+    }
+}
+
+fn append_identity_columns(
+    identity: &lash_core::AppendRequestIdentity,
+) -> (Option<&str>, Option<i64>, Option<i64>) {
+    match identity {
+        lash_core::AppendRequestIdentity::PlainCommit => (None, None, None),
+        lash_core::AppendRequestIdentity::Append {
+            encoding_version,
+            request_hash,
+            requested_node_count,
+            ..
+        } => (
+            Some(request_hash.as_str()),
+            Some(*requested_node_count as i64),
+            Some(i64::from(*encoding_version)),
+        ),
+    }
 }

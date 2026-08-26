@@ -475,7 +475,7 @@ impl RuntimeCommit {
             graph: _,
             checkpoint: _,
             usage_deltas: _,
-            turn_commit,
+            turn_commit: _,
             completed_queue_claims,
             completed_turn_input_claims,
             enqueued_queue_batches,
@@ -483,7 +483,6 @@ impl RuntimeCommit {
             adopted_intent_rows,
             committed_attachment_ids,
         } = self;
-        debug_assert!(turn_commit.append_request_identity.is_some());
         debug_assert!(
             completed_queue_claims.is_empty()
                 && completed_turn_input_claims.is_empty()
@@ -964,7 +963,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// clear staged rows that the original transaction never carried.
     ///
     /// A fresh identity-bearing append enforces
-    /// [`AppendRequestIdentity::requested_ancestor_node_id`] against the
+    /// the optional ancestor in [`AppendRequestIdentity::Append`] against the
     /// transaction's active path, then atomically publishes graph, checkpoint,
     /// usage, queue/input settlements, attachment adoptions, and a receipt whose
     /// stored replay bit is `false`. Receipt lookup, fresh-only ancestor fencing,

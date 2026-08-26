@@ -135,10 +135,11 @@ const POST_FLOOR_ARTIFACTS: [&str; 19] = [
     "lash_tool_intent_submissions",
     "uq_lash_runtime_effect_replay_group_seq",
 ];
-/// The predecessor artifact component 61 explicitly retires. The divergent
-/// fixture reconstructs the published component-60 graph shape before recording
-/// that predecessor, so the refusal must enumerate this exact index.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_graph_nodes_seq"];
+/// What the newest generation alone introduced — the `introduced_relations` of
+/// the migration out of the immediate predecessor version. The divergent fixture
+/// records that predecessor over the *current* catalog, so these are exactly the
+/// artifacts its refusal must enumerate.
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_runtime_turn_commits"];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -641,19 +642,17 @@ async fn seed(database_url: &str) -> Result<()> {
     // that a boot gate on every restart cannot.
     let probe_before_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
-    // Reconstruct the published predecessor's graph shape before rewinding its
-    // ledger: component 60 exposed an auto-assigned sequence column and indexed
-    // it beside generation. Component 61 is a hard cutover, so this fixture must
-    // carry the removed shape and prove Lash refuses it rather than silently
-    // stamping it current.
-    sqlx::query("ALTER TABLE lash_graph_nodes ADD COLUMN seq BIGSERIAL")
-        .execute(&pool)
-        .await
-        .context("restore the component-60 graph sequence column")?;
-    sqlx::query("CREATE INDEX idx_lash_graph_nodes_seq ON lash_graph_nodes(session_id, seq)")
-        .execute(&pool)
-        .await
-        .context("restore the component-60 graph sequence index")?;
+    // Reconstruct the published component-61 receipt shape before rewinding its
+    // ledger: the predecessor allowed independently-nullable append identity
+    // fields and still carried the readerless requested-ancestor column.
+    sqlx::query(
+        "ALTER TABLE lash_runtime_turn_commits
+             DROP CONSTRAINT lash_runtime_turn_commits_check,
+             ADD COLUMN requested_ancestor_node_id TEXT",
+    )
+    .execute(&pool)
+    .await
+    .context("restore the component-61 append receipt shape")?;
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
     // The walk now sees the exact predecessor shape and stamp. The drain list
@@ -720,6 +719,18 @@ async fn refuse(database_url: &str) -> Result<()> {
         "opened": opened,
         "error": error,
     }));
+
+    // The migration floor predates component 61's graph-sequence hard cutover,
+    // so restore that published column and index before removing later
+    // creation-only artifacts.
+    sqlx::query("ALTER TABLE lash_graph_nodes ADD COLUMN seq BIGSERIAL")
+        .execute(&pool)
+        .await
+        .context("restore the migration-floor graph sequence column")?;
+    sqlx::query("CREATE INDEX idx_lash_graph_nodes_seq ON lash_graph_nodes(session_id, seq)")
+        .execute(&pool)
+        .await
+        .context("restore the migration-floor graph sequence index")?;
 
     // Remove every artifact introduced after the migration floor, leaving the
     // catalog the floor generation (`MIGRATION_FLOOR_VERSION`) published, then

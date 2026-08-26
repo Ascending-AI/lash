@@ -9,7 +9,7 @@ durable-read fixture advances.
   all six manifest-component edges projected in `checkpoint_blob_refs`; the
   fixture was re-armed through the same transactional 37 -> 38 backfill as a
   deployed legacy catalog.
-- `postgres/fixture.sql` uses the schema-61 PostgreSQL catalog while
+- `postgres/fixture.sql` uses the schema-62 PostgreSQL catalog while
   retaining the checkpoint blob from the same commit.
 
 Both contain the `durable-read-fixture` session with an `execution_state`
@@ -18,4 +18,4 @@ refresh the surrounding catalog so the current binary can reach hydration, but
 the retained checkpoint blob stays byte-for-byte at component encoding 1. The
 current binary must then refuse that session with the exact drain-and-recreate
 diagnostic. These are rejection fixtures, not compatibility fixtures: never
-update their component version.
+update their retained checkpoint component encoding.

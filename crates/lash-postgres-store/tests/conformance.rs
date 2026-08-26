@@ -579,15 +579,36 @@ async fn postgres_runtime_turn_receipt_identity_columns_are_nullable_when_config
         &[
             "request_identity_hash",
             "requested_node_count",
-            "requested_ancestor_node_id",
             "identity_encoding_version",
         ][..],
     )
     .fetch_all(storage.pool())
     .await
     .expect("read Postgres receipt schema");
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 3);
     assert!(rows.iter().all(|(_, nullable)| nullable == "YES"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_runtime_turn_receipt_rejects_half_populated_append_identity_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres receipt-schema test: database is not configured");
+        return;
+    };
+    reset(&storage).await;
+    let error = sqlx::query(
+        "INSERT INTO lash_runtime_turn_commits (
+            session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+            request_identity_hash
+         ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash')",
+    )
+    .execute(storage.pool())
+    .await
+    .expect_err("a half-populated append identity must violate the schema CHECK");
+    assert!(
+        error.to_string().contains("check constraint"),
+        "Postgres must report the schema CHECK: {error}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1367,7 +1388,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 61, "Postgres component schema pin");
+    assert_eq!(current_version, 62, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'

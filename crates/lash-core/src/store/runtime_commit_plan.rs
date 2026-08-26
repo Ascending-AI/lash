@@ -23,8 +23,8 @@ pub struct RuntimeCommitReceiptRecord {
     pub turn_commit_hash: String,
     /// Canonical result stored by the first commit attempt.
     pub result: RuntimeCommitReceipt,
-    /// Versioned append-request identity, when this is an append receipt.
-    pub append_request_identity: Option<AppendRequestIdentity>,
+    /// Plain-commit or versioned append-request replay identity.
+    pub append_request_identity: AppendRequestIdentity,
 }
 
 /// Backend observations needed to validate a fresh runtime commit.
@@ -124,8 +124,8 @@ pub struct RuntimeCommitReceiptWrite<'a> {
     pub turn_commit_hash: &'a str,
     /// Canonical result encoded into the durable receipt.
     pub result: &'a RuntimeCommitReceipt,
-    /// Versioned append-request identity, when applicable.
-    pub append_request_identity: Option<&'a AppendRequestIdentity>,
+    /// Plain-commit or versioned append-request replay identity.
+    pub append_request_identity: &'a AppendRequestIdentity,
 }
 
 /// Prepared semantic identity for one attempted runtime commit.
@@ -227,8 +227,8 @@ impl RuntimeCommitPlanner {
         match decide_runtime_commit_receipt(
             &prior.turn_commit_hash,
             &self.turn_commit_hash,
-            prior.append_request_identity.as_ref(),
-            self.commit.turn_commit.append_request_identity.as_ref(),
+            &prior.append_request_identity,
+            &self.commit.turn_commit.append_request_identity,
         ) {
             RuntimeCommitReceiptDecision::Replay => {
                 let mut result = prior.result;
@@ -269,23 +269,14 @@ impl RuntimeCommitPlanner {
         &self,
         facts: FreshRuntimeCommitFacts,
     ) -> Result<RuntimeCommitPlan<'_>, StoreError> {
-        if self
-            .commit
-            .turn_commit
-            .append_request_identity
-            .as_ref()
-            .and_then(|identity| identity.requested_ancestor_node_id.as_ref())
-            .is_some()
+        if let AppendRequestIdentity::Append {
+            requested_ancestor_node_id: Some(required_node_id),
+            ..
+        } = &self.commit.turn_commit.append_request_identity
             && !facts.requested_ancestor_is_active
         {
             return Err(StoreError::AppendAncestorNotActive {
-                required_node_id: self
-                    .commit
-                    .turn_commit
-                    .append_request_identity
-                    .as_ref()
-                    .and_then(|identity| identity.requested_ancestor_node_id.clone())
-                    .expect("checked append ancestor"),
+                required_node_id: required_node_id.clone(),
             });
         }
         validate_head_revision(
@@ -542,7 +533,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             operation_key: &self.operation_key,
             turn_commit_hash: &self.turn_commit_hash,
             result,
-            append_request_identity: self.commit.turn_commit.append_request_identity.as_ref(),
+            append_request_identity: &self.commit.turn_commit.append_request_identity,
         }
     }
 }

@@ -1125,16 +1125,20 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             )
         };
         let old_leaf_node_id = meta.as_ref().and_then(|head| head.leaf_node_id.clone());
-        let requested_ancestor_is_active = commit
-            .turn_commit
-            .append_request_identity
-            .as_ref()
-            .and_then(|identity| identity.requested_ancestor_node_id.as_deref())
-            .is_none_or(|required| {
-                self.session_graph
-                    .lock_recover()
-                    .active_path_contains(required)
-            });
+        let requested_ancestor_is_active = match &commit.turn_commit.append_request_identity {
+            crate::AppendRequestIdentity::Append {
+                requested_ancestor_node_id: Some(required),
+                ..
+            } => self
+                .session_graph
+                .lock_recover()
+                .active_path_contains(required),
+            crate::AppendRequestIdentity::PlainCommit
+            | crate::AppendRequestIdentity::Append {
+                requested_ancestor_node_id: None,
+                ..
+            } => true,
+        };
         let parent_node_facts = old_leaf_node_id
             .as_deref()
             .map(|leaf_node_id| {
@@ -1522,7 +1526,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             turn_commit_hash: receipt.turn_commit_hash.to_string(),
             result: result.clone(),
             committed_at_ms: transaction_now,
-            append_request_identity: receipt.append_request_identity.cloned(),
+            append_request_identity: receipt.append_request_identity.clone(),
         };
         let mut runtime_turn_commits = self.runtime_turn_commits.lock_recover();
         runtime_turn_commits.insert(
@@ -1542,7 +1546,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 runtime_turn_commits.insert(
                     (session_id.clone(), marker),
                     RuntimeTurnCommitRecord {
-                        append_request_identity: None,
+                        append_request_identity: crate::AppendRequestIdentity::PlainCommit,
                         ..stored_receipt.clone()
                     },
                 );

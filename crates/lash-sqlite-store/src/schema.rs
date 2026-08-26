@@ -175,9 +175,9 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     committed_at_ms             INTEGER NOT NULL,
     request_identity_hash       TEXT,
     requested_node_count        INTEGER,
-    requested_ancestor_node_id  TEXT,
     identity_encoding_version   INTEGER,
-    PRIMARY KEY (session_id, turn_id)
+    PRIMARY KEY (session_id, turn_id),
+    CHECK ((request_identity_hash IS NULL) = (requested_node_count IS NULL) AND (request_identity_hash IS NULL) = (identity_encoding_version IS NULL))
 );
 
 CREATE TABLE IF NOT EXISTS turn_cancel_requests (
@@ -314,9 +314,8 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 ";
 
-/// Canonical schema version. There is no general migration chain — older
-/// databases must be deleted before opening except for the exact durable-core
-/// 39 -> 40 additive migration. See the [`SCHEMA`] doc comment for the
+/// Canonical schema version. There is no migration chain — older databases
+/// must be deleted before opening. See the [`SCHEMA`] doc comment for the
 /// rationale.
 ///
 /// Bumped to 10 for the attachment three-layer cutover (ADR 0028): the
@@ -423,7 +422,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 ///
 /// An additive, index-only catalog change does **not** bump this version. Every
 /// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a version-42 file written by an older binary self-heals into the
+/// schema, so a version-43 file written by an older binary self-heals into the
 /// newer index set on first open, and a newer file stays readable by the older
 /// binary — the two are mutually compatible on the same path. Bumping instead
 /// would reject-and-recreate live stores for a change that costs nothing to
@@ -438,7 +437,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// beside durable session binding metadata. NULL is the version-zero legacy map.
 /// Version 42 removes the graph-node sequence column. Per-session generation is
 /// the sole durable graph ordering authority.
-pub(crate) const SCHEMA_VERSION: i32 = 42;
+/// Version 43 makes runtime append receipt identity columns all-or-none and
+/// removes the readerless requested-ancestor receipt column. Older stores are
+/// rejected and recreated; there is no compatibility read or migration path.
+pub(crate) const SCHEMA_VERSION: i32 = 43;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
