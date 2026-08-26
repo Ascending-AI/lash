@@ -85,10 +85,17 @@ run_release_script_tests() {
   python3 scripts/test_check_version_bump_fixtures.py
   python3 scripts/test_release_version.py
   python3 scripts/test_publish_workspace.py
-  python3 scripts/test_release_notes.py
 }
 
-resolve_release_notes_base() {
+# Path-scoped gate selection. `scripts/gate_scope.py` maps this branch's
+# touched paths onto gate families and only ever answers `skip` for a family no
+# touched path can reach; every ambiguity -- a shared input, an unrecognised
+# path, an empty path set, its own failure -- answers `run`. Its table is
+# printed verbatim below, because a skipped leg that leaves no trace in the
+# gate log is a leg a reviewer cannot audit.
+# Resolve the base ref this branch's touched paths are computed against:
+# the configured PR base when one is known, falling back to main.
+resolve_gate_base() {
   local configured_base="${LASH_PR_BASE_REF:-${GITHUB_BASE_REF:-}}"
   if [ -z "$configured_base" ] && command -v gh >/dev/null 2>&1; then
     configured_base="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || true)"
@@ -104,29 +111,16 @@ resolve_release_notes_base() {
   local candidate
   for candidate in "${candidates[@]}"; do
     if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null; then
-      printf '%s\n' "$candidate"
+      printf '%s
+' "$candidate"
       return
     fi
   done
 
-  echo "Cannot resolve release-note base ref: $configured_base" >&2
+  echo "Cannot resolve gate base ref: $configured_base" >&2
   return 1
 }
 
-check_current_branch_release_notes() {
-  step "Current branch release notes"
-  local base_ref merge_base
-  base_ref="$(resolve_release_notes_base)"
-  merge_base="$(git merge-base "$base_ref" HEAD)"
-  python3 scripts/release_notes.py check-pr --range "${merge_base}..HEAD"
-}
-
-# Path-scoped gate selection. `scripts/gate_scope.py` maps this branch's
-# touched paths onto gate families and only ever answers `skip` for a family no
-# touched path can reach; every ambiguity -- a shared input, an unrecognised
-# path, an empty path set, its own failure -- answers `run`. Its table is
-# printed verbatim below, because a skipped leg that leaves no trace in the
-# gate log is a leg a reviewer cannot audit.
 gate_scope_apply() {
   step "Gate scope"
   GATE_RUN_RUST_COMPILE=1
@@ -137,7 +131,7 @@ gate_scope_apply() {
   GATE_SCOPE_CLASSIFICATION="run-everything"
 
   local base_ref env_output
-  if ! base_ref="$(resolve_release_notes_base)"; then
+  if ! base_ref="$(resolve_gate_base)"; then
     echo "gate scope: base ref unresolved; running every gate family"
     return
   fi
@@ -494,7 +488,6 @@ step "Durable transcript classification"
 python3 scripts/check-transcript-diff.py --advisory
 
 scoped SCRIPTS "Repository script tests" run_release_script_tests
-check_current_branch_release_notes
 
 scoped RUST_COMPILE "Workspace check" run_workspace_check
 scoped RUST_COMPILE "lash-runtime feature boundary" run_runtime_feature_boundary_check

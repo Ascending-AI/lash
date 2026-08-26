@@ -36,10 +36,6 @@ Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
 ## Rules
 
 - **The first line is load-bearing.** It becomes the squash commit title in `git log`, so write it imperative, one sentence, standalone: `Add cursor pagination to the process registry listing`, never `Fixes`, `WIP`, or `Phase 1`.
-- **User-facing changes carry release notes.** The squash commit body must include a `Release-Notes:` section describing the change for Lash's users. The release workflow collects those sections and refuses to publish a range that has none. See `docs/PUBLISHING.md`. Three specifics that get missed:
-  - **One `Release-Notes:` marker per note.** A note ends at the next marker, so two category lines under one marker silently merge into a single note. A change that is both breaking and a fix carries two `Release-Notes:` blocks.
-  - **`Breaking:` is about durable surfaces, not intent.** Re-keying any durable identity, exported id, or persisted format is `Breaking:` even when the motivation is a bug fix — the note must say what stored data or saved configuration stops resolving. A behavior the facade now overwrites where callers previously controlled it is also breaking.
-  - **The PR body carries the same `Release-Notes:` block as the commit.** The body is what a reviewer and the merge queue see; a note that lives only in a local commit message is invisible at review time and easy to lose across a squash.
 - **Durable transcript snapshots require one named justification.** If an `insta` inline snapshot diff changes a line containing `Checkpoint`, `DurableEffect`, `stored logical=`, `ref (unchanged)`, or a `rev=` transition, the PR body must include one sentence beginning `Transcript:` that says why. Forced articulation is the moment a wrongly blessed diff gets noticed.
 - **Lead with the summary.** A reviewer reads the first paragraph and knows what the PR does and why. Depth follows; it doesn't open the PR.
 - **Link the ticket, don't restate it.** One or two orienting sentences, then the link. The PR carries the *how*; the ticket carries the *what/why*. Don't copy the ticket body in.

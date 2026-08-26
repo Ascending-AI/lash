@@ -86,7 +86,6 @@ The main CI workflow also runs:
 ```bash
 python3 scripts/test_release_version.py
 python3 scripts/test_publish_workspace.py
-python3 scripts/test_release_notes.py
 ```
 
 Those tests pin the lockstep/private-crate version behavior, the publisher's
@@ -122,32 +121,12 @@ A newer racing main commit owns its normal push validation instead. Tagless
 local and offline checkouts continue to use `docs/released-version.txt` as
 their fallback authority.
 
-## Release notes (required)
+## Release notes (manual)
 
-Every release ships curated notes. Any commit that should contribute
-user-facing notes carries a `Release-Notes:` section in its body — everything
-after the marker line, written as Markdown:
-
-```text
-Add durable suspension to processes
-
-Implementation details for reviewers...
-
-Release-Notes:
-- Processes now suspend durably while waiting on signals or timers.
-- Signals are named and typed; the unnamed `wait_signal()` is removed.
-```
-
-The manual release workflow runs `scripts/release_notes.py collect --require`
-before it creates a new tag. If no commit in `previous-tag..release_sha` carries
-a section, the release stops without publishing. The publish job collects the
-same range's sections (oldest first) into the GitHub release body; the
-auto-generated commit list is appended below. The previous tag is resolved by
-graph ancestry (`git describe`), not version sorting, so tags from unrelated
-history lines are ignored. The flow's post-release `docs: stamp release`
-commit appears in the next range and carries its required categorized trailer,
-but the collector excludes that mechanical note so it cannot satisfy the next
-release gate by itself. Every other commit remains eligible to contribute.
+Release notes are written by hand. The release publishes with GitHub's
+auto-generated commit list as its body; a maintainer edits the release on
+GitHub afterward with the curated notes. Nothing in CI or the release
+workflow parses commit messages for notes.
 
 ### Releases that require store recreation
 
@@ -161,7 +140,6 @@ must say it is one-way. Lead the section with `Breaking:` and carry three facts
 when recreation is required:
 
 ```text
-Release-Notes:
 - Breaking: this release has no explicit Postgres store migration. Persistent
   deployments must recreate their stores (and the effect journal alongside
   them); lash will refuse the old schema rather than guess at a transition.

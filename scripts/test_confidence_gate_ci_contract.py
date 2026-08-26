@@ -23,7 +23,6 @@ DOCS_PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "docs-pages.yml"
 SCCACHE_ACTION_REF = "./.github/actions/setup-sccache"
 SCCACHE_ACTION = ROOT / ".github" / "actions" / "setup-sccache" / "action.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
-RELEASE_NOTES = ROOT / "scripts" / "release_notes.py"
 GATE = ROOT / "scripts" / "confidence-gate.sh"
 PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
@@ -55,9 +54,6 @@ OLD_BROAD_CI_ARTIFACT = "bounded-" + "broad-replay-backend-confidence"
 OLD_BROAD_CI_OUT_ROOT = "target/confidence-ci/" + OLD_BROAD_CI_JOB_ID
 VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
     "validate_manifest"
-]
-IS_AUTOMATED_DOCS_STAMP = runpy.run_path(str(RELEASE_NOTES))[
-    "is_automated_docs_stamp"
 ]
 
 
@@ -492,32 +488,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             f"these script self-tests exist but CI never runs them: {missing}",
         )
 
-    def test_lint_job_checks_and_previews_pr_release_notes(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        lint = workflow_job_block(workflow, "lint")
-
-        self.assertIn(
-            'git fetch \\\n'
-            '            --no-tags --prune origin "+refs/heads/*:refs/remotes/origin/*"',
-            lint,
-        )
-        self.assertIn(
-            'git fetch \\\n            --force --tags origin',
-            lint,
-        )
-        self.assertIn("if: github.event_name == 'pull_request'", lint)
-        self.assertIn('git merge-base "origin/${{ github.base_ref }}" HEAD', lint)
-        self.assertIn("python3 scripts/release_notes.py check-pr", lint)
-        self.assertIn('--summary "$GITHUB_STEP_SUMMARY"', lint)
-
-    def test_push_gate_checks_current_branch_release_notes(self) -> None:
-        push_gate = PUSH_GATE.read_text(encoding="utf-8")
-        check = shell_function_body(push_gate, "check_current_branch_release_notes")
-
-        self.assertIn('git merge-base "$base_ref" HEAD', check)
-        self.assertIn("python3 scripts/release_notes.py check-pr", check)
-        self.assertIn('--range "${merge_base}..HEAD"', check)
-
     def test_push_gate_runs_the_gates_whose_self_tests_it_runs(self) -> None:
         push_gate = PUSH_GATE.read_text(encoding="utf-8")
         pre_commit = PRE_COMMIT_CONFIG.read_text(encoding="utf-8")
@@ -748,7 +718,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "release refused: target ",
             "run.get('databaseId')",
             "run.get('url', 'URL unavailable')",
-            "release_notes.py collect --require",
             "release_version.py print-next",
             'git tag "${RELEASE_TAG}" "${RELEASE_SHA}"',
         ]
@@ -1451,9 +1420,6 @@ derive_mutation_jobs() {{
         self.assertIn("git rebase origin/main", release)
         self.assertIn("continue-on-error: true", release)
         self.assertIn(
-            "Release-Notes: Internal: Stamp documentation version pins", release
-        )
-        self.assertIn(
             "Skipping docs pin for superseded ${RELEASE_TAG}", release
         )
         self.assertIn(
@@ -1464,22 +1430,6 @@ derive_mutation_jobs() {{
         self.assertIn("permissions:\n  contents: read\n  actions: read", release)
         publish = workflow_job_block(release, "publish")
         self.assertIn("permissions:\n      contents: write\n      actions: write", publish)
-
-    def test_release_notes_are_gated_only_when_a_manual_release_is_cut(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-
-        self.assertNotIn("release-notes-gate", workflow)
-        self.assertNotIn("release_notes.py collect --require", workflow)
-        prepare_release = workflow_job_block(release, "prepare-release")
-        self.assertIn("release_notes.py collect --require", prepare_release)
-
-    def test_automated_docs_stamp_cannot_satisfy_next_release_notes_gate(self) -> None:
-        release_notes = RELEASE_NOTES.read_text(encoding="utf-8")
-
-        self.assertTrue(IS_AUTOMATED_DOCS_STAMP("docs: stamp release 0.1.0-alpha.113"))
-        self.assertFalse(IS_AUTOMATED_DOCS_STAMP("docs: explain release 0.1.0-alpha.113"))
-        self.assertIn("if is_automated_docs_stamp(subject):", release_notes)
 
     def test_workspace_tests_are_sharded_off_the_critical_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

@@ -112,7 +112,6 @@ jobs:
           git checkout --detach "${sha}"
           tag="$(git tag --points-at "${sha}" --list 'v*' --sort=-v:refname | head -n 1)"
           if [ -z "${tag}" ]; then
-            python3 scripts/release_notes.py collect --require --end "${sha}" >/dev/null
             version="$(python3 scripts/release_version.py print-next)"
             tag="v${version}"
             if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
@@ -337,8 +336,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        # Full history + tags: release_notes.py walks previous-tag..tag to
-        # assemble the curated release body.
+        # Full history + tags: tag ancestry validation below needs them.
         # Equivalent to checkout ref: ${{ needs.prepare-release.outputs.release_sha }}.
         env:
           CHECKOUT_REF: ${{ needs.prepare-release.outputs.release_sha }}
@@ -359,13 +357,6 @@ jobs:
           git fetch --force --tags origin
           git fetch --no-tags origin "${CHECKOUT_REF}"
           git checkout --force --detach FETCH_HEAD
-
-      # Curated notes from `Release-Notes:` commit sections become the release
-      # body; the auto-generated commit list is appended below. Written
-      # outside dist/ so it is not uploaded as an asset. prepare-release has
-      # already required curated notes before creating a new tag.
-      - name: Collect release notes
-        run: python3 scripts/release_notes.py collect --end "${RELEASE_SHA}" --out "${{ runner.temp }}/RELEASE_NOTES.md"
 
       - name: Publish validated release tag
         run: |
@@ -394,9 +385,11 @@ jobs:
 
       - name: Publish release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        # Release notes are written manually: the release publishes with the
+        # auto-generated commit list only, and a maintainer edits the release
+        # body on GitHub afterward.
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          body_path: ${{ runner.temp }}/RELEASE_NOTES.md
           generate_release_notes: true
 
       # The release is already public at this point. Keep the checked-in docs
@@ -432,9 +425,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit \
-            -m "docs: stamp release ${version}" \
-            -m "Release-Notes: Internal: Stamp documentation version pins for ${version}."
+          git commit -m "docs: stamp release ${version}"
 
           max_attempts=3
           attempt=1
