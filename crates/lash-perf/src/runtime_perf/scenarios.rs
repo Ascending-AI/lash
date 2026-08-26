@@ -1,8 +1,5 @@
 use lash_standard_plugins::{RollingHistoryConfig, StandardContextApproach};
 
-pub(crate) const DURABLE_CHECKPOINT_CURVE_BYTES: [usize; 5] =
-    [256 * 1024, 512 * 1024, 768 * 1024, 1024 * 1024, 1280 * 1024];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ExecutionMode {
     Standard,
@@ -496,14 +493,14 @@ impl RuntimePerfScenario {
             "durable_checkpoint_curve_sqlite",
             Rlm,
             RuntimeScenario,
-            "Measures checkpoint-size attribution inside complete RLM turns against the decorated SQLite persistence boundary."
+            "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against SQLite. The fixed transcript/message/graph/component center point is CLI-configurable."
         ),
         runtime_perf_metadata!(
             DurableCheckpointCurvePostgres,
             "durable_checkpoint_curve_postgres",
             Rlm,
             RuntimeScenario,
-            "Measures checkpoint-size attribution inside complete RLM turns against the decorated PostgreSQL persistence boundary."
+            "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against PostgreSQL. The fixed transcript/message/graph/component center point is CLI-configurable."
         ),
         runtime_perf_metadata!(
             DurableQueuedWorkContentionSqlite,
@@ -687,12 +684,6 @@ impl RuntimePerfScenario {
             Self::AsyncProcessSettlement8Children => Some(8),
             _ => None,
         }
-    }
-
-    pub(crate) fn checkpoint_curve_bytes(self, turn_index: usize) -> Option<usize> {
-        self.is_checkpoint_curve().then(|| {
-            DURABLE_CHECKPOINT_CURVE_BYTES[turn_index % DURABLE_CHECKPOINT_CURVE_BYTES.len()]
-        })
     }
 
     fn metadata(self) -> &'static RuntimePerfScenarioMetadata {

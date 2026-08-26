@@ -183,17 +183,11 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
         | RuntimePerfScenario::HighTrafficKneeSqlite
         | RuntimePerfScenario::HighTrafficKneePostgres
         | RuntimePerfScenario::DurableQueuedWorkContentionSqlite
-        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres => {
+        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres
+        | RuntimePerfScenario::DurableCheckpointCurveSqlite
+        | RuntimePerfScenario::DurableCheckpointCurvePostgres => {
             unreachable!("direct-dispatch scenarios construct their own operations")
         }
-        RuntimePerfScenario::DurableCheckpointCurveSqlite
-        | RuntimePerfScenario::DurableCheckpointCurvePostgres => format!(
-            "Turn {} in the durable checkpoint curve. Persist checkpoint body bytes {} inside this live RLM turn, then finish exactly: runtime perf benchmark ok",
-            turn_index + 1,
-            scenario
-                .checkpoint_curve_bytes(turn_index)
-                .expect("checkpoint curve scenario")
-        ),
         RuntimePerfScenario::StoreHardeningHotPaths => {
             format!("Turn {} in the store-hardening benchmark.", turn_index + 1)
         }

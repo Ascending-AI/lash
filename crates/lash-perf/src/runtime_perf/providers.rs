@@ -1965,12 +1965,7 @@ finish "runtime perf benchmark ok""#,
         }
         RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres => {
-            let target_bytes = checkpoint_curve_bytes_from_request(request);
-            let body = "x".repeat(target_bytes);
-            let literal = serde_json::to_string(&body).expect("checkpoint curve string literal");
-            text_profile(lashlang_block(&format!(
-                "checkpoint_curve_blob = {literal}\nfinish \"runtime perf benchmark ok\""
-            )))
+            unreachable!("durable checkpoint curves bypass the provider harness")
         }
         RuntimePerfScenario::RlmObliqueStackMix => {
             let text = lashlang_block(
@@ -2160,16 +2155,6 @@ fn high_traffic_trigger_name(request: &LlmRequest) -> String {
         })
         .unwrap_or("missing-session");
     format!("runtime-perf-load-trigger-{session_id}")
-}
-
-fn checkpoint_curve_bytes_from_request(request: &LlmRequest) -> usize {
-    let text = request_text(request);
-    let marker = "checkpoint body bytes ";
-    text.rsplit(marker)
-        .next()
-        .and_then(|suffix| suffix.split_whitespace().next())
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(256 * 1024)
 }
 
 fn lashlang_block(source: &str) -> String {

@@ -184,6 +184,7 @@ pub(crate) async fn run_once(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     contention_workers: usize,
+    checkpoint_curve: &CheckpointCurveConfig,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let before_scheduler = RuntimeSchedulerSample::capture();
@@ -191,6 +192,7 @@ pub(crate) async fn run_once(
         scenario,
         chat_turns,
         contention_workers,
+        checkpoint_curve,
         high_traffic,
     ))
     .await;
@@ -206,8 +208,17 @@ async fn run_once_inner(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     contention_workers: usize,
+    checkpoint_curve: &CheckpointCurveConfig,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
+    if scenario.is_checkpoint_curve() {
+        return Box::pin(run_once_durable_checkpoint_curve(
+            scenario,
+            chat_turns,
+            checkpoint_curve,
+        ))
+        .await;
+    }
     if scenario.is_queued_work_contention() {
         return Box::pin(run_once_durable_queued_work_contention(
             scenario,
@@ -530,7 +541,6 @@ async fn run_once_inner(
         }
 
         let before_turn_usage = runtime.usage_report();
-        let commit_measurement_start = runtime.store_metrics().commit_measurements().len();
         if let Some(variant) = catalog_variant {
             let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics()?;
             extra_counters.insert(
@@ -749,45 +759,6 @@ async fn run_once_inner(
                 .map_err(anyhow::Error::msg)?;
         let mut phase_profile = phase_probe.take_completed();
         phase_profile.extend(extra_phase_profile);
-        if let Some(target_bytes) = scenario.checkpoint_curve_bytes(turn_index) {
-            phase_profile = phase_profile
-                .into_iter()
-                .map(|(phase, measurement)| {
-                    (
-                        format!("checkpoint_curve.{target_bytes}.{phase}"),
-                        measurement,
-                    )
-                })
-                .collect();
-            let measurements = runtime.store_metrics().commit_measurements();
-            let turn_measurements = &measurements[commit_measurement_start..];
-            extra_counters.insert(
-                format!("checkpoint_curve.{target_bytes}.commit_count"),
-                turn_measurements.len() as u64,
-            );
-            if let Some(commit) = turn_measurements.last() {
-                extra_counters.insert(
-                    format!("checkpoint_curve.{target_bytes}.logical_bytes"),
-                    commit.total_bytes,
-                );
-                extra_counters.insert(
-                    format!("checkpoint_curve.{target_bytes}.checkpoint_bytes"),
-                    commit.checkpoint_bytes,
-                );
-                extra_counters.insert(
-                    format!("checkpoint_curve.{target_bytes}.logical_rows"),
-                    commit.total_rows,
-                );
-                extra_counters.insert(
-                    format!("checkpoint_curve.{target_bytes}.graph_rows"),
-                    commit.graph_rows,
-                );
-                extra_counters.insert(
-                    format!("checkpoint_curve.{target_bytes}.checkpoint_components"),
-                    commit.checkpoint_components,
-                );
-            }
-        }
         turns.push(RuntimePerfTurnResult {
             turn_index,
             run_turn_ms,

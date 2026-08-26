@@ -68,6 +68,10 @@ pub async fn run_cli(
     scenario_filters: Vec<String>,
     chat_turns: usize,
     contention_workers: usize,
+    checkpoint_transcript_bytes: usize,
+    checkpoint_messages: usize,
+    checkpoint_graph_rows: usize,
+    checkpoint_components: usize,
     high_traffic_population: usize,
     high_traffic_arrival_rate: u64,
     high_traffic_mix: String,
@@ -86,6 +90,12 @@ pub async fn run_cli(
     let runs = runs.max(1);
     let chat_turns = chat_turns.max(1);
     let contention_workers = contention_workers.max(1);
+    let checkpoint_curve = CheckpointCurveConfig::new(
+        checkpoint_transcript_bytes,
+        checkpoint_messages,
+        checkpoint_graph_rows,
+        checkpoint_components,
+    )?;
     let high_traffic = HighTrafficConfig::parse(
         high_traffic_population,
         high_traffic_arrival_rate,
@@ -101,6 +111,7 @@ pub async fn run_cli(
                 *scenario,
                 chat_turns,
                 contention_workers,
+                &checkpoint_curve,
                 &high_traffic,
             ))
             .await?;
@@ -138,6 +149,7 @@ pub async fn run_cli(
                 *scenario,
                 chat_turns,
                 contention_workers,
+                &checkpoint_curve,
                 &high_traffic,
             ))
             .await?;

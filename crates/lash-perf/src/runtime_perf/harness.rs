@@ -16,7 +16,7 @@ use lash::{
     provider::{ProviderHandle, ProviderOptions, ProviderReliability},
     runtime::SessionSnapshot,
 };
-use lash_core::{SessionHistoryRecord, SessionStoreFactory};
+use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
 use lash_protocol_rlm::RlmTurnInputExt;
 use lash_provider_openai::OpenAiCompatibleProvider;
@@ -1114,6 +1114,37 @@ impl RuntimePerfCoreBuilderExt for lash::LashCoreBuilder {
     }
 }
 
+pub(crate) fn durable_sqlite_session_store_factory(
+    sessions_root: PathBuf,
+    process_registry_path: &std::path::Path,
+) -> (
+    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<RuntimePerfStoreMetrics>,
+) {
+    let inner: Arc<dyn lash_core::SessionStoreFactory> = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+            sessions_root,
+            process_registry_path,
+        ),
+    );
+    let factory = RuntimePerfStoreFactory::decorating(inner);
+    let metrics = factory.metrics();
+    (Arc::new(factory), metrics)
+}
+
+pub(crate) fn durable_postgres_session_store_factory(
+    postgres: &lash_postgres_store::PostgresStorage,
+) -> (
+    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<RuntimePerfStoreMetrics>,
+) {
+    let inner: Arc<dyn lash_core::SessionStoreFactory> =
+        Arc::new(postgres.session_store_factory_with_shared_process_registry());
+    let factory = RuntimePerfStoreFactory::decorating(inner);
+    let metrics = factory.metrics();
+    (Arc::new(factory), metrics)
+}
+
 pub(crate) async fn build_runtime_with_sqlite_store(
     scenario: RuntimePerfScenario,
     root: PathBuf,
@@ -1190,15 +1221,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             Arc::new(RuntimePerfStoreMetrics::default()),
         )
     } else {
-        let inner_store_factory: Arc<dyn lash_core::SessionStoreFactory> = Arc::new(
-            lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-                sessions_root,
-                &process_db,
-            ),
-        );
-        let store_factory = RuntimePerfStoreFactory::decorating(inner_store_factory);
-        let store_metrics = store_factory.metrics();
-        (Arc::new(store_factory), store_metrics)
+        durable_sqlite_session_store_factory(sessions_root, &process_db)
     };
     let commit_budget = if scenario.is_checkpoint_curve() {
         lash::CommitBudget::bounded(8 * 1024 * 1024, 2_048)
@@ -1296,10 +1319,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let process_env_store = Arc::new(postgres.process_env_store());
     let process_registry = Arc::new(postgres.process_registry());
     let trigger_store = Arc::new(postgres.trigger_store());
-    let inner_store_factory: Arc<dyn lash_core::SessionStoreFactory> =
-        Arc::new(postgres.session_store_factory_with_shared_process_registry());
-    let store_factory = Arc::new(RuntimePerfStoreFactory::decorating(inner_store_factory));
-    let store_metrics = store_factory.metrics();
+    let (store_factory, store_metrics) = durable_postgres_session_store_factory(&postgres);
     let attachment_store = Arc::new(lash::persistence::InMemoryAttachmentStore::new());
     let commit_budget = if scenario.is_checkpoint_curve() {
         lash::CommitBudget::bounded(8 * 1024 * 1024, 2_048)

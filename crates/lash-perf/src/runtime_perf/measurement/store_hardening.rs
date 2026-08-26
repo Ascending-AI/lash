@@ -82,13 +82,13 @@ async fn run_once_store_hardening_hot_paths(
     let sqlite_session_id = format!("perf-hardening-sqlite-{run_id}");
     let postgres_session_id = format!("perf-hardening-postgres-{run_id}");
     let memory_store = memory_factory
-        .create_store(&store_hardening_create_request(&memory_session_id))
+        .create_store(&runtime_perf_session_create_request(&memory_session_id))
         .await?;
     let sqlite_store = sqlite_factory
-        .create_store(&store_hardening_create_request(&sqlite_session_id))
+        .create_store(&runtime_perf_session_create_request(&sqlite_session_id))
         .await?;
     let postgres_store = postgres_factory
-        .create_store(&store_hardening_create_request(&postgres_session_id))
+        .create_store(&runtime_perf_session_create_request(&postgres_session_id))
         .await?;
 
     let memory_registry: Arc<dyn lash_core::ProcessRegistry> =
@@ -598,7 +598,7 @@ async fn load_store_hardening_state(
     )
 }
 
-fn store_hardening_create_request(session_id: &str) -> lash_core::SessionStoreCreateRequest {
+fn runtime_perf_session_create_request(session_id: &str) -> lash_core::SessionStoreCreateRequest {
     lash_core::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.to_string(),
