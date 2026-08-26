@@ -390,9 +390,16 @@ async fn append_conformance_runtime(
         });
     // The protocol-session capability is embedder-supplied; the in-tree fake is
     // enough here because this suite never runs a turn.
-    let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session(request.session_id.clone(), state.plugin_snapshot())
-        .expect("append conformance plugin session");
+    let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
+    let plugins = match state.plugin_snapshot() {
+        Some(snapshot) => host.rematerialize_session(
+            request.session_id.clone(),
+            snapshot,
+            crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+        ),
+        None => host.build_session(request.session_id.clone()),
+    }
+    .expect("append conformance plugin session");
     crate::LashRuntime::from_persistent_embedded_state(
         request.policy.clone(),
         crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(

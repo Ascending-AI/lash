@@ -323,14 +323,15 @@ impl EmbeddedRuntimeBuilder {
                 .build_session_with_parent(
                     state.session_id.clone(),
                     None,
-                    None,
-                    crate::plugin::SessionAuthorityContext {
-                        plugin_options: self.plugin_options.clone(),
+                    crate::plugin::SessionCreationConfig {
+                        authority: crate::plugin::SessionAuthorityContext {
+                            plugin_options: self.plugin_options.clone(),
+                            ..crate::plugin::SessionAuthorityContext::default()
+                        },
                         protocol_turn_options: state.protocol_turn_options.clone(),
-                        ..crate::plugin::SessionAuthorityContext::default()
                     },
                 )
-                .map_err(|err| SessionError::Protocol(err.to_string())),
+                .map_err(SessionError::Plugin),
         }
     }
 

@@ -617,7 +617,7 @@ mod tests {
         )
         .expect("orchestration probe registry");
         let plugins = crate::plugin::PluginHost::empty()
-            .build_session("granted-call-session", None)
+            .build_session("granted-call-session")
             .expect("plugin session");
         let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
         let host = Arc::new(crate::testing::MockSessionManager::default());
@@ -988,7 +988,7 @@ mod tests {
                 crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider)),
             ),
         )])
-        .build_session("session", None)
+        .build_session("session")
         .expect("plugin session");
         let tools = plugins.tools();
         let tool_catalog = plugins

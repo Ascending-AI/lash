@@ -16,7 +16,7 @@ fn standard_protocol_owns_batch_not_processes() {
     let session = PluginHost::new(vec![Arc::new(
         lash_protocol_standard::StandardProtocolPluginFactory,
     )])
-    .build_session("root", None)
+    .build_session("root")
     .expect("session");
 
     let names = tool_names(&session);
@@ -32,7 +32,7 @@ fn processes_are_composed_with_standard_protocol() {
         Arc::new(lash_tools::shell::StandardShellPluginFactory::new()),
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory),
     ])
-    .build_session("root", None)
+    .build_session("root")
     .expect("session");
 
     let names = tool_names(&session);

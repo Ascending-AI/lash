@@ -7,8 +7,7 @@ pub(in crate::runtime::session_manager) struct SessionCreatePlan {
     pub(in crate::runtime::session_manager) parent_session_id: Option<String>,
     pub(in crate::runtime::session_manager) policy: SessionPolicy,
     pub(in crate::runtime::session_manager) initial_runtime_state: RuntimeSessionState,
-    pub(in crate::runtime::session_manager) plugin_authority:
-        crate::plugin::SessionAuthorityContext,
+    pub(in crate::runtime::session_manager) plugin_config: crate::plugin::SessionCreationConfig,
     pub(in crate::runtime::session_manager) plugin_source: crate::SessionPluginSource,
     pub(in crate::runtime::session_manager) context_overlay: crate::SessionContextOverlay,
     pub(in crate::runtime::session_manager) protocol_request: SessionCreateRequest,
@@ -44,10 +43,12 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         current.host.core.clock.as_ref(),
     )
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    let plugin_authority = crate::plugin::SessionAuthorityContext {
-        tool_access: request.tool_access.clone(),
-        subagent: request.subagent.clone(),
-        plugin_options: request.plugin_options.clone(),
+    let plugin_config = crate::plugin::SessionCreationConfig {
+        authority: crate::plugin::SessionAuthorityContext {
+            tool_access: request.tool_access.clone(),
+            subagent: request.subagent.clone(),
+            plugin_options: request.plugin_options.clone(),
+        },
         protocol_turn_options: initial_runtime_state.protocol_turn_options.clone(),
     };
 
@@ -61,7 +62,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_create_plan(
         parent_session_id,
         policy,
         initial_runtime_state,
-        plugin_authority,
+        plugin_config,
         plugin_source: request.plugin_source,
         context_overlay: request.context_overlay.clone(),
         usage_source: request.usage_source.clone(),

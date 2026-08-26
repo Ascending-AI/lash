@@ -492,7 +492,7 @@ pub(crate) fn plugin_session_with_orchestrating_tool(
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(tool_factory));
     crate::PluginHost::new(factories)
-        .build_session(session_id, None)
+        .build_session(session_id)
         .expect("plugins")
 }
 
@@ -507,7 +507,7 @@ pub(crate) fn plugin_session_with_tools(
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(tool_factory));
     crate::PluginHost::new(factories)
-        .build_session(session_id, None)
+        .build_session(session_id)
         .expect("plugins")
 }
 
@@ -609,7 +609,7 @@ impl TestRuntime {
             crate::PluginSpec::new().with_tool_provider(Arc::clone(&tools)),
         )));
         let plugin_host = crate::PluginHost::new(factories);
-        let plugin_session = plugin_host.build_session("root", None).expect("plugins");
+        let plugin_session = plugin_host.build_session("root").expect("plugins");
         let mut runtime = match self.store {
             Some(store) => LashRuntime::from_persistent_embedded_state(
                 standard_test_policy(),

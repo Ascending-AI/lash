@@ -50,7 +50,7 @@ fn before_tool_plugin_stack(mut factories: Vec<Arc<dyn PluginFactory>>) -> Arc<P
         )),
     );
     PluginHost::new(factories)
-        .build_session("root", None)
+        .build_session("root")
         .expect("plugin session")
 }
 
@@ -86,7 +86,7 @@ fn after_tool_plugin_stack(mut factories: Vec<Arc<dyn PluginFactory>>) -> Arc<Pl
         )),
     );
     PluginHost::new(factories)
-        .build_session("root", None)
+        .build_session("root")
         .expect("plugin session")
 }
 

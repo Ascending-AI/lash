@@ -283,7 +283,7 @@ async fn plugin_contexts_are_nameable() -> anyhow::Result<()> {
         .expect("the docs session-host capture lock must be healthy")
         .clone()
         .expect("opening the session must run the ready hook");
-    let plugin_session = host.build_session(format!("{SESSION}-inspection"), None)?;
+    let plugin_session = host.build_session(format!("{SESSION}-inspection"))?;
     inspect_plugin_session(&plugin_session).await?;
     session
         .plugin_operations()

@@ -311,13 +311,25 @@ fn guarded_session_config(
 
 /// The one language this session is allowed to use, for the plugin build that
 /// has to pick a dialect implementation before the session materializes.
-pub(super) fn resolve_rlm_session_dialect(
+pub(super) fn resolve_new_rlm_session_dialect(
     existing: &ProtocolTurnOptions,
     plugin_options: &PluginOptions,
 ) -> Result<lash_rlm_types::RlmDialect, SessionError> {
     Ok(guarded_session_config(existing, plugin_options)?
         .dialect
         .unwrap_or_default())
+}
+
+pub(super) fn resolve_recorded_rlm_session_dialect(
+    recorded: &ProtocolTurnOptions,
+) -> Result<lash_rlm_types::RlmDialect, lash_core::PluginError> {
+    rlm_session_config(recorded)
+        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+        .dialect
+        .ok_or_else(|| lash_core::PluginError::MissingRecordedSessionConfig {
+            plugin_id: RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            field: "dialect".to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -494,6 +506,31 @@ mod tests {
                 "RLM session dialect is durably pinned to `typescript` and cannot be set to `lashlang`"
             ),
             "the refusal must render the one typed message: {error}"
+        );
+    }
+
+    #[test]
+    fn rematerialization_requires_a_recorded_dialect() {
+        let error = resolve_recorded_rlm_session_dialect(&ProtocolTurnOptions::default())
+            .expect_err("an existing RLM session must record its dialect");
+        assert!(matches!(
+            error,
+            lash_core::PluginError::MissingRecordedSessionConfig { plugin_id, field }
+                if plugin_id == RLM_PROTOCOL_PLUGIN_ID && field == "dialect"
+        ));
+    }
+
+    #[test]
+    fn rematerialization_selects_the_recorded_non_default_dialect() {
+        let recorded = ProtocolTurnOptions::typed(RlmCreateExtras {
+            dialect: Some(RlmDialect::Typescript),
+            ..RlmCreateExtras::default()
+        })
+        .expect("record TypeScript dialect");
+
+        assert_eq!(
+            resolve_recorded_rlm_session_dialect(&recorded).expect("resolve recorded dialect"),
+            RlmDialect::Typescript
         );
     }
 

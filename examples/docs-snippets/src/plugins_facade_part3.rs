@@ -103,8 +103,8 @@ pub(crate) fn plugin_area_facade_witnesses() {
     field_witness(|value: &lash::plugins::PluginSessionContext| {
         let _ = &value.protocol_turn_options;
     });
-    // FIG-2104-WITNESS-0768: lash::plugins::SessionAuthorityContext::protocol_turn_options
-    field_witness(|value: &lash::plugins::SessionAuthorityContext| {
+    // FIG-2104-WITNESS-0768: lash::plugins::SessionCreationConfig::protocol_turn_options
+    field_witness(|value: &lash::plugins::SessionCreationConfig| {
         let _ = &value.protocol_turn_options;
     });
     // FIG-2104-WITNESS-0769: lash::provider::LlmContentBlock::Attachment
@@ -216,6 +216,112 @@ pub(crate) fn plugin_area_facade_witnesses() {
     });
     // FIG-2104-WITNESS-0790: lash::tools::ToolBatchReplies::settled_in_input_order
     member_witness(lash::tools::ToolBatchReplies::settled_in_input_order);
+    // FIG-2138-WITNESS-0791: lash::plugins::PluginSessionContext::materialization
+    field_witness(|value: &lash::plugins::PluginSessionContext| {
+        let _ = value.materialization;
+    });
+    // FIG-2138-WITNESS-0792: lash::plugins::PluginSessionMaterialization
+    type_witness::<lash::plugins::PluginSessionMaterialization>();
+    // FIG-2138-WITNESS-0793: lash::plugins::PluginSessionMaterialization::Creation
+    variant_witness(|value: &lash::plugins::PluginSessionMaterialization| {
+        matches!(value, lash::plugins::PluginSessionMaterialization::Creation)
+    });
+    // FIG-2138-WITNESS-0794: lash::plugins::PluginSessionMaterialization::Rematerialization
+    variant_witness(|value: &lash::plugins::PluginSessionMaterialization| {
+        matches!(
+            value,
+            lash::plugins::PluginSessionMaterialization::Rematerialization
+        )
+    });
+    // FIG-2138-WITNESS-0795: lash::plugins::SessionCreationConfig
+    type_witness::<lash::plugins::SessionCreationConfig>();
+    // FIG-2138-WITNESS-0796: lash::plugins::SessionCreationConfig::authority
+    field_witness(|value: &lash::plugins::SessionCreationConfig| {
+        let _ = &value.authority;
+    });
+    // FIG-2138-WITNESS-0797: lash::plugins::RecordedSessionConfig
+    type_witness::<lash::plugins::RecordedSessionConfig>();
+    // FIG-2138-WITNESS-0798: lash::plugins::RecordedSessionConfig::authority
+    field_witness(|value: &lash::plugins::RecordedSessionConfig| {
+        let _ = &value.authority;
+    });
+    // FIG-2138-WITNESS-0799: lash::plugins::RecordedSessionConfig::protocol_turn_options
+    field_witness(|value: &lash::plugins::RecordedSessionConfig| {
+        let _ = &value.protocol_turn_options;
+    });
+    // FIG-2138-WITNESS-0800: lash::plugins::RecordedSessionConfig::new
+    member_witness(lash::plugins::RecordedSessionConfig::new);
+    // FIG-2138-WITNESS-0801: lash::plugins::PluginHost::rematerialize_session
+    member_witness(
+        |host: &lash::plugins::PluginHost,
+         session_id: String,
+         snapshot: &lash::plugins::PluginSessionSnapshot,
+         config: lash::plugins::RecordedSessionConfig| {
+            host.rematerialize_session(session_id, snapshot, config)
+        },
+    );
+    // FIG-2138-WITNESS-0802: lash::plugins::PluginHost::rematerialize_session_with_overlay
+    member_witness(
+        |host: &lash::plugins::PluginHost,
+         session_id: String,
+         snapshot: &lash::plugins::PluginSessionSnapshot,
+         overlay: lash::plugins::ToolCatalogContribution,
+         tool_snapshot: Option<lash::tools::ToolState>,
+         config: lash::plugins::RecordedSessionConfig| {
+            host.rematerialize_session_with_overlay(
+                session_id,
+                snapshot,
+                overlay,
+                tool_snapshot,
+                config,
+            )
+        },
+    );
+    // FIG-2138-WITNESS-0803: lash::plugins::PluginHost::rematerialize_session_with_parent
+    member_witness(
+        |host: &lash::plugins::PluginHost,
+         session_id: String,
+         parent_session_id: Option<String>,
+         snapshot: &lash::plugins::PluginSessionSnapshot,
+         config: lash::plugins::RecordedSessionConfig| {
+            host.rematerialize_session_with_parent(session_id, parent_session_id, snapshot, config)
+        },
+    );
+    // FIG-2138-WITNESS-0804: lash::plugins::PluginHost::rematerialize_session_with_parent_and_overlay
+    member_witness(
+        |host: &lash::plugins::PluginHost,
+         session_id: String,
+         parent_session_id: Option<String>,
+         snapshot: &lash::plugins::PluginSessionSnapshot,
+         overlay: lash::plugins::ToolCatalogContribution,
+         tool_snapshot: Option<lash::tools::ToolState>,
+         config: lash::plugins::RecordedSessionConfig| {
+            host.rematerialize_session_with_parent_and_overlay(
+                session_id,
+                parent_session_id,
+                snapshot,
+                overlay,
+                tool_snapshot,
+                config,
+            )
+        },
+    );
+    // FIG-2138-WITNESS-0805: lash::plugins::PluginError::MissingRecordedSessionConfig
+    variant_witness(|value: &lash::plugins::PluginError| {
+        matches!(
+            value,
+            lash::plugins::PluginError::MissingRecordedSessionConfig { .. }
+        )
+    });
+    // FIG-2138-WITNESS-0806..0807: lash::plugins::PluginError::MissingRecordedSessionConfig fields
+    field_witness(|value: &lash::plugins::PluginError| {
+        if let lash::plugins::PluginError::MissingRecordedSessionConfig { plugin_id, field } = value
+        {
+            let _ = (plugin_id, field);
+        }
+    });
+    // FIG-2138-WITNESS-0808: lash::SessionError::Plugin
+    variant_witness(|value: &lash::SessionError| matches!(value, lash::SessionError::Plugin(..)));
     // FIG-2104-CLOSURE-0001: lash::tools::ToolAttachmentClient::put
     member_witness(lash::tools::ToolAttachmentClient::put);
     // FIG-2104-CLOSURE-0002: lash::tools::ToolDirectCompletionClient::complete

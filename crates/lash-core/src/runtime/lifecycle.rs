@@ -285,6 +285,7 @@ impl LashRuntime {
             last_committed_observation_turn: None,
             graph_loaded_from_store: false,
             resident_session_state: ResidentSessionState::Valid,
+            materialized_protocol_config_dirty: false,
         })
     }
 
@@ -541,18 +542,30 @@ impl LashRuntime {
                 "RuntimeEnvironment.plugin_host is required for from_environment".to_string(),
             )
         })?;
-        let plugin_session = plugin_host
-            .build_session_with_parent(
+        let authority = crate::plugin::SessionAuthorityContext {
+            plugin_options,
+            ..crate::plugin::SessionAuthorityContext::default()
+        };
+        let plugin_session = match state.plugin_snapshot() {
+            Some(snapshot) => plugin_host.rematerialize_session_with_parent(
                 state.session_id.as_str(),
                 None,
-                state.plugin_snapshot(),
-                crate::plugin::SessionAuthorityContext {
-                    plugin_options,
+                snapshot,
+                crate::plugin::RecordedSessionConfig {
+                    authority,
                     protocol_turn_options: state.protocol_turn_options.clone(),
-                    ..crate::plugin::SessionAuthorityContext::default()
                 },
-            )
-            .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            ),
+            None => plugin_host.build_session_with_parent(
+                state.session_id.as_str(),
+                None,
+                crate::plugin::SessionCreationConfig {
+                    authority,
+                    protocol_turn_options: state.protocol_turn_options.clone(),
+                },
+            ),
+        }
+        .map_err(SessionError::Plugin)?;
         let mut embedded = EmbeddedRuntimeHost::new(env.core.clone());
         if let Some(factory) = env.session_store_factory.as_ref() {
             embedded = embedded.with_session_store_factory(Arc::clone(factory));
@@ -574,6 +587,50 @@ impl LashRuntime {
         runtime.host.process_work_driver = env.process_work_driver.clone();
         runtime.host.queued_work_driver = env.queued_work_driver.clone();
         Ok(runtime)
+    }
+
+    pub(super) async fn persist_materialized_protocol_config(
+        &mut self,
+    ) -> Result<(), SessionError> {
+        if !self.materialized_protocol_config_dirty {
+            return Ok(());
+        }
+        let Some(store) = self.services.store.clone() else {
+            return Ok(());
+        };
+        let operation = super::state::boundary_operation(
+            &self.state.session_id,
+            "protocol-materialization",
+            "record-config",
+        );
+        let protocol_only_first_commit = self.state.checkpoint_ref.is_none();
+        let (mut commit, persisted_node_ids) =
+            crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
+                &mut self.state,
+                &[],
+                operation,
+                self.host.core.durability.commit_budget,
+            )
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        if protocol_only_first_commit {
+            commit.config = crate::PersistedSessionConfig::new(self.state.policy.turn_budget);
+        }
+        let result = commit_runtime_state_with_fresh_session_execution_lease(
+            store,
+            commit,
+            &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
+            self.host.core.control.lease_timings,
+            Arc::clone(&self.host.core.clock),
+        )
+        .await
+        .map_err(|source| {
+            session_commit_error("failed to record protocol configuration", source)
+        })?;
+        self.state.apply_persisted_commit_result(result);
+        self.state.mark_node_ids_persisted(persisted_node_ids);
+        self.materialized_protocol_config_dirty = false;
+        Ok(())
     }
 
     /// Persist any dirty state and drop the runtime, returning a lightweight

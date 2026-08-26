@@ -727,8 +727,7 @@ async fn enqueue_tool_catalog_refresh(
             ),
         )
         .await
-        // Audited: session-command enqueue lowers store and queued-work failures to RuntimeError without a tombstone cause.
-        .map_err(AppError::internal)?;
+        .map_err(AppError::runtime)?;
     session.close().await.map_err(AppError::session_open)?;
     state.trace_for_session(
         &session_id,

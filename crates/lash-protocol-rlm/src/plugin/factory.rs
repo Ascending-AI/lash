@@ -210,9 +210,11 @@ impl RlmProtocolPluginFactory {
         let plugins = plugin_host.build_session_with_parent(
             &request.session_id,
             None,
-            None,
-            SessionAuthorityContext {
-                plugin_options: request.execution_env_spec.plugin_options,
+            lash_core::plugin::SessionCreationConfig {
+                authority: SessionAuthorityContext {
+                    plugin_options: request.execution_env_spec.plugin_options,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         )?;
@@ -323,11 +325,20 @@ impl PluginFactory for RlmProtocolPluginFactory {
             Arc::new(TypescriptDialect::new(lashlang_surface, services));
         let dialect_registry =
             RlmDialectRegistry::new([Arc::clone(&lashlang), Arc::clone(&typescript)]);
-        let selected = super::protocol_session::resolve_rlm_session_dialect(
-            &ctx.protocol_turn_options,
-            &ctx.plugin_options,
-        )
-        .map_err(|error| PluginError::Session(error.to_string()))?;
+        let selected = match ctx.materialization {
+            lash_core::plugin::PluginSessionMaterialization::Creation => {
+                super::protocol_session::resolve_new_rlm_session_dialect(
+                    &ctx.protocol_turn_options,
+                    &ctx.plugin_options,
+                )
+                .map_err(|error| PluginError::Session(error.to_string()))?
+            }
+            lash_core::plugin::PluginSessionMaterialization::Rematerialization => {
+                super::protocol_session::resolve_recorded_rlm_session_dialect(
+                    &ctx.protocol_turn_options,
+                )?
+            }
+        };
         let dialect = dialect_registry
             .resolve(selected.language_id())
             .map_err(|error| PluginError::Session(error.to_string()))?;

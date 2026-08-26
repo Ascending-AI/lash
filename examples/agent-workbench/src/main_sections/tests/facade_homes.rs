@@ -403,7 +403,7 @@
             );
             let host = lash::plugins::PluginHost::new(plugins.into_factories());
             let session = host
-                .build_session("workbench-rolling-history-session", None)
+                .build_session("workbench-rolling-history-session")
                 .expect("build rolling history plugin session");
             let messages = vec![
                 text_message("u1", lash::messages::MessageRole::User, OLD_MARKER),

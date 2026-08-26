@@ -112,6 +112,7 @@ impl LashRuntime {
             }
             ResidentSessionState::Valid => {}
         }
+        let recorded_options = self.state.protocol_turn_options.payload.clone();
         let protocol_session = self
             .session
             .as_ref()
@@ -128,6 +129,8 @@ impl LashRuntime {
                 )
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         }
+        self.materialized_protocol_config_dirty |=
+            self.state.protocol_turn_options.payload != recorded_options;
         Ok(())
     }
 
@@ -208,6 +211,14 @@ impl LashRuntime {
                     || head.checkpoint_ref != self.state.checkpoint_ref
             }
             Ok(None) => {
+                if self.state.checkpoint_ref.is_some() {
+                    return Err(SessionError::Store {
+                        context: "failed to refresh session graph from store".to_string(),
+                        source: crate::StoreError::SessionDeleted {
+                            session_id: self.state.session_id.clone(),
+                        },
+                    });
+                }
                 self.graph_loaded_from_store = true;
                 self.resident_graph_head_stale
                     .store(false, Ordering::Release);
@@ -584,6 +595,9 @@ impl LashRuntime {
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
+        self.persist_materialized_protocol_config()
+            .await
+            .map_err(runtime_error_from_session_command_refresh)?;
         let draft = crate::QueuedWorkBatchDraft::new(
             session_id.clone(),
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
@@ -691,12 +705,7 @@ impl LashRuntime {
                 }
                 self.refresh_session_graph_from_store()
                     .await
-                    .map_err(|error| {
-                        RuntimeError::new(
-                            RuntimeErrorCode::SessionCommandPostDriveRefresh,
-                            error.to_string(),
-                        )
-                    })?;
+                    .map_err(runtime_error_from_session_command_refresh)?;
                 // The existing refresh path deliberately preserves three
                 // live-owned policy fields (FIG-1875's adoption half remains
                 // out of scope). Once this command's durable completion is
@@ -789,12 +798,7 @@ impl LashRuntime {
             // stale CAS conflict on close.
             self.refresh_session_graph_from_store()
                 .await
-                .map_err(|err| {
-                    RuntimeError::new(
-                        crate::RuntimeErrorCode::SessionCommandPostDriveRefresh,
-                        err.to_string(),
-                    )
-                })?;
+                .map_err(runtime_error_from_session_command_refresh)?;
         }
         Ok(receipt)
     }
@@ -951,6 +955,26 @@ impl LashRuntime {
             self.state = next_state;
         }
         Ok(())
+    }
+}
+
+fn runtime_error_from_session_command_refresh(error: SessionError) -> RuntimeError {
+    let deleted_session_id = match &error {
+        SessionError::Store {
+            source: crate::StoreError::SessionDeleted { session_id },
+            ..
+        } => Some(session_id.clone()),
+        _ => None,
+    };
+    let runtime_error = RuntimeError::new(
+        RuntimeErrorCode::SessionCommandPostDriveRefresh,
+        error.to_string(),
+    );
+    match deleted_session_id {
+        Some(session_id) => {
+            runtime_error.with_cause(crate::RuntimeErrorCause::SessionDeleted { session_id })
+        }
+        None => runtime_error,
     }
 }
 

@@ -196,7 +196,7 @@ fn probe_context_with_projector(
     let plugins = crate::plugin::PluginHost::new(vec![Arc::new(
         crate::plugin::StaticPluginFactory::new("probe_tools", spec),
     )])
-    .build_session("root", None)
+    .build_session("root")
     .expect("plugin session");
     let tools = plugins.tools();
     let tool_catalog = plugins

@@ -29,6 +29,10 @@ pub enum PluginError {
     },
     #[error("plugin session error: {0}")]
     Session(String),
+    /// An existing plugin session cannot be reconstructed because a required
+    /// protocol-owned field is absent from its durable record.
+    #[error("recorded session config for plugin `{plugin_id}` is missing required field `{field}`")]
+    MissingRecordedSessionConfig { plugin_id: String, field: String },
     #[error(transparent)]
     Runtime(crate::RuntimeError),
     /// A turn-scoped plugin write presented a lapsed or superseded borrowed

@@ -62,24 +62,18 @@ fn build_session_plugins(
     plan: &SessionCreatePlan,
 ) -> Result<Arc<crate::PluginSession>, crate::PluginError> {
     match plan.plugin_source {
-        crate::SessionPluginSource::CurrentHostFresh => current
-            .plugins
-            .host()
-            .build_session_with_parent(
+        crate::SessionPluginSource::CurrentHostFresh => {
+            current.plugins.host().build_session_with_parent(
                 &plan.session_id,
                 plan.parent_session_id.clone(),
-                None,
-                plan.plugin_authority.clone(),
+                plan.plugin_config.clone(),
             )
-            .map_err(|err| crate::PluginError::Session(err.to_string())),
-        crate::SessionPluginSource::CurrentSessionFork => current
-            .plugins
-            .fork_for_child_session(
-                &plan.session_id,
-                plan.parent_session_id.clone(),
-                plan.plugin_authority.clone(),
-            )
-            .map_err(|err| crate::PluginError::Session(err.to_string())),
+        }
+        crate::SessionPluginSource::CurrentSessionFork => current.plugins.fork_for_child_session(
+            &plan.session_id,
+            plan.parent_session_id.clone(),
+            plan.plugin_config.clone(),
+        ),
     }
 }
 

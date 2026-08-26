@@ -1332,9 +1332,16 @@ async fn property_runtime(
             policy: request.policy.clone(),
             ..crate::RuntimeSessionState::new(request.policy.clone())
         });
-    let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
-        .build_session(request.session_id.clone(), state.plugin_snapshot())
-        .map_err(|error| error.to_string())?;
+    let host = crate::PluginHost::new(crate::testing::test_standard_protocol_factories());
+    let plugins = match state.plugin_snapshot() {
+        Some(snapshot) => host.rematerialize_session(
+            request.session_id.clone(),
+            snapshot,
+            crate::plugin::RecordedSessionConfig::new(state.protocol_turn_options.clone()),
+        ),
+        None => host.build_session(request.session_id.clone()),
+    }
+    .map_err(|error| error.to_string())?;
     crate::LashRuntime::from_persistent_embedded_state(
         request.policy.clone(),
         crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(

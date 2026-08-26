@@ -1746,7 +1746,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
         crate::PluginHost::new(vec![Arc::new(EffectControllerTestProtocolFactory {
             install_code_executor: true,
         })])
-        .build_session("root", None)
+        .build_session("root")
         .expect("plugins");
     let mut runtime = LashRuntime::from_embedded_state(
         policy,
@@ -1797,7 +1797,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         crate::PluginHost::new(vec![Arc::new(EffectControllerTestProtocolFactory {
             install_code_executor: false,
         })])
-        .build_session("root", None)
+        .build_session("root")
         .expect("plugins");
     let mut runtime = LashRuntime::from_embedded_state(
         policy,

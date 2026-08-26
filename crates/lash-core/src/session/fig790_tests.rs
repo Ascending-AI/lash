@@ -386,7 +386,7 @@ fn fig790_process_await_context(
     let processes: Arc<dyn crate::ProcessService> =
         Arc::new(EffectBackedProcessService { registry });
     let plugins = crate::plugin::PluginHost::empty()
-        .build_session("fig790-session", None)
+        .build_session("fig790-session")
         .expect("FIG-790 plugin session");
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());

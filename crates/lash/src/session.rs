@@ -366,7 +366,9 @@ fn reconcile_loaded_state_policy(
 ) {
     let recorded_provider_id = state.policy.recorded_provider_id().to_string();
     state.policy = policy.clone();
-    state.policy.provider_id = recorded_provider_id;
+    if !recorded_provider_id.is_empty() {
+        state.policy.provider_id = recorded_provider_id;
+    }
     if !host_prompt_is_present && let Some(persisted_prompt) = persisted_prompt {
         state.policy.prompt = persisted_prompt.clone();
     }
@@ -1448,6 +1450,31 @@ mod reconcile_tests {
         assert_eq!(state.policy.model.id, "host-model");
         assert_eq!(state.policy.generation, host.generation);
         assert_eq!(state.policy.prompt, host.prompt);
+    }
+
+    #[test]
+    fn host_provider_wins_when_the_durable_config_has_not_recorded_one() {
+        let mut state = RuntimeSessionState {
+            session_id: "session".to_string(),
+            policy: SessionPolicy {
+                provider_id: String::new(),
+                model: model("uncommitted-model"),
+                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            },
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
+        };
+        let host = SessionPolicy {
+            provider_id: "host-provider".to_string(),
+            model: model("host-model"),
+            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+
+        reconcile_loaded_state_policy(&mut state, &host, false, None);
+
+        assert_eq!(state.policy.provider_id, "host-provider");
+        assert_eq!(state.policy.model.id, "host-model");
     }
 
     #[tokio::test]

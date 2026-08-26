@@ -158,14 +158,27 @@ fn build_hidden_session(
     hidden_tool_name: &str,
     snapshot: Option<&crate::PluginSessionSnapshot>,
 ) -> Arc<crate::PluginSession> {
-    plugin_host
-        .build_session_with_parent(
+    let authority = hidden_authority(hidden_tool_name);
+    match snapshot {
+        Some(snapshot) => plugin_host.rematerialize_session_with_parent(
             session_id,
             Some("parent".to_string()),
             snapshot,
-            hidden_authority(hidden_tool_name),
-        )
-        .expect("hidden child plugin session")
+            crate::plugin::RecordedSessionConfig {
+                authority,
+                protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            },
+        ),
+        None => plugin_host.build_session_with_parent(
+            session_id,
+            Some("parent".to_string()),
+            crate::plugin::SessionCreationConfig {
+                authority,
+                ..Default::default()
+            },
+        ),
+    }
+    .expect("hidden child plugin session")
 }
 
 fn root_state(session_id: &str) -> RuntimeSessionState {
