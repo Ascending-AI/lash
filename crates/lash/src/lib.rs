@@ -323,9 +323,9 @@ pub mod persistence {
         LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
         MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
         OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
-        ProtocolEvent, PruneState, QueuedWorkStore, RuntimePersistence, ScanCoverage,
-        SessionAdmission, SessionBinding, SessionBlobReclaimReport, SessionCommitStore,
-        SessionExecutionLease, SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+        ProtocolEvent, QueuedWorkStore, RuntimePersistence, ScanCoverage, SessionAdmission,
+        SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionExecutionLease,
+        SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
         SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseDisplacement,
         SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionGraph,
         SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
@@ -482,8 +482,8 @@ pub mod messages {
     /// Read-side session-tree values exposed through integrator session views.
     pub use lash_core::session_graph::{SessionMessageTreeNode, SharedJsonValue};
     pub use lash_core::{
-        Message, MessageOrigin, MessageRole, Part, PartKind, facade_support::MessageSequence,
-        session_model::message::PartAttachment,
+        Message, MessageOrigin, MessageRole, Part, PartKind, PruneState,
+        facade_support::MessageSequence, session_model::message::PartAttachment,
     };
 }
 
