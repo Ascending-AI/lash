@@ -192,10 +192,17 @@ fn record_completed_phase(
 pub(crate) async fn run_once(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
+    contention_workers: usize,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let before_scheduler = RuntimeSchedulerSample::capture();
-    let result = Box::pin(run_once_inner(scenario, chat_turns, high_traffic)).await;
+    let result = Box::pin(run_once_inner(
+        scenario,
+        chat_turns,
+        contention_workers,
+        high_traffic,
+    ))
+    .await;
     let after_scheduler = RuntimeSchedulerSample::capture();
     let mut result = result?;
     result
@@ -207,8 +214,17 @@ pub(crate) async fn run_once(
 async fn run_once_inner(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
+    contention_workers: usize,
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
+    if scenario.is_queued_work_contention() {
+        return Box::pin(run_once_durable_queued_work_contention(
+            scenario,
+            chat_turns,
+            contention_workers,
+        ))
+        .await;
+    }
     if scenario.is_high_traffic() {
         let database_url = scenario
             .uses_postgres()
@@ -314,8 +330,10 @@ async fn run_once_inner(
         RuntimePerfScenario::HighTrafficLoadSqlite
         | RuntimePerfScenario::HighTrafficLoadPostgres
         | RuntimePerfScenario::HighTrafficKneeSqlite
-        | RuntimePerfScenario::HighTrafficKneePostgres => {
-            unreachable!("high-traffic scenarios return before the generic dispatch")
+        | RuntimePerfScenario::HighTrafficKneePostgres
+        | RuntimePerfScenario::DurableQueuedWorkContentionSqlite
+        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres => {
+            unreachable!("direct-dispatch scenarios return before the generic dispatch")
         }
     }
 

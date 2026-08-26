@@ -88,7 +88,7 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
         .into_iter()
         .filter(|scenario| !scenario.uses_postgres())
     {
-        let result = Box::pin(run_once(scenario, 1, &high_traffic_config()))
+        let result = Box::pin(run_once(scenario, 1, 4, &high_traffic_config()))
             .await
             .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
         for phase in STABLE_DURABLE_PHASES {
@@ -277,11 +277,92 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
     }
 }
 
+#[test]
+fn durable_queued_work_contention_inventory_is_backend_complete_and_opt_in() {
+    let scenarios = [
+        RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
+        RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
+    ];
+    assert!(!scenarios[0].uses_postgres());
+    assert!(scenarios[1].uses_postgres());
+    for scenario in scenarios {
+        assert!(scenario.is_durable());
+        assert!(scenario.is_queued_work_contention());
+        assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
+        let metadata = RuntimePerfScenario::METADATA
+            .iter()
+            .find(|metadata| metadata.scenario == scenario)
+            .unwrap_or_else(|| panic!("{} is missing metadata", scenario.name()));
+        assert_eq!(
+            metadata.scenario_harness,
+            ScenarioHarnessKind::RuntimeScenario
+        );
+        assert!(metadata.harness_rationale.contains("quiet box"));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters() {
+    let workers = 4;
+    let turns = 2;
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
+        turns,
+        workers,
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("durable queued-work contention SQLite smoke should run");
+
+    assert_eq!(
+        result.extra_counters["durable_contention.workers"],
+        workers as u64
+    );
+    assert_eq!(
+        result.extra_counters["durable_contention.completed_batches"],
+        (workers * turns) as u64
+    );
+    assert_eq!(
+        result.extra_counters["durable_contention.remaining_batches"],
+        0
+    );
+    assert_eq!(
+        result.extra_counters["durable_contention.pool_wait_observable"],
+        0
+    );
+    for counter in [
+        "durable_contention.claim_attempts",
+        "durable_contention.renewals",
+        "durable_contention.abandons",
+        "durable_contention.reclaims",
+        "durable_contention.reclaim_conflicts",
+        "durable_contention.store_contention_retries",
+        "durable_contention.lease_failures",
+        "durable_contention.cas_failures",
+    ] {
+        assert!(
+            result.extra_counters.contains_key(counter),
+            "missing {counter}"
+        );
+    }
+    for metric in [
+        "durable_contention.claim_wait_ms",
+        "durable_contention.service_ms",
+        "durable_contention.pool_wait_ms",
+    ] {
+        assert!(
+            result.metric_samples_ms.contains_key(metric),
+            "missing {metric}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_sqlite_checkpoint_curve_reports_each_target_size() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::DurableCheckpointCurveSqlite,
         DURABLE_CHECKPOINT_CURVE_BYTES.len(),
+        4,
         &high_traffic_config(),
     ))
     .await
@@ -306,6 +387,7 @@ async fn high_traffic_sqlite_smoke_reports_load_structure() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::HighTrafficLoadSqlite,
         1,
+        4,
         &high_traffic_config(),
     ))
     .await
@@ -361,6 +443,7 @@ async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::HighTrafficKneeSqlite,
         1,
+        4,
         &high_traffic_config(),
     ))
     .await
@@ -424,6 +507,7 @@ async fn high_traffic_trigger_waits_for_terminal_delivery() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::HighTrafficLoadSqlite,
         1,
+        4,
         &config,
     ))
     .await
@@ -595,6 +679,8 @@ fn runtime_perf_runtime_scenario_rationales_explain_lower_layer_ownership() {
         RuntimePerfScenario::QueuedWorkClaimStress,
         RuntimePerfScenario::TurnInputIngressInterrupt,
         RuntimePerfScenario::StoreHardeningHotPaths,
+        RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
+        RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
     ] {
         let metadata = RuntimePerfScenario::METADATA
             .iter()

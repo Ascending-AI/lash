@@ -584,3 +584,530 @@ pub(crate) async fn run_once_async_process_settlement(
         cumulative_usage,
     })
 }
+
+#[derive(Default)]
+struct DurableContentionCounters {
+    claim_attempts: std::sync::atomic::AtomicU64,
+    claim_refusals: std::sync::atomic::AtomicU64,
+    lease_failures: std::sync::atomic::AtomicU64,
+    renewals: std::sync::atomic::AtomicU64,
+    abandons: std::sync::atomic::AtomicU64,
+    reclaims: std::sync::atomic::AtomicU64,
+    reclaim_conflicts: std::sync::atomic::AtomicU64,
+    store_contention_retries: std::sync::atomic::AtomicU64,
+    cas_failures: std::sync::atomic::AtomicU64,
+    completions: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Default)]
+struct DurableContentionSamples {
+    claim_wait_ms: Mutex<Vec<f64>>,
+    service_ms: Mutex<Vec<f64>>,
+}
+
+async fn settle_durable_contention_claim(
+    store: &(dyn lash_core::RuntimePersistence + '_),
+    completion: QueuedWorkCompletion,
+    counters: &DurableContentionCounters,
+) -> anyhow::Result<()> {
+    for _ in 0..256 {
+        let state = lash_core::store::load_persisted_session_state(store)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("durable contention session state disappeared"))?;
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.completed_queue_claims = vec![completion.clone()];
+        match store.commit_runtime_state(commit).await {
+            Ok(_) => return Ok(()),
+            Err(lash_core::StoreError::Contended) => {
+                counters
+                    .store_contention_retries
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+            Err(
+                lash_core::StoreError::HeadRevisionConflict { .. }
+                | lash_core::StoreError::RuntimeTurnCommitConflict { .. }
+                | lash_core::StoreError::AppendOperationIdentityConflict { .. },
+            ) => {
+                counters
+                    .cas_failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    anyhow::bail!("durable contention completion exhausted 256 CAS retries")
+}
+
+async fn run_durable_contention_worker(
+    worker: usize,
+    target_completions: u64,
+    session_id: String,
+    store: Arc<dyn lash_core::RuntimePersistence>,
+    session_fence: lash_core::SessionExecutionLeaseAuthority,
+    counters: Arc<DurableContentionCounters>,
+    samples: Arc<DurableContentionSamples>,
+) -> anyhow::Result<()> {
+    let owner = lash_core::LeaseOwnerIdentity::opaque(
+        format!("runtime-perf-contention-worker-{worker}"),
+        uuid::Uuid::new_v4().to_string(),
+    );
+    let competing_lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &owner,
+            &format!("runtime-perf-contention-worker-{worker}"),
+            QUEUED_WORK_CLAIM_TTL_MS,
+        )
+        .await?;
+    if matches!(
+        competing_lease,
+        lash_core::SessionExecutionLeaseClaimOutcome::Busy { .. }
+    ) {
+        counters
+            .lease_failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        anyhow::bail!("contention worker {worker} unexpectedly acquired the controller lease");
+    }
+
+    let mut empty_claims = 0usize;
+    while counters
+        .completions
+        .load(std::sync::atomic::Ordering::Acquire)
+        < target_completions
+    {
+        let sequence = counters
+            .claim_attempts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        let claim_started = Instant::now();
+        let outcome = store
+            .claim_ready_queued_work(
+                &session_id,
+                &session_fence,
+                &owner,
+                QueuedWorkClaimBoundary::Idle,
+                lash_core::testing::queued_work_claim_policy(1),
+            )
+            .await?;
+        let Some(mut claim) = outcome.claim() else {
+            counters
+                .claim_refusals
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            empty_claims += 1;
+            if counters
+                .completions
+                .load(std::sync::atomic::Ordering::Acquire)
+                >= target_completions
+            {
+                break;
+            }
+            if empty_claims >= 1_024 {
+                anyhow::bail!(
+                    "contention worker {worker} observed 1024 empty claims before completion"
+                );
+            }
+            tokio::task::yield_now().await;
+            continue;
+        };
+        empty_claims = 0;
+        let claim_wait_ms = elapsed_ms(claim_started);
+        samples.claim_wait_ms.lock_recover().push(claim_wait_ms);
+        let service_started = Instant::now();
+        if sequence.is_multiple_of(3) {
+            match store
+                .renew_session_execution_lease(&session_fence, QUEUED_WORK_CLAIM_TTL_MS)
+                .await
+            {
+                Ok(_) => {
+                    counters
+                        .renewals
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(error) => {
+                    counters
+                        .lease_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    return Err(error.into());
+                }
+            }
+        }
+
+        if sequence.is_multiple_of(2) {
+            let batch_ids = claim
+                .batches
+                .iter()
+                .map(|batch| batch.batch_id.clone())
+                .collect::<Vec<_>>();
+            store.abandon_queued_work_claim(&claim).await?;
+            counters
+                .abandons
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let reclaimed = store
+                .claim_ready_queued_work_by_batch_ids(
+                    &session_id,
+                    &session_fence,
+                    &owner,
+                    QueuedWorkClaimBoundary::Idle,
+                    &batch_ids,
+                    lash_core::testing::queued_work_claim_policy(1),
+                )
+                .await?;
+            let Some(reclaimed) = reclaimed.claim else {
+                counters
+                    .reclaim_conflicts
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                samples
+                    .service_ms
+                    .lock_recover()
+                    .push(elapsed_ms(service_started));
+                continue;
+            };
+            claim = reclaimed;
+            counters
+                .reclaims
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        settle_durable_contention_claim(store.as_ref(), claim.completion(), &counters).await?;
+        counters
+            .completions
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        samples
+            .service_ms
+            .lock_recover()
+            .push(elapsed_ms(service_started));
+    }
+    Ok(())
+}
+
+/// Runs queued-work lifecycle contention against one backend and one session.
+///
+/// The worker count is supplied by `--runtime-perf-contention-workers`; each
+/// worker targets `chat_turns` completions. Wall-clock throughput and latency
+/// are quiet-box witnesses only. Tests assert emitted structure and counters,
+/// never latency thresholds.
+pub(crate) async fn run_once_durable_queued_work_contention(
+    scenario: RuntimePerfScenario,
+    chat_turns: usize,
+    workers: usize,
+) -> anyhow::Result<RuntimePerfRunResult> {
+    let database_url = scenario
+        .uses_postgres()
+        .then(configured_postgres_database_url)
+        .flatten();
+    if scenario.uses_postgres() && database_url.is_none() {
+        if postgres_is_required() {
+            anyhow::bail!(
+                "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
+                scenario.name()
+            );
+        }
+        eprintln!(
+            "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
+            scenario.name()
+        );
+        return Ok(skipped_runtime_perf_result(scenario, chat_turns));
+    }
+
+    let workers = workers.max(1);
+    let target_completions = workers
+        .checked_mul(chat_turns)
+        .ok_or_else(|| anyhow::anyhow!("durable contention work count overflow"))?;
+    let total_started = Instant::now();
+    let before_memory = process_memory_sample();
+    let total_before_alloc = allocator_stats();
+    let sqlite_root = (!scenario.uses_postgres())
+        .then(|| make_temp_bench_dir(&format!("lash-runtime-perf-{}", scenario.name())))
+        .transpose()?;
+    let postgres_namespace = match database_url.as_deref() {
+        Some(url) => Some(lash_postgres_store::testing::IsolatedDatabase::create(url).await),
+        None => None,
+    };
+
+    let build_before_alloc = allocator_stats();
+    let build_started = Instant::now();
+    let mut runtime = match postgres_namespace.as_ref() {
+        Some(namespace) => build_runtime_with_postgres_store(scenario, namespace.url()).await?,
+        None => {
+            build_runtime_with_sqlite_store(
+                scenario,
+                sqlite_root.as_ref().expect("SQLite root").clone(),
+            )
+            .await?
+        }
+    };
+    let build_runtime_ms = elapsed_ms(build_started);
+    let build_runtime_alloc = alloc_delta(build_before_alloc, allocator_stats());
+    let after_build_memory = process_memory_sample();
+    let session_id = runtime.session().session_id().to_string();
+    let store = runtime.persistence();
+    // The scenario drives the retained persistence handle directly. Close the
+    // facade session before advancing the durable head so its resident cursor
+    // cannot attempt a stale close-time commit after the contention window.
+    runtime.close().await?;
+
+    let seed_before_alloc = allocator_stats();
+    let seed_started = Instant::now();
+    if lash_core::store::load_persisted_session_state(store.as_ref())
+        .await?
+        .is_none()
+    {
+        let state = RuntimeSessionState {
+            session_id: session_id.clone(),
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
+        };
+        store
+            .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
+            .await?;
+    }
+    for index in 0..target_completions {
+        let wake = queued_work_stress_wake(
+            &session_id,
+            &format!("durable contention batch {index}"),
+            (index + 1) as u64,
+        );
+        store
+            .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))
+            .await?;
+    }
+    let controller_owner = lash_core::LeaseOwnerIdentity::opaque(
+        "runtime-perf-contention-controller",
+        uuid::Uuid::new_v4().to_string(),
+    );
+    let controller_lease = store
+        .try_claim_session_execution_lease(
+            &session_id,
+            &controller_owner,
+            "runtime-perf-contention-controller",
+            QUEUED_WORK_CLAIM_TTL_MS,
+        )
+        .await?
+        .acquired()
+        .ok_or_else(|| anyhow::anyhow!("durable contention controller lease was busy"))?;
+    let session_fence = controller_lease.fence();
+    let seed_state_ms = elapsed_ms(seed_started);
+    let seed_state_alloc = alloc_delta(seed_before_alloc, allocator_stats());
+    let after_seed_memory = process_memory_sample();
+
+    let run_before_alloc = allocator_stats();
+    let run_started = Instant::now();
+    let counters = Arc::new(DurableContentionCounters::default());
+    let samples = Arc::new(DurableContentionSamples::default());
+    let mut tasks = tokio::task::JoinSet::new();
+    for worker in 0..workers {
+        tasks.spawn(run_durable_contention_worker(
+            worker,
+            target_completions as u64,
+            session_id.clone(),
+            Arc::clone(&store),
+            session_fence.clone(),
+            Arc::clone(&counters),
+            Arc::clone(&samples),
+        ));
+    }
+    while let Some(result) = tasks.join_next().await {
+        result.map_err(anyhow::Error::from)??;
+    }
+    let run_turn_ms = elapsed_ms(run_started);
+    let run_turn_alloc = alloc_delta(run_before_alloc, allocator_stats());
+    let after_turn_memory = process_memory_sample();
+    store.release_session_execution_lease(&session_fence).await?;
+
+    let export_before_alloc = allocator_stats();
+    let export_started = Instant::now();
+    let remaining = store.list_pending_queued_work(&session_id).await?.len();
+    if remaining != 0 {
+        anyhow::bail!("durable contention left {remaining} scenario-owned batches pending");
+    }
+    let export_state_ms = elapsed_ms(export_started);
+    let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
+    let after_export_memory = process_memory_sample();
+    let claim_wait_ms = samples.claim_wait_ms.lock_recover().clone();
+    let service_ms = samples.service_ms.lock_recover().clone();
+    let claim_summary = crate::perf_support::metrics::percentile_summary(claim_wait_ms.clone());
+    let service_summary = crate::perf_support::metrics::percentile_summary(service_ms.clone());
+    let completed = counters
+        .completions
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let throughput = rate_per_second(completed, run_turn_ms);
+    let metric_samples_ms = BTreeMap::from([
+        ("durable_contention.claim_wait_ms".to_string(), claim_wait_ms),
+        ("durable_contention.service_ms".to_string(), service_ms),
+        ("durable_contention.pool_wait_ms".to_string(), Vec::new()),
+    ]);
+    let phase_profile = BTreeMap::from([
+        (
+            "durable_contention.claim_wait".to_string(),
+            metric_phase(&metric_samples_ms["durable_contention.claim_wait_ms"]),
+        ),
+        (
+            "durable_contention.service".to_string(),
+            metric_phase(&metric_samples_ms["durable_contention.service_ms"]),
+        ),
+        (
+            "durable_contention.pool_wait".to_string(),
+            metric_phase(&[]),
+        ),
+    ]);
+    let extra_counters = BTreeMap::from([
+        ("durable_contention.workers".to_string(), workers as u64),
+        (
+            "durable_contention.seeded_batches".to_string(),
+            target_completions as u64,
+        ),
+        ("durable_contention.completed_batches".to_string(), completed),
+        (
+            "durable_contention.throughput_per_second_milli".to_string(),
+            scaled_rate(throughput),
+        ),
+        (
+            "durable_contention.claim_wait_p50_micros".to_string(),
+            millis_to_micros(claim_summary.p50),
+        ),
+        (
+            "durable_contention.claim_wait_p95_micros".to_string(),
+            millis_to_micros(claim_summary.p95),
+        ),
+        (
+            "durable_contention.service_p50_micros".to_string(),
+            millis_to_micros(service_summary.p50),
+        ),
+        (
+            "durable_contention.service_p95_micros".to_string(),
+            millis_to_micros(service_summary.p95),
+        ),
+        (
+            "durable_contention.claim_attempts".to_string(),
+            counters
+                .claim_attempts
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.claim_refusals".to_string(),
+            counters
+                .claim_refusals
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.renewals".to_string(),
+            counters.renewals.load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.abandons".to_string(),
+            counters.abandons.load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.reclaims".to_string(),
+            counters.reclaims.load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.reclaim_conflicts".to_string(),
+            counters
+                .reclaim_conflicts
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.store_contention_retries".to_string(),
+            counters
+                .store_contention_retries
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.lease_failures".to_string(),
+            counters
+                .lease_failures
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.cas_failures".to_string(),
+            counters
+                .cas_failures
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        // RuntimePersistence brackets include connection checkout but expose no
+        // checkout subspan. Preserve an explicit unavailable observation instead
+        // of relabeling whole-call time as pool wait.
+        ("durable_contention.pool_wait_micros".to_string(), 0),
+        ("durable_contention.pool_wait_observable".to_string(), 0),
+        ("durable_contention.remaining_batches".to_string(), 0),
+    ]);
+    let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
+    let zero_alloc = zero_allocation_delta();
+    let turn = RuntimePerfTurnResult {
+        turn_index: 0,
+        run_turn_ms,
+        await_background_work_ms: 0.0,
+        total_ms: run_turn_ms,
+        memory: RuntimePerfTurnMemoryRunResult {
+            rss_before_kb: after_seed_memory.rss_kb,
+            rss_after_turn_kb: after_turn_memory.rss_kb,
+            rss_after_await_kb: after_turn_memory.rss_kb,
+            peak_hwm_before_kb: after_seed_memory.hwm_kb,
+            peak_hwm_after_await_kb: after_turn_memory.hwm_kb,
+            rss_growth_kb: diff_opt_i64(after_seed_memory.rss_kb, after_turn_memory.rss_kb),
+            hwm_growth_kb: diff_opt_i64(after_seed_memory.hwm_kb, after_turn_memory.hwm_kb),
+        },
+        allocations: RuntimePerfTurnAllocationRunResult {
+            run_turn: run_turn_alloc.clone(),
+            await_background_work: zero_alloc.clone(),
+            total: run_turn_alloc.clone(),
+        },
+        phase_profile: phase_profile.clone(),
+        turn_usage: TokenUsage::default(),
+        usage_delta: SessionUsageReport::default(),
+        cumulative_usage: SessionUsageReport::default(),
+    };
+
+    drop(store);
+    drop(runtime);
+    if let Some(root) = sqlite_root {
+        let _ = std::fs::remove_dir_all(root);
+    }
+    drop(postgres_namespace);
+
+    Ok(RuntimePerfRunResult {
+        scenario: scenario.name().to_string(),
+        scenario_harness: scenario.scenario_harness().name().to_string(),
+        chat_turns,
+        stack_profile: None,
+        build_runtime_ms,
+        seed_state_ms,
+        run_turn_ms,
+        await_background_work_ms: 0.0,
+        export_state_ms,
+        total_ms: elapsed_ms(total_started),
+        session_nodes: 0,
+        active_path_messages: 0,
+        extra_counters,
+        metric_samples: BTreeMap::new(),
+        metric_samples_ms,
+        memory: RuntimePerfMemoryRunResult {
+            rss_before_kb: before_memory.rss_kb,
+            rss_after_build_kb: after_build_memory.rss_kb,
+            rss_after_seed_kb: after_seed_memory.rss_kb,
+            rss_after_turn_kb: after_turn_memory.rss_kb,
+            rss_after_await_kb: after_turn_memory.rss_kb,
+            rss_after_export_kb: after_export_memory.rss_kb,
+            peak_hwm_before_kb: before_memory.hwm_kb,
+            peak_hwm_after_export_kb: after_export_memory.hwm_kb,
+            rss_growth_kb: diff_opt_i64(before_memory.rss_kb, after_export_memory.rss_kb),
+            hwm_growth_kb: diff_opt_i64(before_memory.hwm_kb, after_export_memory.hwm_kb),
+        },
+        allocations: RuntimePerfAllocationRunResult {
+            build_runtime: build_runtime_alloc,
+            seed_state: seed_state_alloc,
+            run_turn: run_turn_alloc,
+            await_background_work: zero_alloc,
+            export_state: export_state_alloc,
+            total: total_alloc,
+        },
+        phase_profile,
+        turns: vec![turn],
+        cumulative_usage: SessionUsageReport::default(),
+    })
+}

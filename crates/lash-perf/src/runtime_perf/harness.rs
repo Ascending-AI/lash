@@ -16,7 +16,7 @@ use lash::{
     provider::{ProviderHandle, ProviderOptions, ProviderReliability},
     runtime::SessionSnapshot,
 };
-use lash_core::SessionHistoryRecord;
+use lash_core::{SessionHistoryRecord, SessionStoreFactory};
 use lash_llm_tools::LlmToolsPluginFactory;
 use lash_protocol_rlm::RlmTurnInputExt;
 use lash_provider_openai::OpenAiCompatibleProvider;
@@ -147,6 +147,7 @@ pub(crate) struct BenchmarkRuntime {
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
     store: Option<Arc<RuntimePerfStore>>,
+    persistence: Option<Arc<dyn lash::persistence::RuntimePersistence>>,
     store_metrics: Arc<RuntimePerfStoreMetrics>,
     provider_control: Option<Arc<BenchmarkProviderControl>>,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
@@ -174,6 +175,14 @@ impl BenchmarkRuntime {
 
     pub(crate) fn store_metrics(&self) -> Arc<RuntimePerfStoreMetrics> {
         Arc::clone(&self.store_metrics)
+    }
+
+    pub(crate) fn persistence(&self) -> Arc<dyn lash::persistence::RuntimePersistence> {
+        Arc::clone(
+            self.persistence
+                .as_ref()
+                .expect("runtime perf persistence handle"),
+        )
     }
 
     pub(crate) fn core(&self) -> LashCore {
@@ -903,6 +912,7 @@ pub(crate) async fn build_runtime_with_store(
         core,
         session: Some(session),
         store: Some(store),
+        persistence: None,
         provider_control,
         settlement_control,
         tool_catalog_observer,
@@ -1091,12 +1101,12 @@ fn benchmark_field(name: &str, ty: lash::rlm::TypeExpr) -> lash::rlm::TypeField 
 }
 
 trait RuntimePerfCoreBuilderExt {
-    fn with_manual_high_traffic_queue_drain(self, scenario: RuntimePerfScenario) -> Self;
+    fn with_manual_queue_drain(self, scenario: RuntimePerfScenario) -> Self;
 }
 
 impl RuntimePerfCoreBuilderExt for lash::LashCoreBuilder {
-    fn with_manual_high_traffic_queue_drain(self, scenario: RuntimePerfScenario) -> Self {
-        if scenario.is_high_traffic() {
+    fn with_manual_queue_drain(self, scenario: RuntimePerfScenario) -> Self {
+        if scenario.is_high_traffic() || scenario.is_queued_work_contention() {
             self.disable_queued_work_driver()
         } else {
             self
@@ -1209,7 +1219,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
                 .plugins(plugin_stack)
-                .with_manual_high_traffic_queue_drain(scenario)
+                .with_manual_queue_drain(scenario)
                 .build(runtime_perf_owner())?,
         ),
         ExecutionMode::Rlm => {
@@ -1240,19 +1250,32 @@ pub(crate) async fn build_runtime_with_sqlite_store(
                     .store_factory(store_factory.clone())
                     .plugins(plugin_stack)
                     .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
-                    .with_manual_high_traffic_queue_drain(scenario)
+                    .with_manual_queue_drain(scenario)
                     .build(runtime_perf_owner())?,
             )
         }
     };
-    let session = core
-        .open_session(format!("runtime-perf-{}", scenario.name()))
-        .await?;
+    let session_id = format!("runtime-perf-{}", scenario.name());
+    let session = core.open_session(session_id.clone()).await?;
+    let persistence = if scenario.is_queued_work_contention() {
+        Some(
+            store_factory
+                .open_existing_store_by_id(&session_id)
+                .await
+                .map_err(anyhow::Error::msg)?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("runtime perf SQLite session store was not created")
+                })?,
+        )
+    } else {
+        None
+    };
     Ok(BenchmarkRuntime {
         store_metrics,
         core,
         session: Some(session),
         store: None,
+        persistence,
         provider_control: None,
         settlement_control: None,
         tool_catalog_observer: None,
@@ -1322,7 +1345,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
                 .trigger_store(trigger_store.clone())
                 .store_factory(store_factory.clone())
                 .plugins(plugin_stack)
-                .with_manual_high_traffic_queue_drain(scenario)
+                .with_manual_queue_drain(scenario)
                 .build(runtime_perf_owner())?,
         ),
         ExecutionMode::Rlm => {
@@ -1348,23 +1371,32 @@ pub(crate) async fn build_runtime_with_postgres_store(
                     .store_factory(store_factory.clone())
                     .plugins(plugin_stack)
                     .turn_budget(lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS))
-                    .with_manual_high_traffic_queue_drain(scenario)
+                    .with_manual_queue_drain(scenario)
                     .build(runtime_perf_owner())?,
             )
         }
     };
-    let session = core
-        .open_session(format!(
-            "runtime-perf-{}-{}",
-            scenario.name(),
-            uuid::Uuid::new_v4()
-        ))
-        .await?;
+    let session_id = format!("runtime-perf-{}-{}", scenario.name(), uuid::Uuid::new_v4());
+    let session = core.open_session(session_id.clone()).await?;
+    let persistence = if scenario.is_queued_work_contention() {
+        Some(
+            store_factory
+                .open_existing_store_by_id(&session_id)
+                .await
+                .map_err(anyhow::Error::msg)?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("runtime perf PostgreSQL session store was not created")
+                })?,
+        )
+    } else {
+        None
+    };
     Ok(BenchmarkRuntime {
         store_metrics,
         core,
         session: Some(session),
         store: None,
+        persistence,
         provider_control: None,
         settlement_control: None,
         tool_catalog_observer: None,
