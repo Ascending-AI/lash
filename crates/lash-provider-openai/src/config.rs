@@ -133,6 +133,7 @@ pub struct OpenAiCompatibleProvider {
     pub compat: OpenAiCompat,
     pub wire: OpenAiWireConfig,
     pub(crate) transport: std::sync::Arc<dyn LlmHttpTransport>,
+    pub(crate) responses_resume: Option<crate::driver::ResponsesResumeCheckpoint>,
 }
 
 #[derive(Clone, Debug)]
