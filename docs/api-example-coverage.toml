@@ -12297,7 +12297,7 @@ availability = "default+all-features"
 aliases = ["lash_core::LiveReplayGapReason::Unavailable"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:188#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => gaps += 1,"
+usage = "crates/lash-perf/src/runtime_perf/measurement/live_replay.rs:187#LiveReplayOutcome::Gap(lash_core::LiveReplayGapReason::Unavailable) => {"
 
 [[api]]
 symbol = "lash::observe::LiveReplayStore"
@@ -68673,8 +68673,9 @@ kind = "field"
 availability = "default+all-features"
 aliases = ["lash_core::Part::prune_state"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:527#part.prune_state = lash::messages::PruneState::Cleared;"
+assertion = "examples/docs-snippets/src/persistence.rs:528#assert_eq!(part.prune_state, lash::messages::PruneState::Cleared);"
 
 [[api]]
 symbol = "lash::messages::Part::reasoning_meta"
@@ -70495,76 +70496,94 @@ disposition = "unused-justify"
 reason = "Concrete host class: remote transport and alternative protocol-driver implementers; examples cover shipped transports rather than third-party wire boundaries."
 
 [[api]]
-symbol = "lash_core::PruneState"
+symbol = "lash::messages::PruneState"
 kind = "enum"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Cleared"
+symbol = "lash::messages::PruneState::Cleared"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Cleared"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Deleted"
+symbol = "lash::messages::PruneState::Deleted"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Deleted"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Deleted::archive_hash"
+symbol = "lash::messages::PruneState::Deleted::archive_hash"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Deleted::archive_hash"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Deleted::breadcrumb"
+symbol = "lash::messages::PruneState::Deleted::breadcrumb"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Deleted::breadcrumb"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Intact"
+symbol = "lash::messages::PruneState::Intact"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Intact"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Summarized"
+symbol = "lash::messages::PruneState::Summarized"
 kind = "variant"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Summarized"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Summarized::archive_hash"
+symbol = "lash::messages::PruneState::Summarized::archive_hash"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Summarized::archive_hash"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
-symbol = "lash_core::PruneState::Summarized::summary"
+symbol = "lash::messages::PruneState::Summarized::summary"
 kind = "field"
 availability = "default+all-features"
+aliases = ["lash_core::PruneState::Summarized::summary"]
 area = "sessions-turns"
-disposition = "unused-remove"
-reason = "The FIG-1223 sort found lines naming this member's name but none that ties them to the type that owns it, so no consumer of this path can be established: a bare leaf name matches by coincidence. PR 3 reads the candidate call sites before deleting anything, and re-anchors instead of removing if a real consumer turns up. Breaking: remove this export."
+disposition = "used-asserted"
+usage = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
+assertion = "examples/docs-snippets/src/persistence.rs:634#assert_eq!(observed_prune_states, expected_prune_states);"
 
 [[api]]
 symbol = "lash_core::RetryDecision"
@@ -91061,6 +91080,8 @@ kind = "field"
 [[removal_verdict]]
 symbol = "lash::messages::Part::prune_state"
 kind = "field"
+superseded_by = "used-asserted"
+reason = "FIG-2206 now flips and asserts Part::prune_state through the messages facade; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash::messages::Part::reasoning_meta"
@@ -92336,38 +92357,56 @@ kind = "variant"
 [[removal_verdict]]
 symbol = "lash_core::PruneState"
 kind = "enum"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Cleared"
 kind = "variant"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Cleared; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Deleted"
 kind = "variant"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Deleted; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Deleted::archive_hash"
 kind = "field"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Deleted::archive_hash; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Deleted::breadcrumb"
 kind = "field"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Deleted::breadcrumb; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Intact"
 kind = "variant"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Intact; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Summarized"
 kind = "variant"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Summarized; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Summarized::archive_hash"
 kind = "field"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Summarized::archive_hash; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::PruneState::Summarized::summary"
 kind = "field"
+superseded_by = "used-asserted"
+reason = "FIG-2206 established a host consumer and the facade example now asserts this persisted vocabulary at lash::messages::PruneState::Summarized::summary; superseded by used-asserted."
 
 [[removal_verdict]]
 symbol = "lash_core::QueuedWorkDriver::with_shutdown_token"
@@ -97299,6 +97338,15 @@ usage = "examples/docs-snippets/src/fig1294_ingress.rs:101#let legacy = lash::te
 reason = "The feature-gated `lash::testing` helper is consumed only by an example test."
 
 [[api]]
+symbol = "lash::testing::run_tool"
+kind = "function"
+availability = "all-features"
+area = "sessions-turns"
+disposition = "internal-test-only"
+usage = "crates/lash/src/tests.rs:2497#let outcome = crate::testing::run_tool("
+reason = "The feature-gated `lash::testing` helper is consumed only by a workspace test."
+
+[[api]]
 symbol = "lash::testing::test_code_protocol_factories"
 kind = "function"
 availability = "all-features"
@@ -97324,7 +97372,7 @@ aliases = ["lash_core::CURRENT_SESSION_STATE_VERSION"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/persistence.rs:406#lash::persistence::CURRENT_SESSION_STATE_VERSION,"
-assertion = "examples/docs-snippets/src/persistence.rs:576#assert_eq!(initial_session_state_generation(), (0, 0));"
+assertion = "examples/docs-snippets/src/persistence.rs:584#assert_eq!(initial_session_state_generation(), (0, 0));"
 reason = "The persistence example asserts that the initial complete-session marker generation has no converter predecessor."
 
 [[api]]
@@ -97335,7 +97383,7 @@ aliases = ["lash_core::OLDEST_SUPPORTED_SESSION_STATE_VERSION"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/persistence.rs:407#lash::persistence::OLDEST_SUPPORTED_SESSION_STATE_VERSION,"
-assertion = "examples/docs-snippets/src/persistence.rs:576#assert_eq!(initial_session_state_generation(), (0, 0));"
+assertion = "examples/docs-snippets/src/persistence.rs:584#assert_eq!(initial_session_state_generation(), (0, 0));"
 reason = "The persistence example asserts the durable meaning of an absent initial marker through the facade constants."
 
 [[api]]
@@ -97419,7 +97467,7 @@ aliases = ["lash_core::StoreError::SessionStateVersionNewerThanRuntime::found"]
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/persistence.rs:397#lash::persistence::StoreError::SessionStateVersionNewerThanRuntime { found, current } => {"
-assertion = "examples/docs-snippets/src/persistence.rs:582#newer_session_state_requires_runtime_upgrade(&refusal),"
+assertion = "examples/docs-snippets/src/persistence.rs:590#newer_session_state_requires_runtime_upgrade(&refusal),"
 reason = "The persistence example extracts and asserts the persisted generation from the typed refusal."
 
 [[api]]
@@ -97430,7 +97478,7 @@ aliases = ["lash_core::StoreError::SessionStateVersionNewerThanRuntime::current"
 area = "stores"
 disposition = "used-asserted"
 usage = "examples/docs-snippets/src/persistence.rs:397#lash::persistence::StoreError::SessionStateVersionNewerThanRuntime { found, current } => {"
-assertion = "examples/docs-snippets/src/persistence.rs:582#newer_session_state_requires_runtime_upgrade(&refusal),"
+assertion = "examples/docs-snippets/src/persistence.rs:590#newer_session_state_requires_runtime_upgrade(&refusal),"
 reason = "The persistence example extracts and asserts the runtime generation from the typed refusal."
 
 [[api]]

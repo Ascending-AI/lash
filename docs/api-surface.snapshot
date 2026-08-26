@@ -1544,6 +1544,15 @@ lash::messages::PartKind::Reasoning
 lash::messages::PartKind::Text
 lash::messages::PartKind::ToolCall
 lash::messages::PartKind::ToolResult
+lash::messages::PruneState
+lash::messages::PruneState::Cleared
+lash::messages::PruneState::Deleted
+lash::messages::PruneState::Deleted::archive_hash
+lash::messages::PruneState::Deleted::breadcrumb
+lash::messages::PruneState::Intact
+lash::messages::PruneState::Summarized
+lash::messages::PruneState::Summarized::archive_hash
+lash::messages::PruneState::Summarized::summary
 lash::messages::SessionMessageTreeNode
 lash::messages::SessionMessageTreeNode::active
 lash::messages::SessionMessageTreeNode::children
@@ -8609,6 +8618,7 @@ lash::testing::conformance::worklist_next_scan_recovers_insert_behind_cursor
 lash::testing::frame_node_id
 lash::testing::mock_attempt_context
 lash::testing::mock_tool_context
+lash::testing::run_tool
 lash::testing::test_code_protocol_factories
 lash::tools::AttemptContext
 lash::tools::AttemptContext::__for_testing

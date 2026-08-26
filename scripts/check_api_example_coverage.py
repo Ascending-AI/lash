@@ -333,7 +333,7 @@ DISPOSITION_TIERS = {
 #: deleted from the public surface, taking their four example-test-anchored
 #: rows with them.  A deletion lowering the pin is the ratchet tightening, not
 #: bleeding.
-EXAMPLE_TEST_TIER_RATCHET = 1922
+EXAMPLE_TEST_TIER_RATCHET = 1931
 #: Module paths that put an item behind the `testing` feature, which is what
 #: makes a test-only consumer a home rather than an excuse.  `test_support` is
 #: the doc-hidden one lash-core relocates cross-crate test-only items into;

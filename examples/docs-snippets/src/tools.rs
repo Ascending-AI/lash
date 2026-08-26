@@ -137,3 +137,23 @@ mod cross_lane_collision {
         assert_eq!(leaf_source_id, "plugins");
     }
 }
+
+#[tokio::test]
+async fn test_helper_runs_a_provider_through_the_facade() {
+    let provider = weather_provider();
+    let outcome = lash::testing::run_tool(
+        provider.as_ref(),
+        "weather_lookup",
+        &serde_json::json!({ "city": "Berlin", "units": "metric" }),
+    )
+    .await;
+
+    assert!(outcome.is_success());
+    assert_eq!(
+        outcome.value_for_projection(),
+        serde_json::json!({
+            "summary": "metric weather in Berlin",
+            "temperature_c": 21.0
+        })
+    );
+}

@@ -5,6 +5,8 @@ pub use lash_core::TestLocalProcessRegistry;
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;
+/// Runs one tool call with mock contexts for focused provider tests.
+pub use lash_core::testing::run_tool;
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_tool_context, test_code_protocol_factories,

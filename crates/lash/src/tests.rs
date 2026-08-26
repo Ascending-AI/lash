@@ -2491,3 +2491,19 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     assert_eq!(status.remaining_invocations, 1);
     assert!(!status.drained);
 }
+
+#[tokio::test]
+async fn testing_facade_run_tool_executes_provider() {
+    let outcome = crate::testing::run_tool(
+        &AppTools,
+        "app_lookup",
+        &serde_json::json!({ "query": "weather" }),
+    )
+    .await;
+
+    assert!(outcome.is_success());
+    assert_eq!(
+        outcome.value_for_projection(),
+        serde_json::json!({ "ok": true })
+    );
+}
