@@ -447,7 +447,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    # Full-profile only (2026-08-26 ruling): the API example-coverage and
+    # surface-snapshot gates certify docs/ artifacts, not the build, so they
+    # run on workflow_dispatch — which the release gate requires on the
+    # release SHA — instead of spending a rustdoc compile on every PR.
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true'
 
     steps:
       - name: Check out repository

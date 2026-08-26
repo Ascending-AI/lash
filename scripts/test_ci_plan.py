@@ -109,6 +109,10 @@ def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
     plan_outputs.update({"docs_only": "false", "fail_open": "false"})
     needs = {job: {"result": "success", "outputs": {}} for job in ci_plan.UNGATED_JOBS | set(ci_plan.GATED_JOBS)}
+    # Full-profile jobs are skipped on every event but workflow_dispatch,
+    # which is what these event-less fixtures exercise.
+    for job in ci_plan.FULL_PROFILE_JOBS:
+        needs[job] = {"result": "skipped", "outputs": {}}
     needs["plan"]["outputs"] = plan_outputs
     return needs
 

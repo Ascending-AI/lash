@@ -164,12 +164,33 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         }
         for job in trunk_only:
             needs[job] = {"result": "skipped", "outputs": {}}
+        # Full-profile jobs skip everywhere except workflow_dispatch.
+        self.assertEqual(plan["FULL_PROFILE_JOBS"], {"api-coverage"})
+        needs["api-coverage"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
         self.assertEqual(evaluate(needs, "merge_group"), [])
         push_problems = evaluate(needs, "push")
         self.assertEqual(len(push_problems), len(trunk_only))
         for problem in push_problems:
             self.assertIn("although plan.", problem)
+        needs["api-coverage"] = {"result": "success", "outputs": {}}
+        self.assertIn(
+            "full-profile job api-coverage ended with 'success' on a "
+            "pull_request event, expected skipped",
+            evaluate(needs, "pull_request"),
+        )
+        self.assertEqual(
+            [p for p in evaluate(needs, "workflow_dispatch") if "api-coverage" in p],
+            [],
+        )
+        needs["api-coverage"] = {"result": "skipped", "outputs": {}}
+
+        api_coverage = workflow_job_block(workflow, "api-coverage")
+        self.assertIn(
+            "if: github.event_name == 'workflow_dispatch' "
+            "&& needs.plan.outputs.rust == 'true'",
+            api_coverage,
+        )
 
         # Workers E2E runs only on the full profile (workflow_dispatch),
         # through step-level guards; every other event gets an explain step.

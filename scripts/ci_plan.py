@@ -47,6 +47,10 @@ TRUNK_ONLY_JOBS = {
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
+# Jobs that run only on the full profile (workflow_dispatch); every other
+# event must show them skipped.
+FULL_PROFILE_JOBS = {"api-coverage"}
+
 UNGATED_JOBS = {
     "plan",
     "facade-only-examples",
@@ -211,6 +215,13 @@ def evaluate_conclusion(
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
+        if job in FULL_PROFILE_JOBS and event_name != "workflow_dispatch":
+            if result != "skipped":
+                problems.append(
+                    f"full-profile job {job} ended with {result!r} on a "
+                    f"{event_name} event, expected skipped"
+                )
+            continue
         if job in TRUNK_ONLY_JOBS and event_name in DEFERRED_EVENTS:
             if result != "skipped":
                 problems.append(
