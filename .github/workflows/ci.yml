@@ -16,9 +16,9 @@ on:
   # <head-sha>` waits a bounded window for the run GitHub should have made,
   # dispatches this trigger exactly once if none arrives, then polls that run
   # to a conclusion. A dispatch run is NOT equivalent to the run it replaces —
-  # the event-conditional steps below (`Check versioned surface bumps`,
-  # `Check and preview PR release notes`) do not run, and it builds
-  # refs/heads/<branch> rather than the PR merge tree — so the script exits 3,
+  # the event-conditional `Check versioned surface bumps` step below does not
+  # run, and it builds refs/heads/<branch> rather than the PR merge tree — so
+  # the script exits 3,
   # not 0, on a green dispatch. Callers opt in with --accept-dispatch-run.
   workflow_dispatch:
   pull_request:
@@ -425,7 +425,6 @@ jobs:
           python3 scripts/test_slack_clone_live_model_e2e_contract.py
           python3 scripts/test_judged_runbook_matrix.py
           python3 scripts/test_check_judged_build_geometry.py
-          python3 scripts/test_release_notes.py
           python3 scripts/test_restate_workers_e2e_coverage.py
           python3 scripts/test_rustdoc_json_cache.py
           python3 scripts/test_runtime_perf_percentiles.py
@@ -908,14 +907,6 @@ jobs:
             --no-tags origin "${GITHUB_SHA}"
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
-
-      - name: Check and preview PR release notes
-        if: github.event_name == 'pull_request'
-        run: |
-          merge_base="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
-          python3 scripts/release_notes.py check-pr \
-            --range "${merge_base}..HEAD" \
-            --summary "$GITHUB_STEP_SUMMARY"
 
       # Every event compares against the base its own tree actually sits on.
       #

@@ -176,9 +176,10 @@ merged product state lives on `main`.
 Merging to `main` does not release. A maintainer manually runs the GitHub
 `Release` workflow after selecting a green commit on `main`; leaving
 `release_sha` blank selects the current head. The workflow verifies a green
-full-profile CI run on that commit (dispatch `ci.yml` on it first), requires
-curated release notes, computes the next version, tags the exact commit,
-builds assets, and publishes.
+full-profile CI run on that commit (dispatch `ci.yml` on it first), computes
+the next version, tags the exact commit, builds assets, and publishes with
+the auto-generated commit list; release notes are written manually on the
+GitHub release afterward.
 
 Never create release tags or publish crates and artifacts by hand. See
 `docs/PUBLISHING.md` for the complete release contract.

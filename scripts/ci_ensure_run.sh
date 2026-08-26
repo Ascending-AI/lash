@@ -48,9 +48,6 @@ set -euo pipefail
 #   * `Check versioned surface bumps`  (if: event_name != 'workflow_dispatch')
 #     — the gate that fails a PR changing a versioned surface without bumping
 #     it (scripts/check_version_bumps.py, scripts/versioned-surfaces.toml).
-#   * `Check and preview PR release notes` (if: event_name == 'pull_request')
-#     — the `Release-Notes:` requirement.
-#
 # It also builds a different tree: a `pull_request` run carries
 # `refs/pull/<n>/merge` (the merged result), a dispatch carries
 # `refs/heads/<branch>` (the branch tip alone). A green dispatch therefore
@@ -408,8 +405,8 @@ settle() {
   if [ "$settled_event" = "workflow_dispatch" ] && [ "$accept_dispatch" -eq 0 ]; then
     # Green, but on the weaker gate set — the caller decides, not this script.
     note "run $run_id is a workflow_dispatch recovery run: 'Check versioned" \
-      "surface bumps' and 'Check and preview PR release notes' did not run," \
-      "and it built refs/heads/$branch rather than the PR merge tree." \
+      "surface bumps' did not run, and it built refs/heads/$branch rather" \
+      "than the PR merge tree." \
       "Exiting 3; pass --accept-dispatch-run to treat this as a full pass."
     exit 3
   fi

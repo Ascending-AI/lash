@@ -47,11 +47,10 @@ self-test sweeps every tracked ``*.rs`` for references to ``docs/**`` and
 ``CONTEXT.md`` and fails on any path this file does not already treat as
 rust-affecting.
 
-Two local gates are deliberately in *no* family and must always run:
-``scripts/release_notes.py check-pr`` and ``scripts/check-transcript-diff.py``
-read the commit range's messages and the diff's semantics, not its paths, so
-every non-empty change affects them. A path-scoped classifier has nothing to
-say about a commit-scoped gate.
+One local gate is deliberately in *no* family and must always run:
+``scripts/check-transcript-diff.py`` reads the diff's semantics, not its
+paths, so every non-empty change affects it. A path-scoped classifier has
+nothing to say about a commit-scoped gate.
 
 Note that ``docs-text`` runs for source changes too: its gates read ``crates/``
 as well as ``docs/``. It stays a named family so the audit line printed into a
