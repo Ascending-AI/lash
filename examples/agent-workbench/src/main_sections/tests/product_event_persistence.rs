@@ -57,8 +57,8 @@ fn product_event_log_decode_error_names_histories_and_the_nested_cause() {
 }
 
 #[test]
-fn released_unversioned_product_event_histories_still_load() {
-    let data_dir = tempfile::tempdir().expect("released product event tempdir");
+fn product_event_log_rejects_unversioned_product_event_root_with_clear_error() {
+    let data_dir = tempfile::tempdir().expect("unversioned product event tempdir");
     let path = data_dir.path().join("product-events.json");
     std::fs::write(
         &path,
@@ -80,51 +80,47 @@ fn released_unversioned_product_event_histories_still_load() {
             }
         }"#,
     )
-    .expect("write released unversioned product event history");
+    .expect("write unversioned product event history");
 
-    let registry = SessionEventRegistry::persistent(path, 4)
-        .expect("released unversioned product event history remains compatible");
-    let snapshot = registry.snapshot("released-session");
-    assert_eq!(snapshot.cursor, 1);
+    let error = match SessionEventRegistry::persistent(path.clone(), 4) {
+        Ok(_) => panic!("an unversioned product event root must be rejected"),
+        Err(error) => error,
+    };
+    let typed = error
+        .downcast_ref::<ProductEventLogLoadError>()
+        .expect("product event load failures remain typed");
     assert!(matches!(
-        &snapshot.events[0].item,
-        StreamItem::Message { message } if message.text == "released main"
+        typed.source,
+        ProductEventLogDecodeError::UnversionedRoot
     ));
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains(
+            "unversioned product event log is not supported; expected a root object with `format_version` and `histories`"
+        ),
+        "actual error: {rendered}"
+    );
 }
 
 #[test]
-fn released_unversioned_log_allows_format_version_as_a_session_id() {
-    let data_dir = tempfile::tempdir().expect("released collision tempdir");
-    let path = data_dir.path().join("product-events.json");
-    std::fs::write(
-        &path,
-        r#"{
-            "format_version": {
-                "cursor": 1,
-                "events": [{
-                    "event_id": "released-message",
-                    "sequence": 1,
-                    "type": "message",
-                    "message": {
-                        "id": "message",
-                        "role": "assistant",
-                        "text": "released collision",
-                        "at": ""
-                    }
-                }],
-                "event_ids": ["released-message"]
-            }
-        }"#,
-    )
-    .expect("write released session-id collision");
+fn active_turns_reject_bare_legacy_set_with_clear_error() {
+    let data_dir = tempfile::tempdir().expect("legacy active turns tempdir");
+    let path = data_dir.path().join("active-turns.json");
+    std::fs::write(&path, r#"[["session", "turn"]]"#)
+        .expect("write bare active turns set");
 
-    let registry = SessionEventRegistry::persistent(path, 4)
-        .expect("released root-key session id remains compatible");
-    let snapshot = registry.snapshot("format_version");
-    assert!(matches!(
-        &snapshot.events[0].item,
-        StreamItem::Message { message } if message.text == "released collision"
-    ));
+    let error = match ActiveTurns::persistent(path.clone()) {
+        Ok(_) => panic!("a bare active-turns set must be rejected"),
+        Err(error) => error,
+    };
+    let rendered = format!("{error:#}");
+    assert!(
+        rendered.contains("decode active turns")
+            && rendered.contains(
+                "legacy bare active turn set is no longer supported; expected an object with `turns` and `prompts`"
+            ),
+        "actual error: {rendered}"
+    );
 }
 
 #[test]
