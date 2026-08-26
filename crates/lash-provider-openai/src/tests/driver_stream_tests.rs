@@ -75,13 +75,24 @@ impl LlmHttpTransport for AbortingSseTransport {
 #[derive(Debug)]
 struct ResumableSseTransport {
     responses: std::sync::Mutex<VecDeque<VecDeque<ScriptedByteEvent>>>,
+    content_types: std::sync::Mutex<VecDeque<String>>,
     requests: std::sync::Mutex<Vec<LlmHttpRequest>>,
 }
 
 impl ResumableSseTransport {
     fn new(responses: Vec<Vec<ScriptedByteEvent>>) -> Arc<Self> {
+        let content_types = vec!["text/event-stream".to_string(); responses.len()];
+        Self::with_content_types(responses, content_types)
+    }
+
+    fn with_content_types(
+        responses: Vec<Vec<ScriptedByteEvent>>,
+        content_types: Vec<String>,
+    ) -> Arc<Self> {
+        assert_eq!(responses.len(), content_types.len());
         Arc::new(Self {
             responses: std::sync::Mutex::new(responses.into_iter().map(VecDeque::from).collect()),
+            content_types: std::sync::Mutex::new(content_types.into()),
             requests: std::sync::Mutex::new(Vec::new()),
         })
     }
@@ -108,10 +119,15 @@ impl LlmHttpTransport for ResumableSseTransport {
             .lock_recover()
             .pop_front()
             .expect("scripted Responses stream");
+        let content_type = self
+            .content_types
+            .lock_recover()
+            .pop_front()
+            .expect("scripted Responses content type");
         Ok(LlmHttpResponse {
             status: 200,
             headers: vec![
-                ("content-type".to_string(), "text/event-stream".to_string()),
+                ("content-type".to_string(), content_type),
                 ("x-request-id".to_string(), format!("req_{request_ordinal}")),
             ],
             body: LlmHttpBody::streamed(ScriptedByteStream { events }),
@@ -283,7 +299,7 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
             ),
         ],
     ]);
-    let provider = OpenAiProvider::new("key")
+    let mut provider = OpenAiProvider::new("key")
         .with_options(ProviderOptions {
             reliability: ProviderReliability::default()
                 .max_attempts(2)
@@ -292,6 +308,11 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
             ..ProviderOptions::default()
         })
         .with_transport(Arc::clone(&transport) as _);
+    provider
+        .inner
+        .wire
+        .query_params
+        .push(("api-version".to_string(), "preview".to_string()));
     let mut handle = ProviderHandle::new(provider.into_components());
 
     let mut request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
@@ -320,7 +341,8 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     assert_eq!(requests[1].method, LlmHttpMethod::Get);
     assert_eq!(
         requests[1].url,
-        "https://api.openai.com/v1/responses/resp_resume?starting_after=1&stream=true"
+        "https://api.openai.com/v1/responses/resp_resume?api-version=preview&starting_after=1&stream=true",
+        "static wire query parameters are preserved on the resume URL"
     );
     assert!(requests[1].body.is_empty());
 
@@ -376,6 +398,169 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
         Vec::<String>::new(),
         "reattachment must not conflict with the logical generation's live evidence"
     );
+}
+
+#[tokio::test]
+async fn responses_checkpoint_does_not_resume_a_different_logical_call() {
+    let transport = ResumableSseTransport::new(vec![
+        vec![
+            sse_chunk(
+                r#"{"type":"response.created","sequence_number":0,"response":{"id":"resp_call_a","status":"in_progress"}}"#,
+            ),
+            sse_chunk(
+                r#"{"type":"response.output_text.delta","sequence_number":1,"output_index":0,"delta":"A partial"}"#,
+            ),
+            ScriptedByteEvent::Abort(
+                LlmTransportError::new("Stream read failed: scripted disconnect")
+                    .with_kind(ProviderFailureKind::Stream)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+            ),
+        ],
+        vec![
+            sse_chunk(
+                r#"{"type":"response.created","sequence_number":0,"response":{"id":"resp_call_b","status":"in_progress"}}"#,
+            ),
+            sse_chunk(
+                r#"{"type":"response.output_text.delta","sequence_number":1,"output_index":0,"delta":"B output"}"#,
+            ),
+            sse_chunk(
+                r#"{"type":"response.completed","sequence_number":2,"response":{"id":"resp_call_b","status":"completed","output":[{"type":"message","id":"msg_call_b","status":"completed","content":[{"type":"output_text","text":"B output"}]}]}}"#,
+            ),
+        ],
+    ]);
+    let provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::default().max_attempts(1),
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::clone(&transport) as _);
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let mut call_a = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
+    call_a.messages = vec![LlmMessage::text(LlmRole::User, "call A")];
+    handle
+        .complete(call_a)
+        .await
+        .expect_err("call A exhausts its retry budget after interruption");
+
+    let mut call_b = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
+    call_b.messages = vec![LlmMessage::text(LlmRole::User, "call B")];
+    let completion = handle
+        .complete(call_b)
+        .await
+        .expect("call B starts and completes a fresh generation");
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2, "one request per logical call");
+    assert_eq!(requests[0].method, LlmHttpMethod::Post);
+    assert_eq!(
+        requests[1].method,
+        LlmHttpMethod::Post,
+        "a different request body must not resume call A"
+    );
+    assert!(
+        String::from_utf8_lossy(&requests[1].body).contains("call B"),
+        "the fresh request carries call B's prompt"
+    );
+    assert_eq!(completion.response.full_text, "B output");
+}
+
+#[tokio::test]
+async fn responses_resume_event_without_sequence_number_fails_closed() {
+    let transport = ResumableSseTransport::new(vec![
+        vec![
+            sse_chunk(
+                r#"{"type":"response.created","sequence_number":0,"response":{"id":"resp_missing_sequence","status":"in_progress"}}"#,
+            ),
+            sse_chunk(
+                r#"{"type":"response.output_text.delta","sequence_number":1,"output_index":0,"delta":"partial"}"#,
+            ),
+            ScriptedByteEvent::Abort(
+                LlmTransportError::new("Stream read failed: scripted disconnect")
+                    .with_kind(ProviderFailureKind::Stream)
+                    .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+            ),
+        ],
+        vec![sse_chunk(
+            r#"{"type":"response.output_text.delta","output_index":0,"delta":"unsafe"}"#,
+        )],
+    ]);
+    let provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::clone(&transport) as _);
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let failure = handle
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
+        .await
+        .expect_err("a resume event without a sequence number is unsafe");
+
+    assert_eq!(
+        failure.code.as_deref(),
+        Some("responses_resume_event_missing_sequence")
+    );
+    assert_eq!(transport.requests().len(), 2, "creation then resume");
+    assert_eq!(transport.requests()[1].method, LlmHttpMethod::Get);
+}
+
+#[tokio::test]
+async fn responses_resume_response_without_event_stream_fails_closed() {
+    let transport = ResumableSseTransport::with_content_types(
+        vec![
+            vec![
+                sse_chunk(
+                    r#"{"type":"response.created","sequence_number":0,"response":{"id":"resp_not_streaming","status":"in_progress"}}"#,
+                ),
+                sse_chunk(
+                    r#"{"type":"response.output_text.delta","sequence_number":1,"output_index":0,"delta":"partial"}"#,
+                ),
+                ScriptedByteEvent::Abort(
+                    LlmTransportError::new("Stream read failed: scripted disconnect")
+                        .with_kind(ProviderFailureKind::Stream)
+                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+                ),
+            ],
+            vec![ScriptedByteEvent::Chunk(bytes::Bytes::from(
+                r#"{"id":"resp_not_streaming","status":"completed"}"#,
+            ))],
+        ],
+        vec![
+            "text/event-stream".to_string(),
+            "application/json".to_string(),
+        ],
+    );
+    let provider = OpenAiProvider::new("key")
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(2)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::clone(&transport) as _);
+    let mut handle = ProviderHandle::new(provider.into_components());
+
+    let failure = handle
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
+        .await
+        .expect_err("a resume response must be an event stream");
+
+    assert_eq!(
+        failure.code.as_deref(),
+        Some("responses_resume_not_streaming")
+    );
+    assert_eq!(transport.requests().len(), 2, "creation then resume");
+    assert_eq!(transport.requests()[1].method, LlmHttpMethod::Get);
 }
 
 #[tokio::test]

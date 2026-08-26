@@ -187,7 +187,11 @@ impl Provider for OpenAiProvider {
         self.inner
             .responses_resume
             .as_ref()
-            .filter(|resume| resume.request_id == request.scope.request_id)
+            .filter(|resume| {
+                resume.request_key.request_id == request.scope.request_id
+                    && responses_request_fingerprint(&self.inner, request)
+                        .is_some_and(|fingerprint| fingerprint == resume.request_key.fingerprint)
+            })
             .map_or(GenerationRetryGuarantee::None, |_| {
                 GenerationRetryGuarantee::Resumable
             })

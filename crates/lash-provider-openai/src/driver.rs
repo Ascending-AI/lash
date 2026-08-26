@@ -15,12 +15,20 @@ struct ResponseContext {
     http_summary: String,
     stream_termination: StreamTermination,
     responses_resume: Option<ResponsesResumeCheckpoint>,
-    request_id: String,
+    request_key: ResponsesRequestKey,
+}
+
+pub(crate) type ResponsesRequestFingerprint = [u8; 32];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ResponsesRequestKey {
+    pub(crate) request_id: String,
+    pub(crate) fingerprint: ResponsesRequestFingerprint,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ResponsesResumeCheckpoint {
-    pub(crate) request_id: String,
+    pub(crate) request_key: ResponsesRequestKey,
     response_id: String,
     starting_after: u64,
     state: ResponsesStreamState,
@@ -61,7 +69,7 @@ fn responses_event_sequence_number(raw: &str) -> Option<u64> {
 
 fn responses_stream_failure(
     provider: &mut OpenAiCompatibleProvider,
-    request_id: String,
+    request_key: ResponsesRequestKey,
     state: ResponsesStreamState,
     last_sequence_number: Option<u64>,
     sequence_cursor_valid: bool,
@@ -81,7 +89,7 @@ fn responses_stream_failure(
             response_id
                 .zip(last_sequence_number)
                 .map(|(response_id, starting_after)| ResponsesResumeCheckpoint {
-                    request_id,
+                    request_key,
                     response_id,
                     starting_after,
                     state,
@@ -93,6 +101,59 @@ fn responses_stream_failure(
     error
         .with_output_started(output_started)
         .with_partial_response(partial)
+}
+
+fn build_request_body(
+    provider: &OpenAiCompatibleProvider,
+    req: &LlmRequest,
+    endpoint: CompletionEndpoint,
+    stream: bool,
+    origin_route: &ProviderRouteIdentity,
+) -> Result<Value, LlmTransportError> {
+    let mut body = match endpoint {
+        CompletionEndpoint::Responses => {
+            provider.build_responses_request_body_for_route(req, stream, origin_route)?
+        }
+        CompletionEndpoint::ChatCompletions => provider.build_chat_request_body(req, stream)?,
+    };
+    if provider.resolved_compat(endpoint).cache_session_affinity {
+        body["session_id"] = Value::String(
+            req.scope
+                .session_id
+                .chars()
+                .take(CACHE_SESSION_ID_MAX_CHARS)
+                .collect(),
+        );
+    }
+    Ok(body)
+}
+
+fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
+    use sha2::Digest as _;
+
+    sha2::Sha256::digest(body).into()
+}
+
+pub(crate) fn responses_request_fingerprint(
+    provider: &OpenAiCompatibleProvider,
+    req: &LlmRequest,
+) -> Option<ResponsesRequestFingerprint> {
+    let endpoint = CompletionEndpoint::Responses;
+    let origin_route = ProviderRouteIdentity::for_endpoint(
+        endpoint.provider_kind(),
+        &provider.base_url,
+        req.model.clone(),
+    );
+    let body = build_request_body(
+        provider,
+        req,
+        endpoint,
+        req.stream_events.is_some(),
+        &origin_route,
+    )
+    .ok()?;
+    let body_bytes = serde_json::to_vec(&body).ok()?;
+    Some(request_fingerprint(&body_bytes))
 }
 
 impl CompletionEndpoint {
@@ -189,11 +250,25 @@ pub(crate) async fn complete(
     let provider_trace = req.provider_trace.clone();
     let timeouts = provider.options.llm_timeouts();
     let stream = stream_events.is_some();
+    let compat = provider.resolved_compat(endpoint);
+    let stream_termination = req
+        .model_capability
+        .stream_termination
+        .unwrap_or(compat.stream_termination);
+    let body = build_request_body(provider, &req, endpoint, stream, &origin_route)?;
+    let generation_disposition = Some(generation_disposition(&req, &body));
+    let body_bytes = serde_json::to_vec(&body)
+        .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
+    let request_fingerprint = request_fingerprint(&body_bytes);
+    let request_key = ResponsesRequestKey {
+        request_id: req.scope.request_id.clone(),
+        fingerprint: request_fingerprint,
+    };
     let responses_resume = if endpoint == CompletionEndpoint::Responses && stream {
         let matches_request = provider
             .responses_resume
             .as_ref()
-            .is_some_and(|resume| resume.request_id == req.scope.request_id);
+            .is_some_and(|resume| resume.request_key == request_key);
         if !matches_request {
             provider.responses_resume = None;
         }
@@ -202,29 +277,6 @@ pub(crate) async fn complete(
         provider.responses_resume = None;
         None
     };
-    let compat = provider.resolved_compat(endpoint);
-    let stream_termination = req
-        .model_capability
-        .stream_termination
-        .unwrap_or(compat.stream_termination);
-    let mut body = match endpoint {
-        CompletionEndpoint::Responses => {
-            provider.build_responses_request_body_for_route(&req, stream, &origin_route)?
-        }
-        CompletionEndpoint::ChatCompletions => provider.build_chat_request_body(&req, stream)?,
-    };
-    if compat.cache_session_affinity {
-        body["session_id"] = Value::String(
-            req.scope
-                .session_id
-                .chars()
-                .take(CACHE_SESSION_ID_MAX_CHARS)
-                .collect(),
-        );
-    }
-    let generation_disposition = Some(generation_disposition(&req, &body));
-    let body_bytes = serde_json::to_vec(&body)
-        .map_err(|e| LlmTransportError::new(format!("{}: {e}", endpoint.serialize_error())))?;
     emit_provider_request_trace(
         provider_trace.as_ref(),
         "openai_compatible",
@@ -308,7 +360,7 @@ pub(crate) async fn complete(
             };
             return Err(responses_stream_failure(
                 provider,
-                resume.request_id,
+                resume.request_key,
                 resume.state,
                 Some(resume.starting_after),
                 true,
@@ -344,7 +396,7 @@ pub(crate) async fn complete(
         if let Some(resume) = responses_resume {
             failure = responses_stream_failure(
                 provider,
-                resume.request_id,
+                resume.request_key,
                 resume.state,
                 Some(resume.starting_after),
                 true,
@@ -382,7 +434,7 @@ pub(crate) async fn complete(
     if !is_sse && let Some(resume) = responses_resume.clone() {
         return Err(responses_stream_failure(
             provider,
-            resume.request_id,
+            resume.request_key,
             resume.state,
             Some(resume.starting_after),
             true,
@@ -401,7 +453,7 @@ pub(crate) async fn complete(
         http_summary,
         stream_termination,
         responses_resume,
-        request_id: req.scope.request_id.clone(),
+        request_key,
     };
     let response = if is_sse {
         drive_streaming_response(
@@ -770,7 +822,7 @@ async fn drive_streaming_responses(
         http_summary,
         stream_termination,
         responses_resume,
-        request_id,
+        request_key,
     } = context;
     let resume_after = responses_resume
         .as_ref()
@@ -854,7 +906,7 @@ async fn drive_streaming_responses(
     if let Err(error) = stream_result {
         return Err(responses_stream_failure(
             provider,
-            request_id,
+            request_key,
             state,
             last_sequence_number,
             sequence_cursor_valid,
@@ -868,7 +920,7 @@ async fn drive_streaming_responses(
     {
         return Err(responses_stream_failure(
             provider,
-            request_id,
+            request_key,
             state,
             last_sequence_number,
             sequence_cursor_valid,
