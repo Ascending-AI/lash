@@ -337,7 +337,6 @@ impl Provider for DevFailureProvider {
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {
-                            full_text: partial.to_string(),
                             parts: vec![LlmOutputPart::Text {
                                 text: partial.to_string(),
                                 response_meta: None,
@@ -373,7 +372,6 @@ impl Provider for DevFailureProvider {
                         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
                         .with_output_started(true)
                         .with_partial_response(LlmResponse {
-                            full_text: partial.to_string(),
                             parts: vec![LlmOutputPart::Text {
                                 text: partial.to_string(),
                                 response_meta: None,
@@ -426,7 +424,6 @@ fn finish_cell(dialect: lash::rlm::RlmDialect, value: &str) -> String {
 fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
     send_delta(request, text);
     LlmResponse {
-        full_text: text.to_string(),
         parts: vec![LlmOutputPart::Text {
             text: text.to_string(),
             response_meta: None,
@@ -449,7 +446,6 @@ fn replay_route_response(request: &LlmRequest, dialect: lash::rlm::RlmDialect) -
     send_reasoning(request, &reasoning);
     send_delta(request, &text);
     LlmResponse {
-        full_text: text.clone(),
         parts: vec![
             LlmOutputPart::Reasoning {
                 text: reasoning,

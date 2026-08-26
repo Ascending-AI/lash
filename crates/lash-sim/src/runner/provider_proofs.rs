@@ -10,7 +10,7 @@ pub(super) async fn prove_openai_compatible_tool_stream() -> Result<ProofRun, Fi
         "OpenAI-compatible tool stream terminal reason was not tool_use",
     )?;
     require(
-        response.full_text == "café ",
+        response.full_text() == "café ",
         "OpenAI-compatible tool stream text did not preserve split UTF-8",
     )?;
     require(
@@ -35,7 +35,7 @@ pub(super) async fn prove_openai_compatible_tool_stream() -> Result<ProofRun, Fi
         json!({
             "classification": "success",
             "terminal_reason": response.terminal_reason.code(),
-            "full_text": response.full_text,
+            "full_text": response.full_text(),
         }),
     )
 }
@@ -53,7 +53,7 @@ pub(super) async fn prove_openai_responses_text_stream() -> Result<ProofRun, Fix
         "OpenAI Responses stream terminal reason was not stop",
     )?;
     require(
-        response.full_text == "Direct answer.",
+        response.full_text() == "Direct answer.",
         "OpenAI Responses stream did not produce expected text",
     )?;
     proof(
@@ -65,7 +65,7 @@ pub(super) async fn prove_openai_responses_text_stream() -> Result<ProofRun, Fix
         json!({
             "classification": "success",
             "terminal_reason": response.terminal_reason.code(),
-            "full_text": response.full_text,
+            "full_text": response.full_text(),
             "usage": response.usage,
         }),
     )
@@ -128,7 +128,7 @@ pub(super) async fn prove_codex_responses_text_stream() -> Result<ProofRun, Fixe
         "Codex Responses stream terminal reason was not stop",
     )?;
     require(
-        response.full_text == "Codex direct answer.",
+        response.full_text() == "Codex direct answer.",
         "Codex Responses stream did not produce expected text",
     )?;
     proof(
@@ -140,7 +140,7 @@ pub(super) async fn prove_codex_responses_text_stream() -> Result<ProofRun, Fixe
         json!({
             "classification": "success",
             "terminal_reason": response.terminal_reason.code(),
-            "full_text": response.full_text,
+            "full_text": response.full_text(),
             "usage": response.usage,
         }),
     )
@@ -248,7 +248,7 @@ pub(super) async fn prove_anthropic_messages_text_stream()
         "Anthropic Messages stream terminal reason was not stop",
     )?;
     require(
-        response.full_text == "Anthropic scripted answer.",
+        response.full_text() == "Anthropic scripted answer.",
         "Anthropic Messages stream did not produce expected text",
     )?;
     proof(
@@ -260,7 +260,7 @@ pub(super) async fn prove_anthropic_messages_text_stream()
         json!({
             "classification": "success",
             "terminal_reason": response.terminal_reason.code(),
-            "full_text": response.full_text,
+            "full_text": response.full_text(),
             "usage": response.usage,
         }),
     )
@@ -288,7 +288,7 @@ pub(super) async fn prove_google_stream_generate_text() -> Result<ProofRun, Fixe
         "Google streamGenerateContent terminal reason was not stop",
     )?;
     require(
-        response.full_text == "Google scripted answer.",
+        response.full_text() == "Google scripted answer.",
         "Google streamGenerateContent did not produce expected text",
     )?;
     require(
@@ -308,7 +308,7 @@ pub(super) async fn prove_google_stream_generate_text() -> Result<ProofRun, Fixe
         json!({
             "classification": "success",
             "terminal_reason": response.terminal_reason.code(),
-            "full_text": response.full_text,
+            "full_text": response.full_text(),
             "usage": response.usage,
         }),
     )
@@ -335,7 +335,7 @@ pub(super) async fn prove_google_generate_text() -> Result<ProofRun, FixedScript
         "Google generateContent terminal reason was not stop",
     )?;
     require(
-        response.full_text == "Google buffered answer.",
+        response.full_text() == "Google buffered answer.",
         "Google generateContent did not produce expected text",
     )?;
     require(
@@ -355,7 +355,7 @@ pub(super) async fn prove_google_generate_text() -> Result<ProofRun, FixedScript
         json!({
             "classification": "success",
             "terminal_reason": response.terminal_reason.code(),
-            "full_text": response.full_text,
+            "full_text": response.full_text(),
             "usage": response.usage,
         }),
     )
@@ -665,7 +665,7 @@ fn success_terminal(response: &LlmResponse) -> TranscriptTerminal {
         classification: "success",
         provider_result: Some(TranscriptProviderResult {
             terminal_reason: response.terminal_reason.code().to_string(),
-            full_text_bytes: response.full_text.len(),
+            full_text_bytes: response.full_text().len(),
             part_count: response.parts.len(),
             usage: serde_json::to_value(&response.usage).unwrap_or(serde_json::Value::Null),
         }),

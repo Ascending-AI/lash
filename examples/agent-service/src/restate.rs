@@ -537,7 +537,6 @@ result = (await handle)?
 finish "done via Restate E2E"
 </lashlang>"#;
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,

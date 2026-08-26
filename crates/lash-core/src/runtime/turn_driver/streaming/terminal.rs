@@ -15,7 +15,6 @@ pub(super) fn synthesize_protocol_abort(
     execution_evidence.collection_interruption =
         Some(crate::ExecutionEvidenceCollectionInterruption::ProtocolAbort);
     let mut response = LlmResponse {
-        full_text: stream_accumulator.full_text(),
         parts: Vec::new(),
         usage: streamed_usage,
         terminal_reason: crate::LlmTerminalReason::Stop,

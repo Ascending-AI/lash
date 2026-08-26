@@ -56,20 +56,10 @@ pub struct TurnDriverPreamble<M: TurnProtocol = UnitTurnProtocol> {
     pub prompt_contributions: Vec<PromptContribution>,
 }
 
-/// Convert a raw `LlmResponse` into a stream of `LlmOutputPart`s that
-/// downstream code can iterate. When the response only carries
-/// `full_text` (provider didn't populate `parts`), synthesize a single
-/// `Text` part.
+/// Convert a raw `LlmResponse` into the visible stream of `LlmOutputPart`s that
+/// downstream code can iterate.
 pub fn normalized_response_parts(llm_response: &LlmResponse) -> Vec<LlmOutputPart> {
-    let parts = if llm_response.parts.is_empty() && !llm_response.full_text.is_empty() {
-        vec![LlmOutputPart::Text {
-            text: llm_response.full_text.clone(),
-            response_meta: None,
-        }]
-    } else {
-        llm_response.parts.clone()
-    };
-    visible_response_parts(parts)
+    visible_response_parts(llm_response.parts.clone())
 }
 
 /// Apply provider phase semantics to response parts. If a Responses-family

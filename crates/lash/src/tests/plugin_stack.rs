@@ -290,7 +290,6 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
                 ..LlmResponse::default()
             },
             LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,

@@ -1901,7 +1901,7 @@ fn stream_parser_captures_text_reasoning_tool_and_phase() {
     )
     .unwrap();
 
-    assert_eq!(state.full_text, "Hi");
+    assert_eq!(state.full_text(), "Hi");
     let parts = state.response_parts();
     assert!(matches!(
         &parts[0],
@@ -2339,7 +2339,7 @@ async fn chat_stream_ending_without_finish_reason_is_retryable_truncation_with_p
     );
     assert!(error.is_retryable());
     let partial = error.partial_response.as_deref().expect("partial response");
-    assert_eq!(partial.full_text, "partial");
+    assert_eq!(partial.full_text(), "partial");
     assert_eq!(partial.usage.input_tokens, 9);
     assert_eq!(partial.usage.output_tokens, 4);
     assert!(partial.provider_usage.is_some());
@@ -2370,7 +2370,7 @@ async fn chat_stream_with_finish_reason_succeeds_and_eof_tolerated_preserves_com
         )))
         .await
         .expect("finish_reason is terminal evidence");
-    assert_eq!(response.full_text, "done");
+    assert_eq!(response.full_text(), "done");
     assert_eq!(response.terminal_reason, LlmTerminalReason::Stop);
 
     let eof_body = "data: {\"choices\":[{\"delta\":{\"content\":\"legacy\"}}]}\n\n";
@@ -2387,7 +2387,7 @@ async fn chat_stream_with_finish_reason_succeeds_and_eof_tolerated_preserves_com
         )))
         .await
         .expect("explicit EOF tolerance preserves compatibility");
-    assert_eq!(response.full_text, "legacy");
+    assert_eq!(response.full_text(), "legacy");
 }
 
 #[tokio::test]
@@ -2412,8 +2412,8 @@ async fn responses_stream_requires_terminal_event_and_accepts_incomplete_termina
         error
             .partial_response
             .as_deref()
-            .map(|partial| partial.full_text.as_str()),
-        Some("partial")
+            .map(LlmResponse::full_text),
+        Some("partial".to_string())
     );
     let partial = error.partial_response.as_deref().expect("partial response");
     assert_eq!(partial.usage.input_tokens, 5);
@@ -2432,7 +2432,7 @@ async fn responses_stream_requires_terminal_event_and_accepts_incomplete_termina
         )))
         .await
         .expect("response.incomplete is terminal evidence");
-    assert_eq!(response.full_text, "bounded");
+    assert_eq!(response.full_text(), "bounded");
 }
 
 #[path = "provider_routing_tests.rs"]

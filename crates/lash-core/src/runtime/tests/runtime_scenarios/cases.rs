@@ -576,7 +576,6 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                                 ..crate::LlmResponse::default()
                             },
                             1 => crate::LlmResponse {
-                                full_text: "intent drain complete".to_string(),
                                 parts: vec![crate::LlmOutputPart::Text {
                                     text: "intent drain complete".to_string(),
                                     response_meta: None,

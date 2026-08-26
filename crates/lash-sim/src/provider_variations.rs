@@ -427,7 +427,7 @@ mod tests {
                     variation.name()
                 );
                 assert_eq!(
-                    response.full_text.contains(LASHLANG_CLOSE_DELIMITER),
+                    response.full_text().contains(LASHLANG_CLOSE_DELIMITER),
                     matches!(variation, ProviderStopVariation::LiteralPresent),
                     "{} {} returned the wrong delimiter shape",
                     dialect.name(),

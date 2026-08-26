@@ -167,7 +167,6 @@ fn typed_probe_definition() -> ToolDefinition {
 
 fn response_text(text: &str) -> LlmResponse {
     LlmResponse {
-        full_text: text.to_string(),
         parts: vec![LlmOutputPart::Text {
             text: text.to_string(),
             response_meta: None,

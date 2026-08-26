@@ -1568,7 +1568,7 @@ mod tests {
             .expect("scripted response");
 
         assert_eq!(response.terminal_reason, LlmTerminalReason::ToolUse);
-        assert_eq!(response.full_text, "café ");
+        assert_eq!(response.full_text(), "café ");
         let deltas = text_deltas(&events);
         assert_eq!(deltas, vec!["café ".to_string()]);
 
@@ -1687,7 +1687,7 @@ mod tests {
             .expect("scripted OpenAI Responses response");
 
         assert_eq!(response.terminal_reason, LlmTerminalReason::Stop);
-        assert_eq!(response.full_text, "Direct answer.");
+        assert_eq!(response.full_text(), "Direct answer.");
         assert_eq!(response.usage.input_tokens, 5);
         assert_eq!(response.usage.output_tokens, 2);
     }
@@ -1797,7 +1797,7 @@ mod tests {
             .expect("early scheduler releases must be buffered, not retried into no-script");
 
         assert_eq!(response.terminal_reason, LlmTerminalReason::ToolUse);
-        assert_eq!(response.full_text, "café ");
+        assert_eq!(response.full_text(), "café ");
         assert_eq!(text_deltas(&events), vec!["café ".to_string()]);
         assert_eq!(transport.remaining_scripts().expect("remaining scripts"), 0);
         let exchanges = transport.exchanges().expect("exchange log");

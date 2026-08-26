@@ -376,7 +376,6 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
             let text = scripted.clone();
             async move {
                 Ok(lash::provider::LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![lash_core::LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,

@@ -133,7 +133,6 @@ impl GoogleOAuthProvider {
             })?;
             let origin_model = request.get("model").and_then(Value::as_str);
             let parts = self.response_parts_from_value(&value, origin_model);
-            let full_text = lash_core::facade_support::visible_response_text_from_parts(&parts);
             let provider_usage = value.get("usageMetadata").cloned();
             let usage = provider_usage
                 .as_ref()
@@ -161,7 +160,6 @@ impl GoogleOAuthProvider {
                     .with_code(error.code())
             })?;
             return Ok(LlmResponse {
-                full_text,
                 parts,
                 usage,
                 terminal_reason,
@@ -275,7 +273,6 @@ impl GoogleOAuthProvider {
             }
             parts.extend(tool_call_parts.clone());
             LlmResponse {
-                full_text: full.clone(),
                 parts,
                 usage: usage.clone(),
                 terminal_reason: LlmTerminalReason::Unknown,
@@ -329,7 +326,6 @@ impl GoogleOAuthProvider {
             Self::terminal_reason_from_value(finish_event.as_ref().unwrap_or(&Value::Null), &parts);
 
         Ok(LlmResponse {
-            full_text: full,
             parts,
             usage,
             terminal_reason,

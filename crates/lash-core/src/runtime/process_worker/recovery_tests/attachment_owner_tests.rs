@@ -120,7 +120,6 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
             .requires_streaming(true)
             .complete(|_| async {
                 Ok(crate::llm::types::LlmResponse {
-                    full_text: "nested turn complete".to_string(),
                     parts: vec![crate::llm::types::LlmOutputPart::Text {
                         text: "nested turn complete".to_string(),
                         response_meta: None,

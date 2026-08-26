@@ -902,7 +902,6 @@ fn runtime_batch_provider() -> ProviderHandle {
             ..LlmResponse::default()
         },
         LlmResponse {
-            full_text: "done".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "done".to_string(),
                 response_meta: None,
@@ -2678,7 +2677,6 @@ fn retrying_visible_stream_provider() -> ProviderHandle {
                         ));
                 }
                 Ok(LlmResponse {
-                    full_text: "prose-3".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "prose-3".to_string(),
                         response_meta: None,
@@ -2736,7 +2734,6 @@ fn output_then_failing_rlm_prose_provider(
                 };
                 stream.send(LlmStreamEvent::Delta(text.to_string()));
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: text.to_string(),
                         response_meta: None,
@@ -2787,7 +2784,6 @@ fn natural_prose_reasoning_provider(
                     response_meta: None,
                 });
                 Ok(LlmResponse {
-                    full_text: text.to_string(),
                     parts,
                     response_metadata: Default::default(),
                     ..LlmResponse::default()
@@ -6616,7 +6612,6 @@ fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Res
                     stream.send(LlmStreamEvent::Delta(chunk.to_string()));
                 }
                 Ok(LlmResponse {
-                    full_text: RAW_FINAL.to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: RAW_FINAL.to_string(),
                         response_meta: None,

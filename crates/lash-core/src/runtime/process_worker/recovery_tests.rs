@@ -1004,7 +1004,6 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
                         ..Default::default()
                     },
                     1 => crate::llm::types::LlmResponse {
-                        full_text: "child turn complete".to_string(),
                         parts: vec![crate::llm::types::LlmOutputPart::Text {
                             text: "child turn complete".to_string(),
                             response_meta: None,

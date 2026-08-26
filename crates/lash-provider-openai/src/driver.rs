@@ -602,7 +602,6 @@ fn complete_buffered_responses(
         state.provider_usage = value.get("usage").cloned();
         state.usage = usage_from_response_value(&value);
         state.parts = OpenAiCompatibleProvider::response_parts_from_value(&value);
-        state.recompute_full_text();
         state.final_response = Some(value);
     }
     let terminal_event_seen = state.terminal_event_seen
@@ -660,12 +659,12 @@ fn complete_buffered_responses(
                 }
             }
         }
-        if !state.full_text.is_empty() {
-            tx.send(LlmStreamEvent::Delta(state.full_text.clone()));
+        let full_text = state.full_text();
+        if !full_text.is_empty() {
+            tx.send(LlmStreamEvent::Delta(full_text));
         }
     }
     Ok(LlmResponse {
-        full_text: state.full_text,
         parts,
         usage: state.usage,
         terminal_reason,
@@ -762,7 +761,6 @@ fn complete_buffered_chat(
     };
     let execution_evidence = state.execution_evidence;
     Ok(LlmResponse {
-        full_text: state.full_text,
         parts,
         usage: state.usage,
         terminal_reason,
@@ -961,7 +959,6 @@ async fn drive_streaming_responses(
         ));
     }
     Ok(LlmResponse {
-        full_text: state.full_text,
         parts,
         usage: state.usage,
         terminal_reason,
@@ -1074,7 +1071,6 @@ async fn drive_streaming_chat(
     };
     let execution_evidence = state.execution_evidence;
     Ok(LlmResponse {
-        full_text: state.full_text,
         parts,
         usage: state.usage,
         terminal_reason,
@@ -1096,7 +1092,6 @@ fn chat_response_from_state(state: ChatStreamState, url: &str) -> LlmResponse {
     let parts = state.parts();
     let execution_evidence = state.execution_evidence;
     LlmResponse {
-        full_text: state.full_text,
         parts,
         usage: state.usage,
         terminal_reason: LlmTerminalReason::Unknown,

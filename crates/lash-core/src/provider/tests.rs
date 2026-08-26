@@ -252,7 +252,10 @@ impl Provider for PartialStreamFailureProvider {
             .with_code("stream_ended_before_terminal")
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
-                full_text: "partial".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "partial".to_string(),
+                    response_meta: None,
+                }],
                 usage: LlmUsage {
                     input_tokens: 7,
                     output_tokens: 3,
@@ -306,7 +309,10 @@ impl Provider for CountedPartialStreamFailureProvider {
             .with_code("stream_ended_before_terminal")
             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
             .with_partial_response(LlmResponse {
-                full_text: "paid partial".to_string(),
+                parts: vec![LlmOutputPart::Text {
+                    text: "paid partial".to_string(),
+                    response_meta: None,
+                }],
                 ..LlmResponse::default()
             }))
     }
@@ -338,7 +344,10 @@ impl Provider for TerminalProvider {
 
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
-            full_text: self.text.to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: self.text.to_string(),
+                response_meta: None,
+            }],
             terminal_reason: self.reason,
             response_metadata: Default::default(),
             ..LlmResponse::default()
@@ -387,7 +396,6 @@ impl Provider for MutatingProvider {
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         self.options.max_output_tokens = Some(MUTATED_MAX_OUTPUT_TOKENS);
         Ok(LlmResponse {
-            full_text: "ok".to_string(),
             parts: Vec::new(),
             usage: LlmUsage::default(),
             terminal_reason: crate::LlmTerminalReason::Stop,
@@ -446,7 +454,6 @@ impl Provider for FailingProvider {
                 .with_retry_verdict(retry_verdict));
         }
         Ok(LlmResponse {
-            full_text: "ok".to_string(),
             parts: Vec::new(),
             usage: LlmUsage::default(),
             terminal_reason: crate::LlmTerminalReason::Stop,
@@ -533,7 +540,6 @@ impl Provider for StatusFailingProvider {
             return Err(failure);
         }
         Ok(LlmResponse {
-            full_text: "ok".to_string(),
             parts: Vec::new(),
             usage: LlmUsage::default(),
             terminal_reason: crate::LlmTerminalReason::Stop,
@@ -1219,8 +1225,8 @@ async fn failed_stream_attempt_retains_observed_usage_and_evidence_in_ledger() {
         failure
             .partial_response
             .as_deref()
-            .map(|response| response.full_text.as_str()),
-        Some("partial")
+            .map(LlmResponse::full_text),
+        Some("partial".to_string())
     );
 }
 
@@ -1341,7 +1347,10 @@ fn automatic_retry_classes_are_explicit_and_output_requires_a_guarantee() {
         .with_kind(ProviderFailureKind::Stream)
         .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
         .with_partial_response(LlmResponse {
-            full_text: "paid output".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "paid output".to_string(),
+                response_meta: None,
+            }],
             ..LlmResponse::default()
         });
     let position = failure_protocol_position(&output_started);
@@ -1499,7 +1508,10 @@ impl Provider for ReportingProvider {
 
     async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
         Ok(LlmResponse {
-            full_text: "ok".to_string(),
+            parts: vec![LlmOutputPart::Text {
+                text: "ok".to_string(),
+                response_meta: None,
+            }],
             usage: LlmUsage {
                 input_tokens: 11,
                 output_tokens: 5,

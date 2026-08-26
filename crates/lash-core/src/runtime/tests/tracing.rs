@@ -33,7 +33,6 @@ fn completed_text_call(text: &str) -> MockCall {
     MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: text.to_string(),
                 response_meta: None,
@@ -373,7 +372,6 @@ async fn provider_spans_are_children_of_the_turn_span() {
             let provider_span = ::tracing::info_span!("provider.complete");
             drop(provider_span);
             Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,
@@ -439,7 +437,6 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,
@@ -551,7 +548,6 @@ async fn standard_runtime_trace_records_stream_event_entries() {
             }),
         ],
         response: Ok(LlmResponse {
-            full_text: "Hello world".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Hello world".to_string(),
                 response_meta: None,
@@ -762,7 +758,6 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
                 });
             }
             Ok(LlmResponse {
-                full_text: "Hello".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "Hello".to_string(),
                     response_meta: None,
@@ -896,7 +891,6 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
             .complete(|req| async move {
                 assert!(req.provider_trace.is_none());
                 Ok(LlmResponse {
-                    full_text: "Hello".to_string(),
                     parts: vec![LlmOutputPart::Text {
                         text: "Hello".to_string(),
                         response_meta: None,
@@ -953,7 +947,6 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
             LlmStreamEvent::Delta("world".to_string()),
         ],
         response: Ok(LlmResponse {
-            full_text: "Hello world".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Hello world".to_string(),
                 response_meta: None,

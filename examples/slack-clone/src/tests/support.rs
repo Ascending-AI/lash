@@ -168,7 +168,6 @@ impl Script {
                     Ok(match step {
                         Step::Gated(_) => unreachable!("gated steps are unwrapped above"),
                         Step::Text(text) => LlmResponse {
-                            full_text: text.clone(),
                             parts: vec![LlmOutputPart::Text {
                                 text,
                                 response_meta: None,

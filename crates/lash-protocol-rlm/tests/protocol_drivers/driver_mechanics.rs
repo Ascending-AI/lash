@@ -141,7 +141,6 @@ fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
             execution_evidence: Some(lash_core::ExecutionEvidence {
@@ -191,7 +190,6 @@ fn natural_stop_without_applied_boundary_does_not_close_or_execute_a_cell() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
             ..LlmResponse::default()
@@ -237,7 +235,6 @@ fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
             ..LlmResponse::default()
@@ -277,7 +274,6 @@ fn buffered_response_executes_only_first_of_two_complete_cells_without_retry() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
             ..LlmResponse::default()
@@ -313,7 +309,6 @@ fn illustrative_prose_with_an_unclosed_cell_retries_without_execution() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
             generation_disposition: Some(lash_core::GenerationReceipt {
@@ -348,7 +343,6 @@ fn natural_end_turn_with_a_partial_program_retries_without_execution() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::Stop,
             generation_disposition: Some(lash_core::GenerationReceipt {
@@ -385,7 +379,6 @@ fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
             ..LlmResponse::default()
@@ -479,7 +472,6 @@ fn output_limit_prose_retries_with_the_request_cap() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
             ..LlmResponse::default()
@@ -524,7 +516,6 @@ fn output_limit_prose_cut_at_a_close_tag_mention_retries() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             terminal_reason: lash_core::LlmTerminalReason::OutputLimit,
             generation_disposition: Some(lash_core::GenerationReceipt {
@@ -567,7 +558,6 @@ fn terminal_provider_paths_emit_only_visible_prose() {
             id: llm_id,
             text_streamed: false,
             result: Ok(LlmResponse {
-                full_text: text.to_string(),
                 parts: vec![text_part(text)],
                 terminal_reason,
                 ..LlmResponse::default()
@@ -616,7 +606,6 @@ fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: lashlang_block("print \"hi\""),
             parts: vec![LlmOutputPart::Text {
                 text: lashlang_block("print \"hi\""),
                 response_meta: None,
@@ -652,7 +641,6 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: lashlang_block_with_prose("Reason first.", "print \"hi\""),
             parts: vec![LlmOutputPart::Text {
                 text: lashlang_block_with_prose("Reason first.", "print \"hi\""),
                 response_meta: None,
@@ -818,7 +806,6 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: lashlang_block("ok = await tools.ok({})\nfail = await tools.fail({})\nstop = await tools.stop({})\nresults = { a: ok, b: fail, c: stop }"),
             parts: vec![LlmOutputPart::Text {
                 text: lashlang_block("ok = await tools.ok({})\nfail = await tools.fail({})\nstop = await tools.stop({})\nresults = { a: ok, b: fail, c: stop }"),
                 response_meta: None,
@@ -980,7 +967,6 @@ fn a_cell_of_the_inactive_dialect_is_named_on_the_first_iteration() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             ..LlmResponse::default()
         }),
@@ -1025,7 +1011,6 @@ fn a_lashlang_cell_in_a_typescript_session_is_named_the_same_way() {
         id: llm_id,
         text_streamed: false,
         result: Ok(LlmResponse {
-            full_text: text.to_string(),
             parts: vec![text_part(text)],
             ..LlmResponse::default()
         }),
@@ -1835,7 +1820,6 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
             id: llm_id,
             text_streamed: false,
             result: Ok(LlmResponse {
-                full_text: text.clone(),
                 parts: vec![text_part(&text)],
                 terminal_reason: lash_core::LlmTerminalReason::Stop,
                 ..LlmResponse::default()

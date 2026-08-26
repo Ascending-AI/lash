@@ -199,7 +199,6 @@ pub(crate) fn benchmark_provider_with_control(
                     profile.parts
                 };
                 Ok(LlmResponse {
-                    full_text: profile.full_text.clone(),
                     parts,
                     usage,
                     terminal_reason: lash_core::LlmTerminalReason::Stop,

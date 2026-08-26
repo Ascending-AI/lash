@@ -30,7 +30,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 30;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 31;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 const PROCESS_ID: &str = "durable-read-waiting-process";
@@ -717,7 +717,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         matches!(
             &queued[0].items[0].payload,
             QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-                if frame_id.as_str() == "durable-read-frame"
+                if frame_id == &lash_core::facade_support::frame_node_id(SESSION_ID, "durable-read-frame")
                     && task == "durable read queued task"
         ),
         "durable fixture semantic drift: queued-work payload changed"

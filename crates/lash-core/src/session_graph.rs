@@ -10,6 +10,9 @@ use crate::{BaseRenderCache, Clock, Message, PromptUsage, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_sansio::core_support::MessageCoreSupport;
 
+#[path = "session_graph_legacy_response.rs"]
+mod legacy_response;
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RealizedNodeTimestamp {
     pub node_id: String,
@@ -217,10 +220,14 @@ pub struct SessionNodeRecord {
 /// generation it carries. Bodies written before the stamp existed carry no
 /// field and are generation 1 by definition.
 ///
+/// Version 3 removes the duplicated `LlmResponse.full_text` member. The
+/// pre-v3 decode path below projects that legacy value into response parts
+/// before typed decoding when the parts carry no visible assistant prose.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 3;
 
 /// Generation of a body written before the stamp existed.
 ///
@@ -748,7 +755,15 @@ impl SessionNodeRecord {
         parent_node_id: Option<String>,
         node_json: &str,
     ) -> Result<Self, serde_json::Error> {
-        let body = serde_json::from_str::<StoredSessionNodeBody>(node_json)?;
+        let mut value = serde_json::from_str::<serde_json::Value>(node_json)?;
+        let body_schema_version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_else(|| u64::from(unstamped_node_body_schema_version()));
+        if body_schema_version <= 2 {
+            legacy_response::upgrade_session_node_llm_responses(&mut value);
+        }
+        let body = serde_json::from_value::<StoredSessionNodeBody>(value)?;
         if body.schema_version > SESSION_NODE_BODY_SCHEMA_VERSION {
             return Err(serde::de::Error::custom(format!(
                 "graph node body is schema version {}, but this build reads at most {}; \

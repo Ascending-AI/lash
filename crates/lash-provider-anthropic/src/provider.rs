@@ -234,9 +234,8 @@ impl Provider for AnthropicProvider {
 
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
-        let (parts, full_text, usage, terminal_reason) = Self::finalize(state, &req.model);
+        let (parts, usage, terminal_reason) = Self::finalize(state, &req.model);
         let mut response = LlmResponse {
-            full_text,
             parts,
             usage,
             terminal_reason,
@@ -304,9 +303,8 @@ impl AnthropicProvider {
     ) -> LlmResponse {
         let provider_usage = state.provider_usage.take();
         let execution_evidence = state.execution_evidence.clone();
-        let (parts, full_text, usage, _) = Self::finalize(state, origin_model);
+        let (parts, usage, _) = Self::finalize(state, origin_model);
         LlmResponse {
-            full_text,
             parts,
             usage,
             terminal_reason: LlmTerminalReason::Unknown,

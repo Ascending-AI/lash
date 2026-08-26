@@ -202,7 +202,7 @@ mod tests {
             )
             .await
             .expect("Google default permits clean EOF");
-        assert_eq!(response.full_text, "legacy");
+        assert_eq!(response.full_text(), "legacy");
 
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
@@ -234,7 +234,7 @@ mod tests {
             Some("stream_ended_before_finish_reason")
         );
         let partial = error.partial_response.as_deref().expect("partial response");
-        assert_eq!(partial.full_text, "legacy");
+        assert_eq!(partial.full_text(), "legacy");
         assert_eq!(partial.usage.input_tokens, 6);
         assert_eq!(partial.usage.output_tokens, 2);
         assert!(partial.provider_usage.is_some());
@@ -338,7 +338,7 @@ mod tests {
             )
             .await
             .expect("finishReason is terminal evidence");
-        assert_eq!(response.full_text, "done");
+        assert_eq!(response.full_text(), "done");
         assert_eq!(response.terminal_reason, LlmTerminalReason::Stop);
         let evidence = response
             .execution_evidence
@@ -530,7 +530,7 @@ mod tests {
     async fn google_streaming_reasoning_preserves_signature_and_gates_deltas() {
         let wire_events = streaming_reasoning_events();
         let (exposed, exposed_events) = streaming_reasoning_response(&wire_events, true).await;
-        assert_eq!(exposed.full_text, "answer");
+        assert_eq!(exposed.full_text(), "answer");
         let exposed_deltas = exposed_events
             .iter()
             .filter_map(|event| match event {
@@ -583,8 +583,8 @@ mod tests {
 
         let (hidden, hidden_events) = streaming_reasoning_response(&wire_events, false).await;
         assert_eq!(hidden.parts, exposed.parts);
-        assert!(!hidden.full_text.contains("plan é"));
-        assert!(!hidden.full_text.contains("carefully"));
+        assert!(!hidden.full_text().contains("plan é"));
+        assert!(!hidden.full_text().contains("carefully"));
         assert!(
             hidden_events
                 .iter()

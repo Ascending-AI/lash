@@ -332,16 +332,7 @@ pub(crate) fn lashlang_block_with_prose(prose: &str, code: &str) -> String {
 }
 
 pub(crate) fn rlm_response(parts: Vec<LlmOutputPart>) -> LlmResponse {
-    let full_text = parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
     LlmResponse {
-        full_text,
         parts,
         response_metadata: Default::default(),
         ..LlmResponse::default()
@@ -585,7 +576,7 @@ impl RlmProtocolScenario {
                         .push(transformed.visible_text);
                     observed
                         .plugin_spliced_response_texts
-                        .push(transformed.response.full_text.clone());
+                        .push(transformed.response.full_text().clone());
                     observed
                         .plugin_stream_abort_requests
                         .push(transformed.abort_requested);

@@ -408,7 +408,6 @@ fn scripted_provider() -> lash::provider::ProviderHandle {
 fn scripted_response() -> lash::provider::LlmResponse {
     let program = scripted_program();
     lash::provider::LlmResponse {
-        full_text: program.clone(),
         parts: vec![lash_core::LlmOutputPart::Text {
             text: program,
             response_meta: None,

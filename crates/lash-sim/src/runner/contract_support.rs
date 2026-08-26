@@ -378,12 +378,12 @@ pub(super) fn fixed_texts_provider(
                 let expected_text = text.clone();
                 let response = text_llm_response(text);
                 let response_part_text = response_text_part(&response);
-                if response.full_text != expected_text
+                if response.full_text() != expected_text
                     || response_part_text != Some(expected_text.as_str())
                 {
                     return Err(LlmTransportError::new(format!(
                         "{kind} fixed response shape changed: expected full_text and text part {:?}, got full_text {:?} parts {:?}",
-                        expected_text, response.full_text, response.parts
+                        expected_text, response.full_text(), response.parts
                     )));
                 }
                 Ok(response)

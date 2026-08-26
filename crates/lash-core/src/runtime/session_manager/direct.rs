@@ -483,7 +483,7 @@ impl DirectCompletionCapability {
             .await?;
         let (response, usage, llm_call) = self.run_direct_effect(&context, plan, caused_by).await?;
         Ok(crate::DirectCompletion {
-            text: response.full_text,
+            text: response.full_text(),
             usage,
             llm_call,
         })

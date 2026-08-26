@@ -9,7 +9,7 @@ use lash::direct::{
     DirectLlmClient, DirectMessage, DirectPart, DirectRequest, DirectRole, LlmTerminalReason,
     NonNegativeFiniteF64,
 };
-use lash::provider::ProviderHandle;
+use lash::provider::{LlmResponse, ProviderHandle};
 use lash_plugin_mcp::{
     CreateElicitationRequestParams, CreateElicitationResult, CreateMessageResult,
     ElicitationAction, ElicitationCapability, FormElicitationCapability, McpElicitationHandler,
@@ -118,7 +118,7 @@ impl McpSamplingHandler for DemoSamplingHandler {
             _ => CreateMessageResult::STOP_REASON_END_TURN,
         };
         Ok(CreateMessageResult::new(
-            SamplingMessage::assistant_text(result.full_text.clone()),
+            SamplingMessage::assistant_text(LlmResponse::full_text(&result)),
             self.model.id.clone(),
         )
         .with_stop_reason(stop_reason))

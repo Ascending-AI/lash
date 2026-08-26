@@ -966,7 +966,6 @@ mod tests {
                 self.saw_batch_result.store(true, Ordering::SeqCst);
             }
             Ok(lash_core::LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![lash_core::LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,

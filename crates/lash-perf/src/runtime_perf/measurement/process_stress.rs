@@ -692,7 +692,7 @@ fn direct_llm_client_request(turn_index: usize) -> lash::direct::DirectRequest {
 }
 
 fn validate_direct_llm_response(turn_index: usize, response: &LlmResponse) -> anyhow::Result<()> {
-    let value: serde_json::Value = serde_json::from_str(&response.full_text)
+    let value: serde_json::Value = serde_json::from_str(&response.full_text())
         .with_context(|| format!("parse direct_llm_client turn {} JSON", turn_index + 1))?;
     if value.get("value").and_then(serde_json::Value::as_str) == Some("runtime perf benchmark ok") {
         return Ok(());
@@ -700,6 +700,6 @@ fn validate_direct_llm_response(turn_index: usize, response: &LlmResponse) -> an
     anyhow::bail!(
         "runtime perf scenario direct_llm_client turn {} produced unexpected response: {}",
         turn_index + 1,
-        response.full_text
+        response.full_text()
     );
 }

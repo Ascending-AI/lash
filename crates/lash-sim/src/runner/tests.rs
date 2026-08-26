@@ -420,9 +420,9 @@ async fn generated_park_resume_transcript_is_readable_and_logical_size_labeled()
 }
 
 #[test]
-fn standard_protocol_full_text_mutation_guard() {
+fn standard_protocol_full_text_projection_guard() {
     let result = run_standard_protocol_contract(
-        "standard.full_text_mutation_guard",
+        "standard.full_text_projection_guard",
         "answer with two chunks",
         None,
         vec![
@@ -444,8 +444,8 @@ fn standard_protocol_full_text_mutation_guard() {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default(),
-        vec![json!("first chunk\nsecond chunk")],
-        "fixed Standard execution must preserve LlmResponse.full_text, not only streamed parts"
+        vec![json!("first chunksecond chunk")],
+        "Standard full_text must be the visible-parts projection; parts are the sole authority"
     );
     assert_eq!(
         result
@@ -493,7 +493,7 @@ fn rlm_protocol_response_shape_mutation_guard() {
             .cloned()
             .unwrap_or_default(),
         vec![json!("RLM final prose")],
-        "fixed RLM execution must preserve LlmResponse.full_text"
+        "fixed RLM execution must preserve LlmResponse.full_text()"
     );
     assert_eq!(
         result
@@ -529,7 +529,7 @@ async fn fixed_texts_provider_response_shape_mutation_guard() {
         .await
         .expect("fixed text provider response");
 
-    assert_eq!(response.full_text, "facade response text");
+    assert_eq!(response.full_text(), "facade response text");
     assert!(
         matches!(
             response.parts.as_slice(),
@@ -547,7 +547,7 @@ async fn rlm_final_value_provider_response_shape_mutation_guard() {
         .await
         .expect("rlm final-value provider response");
 
-    assert!(response.full_text.contains("semantic-channel"));
+    assert!(response.full_text().contains("semantic-channel"));
     assert!(
         response_text_part(&response).is_some_and(|text| text.contains("semantic-channel")),
         "rlm final-value provider must return the semantic text part"
@@ -574,7 +574,7 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
         .complete(openai_compatible_request(false))
         .await
         .expect("pending tool provider final response");
-    assert_eq!(final_response.full_text, "done");
+    assert_eq!(final_response.full_text(), "done");
     assert_eq!(response_text_part(&final_response), Some("done"));
 }
 

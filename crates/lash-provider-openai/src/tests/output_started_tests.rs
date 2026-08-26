@@ -633,7 +633,7 @@ async fn responses_handle_retries_allocation_only_stream_failure() {
 
     assert_eq!(transport.calls(), 2);
     let response = result.expect("allocation-only partial is safe to discard and retry");
-    assert_eq!(response.full_text, "second generation");
+    assert_eq!(response.full_text(), "second generation");
 }
 
 async fn assert_streamed_output_stops_retry(first: &'static str) {
@@ -748,7 +748,7 @@ async fn responses_handle_retries_canonical_empty_failed_response() {
         .expect("empty failed response is safe to discard and retry");
 
     assert_eq!(transport.calls(), 2);
-    assert_eq!(response.full_text, "second generation");
+    assert_eq!(response.full_text(), "second generation");
 }
 
 #[tokio::test]
@@ -778,5 +778,5 @@ async fn responses_handle_retries_after_ping_and_response_debug() {
         .expect("benign metadata before failure must preserve recovery");
 
     assert_eq!(transport.calls(), 2);
-    assert_eq!(response.full_text, "second generation");
+    assert_eq!(response.full_text(), "second generation");
 }

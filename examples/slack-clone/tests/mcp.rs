@@ -170,7 +170,7 @@ impl Script {
                         .lock_recover()
                         .push(serde_json::to_string(&request).expect("serialize request"));
                     let step = steps.lock().await.pop_front().unwrap_or(Step::Text("done"));
-                    Ok(match step {
+                    let response = match step {
                         Step::Tool(name) => LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
                                 call_id: "mcp-call".to_string(),
@@ -189,15 +189,22 @@ impl Script {
                             }],
                             ..LlmResponse::default()
                         },
-                        Step::Text(text) => LlmResponse {
-                            full_text: text.to_string(),
-                            parts: vec![LlmOutputPart::Text {
-                                text: text.to_string(),
-                                response_meta: None,
-                            }],
-                            ..LlmResponse::default()
-                        },
-                    })
+                        Step::Text(text) => {
+                            let response = LlmResponse {
+                                parts: vec![LlmOutputPart::Text {
+                                    text: text.to_string(),
+                                    response_meta: None,
+                                }],
+                                ..LlmResponse::default()
+                            };
+                            assert!(
+                                LlmResponse::full_text(&response).contains(text),
+                                "projected response must contain the scripted text"
+                            );
+                            response
+                        }
+                    };
+                    Ok(response)
                 }
             })
             .build()

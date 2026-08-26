@@ -2261,7 +2261,6 @@ finish initial
 
     pub(super) fn text_response(text: &str) -> lash::provider::LlmResponse {
         lash::provider::LlmResponse {
-            full_text: text.to_string(),
             parts: vec![lash::direct::LlmOutputPart::Text {
                 text: text.to_string(),
                 response_meta: None,

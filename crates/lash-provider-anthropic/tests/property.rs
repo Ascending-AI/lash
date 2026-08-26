@@ -139,8 +139,8 @@ fn assert_invariant_under_split(
 ) -> Result<(), TestCaseError> {
     let (unsplit, unsplit_deltas) = complete_with_chunks(vec![canonical]);
     let (split, split_deltas) = complete_with_chunks(chunks);
-    prop_assert_eq!(split.parts, unsplit.parts);
-    prop_assert_eq!(split.full_text, unsplit.full_text);
+    prop_assert_eq!(&split.parts, &unsplit.parts);
+    prop_assert_eq!(split.full_text(), unsplit.full_text());
     prop_assert_eq!(split.usage, unsplit.usage);
     prop_assert_eq!(split.terminal_reason, unsplit.terminal_reason);
     prop_assert_eq!(split_deltas, unsplit_deltas);

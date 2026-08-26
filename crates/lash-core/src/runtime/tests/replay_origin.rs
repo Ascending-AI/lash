@@ -91,7 +91,6 @@ async fn caller_shaped_completion_preserves_drop_sideband_without_provider_trace
             assert!(request.provider_trace.is_none());
             assert!(!format!("{:?}", request.messages).contains("foreign-request-signature"));
             Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,

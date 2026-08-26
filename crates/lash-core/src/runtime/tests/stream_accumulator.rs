@@ -81,7 +81,6 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
     );
 
     let mut response = LlmResponse {
-        full_text: String::new(),
         parts: vec![LlmOutputPart::ToolCall {
             call_id: "call_1".to_string(),
             tool_name: "exec_command".to_string(),
@@ -138,7 +137,6 @@ fn stream_accumulator_does_not_duplicate_complete_final_response() {
     accumulator.push_text("Done.");
 
     let mut response = LlmResponse {
-        full_text: "Done.".to_string(),
         parts: vec![
             LlmOutputPart::Reasoning {
                 text: "I'll answer.".to_string(),
@@ -167,6 +165,28 @@ fn stream_accumulator_does_not_duplicate_complete_final_response() {
 }
 
 #[test]
+fn stream_accumulator_projected_text_covers_reconciled_parts() {
+    let mut accumulator = LlmStreamAccumulator::default();
+    accumulator.push_text("Streamed prefix. ");
+
+    let mut response = LlmResponse {
+        parts: vec![LlmOutputPart::Text {
+            text: "Provider suffix.".to_string(),
+            response_meta: None,
+        }],
+        response_metadata: Default::default(),
+        ..Default::default()
+    };
+
+    accumulator.apply_to_response(&mut response);
+
+    assert_eq!(
+        response.full_text(),
+        crate::visible_response_text_from_parts(&response.parts)
+    );
+}
+
+#[test]
 fn stream_accumulator_full_text_prefers_final_answer_over_commentary() {
     let mut accumulator = LlmStreamAccumulator::default();
     accumulator.push_text_part(
@@ -191,7 +211,7 @@ fn stream_accumulator_full_text_prefers_final_answer_over_commentary() {
     let mut response = LlmResponse::default();
     accumulator.apply_to_response(&mut response);
 
-    assert_eq!(response.full_text, "Final answer.");
+    assert_eq!(response.full_text(), "Final answer.");
     assert_eq!(
         response
             .parts

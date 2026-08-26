@@ -346,7 +346,7 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     );
     assert!(requests[1].body.is_empty());
 
-    assert_eq!(completion.response.full_text, "hello world");
+    assert_eq!(completion.response.full_text(), "hello world");
     assert_eq!(
         completion
             .response
@@ -462,7 +462,7 @@ async fn responses_checkpoint_does_not_resume_a_different_logical_call() {
         String::from_utf8_lossy(&requests[1].body).contains("call B"),
         "the fresh request carries call B's prompt"
     );
-    assert_eq!(completion.response.full_text, "B output");
+    assert_eq!(completion.response.full_text(), "B output");
 }
 
 #[tokio::test]
@@ -683,7 +683,7 @@ async fn responses_resume_keeps_cumulative_usage_as_one_generation_bill() {
         .await
         .expect("the usage-bearing generation resumes");
 
-    assert_eq!(completion.response.full_text, "ab");
+    assert_eq!(completion.response.full_text(), "ab");
     assert_eq!(completion.response.usage.input_tokens, 11);
     assert_eq!(completion.response.usage.output_tokens, 2);
     let cumulative_usage = events

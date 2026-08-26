@@ -13,7 +13,6 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
             reasoning_output_tokens: 0,
         })],
         response: Ok(LlmResponse {
-            full_text: "accounted".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "accounted".to_string(),
                 response_meta: None,
@@ -101,7 +100,6 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
                 reasoning_output_tokens: 0,
             })],
             response: Ok(LlmResponse {
-                full_text: "must not commit".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "must not commit".to_string(),
                     response_meta: None,
@@ -364,7 +362,6 @@ async fn standard_runtime_assembles_stream_only_text_response() {
             }),
         ],
         response: Ok(LlmResponse {
-            full_text: "What time is it?".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "What time is it?".to_string(),
                 response_meta: None,
@@ -572,7 +569,6 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "stopped".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "stopped".to_string(),
                     response_meta: None,
@@ -654,7 +650,6 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "unexpected follow-up".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "unexpected follow-up".to_string(),
                     response_meta: None,
@@ -753,7 +748,6 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "unexpected follow-up".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "unexpected follow-up".to_string(),
                     response_meta: None,
@@ -839,7 +833,6 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
         MockCall {
             stream_events: Vec::new(),
             response: Ok(LlmResponse {
-                full_text: "done".to_string(),
                 parts: vec![LlmOutputPart::Text {
                     text: "done".to_string(),
                     response_meta: None,
@@ -885,7 +878,6 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![],
         response: Ok(LlmResponse {
-            full_text: "Intro paragraph.\n\n## Heading".to_string(),
             parts: vec![
                 LlmOutputPart::Text {
                     text: "Intro paragraph.".to_string(),
@@ -953,7 +945,6 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
             }),
         ],
         response: Ok(LlmResponse {
-            full_text: "Hi".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Hi".to_string(),
                 response_meta: None,
@@ -1001,7 +992,6 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
             }),
         ],
         response: Ok(LlmResponse {
-            full_text: "Hi".to_string(),
             parts: vec![LlmOutputPart::Text {
                 text: "Hi".to_string(),
                 response_meta: None,

@@ -907,7 +907,6 @@ impl Provider for CodexProvider {
             }
             let terminal_reason = openai_terminal_reason_from_response_value(&value, &parts);
             return Ok(LlmResponse {
-                full_text: content,
                 parts,
                 usage,
                 terminal_reason,

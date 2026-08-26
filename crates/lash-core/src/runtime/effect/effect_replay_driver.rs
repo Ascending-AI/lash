@@ -1304,7 +1304,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
                 outcome_json,
                 due_at_ms,
             } => {
-                let outcome = serde_json::from_str(&outcome_json)
+                let outcome = decode_runtime_effect_outcome(&outcome_json)
                     .map_err(|err| vocabulary.decode_error(err))?;
                 Ok(PreparedEffect::ReplayOutcome {
                     outcome: Box::new(outcome),
@@ -1464,6 +1464,65 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
         };
         self.clock.sleep(delay).await;
     }
+}
+
+/// Decode one completed effect outcome, upgrading only the pre-cutover
+/// `LlmResponse.full_text` representation at the durable journal boundary.
+///
+/// Live responses never pass through this function. A legacy text value is
+/// materialized as a response part only when the response's existing parts
+/// project no visible assistant prose; otherwise the parts remain untouched.
+fn decode_runtime_effect_outcome(
+    outcome_json: &str,
+) -> Result<RuntimeEffectOutcome, serde_json::Error> {
+    let mut value: serde_json::Value = serde_json::from_str(outcome_json)?;
+    if let Some(response) = journaled_llm_response_mut(&mut value) {
+        upgrade_legacy_journaled_llm_response(response);
+    }
+    serde_json::from_value(value)
+}
+
+fn journaled_llm_response_mut(value: &mut serde_json::Value) -> Option<&mut serde_json::Value> {
+    match value.get("type").and_then(serde_json::Value::as_str) {
+        Some("llm_call" | "direct") => value.get_mut("result")?.get_mut("Ok"),
+        Some("assistant_response_hooks") => value.get_mut("response"),
+        _ => None,
+    }
+}
+
+fn upgrade_legacy_journaled_llm_response(response: &mut serde_json::Value) {
+    let Some(response) = response.as_object_mut() else {
+        return;
+    };
+    let Some(serde_json::Value::String(full_text)) = response.remove("full_text") else {
+        return;
+    };
+    if full_text.is_empty() {
+        return;
+    }
+
+    let parts_project_no_text = response
+        .get("parts")
+        .cloned()
+        .and_then(|parts| serde_json::from_value::<Vec<crate::LlmOutputPart>>(parts).ok())
+        .is_some_and(|parts| crate::visible_response_text_from_parts(&parts).is_empty());
+    if !parts_project_no_text {
+        return;
+    }
+
+    let Some(parts) = response
+        .get_mut("parts")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    parts.push(
+        serde_json::to_value(crate::LlmOutputPart::Text {
+            text: full_text,
+            response_meta: None,
+        })
+        .expect("LlmOutputPart serialization is infallible"),
+    );
 }
 
 fn sleep_duration_ms(envelope: &RuntimeEffectEnvelope) -> Option<u64> {

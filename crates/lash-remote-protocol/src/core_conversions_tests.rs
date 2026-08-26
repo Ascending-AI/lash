@@ -310,7 +310,6 @@ fn llm_request_and_response_round_trip_owned_dtos() {
         ),
     ]);
     let response = core_llm::LlmResponse {
-        full_text: "done".to_string(),
         parts: vec![core_llm::LlmOutputPart::Text {
             text: "done".to_string(),
             response_meta: None,
@@ -342,7 +341,7 @@ fn llm_request_and_response_round_trip_owned_dtos() {
     remote.validate().expect("valid remote response");
     assert_eq!(remote.provider_metadata.data, response_metadata);
     let core = core_llm::LlmResponse::from(remote);
-    assert_eq!(core.full_text, "done");
+    assert_eq!(core.full_text(), "done");
     assert_eq!(core.terminal_reason, core_llm::LlmTerminalReason::Stop);
     assert_eq!(
         core.execution_evidence

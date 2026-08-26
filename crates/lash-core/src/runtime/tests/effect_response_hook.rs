@@ -34,7 +34,6 @@ fn response_hook_fixture(hook_failures: usize, hook_events: usize) -> ResponseHo
                     let call = provider_calls.fetch_add(1, Ordering::SeqCst) + 1;
                     let text = format!("paid completion {call}");
                     Ok(LlmResponse {
-                        full_text: text.clone(),
                         parts: vec![LlmOutputPart::Text {
                             text,
                             response_meta: None,
@@ -213,7 +212,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
     // The decisive assertion: the paid completion — not our post-processing's
     // opinion of it — is what the journal holds.
     assert_eq!(
-        journaled_raw_completion(&recorder).full_text,
+        journaled_raw_completion(&recorder).full_text(),
         "paid completion 1"
     );
     assert!(
@@ -278,7 +277,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
     );
     assert!(crashed.assistant_output.safe_text.is_empty());
     assert_eq!(
-        journaled_raw_completion(&recorder).full_text,
+        journaled_raw_completion(&recorder).full_text(),
         "paid completion 1",
         "phase 1 was durable before the crash window opened"
     );

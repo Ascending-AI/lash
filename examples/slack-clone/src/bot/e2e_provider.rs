@@ -212,7 +212,6 @@ fn state_path_for_log(root: &Path) -> PathBuf {
 
 fn text(value: &str) -> LlmResponse {
     LlmResponse {
-        full_text: value.to_string(),
         parts: vec![LlmOutputPart::Text {
             text: value.to_string(),
             response_meta: None,

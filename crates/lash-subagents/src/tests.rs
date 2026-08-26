@@ -896,7 +896,6 @@ async fn complete_seed_probe_request(
     if is_child {
         *state.captured_child_prompt.lock_recover() = Some(prompt);
         Ok(LlmResponse {
-            full_text: lashlang_block("finish { len: len(chunk) }"),
             parts: vec![LlmOutputPart::Text {
                 text: lashlang_block("finish { len: len(chunk) }"),
                 response_meta: None,
@@ -906,7 +905,6 @@ async fn complete_seed_probe_request(
         })
     } else {
         Ok(LlmResponse {
-            full_text: state.parent_response.clone(),
             parts: vec![LlmOutputPart::Text {
                 text: state.parent_response.clone(),
                 response_meta: None,

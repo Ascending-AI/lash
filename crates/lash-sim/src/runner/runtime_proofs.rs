@@ -619,11 +619,11 @@ pub(super) fn rlm_final_value_provider() -> ProviderHandle {
                 stream.send(LlmStreamEvent::Delta((*chunk).to_string()));
             }
             let response = text_llm_response(RAW_FINAL);
-            if response.full_text != RAW_FINAL || response_text_part(&response) != Some(RAW_FINAL)
+            if response.full_text() != RAW_FINAL || response_text_part(&response) != Some(RAW_FINAL)
             {
                 return Err(LlmTransportError::new(format!(
                     "rlm final-value fixed response shape changed: expected {:?}, got full_text {:?} parts {:?}",
-                    RAW_FINAL, response.full_text, response.parts
+                    RAW_FINAL, response.full_text(), response.parts
                 )));
             }
             Ok(response)

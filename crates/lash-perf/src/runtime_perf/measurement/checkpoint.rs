@@ -706,7 +706,10 @@ fn checkpoint_pending_llm(
     restored.handle_response(Response::LlmComplete {
         id,
         result: Ok(LlmResponse {
-            full_text: "runtime perf benchmark ok".to_string(),
+            parts: vec![lash_core::LlmOutputPart::Text {
+                text: "runtime perf benchmark ok".to_string(),
+                response_meta: None,
+            }],
             response_metadata: Default::default(),
             ..LlmResponse::default()
         }),
