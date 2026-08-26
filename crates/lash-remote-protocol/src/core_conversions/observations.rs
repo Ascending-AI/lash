@@ -228,6 +228,7 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
 
     fn try_from(value: lash_core::TurnEvent) -> Result<Self, RemoteProtocolError> {
         match value {
+            lash_core::TurnEvent::TurnStarted { turn_id } => Ok(Self::TurnStarted { turn_id }),
             lash_core::TurnEvent::QueuedWorkStarted {
                 boundary,
                 batch_ids,

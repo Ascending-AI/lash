@@ -1270,6 +1270,118 @@ async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<(
     Ok(())
 }
 
+fn assert_turn_started_first(activities: &[TurnActivity], expected_turn_id: &str) {
+    let starts = activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::TurnStarted { turn_id } => Some(turn_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(starts, vec![expected_turn_id]);
+    assert!(matches!(
+        activities.first().map(|activity| &activity.event),
+        Some(TurnEvent::TurnStarted { turn_id }) if turn_id == expected_turn_id
+    ));
+}
+
+#[tokio::test]
+async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session_id = "queued-builder-turn-starts";
+    let session = core.session(session_id).open().await?;
+    let controller = RecordingInlineEffectController::default();
+
+    session
+        .enqueue(TurnInput::text("automatic queued builder"))
+        .id("automatic-queued-input")
+        .send()
+        .await?;
+    let automatic = session
+        .queued_turn()
+        .turn_id("automatic-queued-turn")
+        .run()
+        .await?
+        .expect("automatic queued turn");
+    assert_turn_started_first(&automatic.activities, "automatic-queued-turn");
+
+    session
+        .enqueue(TurnInput::text("scoped automatic queued builder"))
+        .id("scoped-automatic-queued-input")
+        .send()
+        .await?;
+    let scoped_automatic = session
+        .queued_turn()
+        .turn_id("scoped-automatic-queued-turn")
+        .effects(&controller)
+        .run()
+        .await?
+        .expect("scoped automatic queued turn");
+    assert_turn_started_first(&scoped_automatic.activities, "scoped-automatic-queued-turn");
+
+    let store = store_factory
+        .raw_store_for_testing(session_id)
+        .expect("opened session retains its in-memory store");
+    let selected = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    lash_core::facade_support::frame_node_id(session_id, "selected-start"),
+                    "selected queued builder",
+                    None,
+                )],
+            )
+            .with_source_key("selected-turn-start"),
+        )
+        .await?;
+    let selected_output = session
+        .queued_turn()
+        .batch_ids([selected.batch_id])
+        .turn_id("selected-queued-turn")
+        .run()
+        .await?
+        .turn
+        .expect("selected queued turn");
+    assert_turn_started_first(&selected_output.activities, "selected-queued-turn");
+
+    let scoped_selected = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                session_id,
+                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
+                vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
+                    lash_core::facade_support::frame_node_id(session_id, "scoped-selected-start"),
+                    "scoped selected queued builder",
+                    None,
+                )],
+            )
+            .with_source_key("scoped-selected-turn-start"),
+        )
+        .await?;
+    let scoped_selected_output = session
+        .queued_turn()
+        .effects(&controller)
+        .batch_ids([scoped_selected.batch_id])
+        .turn_id("scoped-selected-queued-turn")
+        .run()
+        .await?
+        .turn
+        .expect("scoped selected queued turn");
+    assert_turn_started_first(
+        &scoped_selected_output.activities,
+        "scoped-selected-queued-turn",
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Result<()> {
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -1333,6 +1445,66 @@ async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Result<()> {
         }) if request_id == "pre-dispatch-cancel-request"
             && origin == "test-host"
             && reason == "cancel before queued dispatch"
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_started_identity_targets_cancellation_from_pull_stream() -> Result<()> {
+    let provider = crate::testing::TestProvider::builder()
+        .kind("turn-started-cancel-target")
+        .complete(|_| async {
+            std::future::pending::<()>().await;
+            unreachable!("provider future should be dropped by exact cancellation")
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(provider)
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .disable_queued_work_driver()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("turn-started-cancel-target").open().await?;
+    let expected_turn_id = "turn-started-cancel-target-id";
+    let mut stream = session
+        .turn(TurnInput::text("wait for exact cancellation"))
+        .turn_id(expected_turn_id)
+        .stream()?;
+
+    let first = stream.next().await.expect("turn start activity")?;
+    let TurnEvent::TurnStarted { turn_id } = first.event else {
+        panic!("first pull-stream activity must deliver turn identity");
+    };
+    assert_eq!(turn_id, expected_turn_id);
+    let receipt = session
+        .request_turn_cancel(
+            &turn_id,
+            "turn-started-cancel-request",
+            Some("pull-stream-host".to_string()),
+            Some("cancel from first activity".to_string()),
+        )
+        .await?;
+    assert!(matches!(
+        receipt.outcome,
+        crate::TurnCancelOutcome::Requested(ref evidence)
+            if evidence.request_id == "turn-started-cancel-request"
+    ));
+
+    let report = stream.finish().await?;
+    assert!(matches!(
+        report.outcome,
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
+    ));
+    assert!(matches!(
+        report.cancellation(),
+        Some(lash_core::facade_support::TurnCancellationEvidence {
+            request_id,
+            origin: Some(origin),
+            ..
+        }) if request_id == "turn-started-cancel-request" && origin == "pull-stream-host"
     ));
     Ok(())
 }
@@ -3085,6 +3257,19 @@ async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -
         })
         .collect::<Vec<_>>();
     assert!(!turn_activity.is_empty(), "turn emitted no activity");
+    let lash_core::SessionObservationEventPayload::TurnActivity(first_activity) =
+        &turn_activity[0].payload
+    else {
+        unreachable!("turn_activity contains only activity payloads");
+    };
+    assert!(
+        matches!(
+            &first_activity.event,
+            TurnEvent::TurnStarted { turn_id } if turn_id == "observation-turn"
+        ),
+        "replay must begin with the identity event, got {:?}",
+        first_activity.event
+    );
     assert!(
         turn_activity
             .iter()
@@ -8367,15 +8552,34 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
         .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
+    let activities = RecordingEvents::default();
     let output = session
         .turn(TurnInput::text("switch frames"))
         .turn_id(root_turn_id)
         .advanced()
-        .run_with_scope(scoped_effect_controller)
+        .stream_to_with_scope(&activities, scoped_effect_controller)
         .await?;
 
     assert_eq!(output.assistant_message(), Some("done after frame switch"));
     let follow_turn_id = format!("{root_turn_id}:agent-frame:1");
+    let activities = activities.snapshot().await;
+    let started = activities
+        .iter()
+        .enumerate()
+        .filter_map(|(index, activity)| match &activity.event {
+            TurnEvent::TurnStarted { turn_id } => Some((index, turn_id.as_str())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(started.first().map(|(index, _)| *index), Some(0));
+    assert_eq!(
+        started
+            .iter()
+            .map(|(_, turn_id)| *turn_id)
+            .collect::<Vec<_>>(),
+        vec![root_turn_id, follow_turn_id.as_str()],
+        "each physical frame turn must announce its own identity exactly once"
+    );
     let mut llm_turn_ids = controller
         .invocations()
         .into_iter()

@@ -418,7 +418,21 @@ pub(in crate::runtime) fn turn_input_completion_trace_payload(
     })
 }
 
-async fn emit_queued_work_started_to_sink(
+pub(in crate::runtime) async fn emit_turn_started_to_sink(
+    events: &dyn TurnActivitySink,
+    turn_id: &str,
+) {
+    emit_turn_activity_to_sink_for_turn(
+        events,
+        turn_id,
+        TurnActivity::independent(TurnEvent::TurnStarted {
+            turn_id: turn_id.to_string(),
+        }),
+    )
+    .await;
+}
+
+pub(in crate::runtime) async fn emit_queued_work_started_to_sink(
     events: &dyn TurnActivitySink,
     turn_id: &str,
     boundary: crate::QueuedWorkClaimBoundary,
@@ -2471,14 +2485,6 @@ impl LashRuntime {
             .unwrap_or_else(|| opts.execution_scope_id().to_owned());
         work.input.trace_turn_id = Some(turn_id.clone());
         let causes = work.turn_causes.clone();
-        emit_queued_work_started_to_sink(
-            opts.turn_events_or_noop(),
-            &turn_id,
-            crate::QueuedWorkClaimBoundary::Idle,
-            &claim,
-            causes.clone(),
-        )
-        .await;
         crate::trace::emit_trace(
             &self.host.core.tracing.trace_sink,
             &self.host.core.tracing.trace_context,

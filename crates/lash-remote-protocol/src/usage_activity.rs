@@ -88,6 +88,9 @@ impl RemoteTurnActivity {
         require_non_empty("RemoteTurnActivity", "id", &self.id)?;
         require_non_empty("RemoteTurnActivity", "correlation_id", &self.correlation_id)?;
         match &self.event {
+            RemoteTurnEvent::TurnStarted { turn_id } => {
+                require_non_empty("RemoteTurnEvent::TurnStarted", "turn_id", turn_id)?;
+            }
             RemoteTurnEvent::TurnInputApplied { applications } => {
                 for application in applications {
                     application.validate()?;
@@ -103,6 +106,9 @@ impl RemoteTurnActivity {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteTurnEvent {
+    TurnStarted {
+        turn_id: String,
+    },
     ModelRequestStarted {
         protocol_iteration: usize,
     },

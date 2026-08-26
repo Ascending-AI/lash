@@ -802,6 +802,8 @@ lash::TurnEvent::ToolIntentOutcome::outcome
 lash::TurnEvent::ToolValue
 lash::TurnEvent::ToolValue::tool_name
 lash::TurnEvent::ToolValue::value
+lash::TurnEvent::TurnStarted
+lash::TurnEvent::TurnStarted::turn_id
 lash::TurnEvent::Usage
 lash::TurnEvent::Usage::cumulative
 lash::TurnEvent::Usage::protocol_iteration
@@ -4366,6 +4368,8 @@ lash::prelude::TurnEvent::ToolIntentOutcome::outcome
 lash::prelude::TurnEvent::ToolValue
 lash::prelude::TurnEvent::ToolValue::tool_name
 lash::prelude::TurnEvent::ToolValue::value
+lash::prelude::TurnEvent::TurnStarted
+lash::prelude::TurnEvent::TurnStarted::turn_id
 lash::prelude::TurnEvent::Usage
 lash::prelude::TurnEvent::Usage::cumulative
 lash::prelude::TurnEvent::Usage::protocol_iteration
@@ -6877,6 +6881,8 @@ lash::remote::usage::RemoteTurnEvent::ToolValue::tool_name
 lash::remote::usage::RemoteTurnEvent::ToolValue::value
 lash::remote::usage::RemoteTurnEvent::TurnInputApplied
 lash::remote::usage::RemoteTurnEvent::TurnInputApplied::applications
+lash::remote::usage::RemoteTurnEvent::TurnStarted
+lash::remote::usage::RemoteTurnEvent::TurnStarted::turn_id
 lash::remote::usage::RemoteTurnEvent::Usage
 lash::remote::usage::RemoteTurnEvent::Usage::cumulative
 lash::remote::usage::RemoteTurnEvent::Usage::protocol_iteration

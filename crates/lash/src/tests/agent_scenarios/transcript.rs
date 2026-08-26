@@ -189,7 +189,11 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &str) -> Option<Entr
             Entry::new(Kind::Outcome, actor(), "turn.error").attr(Attr::text("error", message))
         }
         // Provider-wire volume and plugin chatter: see the module doc.
-        lash_core::TurnEvent::QueuedWorkStarted { .. }
+        // `agent_scenario_transcript` records one normalized `turn.start`
+        // boundary before folding activities, so the identity-bearing wire
+        // event must not duplicate that semantic line.
+        lash_core::TurnEvent::TurnStarted { .. }
+        | lash_core::TurnEvent::QueuedWorkStarted { .. }
         | lash_core::TurnEvent::AssistantProseDelta { .. }
         | lash_core::TurnEvent::ReasoningDelta { .. }
         | lash_core::TurnEvent::ModelCallRecorded { .. }

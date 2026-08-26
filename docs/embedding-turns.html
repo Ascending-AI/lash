@@ -111,7 +111,7 @@ pub enum TurnFinish {
           </div>
           <div class="callout">
             <strong>Three event types, only one is for your app.</strong>
-            <p>Apps consume <code>TurnActivity</code>: <code>id</code>, <code>correlation_id</code>, and a <code>TurnEvent</code> payload. Hosts do not subscribe to lower-level runtime/debug graph events. There is no app-facing final-message event enum contract. Sinks match only on <code>TurnEvent</code>.</p>
+            <p>Apps consume <code>TurnActivity</code>: <code>id</code>, <code>correlation_id</code>, and a <code>TurnEvent</code> payload. Every physical turn begins with <code>TurnStarted { turn_id }</code>; use that identity for exact cancellation and steering instead of harvesting the first incidental activity or overriding <code>emit_for_turn</code>. Hosts do not subscribe to lower-level runtime/debug graph events. There is no app-facing final-message event enum contract. Sinks match only on <code>TurnEvent</code>.</p>
           </div>
           <div class="callout">
             <strong>Turn streams are not reconnect cursors.</strong>
