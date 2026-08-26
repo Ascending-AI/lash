@@ -5857,10 +5857,19 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
         .expect("queued turn");
 
     let events = turn_events.snapshot();
+    let crate::TurnEvent::TurnStarted { turn_id } = &events
+        .first()
+        .expect("queued turn emitted no activity")
+        .event
+    else {
+        panic!("queued turn must begin with TurnStarted");
+    };
+    assert_eq!(turn_id, "queued-work-started-turn");
     let queued_started = events
         .iter()
         .position(|activity| matches!(&activity.event, crate::TurnEvent::QueuedWorkStarted { .. }))
         .expect("queued work started event");
+    assert_eq!(queued_started, 1, "claim facts must follow turn identity");
     let model_started = events
         .iter()
         .position(|activity| {

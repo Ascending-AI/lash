@@ -75,7 +75,7 @@ async fn pull_one_turn(session: &amp;LashSession) -&gt; anyhow::Result&lt;lash::
 
     Ok(stream.finish().await?)
 }</code></pre>
-    <p>Use <code>stream_to</code> when you already have a sink object, <code>stream</code> when you want a pull-style <code>futures_util::Stream</code>, and <code>run</code> when you only need the collected <code>TurnOutput</code>. <code>TurnStream</code> implements <code>Stream&lt;Item = Result&lt;TurnActivity&gt;&gt;</code>; <code>next_activity()</code> is a compatibility wrapper. <code>stream_to</code> awaits the sink's <code>emit()</code>. If a UI transport can block, push into a bounded channel and drain it from a separate task; the channel bound becomes your backpressure policy.</p>
+    <p>Use <code>stream_to</code> when you already have a sink object, <code>stream</code> when you want a pull-style <code>futures_util::Stream</code>, and <code>run</code> when you only need the collected <code>TurnOutput</code>. Every physical turn's first activity is <code>TurnStarted { turn_id }</code>. Store that value as the active exact cancellation/steering target; do not infer identity from a later prose, tool, or queued-work event. Derived Agent Frame turns announce their own physical ids the same way. <code>TurnStream</code> implements <code>Stream&lt;Item = Result&lt;TurnActivity&gt;&gt;</code>; <code>next_activity()</code> is a compatibility wrapper. <code>stream_to</code> awaits the sink's <code>emit()</code>. If a UI transport can block, push into a bounded channel and drain it from a separate task; the channel bound becomes your backpressure policy.</p>
   </div>
 
   <div class="section" id="session-reconnect">
@@ -163,6 +163,10 @@ async fn reconnect_session(
     }
 }</code></pre>
     <div class="listing">
+      <div class="listing__row">
+        <div class="listing__label">turn identity</div>
+        <div class="listing__body"><p><code>TurnStarted.turn_id</code> is the first event and the host's exact control target. Session-observation envelopes repeat the same id for routing and reconnect filtering; turn-local and collected streams rely on the payload itself.</p></div>
+      </div>
       <div class="listing__row">
         <div class="listing__label">row identity</div>
         <div class="listing__body"><p>Use <code>TurnActivity.correlation_id</code> for stable rows. Tool start/complete, code start/complete, reasoning, and terminal values should update the same logical UI row when they share a correlation id.</p></div>

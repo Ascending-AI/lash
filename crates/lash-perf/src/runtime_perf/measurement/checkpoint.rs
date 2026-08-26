@@ -505,7 +505,7 @@ async fn run_once_durable_checkpoint_curve(
                 })
                 .await?;
             fixture.runtime_state = loaded_state;
-            let work = work_collector.snapshot();
+            let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();
             drop(work_collector);
 
             for (name, phase) in [

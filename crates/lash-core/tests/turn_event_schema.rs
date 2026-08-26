@@ -42,6 +42,7 @@ macro_rules! turn_event_tags {
 }
 
 turn_event_tags! {
+    TurnStarted => "turn_started",
     QueuedWorkStarted => "queued_work_started",
     ModelRequestStarted => "model_request_started",
     AssistantProseDelta => "assistant_prose_delta",
@@ -89,6 +90,16 @@ fn token_usage_json() -> serde_json::Value {
 /// the pins cover both the present and absent-when-`None` encodings.
 fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
     vec![
+        (
+            "turn_started",
+            TurnEvent::TurnStarted {
+                turn_id: "turn-1".to_string(),
+            },
+            json!({
+                "type": "turn_started",
+                "turn_id": "turn-1",
+            }),
+        ),
         (
             "queued_work_started",
             TurnEvent::QueuedWorkStarted {

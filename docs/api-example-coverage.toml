@@ -24,7 +24,7 @@ schema_version = 1
 # attribute, makes both directions of drift explicit -- a new hidden support
 # module cannot carry paths until it is added, and un-hiding one does not drop
 # the paths it already published.
-gated_core_modules = ["facade_support", "store_backend_support", "test_support"]
+gated_core_modules = ["facade_support", "perf_witness", "store_backend_support", "test_support"]
 
 # The number of removal-verdict tombstones at the end of this file. Pinning it
 # here makes dropping one an edit a reviewer sees rather than a line that
@@ -7372,6 +7372,24 @@ aliases = ["lash::prelude::TurnEvent::ToolValue::value", "lash_core::TurnEvent::
 area = "plugins"
 disposition = "used-unasserted"
 usage = "examples/docs-snippets/src/plugins_facade.rs:147#field_witness(|value: &lash::TurnEvent| {"
+
+[[api]]
+symbol = "lash::TurnEvent::TurnStarted"
+kind = "variant"
+availability = "default+all-features"
+aliases = ["lash::prelude::TurnEvent::TurnStarted", "lash_core::TurnEvent::TurnStarted"]
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:231#lash_core::TurnEvent::TurnStarted { turn_id } => Ok(Self::TurnStarted { turn_id }),"
+
+[[api]]
+symbol = "lash::TurnEvent::TurnStarted::turn_id"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash::prelude::TurnEvent::TurnStarted::turn_id", "lash_core::TurnEvent::TurnStarted::turn_id"]
+area = "sessions-turns"
+disposition = "internal-consumed"
+usage = "crates/lash-remote-protocol/src/core_conversions/observations.rs:231#lash_core::TurnEvent::TurnStarted { turn_id } => Ok(Self::TurnStarted { turn_id }),"
 
 [[api]]
 symbol = "lash::TurnEvent::Usage"
@@ -44711,6 +44729,22 @@ disposition = "unused-add"
 reason = "Add lash::remote::usage::RemoteTurnEvent::TurnInputApplied::applications to the agent-service recovery/operations flow example and assert its externally observable result."
 
 [[api]]
+symbol = "lash::remote::usage::RemoteTurnEvent::TurnStarted"
+kind = "variant"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: remote activity streams mirror the first-class turn identity so process-boundary consumers can target cancellation and steering before later activity arrives."
+
+[[api]]
+symbol = "lash::remote::usage::RemoteTurnEvent::TurnStarted::turn_id"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "unused-justify"
+reason = "Concrete host class: the remote activity DTO carries the physical turn identity for standalone streams whose enclosing message has no turn-id field."
+
+[[api]]
 symbol = "lash::remote::usage::RemoteTurnEvent::Usage"
 kind = "variant"
 availability = "default+all-features"
@@ -72574,6 +72608,94 @@ area = "processes"
 disposition = "internal-test-only"
 usage = "crates/lash-restate/src/tests.rs:2743#lash_core::drive_with_event_pump("
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+
+[[api]]
+symbol = "lash_core::perf_witness::AlreadyInstalled"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:441#let work_collector = lash_core::perf_witness::Collector::install()?;"
+
+[[api]]
+symbol = "lash_core::perf_witness::Collector"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:441#let work_collector = lash_core::perf_witness::Collector::install()?;"
+
+[[api]]
+symbol = "lash_core::perf_witness::Collector::install"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:441#let work_collector = lash_core::perf_witness::Collector::install()?;"
+
+[[api]]
+symbol = "lash_core::perf_witness::Collector::snapshot"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:508#let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();"
+
+[[api]]
+symbol = "lash_core::perf_witness::Snapshot"
+kind = "struct"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:508#let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();"
+
+[[api]]
+symbol = "lash_core::perf_witness::Snapshot::body_copy_passes"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:529#(\"runtime_body_copy_count\", work.body_copy_passes),"
+
+[[api]]
+symbol = "lash_core::perf_witness::Snapshot::copied_bytes"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:530#(\"runtime_body_copy_bytes\", work.copied_bytes),"
+
+[[api]]
+symbol = "lash_core::perf_witness::Snapshot::hash_passes"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:527#(\"runtime_hash_count\", work.hash_passes),"
+
+[[api]]
+symbol = "lash_core::perf_witness::Snapshot::hashed_bytes"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:528#(\"runtime_hash_bytes\", work.hashed_bytes),"
+
+[[api]]
+symbol = "lash_core::perf_witness::record_body_copy"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/blobs.rs:274#lash_core::perf_witness::record_body_copy(body.len());"
+
+[[api]]
+symbol = "lash_core::perf_witness::record_hash_pass"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-sqlite-store/src/blobs.rs:117#lash_core::perf_witness::record_hash_pass(body.len());"
 
 [[api]]
 symbol = "lash_core::facade_support::AgentFrameReasonFacadeOps"

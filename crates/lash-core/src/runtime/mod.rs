@@ -996,6 +996,16 @@ impl TurnActivity {
 // justification: public turn events are transient stream DTOs kept inline for allocation-free emission and stable pattern matching.
 #[allow(clippy::large_enum_variant)]
 pub enum TurnEvent {
+    /// Announces the physical turn identity before any other activity from
+    /// that turn.
+    ///
+    /// Hosts use this identity for exact cancellation and steering targets;
+    /// they must not infer it from whichever incidental activity happens to
+    /// arrive first. Session-observation envelopes also carry `turn_id`, but
+    /// the payload keeps it available to turn-local and collected streams.
+    TurnStarted {
+        turn_id: String,
+    },
     QueuedWorkStarted {
         boundary: crate::QueuedWorkClaimBoundary,
         batch_ids: Vec<String>,

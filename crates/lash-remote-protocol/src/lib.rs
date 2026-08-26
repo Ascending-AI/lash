@@ -32,6 +32,9 @@ pub use turn_input::*;
 pub use turn_result::*;
 pub use usage_activity::*;
 
+// Bumped to 48: `RemoteTurnEvent` gains the first-class `TurnStarted` identity
+// contract. A version 47 peer has no name for the first activity in every turn,
+// so exact negotiation rejects it before a stream is partially decoded.
 // Bumped to 40: `RemoteRuntimeEffectKind` gains `AssistantResponseHooks`, the
 // second phase of the staged LLM-call effect boundary (FIG-1276). A version 39
 // peer has no such variant and fails to decode any effect projection carrying
@@ -106,7 +109,7 @@ pub use usage_activity::*;
 // disposition. Older peers would silently apply the legacy defer policy.
 // Bumped to 47: one generic envelope owns the remote protocol version instead
 // of duplicating it across each request, response, and nested body.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 47;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 48;
 
 /// One versioned remote-protocol message.
 ///

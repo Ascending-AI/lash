@@ -913,6 +913,36 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
 }
 
 #[test]
+fn turn_started_has_pinned_wire_shape_and_non_empty_identity() {
+    let mut activity = RemoteTurnActivity {
+        sequence: 0,
+        id: "turn-start-event".to_string(),
+        correlation_id: "turn-start-correlation".to_string(),
+        event: RemoteTurnEvent::TurnStarted {
+            turn_id: "physical-turn".to_string(),
+        },
+    };
+
+    assert_eq!(
+        serde_json::to_value(Envelope::new(activity.clone())).expect("serialize turn start"),
+        serde_json::json!({
+            "protocol_version": REMOTE_PROTOCOL_VERSION,
+            "sequence": 0,
+            "id": "turn-start-event",
+            "correlation_id": "turn-start-correlation",
+            "type": "turn_started",
+            "turn_id": "physical-turn",
+        })
+    );
+    activity.validate().expect("non-empty turn identity");
+    let RemoteTurnEvent::TurnStarted { turn_id } = &mut activity.event else {
+        unreachable!("constructed turn start activity")
+    };
+    turn_id.clear();
+    assert!(activity.validate().is_err());
+}
+
+#[test]
 fn model_attempt_reset_has_pinned_wire_shape() {
     let activity = RemoteTurnActivity {
         sequence: 3,
@@ -1335,7 +1365,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 47,
+            "protocol_version": 48,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1350,7 +1380,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 47,
+            actual: 48,
             expected: 41,
         }
     ));
@@ -1376,7 +1406,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 47, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 48, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: "process:1".to_string(),
         input: RemoteProcessInput::External {
@@ -1690,7 +1720,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 47,
+            expected: 48,
         })
     ));
 }
@@ -1730,7 +1760,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 47,
+                expected: 48,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1766,7 +1796,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 47,
+                expected: 48,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1822,7 +1852,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 47,
+                expected: 48,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1854,7 +1884,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 47,
+                expected: 48,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"

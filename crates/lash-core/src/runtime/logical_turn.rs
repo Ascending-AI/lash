@@ -145,6 +145,25 @@ impl LogicalTurnStart {
 }
 
 impl LashRuntime {
+    async fn emit_physical_turn_start(
+        turn_events: &dyn TurnActivitySink,
+        turn_id: &str,
+        claims: &LogicalTurnClaims,
+    ) {
+        super::turn_loop::emit_turn_started_to_sink(turn_events, turn_id).await;
+        for claim in &claims.queued {
+            let work = claim.materialize_queued_turn_work();
+            super::turn_loop::emit_queued_work_started_to_sink(
+                turn_events,
+                turn_id,
+                crate::QueuedWorkClaimBoundary::Idle,
+                claim,
+                work.turn_causes,
+            )
+            .await;
+        }
+    }
+
     fn record_follow_on_failure(&mut self, turns: &mut [AssembledTurn], err: RuntimeError) {
         self.invalidate_resident_session_state();
         turns
@@ -215,6 +234,7 @@ impl LashRuntime {
             } else {
                 TurnStopwatch::start(self.host.core.clock.as_ref())
             };
+            Self::emit_physical_turn_start(turn_events, &turn_trace_turn_id, &claims).await;
             let execution_result = match start {
                 LogicalTurnStart::Input(mut input) => {
                     input.trace_turn_id = Some(turn_trace_turn_id.clone());
@@ -455,6 +475,8 @@ impl LashRuntime {
                     }
                 };
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
+                Self::emit_physical_turn_start(turn_events, &terminal_trace_turn_id, &next_claims)
+                    .await;
                 let terminal_result = Box::pin(self.finish_logical_turn_error(
                         format!(
                             "logical turn exceeded the limit of {MAX_AGENT_FRAME_SWITCHES} agent frame switches"
