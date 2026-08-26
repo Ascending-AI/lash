@@ -532,6 +532,7 @@ async fn measure_process_prune(
     turn_index: usize,
     phase_profile: &mut BTreeMap<String, RuntimePerfPhaseRunResult>,
 ) -> anyhow::Result<()> {
+    let prune_scope = format!("perf-prune:{run_id}:{turn_index}");
     for index in 0..HARDENING_PRUNE_BATCH {
         let process_id = format!("perf-prune-{backend}-{run_id}-{turn_index}-{index}");
         registry
@@ -541,7 +542,9 @@ async fn measure_process_prune(
                     metadata: serde_json::json!({"index": index}),
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
+                lash_core::ProcessProvenance::new(
+                    lash_core::ProcessOriginator::host_scoped(&prune_scope),
+                ),
             ))
             .await?;
         registry
@@ -556,7 +559,15 @@ async fn measure_process_prune(
     }
     let (report, phase) = measure_runtime_perf_async_phase(phase_name, async {
         registry
-            .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+            .prune_terminal_processes(
+                u64::MAX,
+                Some(lash_core::ProcessListFilter {
+                    status: lash_core::ProcessStatusFilter::Any,
+                    originator_id: Some(format!("host:{prune_scope}")),
+                    ..lash_core::ProcessListFilter::default()
+                }),
+                lash_core::ProjectionWatermark::NoProjector,
+            )
             .await
             .map_err(anyhow::Error::from)
     })
@@ -607,5 +618,71 @@ fn store_hardening_usage(turn_index: usize) -> lash_core::TokenLedgerEntry {
             cache_write_input_tokens: 4,
             reasoning_output_tokens: 5,
         },
+    }
+}
+
+#[cfg(test)]
+mod store_hardening_tests {
+    use super::*;
+    use lash_core::ProcessRegistry;
+
+    #[tokio::test]
+    async fn process_prune_is_scoped_to_the_hardening_batch() {
+        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let unrelated_process_id = "perf-prune-unrelated";
+        registry
+            .register_process(lash_core::ProcessRegistration::new(
+                unrelated_process_id,
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::json!({}),
+                },
+                lash_core::RecoveryContract::ExternallyOwned,
+                lash_core::ProcessProvenance::new(
+                    lash_core::ProcessOriginator::host_scoped("unrelated"),
+                ),
+            ))
+            .await
+            .expect("register unrelated process");
+        registry
+            .complete_process(
+                unrelated_process_id,
+                lash_core::ProcessAwaitOutput::from_tool_output(
+                    lash_core::ToolCallOutput::success(serde_json::json!({})),
+                ),
+                lash_core::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete unrelated process");
+
+        let mut phase_profile = BTreeMap::new();
+        let scoped_before = registry
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            })
+            .await
+            .expect("list processes before prune");
+        assert_eq!(scoped_before.len(), 1);
+        measure_process_prune(
+            &(registry.clone() as Arc<dyn lash_core::ProcessRegistry>),
+            "test.process_prune",
+            "test",
+            "run",
+            0,
+            &mut phase_profile,
+        )
+        .await
+        .expect("prune hardening batch");
+
+        let remaining = registry
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                originator_id: Some("host:unrelated".to_string()),
+                ..lash_core::ProcessListFilter::default()
+            })
+            .await
+            .expect("list unrelated process");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, unrelated_process_id);
     }
 }
