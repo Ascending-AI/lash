@@ -1121,13 +1121,46 @@ pub(crate) fn durable_sqlite_session_store_factory(
     Arc<dyn lash_core::SessionStoreFactory>,
     Arc<RuntimePerfStoreMetrics>,
 ) {
+    durable_sqlite_session_store_factory_with_commit_measurement(
+        sessions_root,
+        process_registry_path,
+        true,
+    )
+}
+
+pub(crate) fn durable_sqlite_session_store_factory_without_commit_measurement(
+    sessions_root: PathBuf,
+    process_registry_path: &std::path::Path,
+) -> (
+    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<RuntimePerfStoreMetrics>,
+) {
+    durable_sqlite_session_store_factory_with_commit_measurement(
+        sessions_root,
+        process_registry_path,
+        false,
+    )
+}
+
+fn durable_sqlite_session_store_factory_with_commit_measurement(
+    sessions_root: PathBuf,
+    process_registry_path: &std::path::Path,
+    measure_commit_bytes: bool,
+) -> (
+    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<RuntimePerfStoreMetrics>,
+) {
     let inner: Arc<dyn lash_core::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
             sessions_root,
             process_registry_path,
         ),
     );
-    let factory = RuntimePerfStoreFactory::decorating(inner);
+    let factory = if measure_commit_bytes {
+        RuntimePerfStoreFactory::decorating(inner)
+    } else {
+        RuntimePerfStoreFactory::decorating_without_commit_measurement(inner)
+    };
     let metrics = factory.metrics();
     (Arc::new(factory), metrics)
 }
@@ -1138,9 +1171,32 @@ pub(crate) fn durable_postgres_session_store_factory(
     Arc<dyn lash_core::SessionStoreFactory>,
     Arc<RuntimePerfStoreMetrics>,
 ) {
+    durable_postgres_session_store_factory_with_commit_measurement(postgres, true)
+}
+
+pub(crate) fn durable_postgres_session_store_factory_without_commit_measurement(
+    postgres: &lash_postgres_store::PostgresStorage,
+) -> (
+    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<RuntimePerfStoreMetrics>,
+) {
+    durable_postgres_session_store_factory_with_commit_measurement(postgres, false)
+}
+
+fn durable_postgres_session_store_factory_with_commit_measurement(
+    postgres: &lash_postgres_store::PostgresStorage,
+    measure_commit_bytes: bool,
+) -> (
+    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<RuntimePerfStoreMetrics>,
+) {
     let inner: Arc<dyn lash_core::SessionStoreFactory> =
         Arc::new(postgres.session_store_factory_with_shared_process_registry());
-    let factory = RuntimePerfStoreFactory::decorating(inner);
+    let factory = if measure_commit_bytes {
+        RuntimePerfStoreFactory::decorating(inner)
+    } else {
+        RuntimePerfStoreFactory::decorating_without_commit_measurement(inner)
+    };
     let metrics = factory.metrics();
     (Arc::new(factory), metrics)
 }
@@ -1223,11 +1279,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     } else {
         durable_sqlite_session_store_factory(sessions_root, &process_db)
     };
-    let commit_budget = if scenario.is_checkpoint_curve() {
-        lash::CommitBudget::bounded(8 * 1024 * 1024, 2_048)
-    } else {
-        lash::CommitBudget::bounded(1024 * 1024, 512)
-    };
+    let commit_budget = lash::CommitBudget::bounded(1024 * 1024, 512);
     let core = match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
@@ -1321,11 +1373,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let trigger_store = Arc::new(postgres.trigger_store());
     let (store_factory, store_metrics) = durable_postgres_session_store_factory(&postgres);
     let attachment_store = Arc::new(lash::persistence::InMemoryAttachmentStore::new());
-    let commit_budget = if scenario.is_checkpoint_curve() {
-        lash::CommitBudget::bounded(8 * 1024 * 1024, 2_048)
-    } else {
-        lash::CommitBudget::bounded(1024 * 1024, 512)
-    };
+    let commit_budget = lash::CommitBudget::bounded(1024 * 1024, 512);
     let mut plugin_stack = standard_tool_stack(StandardToolStackOptions {
         standard_context_approach: scenario.standard_context_approach(),
         tavily_api_key: None,

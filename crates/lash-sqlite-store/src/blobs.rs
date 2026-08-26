@@ -113,6 +113,8 @@ impl Store {
                     body,
                     profile,
                 )?;
+                #[cfg(feature = "perf-witness")]
+                lash_core::perf_witness::record_hash_pass(body.len());
                 lash_core::store::ensure_checkpoint_component_hash_agreement(
                     key,
                     &stored_ref,
@@ -261,13 +263,15 @@ impl Store {
         let bodies = Self::checkpoint_component_bodies_conn(conn, &record)?;
         let mut components = std::collections::BTreeMap::new();
         for (key, descriptor) in &record.components {
-            let bytes = bodies
-                .get(descriptor.blob_ref.as_str())
-                .cloned()
-                .ok_or_else(|| StoreError::CheckpointComponentMissing {
+            let body = bodies.get(descriptor.blob_ref.as_str()).ok_or_else(|| {
+                StoreError::CheckpointComponentMissing {
                     key: key.clone(),
                     blob_ref: descriptor.blob_ref.clone(),
-                })?;
+                }
+            })?;
+            let bytes = body.clone();
+            #[cfg(feature = "perf-witness")]
+            lash_core::perf_witness::record_body_copy(body.len());
             components.insert(
                 key.clone(),
                 lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),

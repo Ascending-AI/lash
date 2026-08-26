@@ -20,6 +20,9 @@ name = "lash_core"
 # Keep core portable by default.
 default = []
 otel-trace = ["lash-trace/otel"]
+# Internal performance instrumentation. Production builds leave every call
+# site compiled out unless an internal witness explicitly enables this feature.
+perf-witness = []
 # Expose `lash::testing` for downstream plugin crates to share mock
 # session-manager/turn fixtures with lash's own tests.
 testing = ["dep:proptest"]

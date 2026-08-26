@@ -8,8 +8,8 @@ use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
 use crate::perf_support::stack::StackProfile;
 use crate::runtime_perf::measurement::{
-    CheckpointCurveAxis, CheckpointCurveConfig, HighTrafficConfig, RuntimePerfPhaseProbe,
-    checkpoint_curve_points, phase_name, run_once,
+    CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY_FLOOR, CheckpointCurveAxis, CheckpointCurveConfig,
+    HighTrafficConfig, RuntimePerfPhaseProbe, checkpoint_curve_points, phase_name, run_once,
 };
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 
@@ -479,10 +479,10 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
             "manifest_count",
             "changed_body_count",
             "changed_body_bytes",
-            "serialize_hash_count",
-            "serialize_hash_bytes",
-            "staging_copy_count",
-            "staging_copy_bytes",
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
         ] {
             assert_eq!(
                 result
@@ -508,14 +508,37 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
                 |metric: &str| result.metric_samples[&format!("{prefix}.{metric}")][sample] as u64;
             let changed_count = value("changed_body_count");
             let changed_bytes = value("changed_body_bytes");
-            assert_eq!(
-                value("serialize_hash_count"),
-                changed_count * 2,
-                "{prefix} sample {sample} must count both real serialize hash passes"
+            assert!(
+                changed_count > 0,
+                "{prefix} sample {sample} must change bodies"
             );
-            assert_eq!(value("serialize_hash_bytes"), changed_bytes * 2);
-            assert_eq!(value("staging_copy_count"), changed_count);
-            assert_eq!(value("staging_copy_bytes"), changed_bytes);
+            assert!(
+                changed_bytes > 0,
+                "{prefix} sample {sample} must change bytes"
+            );
+            let hash_count = value("runtime_hash_count");
+            let hash_bytes = value("runtime_hash_bytes");
+            let copy_count = value("runtime_body_copy_count");
+            let copy_bytes = value("runtime_body_copy_bytes");
+            let manifest_count = value("manifest_count");
+            let minimum_hash_count =
+                changed_count * CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY_FLOOR + manifest_count;
+            assert!(
+                hash_count >= minimum_hash_count,
+                "{prefix} sample {sample} observed {hash_count} runtime hash passes for {changed_count} changed bodies and {manifest_count} loaded bodies; expected at least {minimum_hash_count}"
+            );
+            assert!(
+                hash_bytes >= changed_bytes,
+                "{prefix} sample {sample} hashed {hash_bytes} bytes for {changed_bytes} changed-body bytes"
+            );
+            assert!(
+                copy_count >= changed_count,
+                "{prefix} sample {sample} observed {copy_count} runtime body copies for {changed_count} changed bodies"
+            );
+            assert!(
+                copy_bytes >= changed_bytes,
+                "{prefix} sample {sample} copied {copy_bytes} bytes for {changed_bytes} changed-body bytes"
+            );
         }
     }
 
@@ -528,8 +551,21 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
         let right = &result.metric_samples[&format!("{}.manifest_count", pair[1].prefix())];
         assert!(
             left.iter().zip(right).all(|(left, right)| left < right),
-            "component curve manifest count must increase monotonically"
+            "component curve manifest count must increase monotonically: left={left:?}, right={right:?}"
         );
+        for metric in [
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
+        ] {
+            let left = &result.metric_samples[&format!("{}.{metric}", pair[0].prefix())];
+            let right = &result.metric_samples[&format!("{}.{metric}", pair[1].prefix())];
+            assert!(
+                left.iter().zip(right).all(|(left, right)| left <= right),
+                "component curve {metric} must be monotonic"
+            );
+        }
     }
     let byte_points = points
         .iter()
@@ -540,8 +576,21 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
         let right = &result.metric_samples[&format!("{}.changed_body_bytes", pair[1].prefix())];
         assert!(
             left.iter().zip(right).all(|(left, right)| left < right),
-            "byte curve changed-body bytes must increase strictly"
+            "byte curve changed-body bytes must increase strictly: left={left:?}, right={right:?}"
         );
+        for metric in [
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
+        ] {
+            let left = &result.metric_samples[&format!("{}.{metric}", pair[0].prefix())];
+            let right = &result.metric_samples[&format!("{}.{metric}", pair[1].prefix())];
+            assert!(
+                left.iter().zip(right).all(|(left, right)| left <= right),
+                "byte curve {metric} must be monotonic"
+            );
+        }
     }
 }
 

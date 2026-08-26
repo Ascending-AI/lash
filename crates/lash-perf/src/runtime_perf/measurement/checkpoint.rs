@@ -226,16 +226,16 @@ impl CheckpointCurvePoint {
     }
 }
 
-pub(crate) fn checkpoint_curve_points(
-    config: &CheckpointCurveConfig,
-) -> Vec<CheckpointCurvePoint> {
+pub(crate) fn checkpoint_curve_points(config: &CheckpointCurveConfig) -> Vec<CheckpointCurvePoint> {
     // Runtime scenarios accept scalar CLI parameters rather than a Cartesian
     // sweep. Derive one small, stable three-point curve on each axis around
     // those configured center values so both axes remain paired in one run.
     let component_targets = [
         config.component_count / CHECKPOINT_CURVE_SCALE,
         config.component_count,
-        config.component_count.saturating_mul(CHECKPOINT_CURVE_SCALE),
+        config
+            .component_count
+            .saturating_mul(CHECKPOINT_CURVE_SCALE),
     ];
     let byte_targets = [
         config.transcript_bytes / CHECKPOINT_CURVE_SCALE,
@@ -254,16 +254,18 @@ pub(crate) fn checkpoint_curve_points(
             graph_rows: config.graph_rows,
             component_count,
         })
-        .chain(byte_targets.into_iter().map(|transcript_bytes| {
-            CheckpointCurvePoint {
-                axis: CheckpointCurveAxis::Bytes,
-                target: transcript_bytes,
-                transcript_bytes,
-                message_count: config.message_count,
-                graph_rows: config.graph_rows,
-                component_count: config.component_count,
-            }
-        }))
+        .chain(
+            byte_targets
+                .into_iter()
+                .map(|transcript_bytes| CheckpointCurvePoint {
+                    axis: CheckpointCurveAxis::Bytes,
+                    target: transcript_bytes,
+                    transcript_bytes,
+                    message_count: config.message_count,
+                    graph_rows: config.graph_rows,
+                    component_count: config.component_count,
+                }),
+        )
         .collect()
 }
 
@@ -311,25 +313,8 @@ impl CheckpointArtifactShape {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct CheckpointWorkCounters {
-    hash_count: u64,
-    hash_bytes: u64,
-    copy_count: u64,
-    copy_bytes: u64,
-}
-
-impl CheckpointWorkCounters {
-    fn record_hash_pass(&mut self, shape: CheckpointArtifactShape) {
-        self.hash_count = self.hash_count.saturating_add(shape.changed_body_count);
-        self.hash_bytes = self.hash_bytes.saturating_add(shape.changed_body_bytes);
-    }
-
-    fn record_copy_pass(&mut self, shape: CheckpointArtifactShape) {
-        self.copy_count = self.copy_count.saturating_add(shape.changed_body_count);
-        self.copy_bytes = self.copy_bytes.saturating_add(shape.changed_body_bytes);
-    }
-}
+#[cfg(test)]
+pub(crate) const CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY_FLOOR: u64 = 5;
 
 struct DurableCheckpointCurveFixture {
     point: CheckpointCurvePoint,
@@ -368,10 +353,10 @@ async fn run_once_durable_checkpoint_curve(
         let postgres = lash_postgres_store::PostgresStorage::connect(&database_url)
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        durable_postgres_session_store_factory(&postgres)
+        durable_postgres_session_store_factory_without_commit_measurement(&postgres)
     } else {
         let root = sqlite_root.as_ref().expect("SQLite checkpoint curve root");
-        durable_sqlite_session_store_factory(
+        durable_sqlite_session_store_factory_without_commit_measurement(
             root.join("sessions"),
             root.join("processes.db").as_path(),
         )
@@ -418,10 +403,7 @@ async fn run_once_durable_checkpoint_curve(
                 lash_core::TurnBudget::Unbounded,
             ))
         };
-        lash_core::testing::stage_execution_state_components(
-            &mut runtime_state,
-            initial_snapshot,
-        )?;
+        lash_core::testing::stage_execution_state_components(&mut runtime_state, initial_snapshot)?;
         let seed_commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
             &[],
@@ -456,25 +438,22 @@ async fn run_once_durable_checkpoint_curve(
         for fixture in &mut fixtures {
             append_checkpoint_curve_graph(&mut fixture.runtime_state, fixture.point, sample);
             let prefix = fixture.point.prefix();
-            let (snapshot, capture_phase) = measure_runtime_perf_async_phase(
-                "checkpoint_curve.capture",
-                async {
+            let work_collector = lash_core::perf_witness::Collector::install()?;
+            let (snapshot, capture_phase) =
+                measure_runtime_perf_async_phase("checkpoint_curve.capture", async {
                     fixture.fixture.assign_one(sample, sample).await?;
                     fixture.fixture.absorb_dirty_assignments();
                     fixture.fixture.capture().map_err(anyhow::Error::from)
-                },
-            )
-            .await?;
+                })
+                .await?;
             let snapshot_shape = CheckpointArtifactShape::from_snapshot(&snapshot);
             let (serialized, serialize_phase) = measure_runtime_perf_phase(
                 "checkpoint_curve.serialize",
                 || {
-                    let mut work = CheckpointWorkCounters::default();
                     lash_core::testing::stage_execution_state_components(
                         &mut fixture.runtime_state,
                         snapshot,
                     )?;
-                    work.record_copy_pass(snapshot_shape);
                     let commit = RuntimeCommit::persisted_state_for_test_with_budget(
                         &fixture.runtime_state,
                         &[],
@@ -489,51 +468,45 @@ async fn run_once_durable_checkpoint_curve(
                             "{prefix} snapshot/commit shape diverged: {snapshot_shape:?} versus {commit_shape:?}"
                         );
                     }
-                    let budget = lash_core::testing::measure_runtime_commit_budget(&commit)?;
-                    work.record_hash_pass(commit_shape);
                     commit.turn_commit_hash()?;
-                    work.record_hash_pass(commit_shape);
-                    if budget.graph_rows != fixture.point.graph_rows {
+                    if commit.graph.nodes.len() != fixture.point.graph_rows {
                         anyhow::bail!(
                             "{prefix} committed {} graph rows, expected {}",
-                            budget.graph_rows,
+                            commit.graph.nodes.len(),
                             fixture.point.graph_rows
                         );
                     }
-                    Ok((commit, commit_shape, work))
+                    Ok((commit, commit_shape))
                 },
             )?;
-            let (commit, shape, work) = serialized;
-            let (_, commit_phase) = measure_runtime_perf_async_phase(
-                "checkpoint_curve.commit",
-                async {
+            let (commit, shape) = serialized;
+            let (_, commit_phase) =
+                measure_runtime_perf_async_phase("checkpoint_curve.commit", async {
                     fixture
                         .store
                         .commit_runtime_state(commit)
                         .await
                         .map_err(anyhow::Error::from)
-                },
-            )
-            .await?;
+                })
+                .await?;
             fixture.fixture.acknowledge_capture();
-            let (loaded_state, load_phase) = measure_runtime_perf_async_phase(
-                "checkpoint_curve.load",
-                async {
-                    let loaded_state = lash::persistence::load_persisted_session_state(
-                        fixture.store.as_ref(),
-                    )
-                        .await?
-                        .ok_or_else(|| anyhow::anyhow!("{prefix} commit was not loadable"))?;
+            let (loaded_state, load_phase) =
+                measure_runtime_perf_async_phase("checkpoint_curve.load", async {
+                    let loaded_state =
+                        lash::persistence::load_persisted_session_state(fixture.store.as_ref())
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("{prefix} commit was not loadable"))?;
                     let execution_state = loaded_state
                         .execution_state_hydration()?
                         .ok_or_else(|| anyhow::anyhow!("{prefix} load omitted execution state"))?;
                     lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&execution_state)
                         .map_err(anyhow::Error::from)?;
                     Ok(loaded_state)
-                },
-            )
-            .await?;
+                })
+                .await?;
             fixture.runtime_state = loaded_state;
+            let work = work_collector.snapshot();
+            drop(work_collector);
 
             for (name, phase) in [
                 ("capture", capture_phase.1),
@@ -551,10 +524,10 @@ async fn run_once_durable_checkpoint_curve(
                 ("manifest_count", shape.manifest_count),
                 ("changed_body_count", shape.changed_body_count),
                 ("changed_body_bytes", shape.changed_body_bytes),
-                ("serialize_hash_count", work.hash_count),
-                ("serialize_hash_bytes", work.hash_bytes),
-                ("staging_copy_count", work.copy_count),
-                ("staging_copy_bytes", work.copy_bytes),
+                ("runtime_hash_count", work.hash_passes),
+                ("runtime_hash_bytes", work.hashed_bytes),
+                ("runtime_body_copy_count", work.body_copy_passes),
+                ("runtime_body_copy_bytes", work.copied_bytes),
             ];
             for (name, value) in counts {
                 metric_samples
@@ -611,7 +584,10 @@ async fn run_once_durable_checkpoint_curve(
     let export_before_alloc = allocator_stats();
     let export_started = Instant::now();
     extra_counters.extend(store_metrics.call_counters());
-    extra_counters.insert("checkpoint_curve.point_count".to_string(), fixtures.len() as u64);
+    extra_counters.insert(
+        "checkpoint_curve.point_count".to_string(),
+        fixtures.len() as u64,
+    );
     let export_state_ms = elapsed_ms(export_started);
     let export_state_alloc = alloc_delta(export_before_alloc, allocator_stats());
     drop(fixtures);

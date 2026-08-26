@@ -191,11 +191,21 @@ impl RuntimeCheckpointComponents {
                 }
                 crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT => {
                     ResidentCheckpointComponentBody::ExecutionState(
-                        checkpoint.checked_component_body(key)?.map(<[u8]>::to_vec),
+                        checkpoint.checked_component_body(key)?.map(|body| {
+                            let copied = body.to_vec();
+                            #[cfg(feature = "perf-witness")]
+                            crate::perf_witness::record_body_copy(body.len());
+                            copied
+                        }),
                     )
                 }
                 _ => ResidentCheckpointComponentBody::Opaque(
-                    checkpoint.checked_component_body(key)?.map(<[u8]>::to_vec),
+                    checkpoint.checked_component_body(key)?.map(|body| {
+                        let copied = body.to_vec();
+                        #[cfg(feature = "perf-witness")]
+                        crate::perf_witness::record_body_copy(body.len());
+                        copied
+                    }),
                 ),
             };
             entries.insert(
@@ -258,7 +268,12 @@ impl RuntimeCheckpointComponents {
                         crate::store::encode_checkpoint_component(key, snapshot)?
                     }
                     ResidentCheckpointComponentBody::ExecutionState(Some(bytes))
-                    | ResidentCheckpointComponentBody::Opaque(Some(bytes)) => bytes.clone(),
+                    | ResidentCheckpointComponentBody::Opaque(Some(bytes)) => {
+                        let copied = bytes.clone();
+                        #[cfg(feature = "perf-witness")]
+                        crate::perf_witness::record_body_copy(bytes.len());
+                        copied
+                    }
                     _ => {
                         return Err(crate::StoreError::StoredDataCorrupt {
                             record_kind: "RuntimeCheckpointComponents",
@@ -426,12 +441,15 @@ impl RuntimeCheckpointComponents {
             }
             let replacement = match component {
                 crate::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                    let copied = body.clone();
+                    #[cfg(feature = "perf-witness")]
+                    crate::perf_witness::record_body_copy(body.len());
                     ResidentCheckpointComponent {
                         descriptor: self
                             .entries
                             .get(key)
                             .and_then(|entry| entry.descriptor.clone()),
-                        body: ResidentCheckpointComponentBody::Opaque(Some(body.clone())),
+                        body: ResidentCheckpointComponentBody::Opaque(Some(copied)),
                         dirty: true,
                     }
                 }
@@ -502,10 +520,16 @@ impl RuntimeCheckpointComponents {
                     message: format!("execution-state leaf component `{key}` was not hydrated"),
                 });
             };
-            components.insert(key.clone(), body.clone());
+            let copied = body.clone();
+            #[cfg(feature = "perf-witness")]
+            crate::perf_witness::record_body_copy(body.len());
+            components.insert(key.clone(), copied);
         }
+        let root = root.to_vec();
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_body_copy(root.len());
         Ok(Some(crate::plugin::HydratedExecutionState {
-            root: root.to_vec(),
+            root,
             components,
         }))
     }

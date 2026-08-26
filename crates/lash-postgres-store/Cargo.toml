@@ -22,6 +22,7 @@ workspace = true
 
 [features]
 default = []
+perf-witness = ["lash-core/perf-witness"]
 # Test/performance-only seams. Production builds cannot bypass the schema gate.
 testing = ["lash-core/testing"]
 

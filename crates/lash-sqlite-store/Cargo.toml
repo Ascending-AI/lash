@@ -18,6 +18,7 @@ categories = ["database", "asynchronous"]
 name = "lash_sqlite_store"
 
 [features]
+perf-witness = ["lash-core/perf-witness"]
 testing = ["lash-core/testing"]
 
 [lints]

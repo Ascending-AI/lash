@@ -1356,7 +1356,12 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
                     key,
                     blob_ref: component.body().map_or_else(
                         || component.blob_ref().cloned(),
-                        |body| Some(BlobRef(crate::stable_hash::sha256_hex(body))),
+                        |body| {
+                            let blob_ref = BlobRef(crate::stable_hash::sha256_hex(body));
+                            #[cfg(feature = "perf-witness")]
+                            crate::perf_witness::record_hash_pass(body.len());
+                            Some(blob_ref)
+                        },
                     ),
                     encoding_version: component.encoding_version(),
                 })

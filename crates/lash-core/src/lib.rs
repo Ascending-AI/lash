@@ -17,6 +17,9 @@ mod identity_json;
 pub mod llm;
 mod model;
 pub mod panic_containment;
+#[cfg(feature = "perf-witness")]
+#[doc(hidden)]
+pub mod perf_witness;
 pub mod plugin;
 mod plugin_stack;
 mod protocol_build;
