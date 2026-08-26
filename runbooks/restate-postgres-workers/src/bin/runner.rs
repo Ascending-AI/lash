@@ -3241,6 +3241,17 @@ async fn emit_button_event(
         .context("trigger occurrence did not start a process")
 }
 
+fn signal_process_output_value(await_output: Value) -> Result<Value> {
+    let await_output: lash_core::ProcessAwaitOutput =
+        serde_json::from_value(await_output).context("decode typed signal process await output")?;
+    let output = await_output.into_tool_output();
+    anyhow::ensure!(
+        output.is_success(),
+        "signal process completed with non-success output: {output:?}"
+    );
+    Ok(output.value_for_projection())
+}
+
 async fn assert_signal_process_output(pool: &sqlx::PgPool, process_id: &str) -> Result<()> {
     let event_json: String = sqlx::query_scalar(
         "SELECT event_json
@@ -3256,13 +3267,8 @@ async fn assert_signal_process_output(pool: &sqlx::PgPool, process_id: &str) -> 
     let await_output = event
         .pointer("/payload/await_output")
         .with_context(|| format!("completed event missing await output: {event}"))?;
-    anyhow::ensure!(
-        await_output.get("type").and_then(Value::as_str) == Some("success"),
-        "signal process `{process_id}` completed with non-success output: {await_output}"
-    );
-    let value = await_output
-        .get("value")
-        .with_context(|| format!("completed event missing success value: {event}"))?;
+    let value = signal_process_output_value(await_output.clone())
+        .with_context(|| format!("decode signal process output: {await_output}"))?;
     anyhow::ensure!(
         value.pointer("/first/phase").and_then(Value::as_str) == Some("first")
             && value.pointer("/second/phase").and_then(Value::as_str) == Some("second"),
@@ -3920,5 +3926,71 @@ mod tests {
             completed_workflow_manifest_path(Some(OsString::from("/tmp/completed.txt"))),
             Some(PathBuf::from("/tmp/completed.txt"))
         );
+    }
+
+    #[test]
+    fn captured_settled_shape_is_success() {
+        let await_output = serde_json::json!({
+            "type": "settled",
+            "output": {
+                "outcome": {
+                    "status": "success",
+                    "payload": {
+                        "$lash_tool_value": "untrusted_json",
+                        "value": {
+                            "first": {"phase": "first"},
+                            "second": {"phase": "second"}
+                        }
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            signal_process_output_value(await_output).unwrap(),
+            json!({
+                "first": {"phase": "first"},
+                "second": {"phase": "second"}
+            })
+        );
+    }
+
+    #[test]
+    fn constructed_success_is_unwrapped_and_classified() {
+        let await_output = lash_core::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::success(json!({
+                "first": {"phase": "first"},
+                "second": {"phase": "second"}
+            })),
+        );
+
+        assert_eq!(
+            signal_process_output_value(serde_json::to_value(await_output).unwrap()).unwrap(),
+            json!({
+                "first": {"phase": "first"},
+                "second": {"phase": "second"}
+            })
+        );
+    }
+
+    #[test]
+    fn failure_and_abandoned_outputs_are_rejected() {
+        let failure = lash_core::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
+                lash_core::ToolFailureClass::External,
+                "signal_failed",
+                "signal failed",
+            )),
+        );
+        let abandoned = lash_core::ProcessAwaitOutput::Abandoned {
+            evidence: Box::new(lash_core::AbandonEvidence {
+                writer: lash_core::AbandonWriter::EngineGaveUp,
+                owner: None,
+                epoch_ms: 1,
+            }),
+            control: None,
+        };
+
+        assert!(signal_process_output_value(serde_json::to_value(failure).unwrap()).is_err());
+        assert!(signal_process_output_value(serde_json::to_value(abandoned).unwrap()).is_err());
     }
 }
