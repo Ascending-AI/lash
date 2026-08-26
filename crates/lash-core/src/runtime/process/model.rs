@@ -556,7 +556,7 @@ impl ProcessStartRequest {
 pub struct SessionScope {
     pub session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_frame_id: Option<crate::AgentFrameId>,
+    pub agent_frame_id: Option<crate::FrameNodeId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -606,7 +606,7 @@ pub enum ProcessOriginator {
     Session {
         session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        agent_frame_id: Option<crate::AgentFrameId>,
+        agent_frame_id: Option<crate::FrameNodeId>,
     },
 }
 
@@ -659,11 +659,11 @@ impl SessionScope {
     /// one durable agent frame.
     pub fn for_agent_frame(
         session_id: impl Into<String>,
-        agent_frame_id: impl Into<crate::AgentFrameId>,
+        agent_frame_id: crate::FrameNodeId,
     ) -> Self {
         Self {
             session_id: session_id.into(),
-            agent_frame_id: Some(agent_frame_id.into()),
+            agent_frame_id: Some(agent_frame_id),
         }
     }
 

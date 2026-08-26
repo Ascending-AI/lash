@@ -2,7 +2,7 @@
 pub struct ProcessOpScope<'scope> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'scope>,
-    pub(crate) agent_frame_id: Option<crate::AgentFrameId>,
+    pub(crate) agent_frame_id: Option<crate::FrameNodeId>,
     pub(crate) turn_cancellation: Option<crate::ProcessTurnCancellation>,
 }
 
@@ -32,7 +32,7 @@ impl<'scope> ProcessOpScope<'scope> {
 
     /// Sets the agent frame id carried by a `ProcessOpScope` for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
-    pub fn with_agent_frame_id(mut self, agent_frame_id: Option<crate::AgentFrameId>) -> Self {
+    pub fn with_agent_frame_id(mut self, agent_frame_id: Option<crate::FrameNodeId>) -> Self {
         self.agent_frame_id = agent_frame_id;
         self
     }
@@ -47,8 +47,8 @@ impl<'scope> ProcessOpScope<'scope> {
 
     /// Exposes agent frame id to store and durable-substrate implementors while persisting and
     /// coordinating durable process execution. Returns `None` when no agent frame id is present.
-    pub fn agent_frame_id(&self) -> Option<&str> {
-        self.agent_frame_id.as_deref()
+    pub fn agent_frame_id(&self) -> Option<&crate::FrameNodeId> {
+        self.agent_frame_id.as_ref()
     }
 
     pub(crate) fn controller(&self) -> &dyn crate::RuntimeEffectController {

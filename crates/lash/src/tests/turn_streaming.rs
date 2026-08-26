@@ -1475,7 +1475,10 @@ async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -> Result<()
                 session.session_id(),
                 crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
                 vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                    "oversized-frame",
+                    lash_core::facade_support::frame_node_id(
+                        &session.session_id(),
+                        "oversized-frame",
+                    ),
                     "w".repeat(64 * 1024),
                     None,
                 )],
@@ -1577,7 +1580,10 @@ async fn selected_queued_turn_refuses_partial_key_break_without_settling_rows() 
                         session_id,
                         lash_core::DeliveryPolicy::EarliestSafeBoundary,
                         vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                            "selected-refusal-frame",
+                            lash_core::facade_support::frame_node_id(
+                                session_id,
+                                "selected-refusal-frame",
+                            ),
                             source_key,
                             None,
                         )],
@@ -1660,7 +1666,7 @@ async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
                     vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                        "interrupted-frame",
+                        lash_core::facade_support::frame_node_id(session_id, "interrupted-frame"),
                         source_key,
                         None,
                     )],
@@ -1793,7 +1799,7 @@ async fn selected_queued_turn_reports_claimed_now_and_already_satisfied_ids() ->
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
                 vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                    "selected-outcome-frame",
+                    lash_core::facade_support::frame_node_id(session_id, "selected-outcome-frame"),
                     "selected-outcome-task",
                     None,
                 )],
@@ -1932,7 +1938,10 @@ async fn selected_queued_turn_deduplicates_present_claimable_id() -> Result<()> 
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
                 vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                    "selected-duplicate-present-frame",
+                    lash_core::facade_support::frame_node_id(
+                        session_id,
+                        "selected-duplicate-present-frame",
+                    ),
                     "selected-duplicate-present-task",
                     None,
                 )],
@@ -2038,7 +2047,7 @@ async fn selected_queued_turn_validates_every_interrupted_composition_before_mut
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
                     vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                        "two-claims-frame",
+                        lash_core::facade_support::frame_node_id(session_id, "two-claims-frame"),
                         source_key,
                         None,
                     )],
@@ -2247,7 +2256,10 @@ async fn selected_queued_turn_redrive_ignores_successor_max_rows() -> Result<()>
                     session_id,
                     lash_core::DeliveryPolicy::EarliestSafeBoundary,
                     vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                        "selected-limit-frame",
+                        lash_core::facade_support::frame_node_id(
+                            session_id,
+                            "selected-limit-frame",
+                        ),
                         source_key,
                         None,
                     )],
@@ -2355,7 +2367,7 @@ async fn selected_queued_turn_reports_execution_lane_contention() -> Result<()> 
                 session_id,
                 lash_core::DeliveryPolicy::EarliestSafeBoundary,
                 vec![crate::persistence::QueuedWorkPayload::agent_frame_task(
-                    "busy-frame",
+                    lash_core::facade_support::frame_node_id(session_id, "busy-frame"),
                     "busy-w1",
                     None,
                 )],

@@ -410,7 +410,7 @@ fn fig790_process_await_context(
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         ),
         session_id: "fig790-session".to_string(),
-        agent_frame_id: String::new(),
+        agent_frame_id: crate::FrameNodeId::default(),
         event_tx,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

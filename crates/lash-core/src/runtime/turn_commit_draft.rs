@@ -133,9 +133,9 @@ impl TurnCommitDraft {
     pub(super) fn remap_node_ids(&mut self, session_id: &str, mapping: &[(String, String)]) {
         self.graph.remap_node_ids(session_id, mapping);
         if let Some(current) = self.state.current_frame_node_id.as_mut()
-            && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current)
+            && let Some((_, derived)) = mapping.iter().find(|(draft, _)| draft == current.as_str())
         {
-            *current = derived.clone();
+            *current = crate::FrameNodeId::new(derived.clone());
         }
     }
 

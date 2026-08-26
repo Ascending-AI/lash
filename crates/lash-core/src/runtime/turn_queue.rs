@@ -398,7 +398,7 @@ pub enum QueuedWorkPayload {
         wake: Box<ProcessWakeDelivery>,
     },
     AgentFrameTask {
-        frame_id: crate::AgentFrameId,
+        frame_id: crate::FrameNodeId,
         task: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
@@ -422,12 +422,12 @@ impl QueuedWorkPayload {
     }
 
     pub fn agent_frame_task(
-        frame_id: impl Into<crate::AgentFrameId>,
+        frame_id: crate::FrameNodeId,
         task: impl Into<String>,
         protocol_turn_options: Option<crate::ProtocolTurnOptions>,
     ) -> Self {
         Self::AgentFrameTask {
-            frame_id: frame_id.into(),
+            frame_id,
             task: task.into(),
             protocol_turn_options,
         }

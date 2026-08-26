@@ -177,10 +177,14 @@ impl RlmRuntimeState {
         let mut active_agent_frame_id = self.active_agent_frame_id.lock().await;
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
-        if *active_agent_frame_id != state.current_frame_node_id {
+        let current_frame_node_id = state
+            .current_frame_node_id
+            .as_ref()
+            .map(ToString::to_string);
+        if *active_agent_frame_id != current_frame_node_id {
             *execution = self.dialect.create_session()?;
             *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
-            *active_agent_frame_id = state.current_frame_node_id.clone();
+            *active_agent_frame_id = current_frame_node_id;
         }
         let protected_names = self.protected_projected_binding_names().await;
         if let Some(snapshot) =

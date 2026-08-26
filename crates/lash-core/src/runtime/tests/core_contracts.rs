@@ -63,7 +63,10 @@ fn runtime_phase_probe_slot_routes_session_fallback_and_scope_override() {
     let session_probe_dyn: Arc<dyn RuntimeTurnPhaseProbe> = session_probe.clone();
     slot.set_for_session("turn-session", session_probe_dyn);
 
-    let frame_scope = crate::SessionScope::for_agent_frame("turn-session", "frame-a");
+    let frame_scope = crate::SessionScope::for_agent_frame(
+        "turn-session",
+        crate::facade_support::frame_node_id("turn-session", "frame-a"),
+    );
     let fallback_probe = slot
         .get_for_scope(&frame_scope)
         .expect("frame scope should inherit the session probe");

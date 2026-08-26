@@ -943,7 +943,10 @@ mod tests {
             .with_payload_schema(crate::LashSchema::new(
                 serde_json::json!({"type": "object"}),
             ))
-            .with_wake_target(crate::SessionScope::for_agent_frame("session", "frame"))
+            .with_wake_target(crate::SessionScope::for_agent_frame(
+                "session",
+                crate::FrameNodeId::from_raw_for_testing("frame"),
+            ))
             .with_event_types([crate::ProcessEventType {
                 name: "app.event".to_string(),
                 payload_schema: crate::LashSchema::new(serde_json::json!({"type": "object"})),

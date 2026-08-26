@@ -367,7 +367,8 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             matches!(
                 &item.payload,
                 lash_core::runtime::QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-                    if frame_id == &expected_frame_id && task == "run seeded follow-on"
+                    if frame_id.as_str() == expected_frame_id.as_str()
+                        && task == "run seeded follow-on"
             )
         })
     });

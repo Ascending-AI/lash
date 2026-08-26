@@ -976,7 +976,7 @@ mod tests {
         );
         let frame = crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
             "root-session",
-            "agent-frame",
+            crate::facade_support::frame_node_id("root-session", "agent-frame"),
         ));
         assert_eq!(
             resolve_trigger_owner_scope("ignored", Some(&frame)).unwrap(),
@@ -1052,7 +1052,7 @@ mod tests {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: "session".to_string(),
-            agent_frame_id: String::new(),
+            agent_frame_id: crate::FrameNodeId::default(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
@@ -1113,7 +1113,7 @@ mod tests {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             session_id: "session".to_string(),
-            agent_frame_id: String::new(),
+            agent_frame_id: crate::FrameNodeId::default(),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

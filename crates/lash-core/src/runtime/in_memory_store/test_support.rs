@@ -514,7 +514,9 @@ mod tests {
                     items: vec![crate::runtime::QueuedWorkItem {
                         item_id: "exhausted-item".to_string(),
                         payload: crate::runtime::QueuedWorkPayload::agent_frame_task(
-                            "frame", "task", None,
+                            crate::facade_support::frame_node_id("session", "frame"),
+                            "task",
+                            None,
                         ),
                     }],
                 },

@@ -372,9 +372,13 @@ impl RuntimeCommitPlanner {
                     .expect("checked selected leaf"),
             });
         }
-        if self.commit.current_frame_node_id != derived_frame_node_id {
+        if self.commit.current_frame_node_id.as_deref() != derived_frame_node_id.as_deref() {
             return Err(StoreError::CurrentFrameNodeMismatch {
-                claimed: self.commit.current_frame_node_id.clone(),
+                claimed: self
+                    .commit
+                    .current_frame_node_id
+                    .clone()
+                    .map(crate::FrameNodeId::into_inner),
                 derived: derived_frame_node_id,
             });
         }
@@ -494,7 +498,10 @@ impl<'a> RuntimeCommitPlan<'a> {
                 schema_version: super::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: self.commit.session_id.clone(),
                 config: self.commit.config.clone(),
-                current_frame_node_id: self.derived_frame_node_id.clone(),
+                current_frame_node_id: self
+                    .derived_frame_node_id
+                    .clone()
+                    .map(crate::FrameNodeId::new),
             },
             self.next_head_revision,
             Some(checkpoint_ref),

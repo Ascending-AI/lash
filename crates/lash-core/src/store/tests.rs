@@ -342,7 +342,7 @@ fn node_id_golden_vector() {
 #[test]
 fn frame_node_id_golden_vector() {
     assert_eq!(
-        crate::frame_node_id("golden-session", "frame-42"),
+        crate::frame_node_id("golden-session", "frame-42").as_str(),
         "frame-node/v2/dea90a18d10331ef6adf1493fb73edb50b45b8e51d375e4d524524928cfa18bc"
     );
 }
@@ -529,7 +529,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
     let frame_node_id = crate::session_graph::frame_node_id("session", "initial-frame");
     let mut graph = GraphAppend {
         nodes: vec![crate::SessionNodeRecord {
-            node_id: frame_node_id.clone(),
+            node_id: frame_node_id.to_string(),
             parent_node_id: None,
             timestamp: "2026-07-26T10:00:00Z".to_string(),
             payload: crate::SessionNodePayload::FrameOpen {
@@ -541,7 +541,7 @@ fn frame_node_identity_is_stable_across_operation_realization() {
                 protocol_turn_options: crate::ProtocolTurnOptions::default(),
             },
         }],
-        leaf_node_id: Some(frame_node_id.clone()),
+        leaf_node_id: Some(frame_node_id.to_string()),
     };
 
     graph
@@ -552,8 +552,8 @@ fn frame_node_identity_is_stable_across_operation_realization() {
         nodes,
         leaf_node_id,
     } = graph;
-    assert_eq!(nodes[0].node_id, frame_node_id);
-    assert_eq!(leaf_node_id, Some(frame_node_id));
+    assert_eq!(nodes[0].node_id, frame_node_id.as_str());
+    assert_eq!(leaf_node_id.as_deref(), Some(frame_node_id.as_str()));
 }
 
 #[test]

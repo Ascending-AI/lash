@@ -127,7 +127,10 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             parent_invocation: self.dispatch_parent_invocation,
             execution_env_spec,
             session_id: self.services.current.session_id.clone(),
-            agent_frame_id: String::new(),
+            agent_frame_id: state
+                .current_frame_node_id
+                .clone()
+                .unwrap_or_else(|| crate::FrameNodeId::new(String::new())),
             event_tx,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),

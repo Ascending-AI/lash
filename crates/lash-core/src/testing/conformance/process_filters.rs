@@ -35,7 +35,10 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
         );
     }
 
-    let scope = SessionScope::for_agent_frame("filter-session", "filter-frame");
+    let scope = SessionScope::for_agent_frame(
+        "filter-session",
+        crate::session_graph::frame_node_id("filter-session", "filter-frame"),
+    );
     let originator_id = scope.session_id.clone();
     let target = registry
         .register_process(

@@ -205,9 +205,11 @@ impl RuntimeObservation {
     ) -> Vec<ProcessHandleView> {
         let root_scope = self.process_scope();
         let mut entries = list_scope_process_handles(executor, &root_scope, mode).await;
-        if let Some(agent_frame_id) = self.persisted_state.current_frame_node_id.as_deref() {
-            let frame_scope =
-                crate::SessionScope::for_agent_frame(self.session_id.as_ref(), agent_frame_id);
+        if let Some(agent_frame_id) = self.persisted_state.current_frame_node_id.as_ref() {
+            let frame_scope = crate::SessionScope::for_agent_frame(
+                self.session_id.as_ref(),
+                agent_frame_id.clone(),
+            );
             if frame_scope.id() != root_scope.id() {
                 entries.extend(list_scope_process_handles(executor, &frame_scope, mode).await);
                 entries.sort_by(|left, right| left.id.cmp(&right.id));
@@ -349,7 +351,9 @@ impl RuntimeHandle {
         {
             drafts.push(LiveReplayEventDraft::new(
                 None::<String>,
-                SessionObservationEventPayload::AgentFrameSwitched { frame_id },
+                SessionObservationEventPayload::AgentFrameSwitched {
+                    frame_id: frame_id.into_inner(),
+                },
             ));
         }
         drafts.push(LiveReplayEventDraft::new(turn_id, payload));
@@ -1111,7 +1115,10 @@ mod tests {
         let cursor = handle.observe().cursor().clone();
         let writer = handle.writer();
         let mut runtime = writer.lock().await;
-        runtime.state.current_frame_node_id = Some("next-frame".to_string());
+        runtime.state.current_frame_node_id = Some(crate::session_graph::frame_node_id(
+            &runtime.state.session_id,
+            "next-frame",
+        ));
 
         handle.publish_from(&runtime);
         let SessionResume::Replayed { events } = handle
@@ -1159,7 +1166,10 @@ mod tests {
         let writer = handle.writer();
         let mut runtime = writer.lock().await;
         runtime.state.turn_index = 1;
-        runtime.state.current_frame_node_id = Some("next-frame".to_string());
+        runtime.state.current_frame_node_id = Some(crate::session_graph::frame_node_id(
+            &runtime.state.session_id,
+            "next-frame",
+        ));
 
         handle.publish_from(&runtime);
         drop(runtime);

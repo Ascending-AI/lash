@@ -99,7 +99,7 @@ pub struct InternalProcessToolCall<'a> {
 #[derive(Clone)]
 pub struct InternalProcessAdmin<'run> {
     pub(super) session_id: String,
-    pub(super) agent_frame_id: crate::AgentFrameId,
+    pub(super) agent_frame_id: crate::FrameNodeId,
     pub(super) processes: Arc<dyn crate::ProcessService>,
     pub(super) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
@@ -372,7 +372,7 @@ mod tests {
     fn admin(processes: Arc<dyn crate::ProcessService>) -> InternalProcessAdmin<'static> {
         InternalProcessAdmin {
             session_id: "session".to_string(),
-            agent_frame_id: "frame".to_string(),
+            agent_frame_id: crate::session_graph::frame_node_id("session", "frame"),
             processes,
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
                 crate::InlineRuntimeEffectController::default(),

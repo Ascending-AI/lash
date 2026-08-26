@@ -118,16 +118,16 @@ fn draft_node_id(namespace: &str, ordinal: u64) -> String {
 /// FrameOpen ID must be final before runtime effects begin. The host-provided
 /// session id fixes the identity before store admission; binding must leave it
 /// unchanged.
-pub fn frame_node_id(session_id: &str, frame_key: &str) -> String {
+pub fn frame_node_id(session_id: &str, frame_key: &str) -> crate::FrameNodeId {
     let preimage = format!(
         "{}:{session_id}:{}:{frame_key}",
         session_id.len(),
         frame_key.len()
     );
-    format!(
+    crate::FrameNodeId::new(format!(
         "frame-node/v2/{}",
         crate::stable_hash::sha256_hex(preimage.as_bytes())
-    )
+    ))
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -1145,8 +1145,9 @@ impl SessionGraph {
             let Some((reason, assignment, protocol_turn_options)) = node.frame_open() else {
                 continue;
             };
+            let frame_node_id = crate::FrameNodeId::new(node.node_id.clone());
             frames.push(crate::AgentFrameRecord::new_at(
-                node.node_id.clone(),
+                frame_node_id.clone(),
                 session_id.to_string(),
                 previous_frame_node_id.clone(),
                 reason.clone(),
@@ -1154,7 +1155,7 @@ impl SessionGraph {
                 protocol_turn_options.clone(),
                 node.timestamp.clone(),
             ));
-            previous_frame_node_id = Some(node.node_id.clone());
+            previous_frame_node_id = Some(frame_node_id);
         }
         Ok(frames)
     }

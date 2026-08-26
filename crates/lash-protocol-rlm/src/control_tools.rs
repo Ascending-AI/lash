@@ -448,7 +448,7 @@ mod tests {
         );
         let context = lash_core::ToolContext::with_agent_frame_id_for_testing(
             context,
-            "frame-node/v2/test-lineage",
+            lash_core::facade_support::frame_node_id("test-session", "test-lineage"),
         );
         let context = lash_core::testing::mock_attempt_context_from(&context);
         provider
@@ -584,11 +584,11 @@ mod tests {
 
         assert_eq!(
             frame_key(&first).as_str(),
-            "frame-key/v1/3b35d2eb3ad01d5b6726ec50183b3d7d6f8894efc9f5dab86af1510f56673efa"
+            "frame-key/v1/b0c4cb16ff47e16a1d126ed5413686bc759fb6549e34b09d8cd95bbff9f1d1ae"
         );
         assert_eq!(
             frame_key(&redriven).as_str(),
-            "frame-key/v1/3b35d2eb3ad01d5b6726ec50183b3d7d6f8894efc9f5dab86af1510f56673efa"
+            "frame-key/v1/b0c4cb16ff47e16a1d126ed5413686bc759fb6549e34b09d8cd95bbff9f1d1ae"
         );
     }
 
@@ -606,11 +606,11 @@ mod tests {
 
         assert_eq!(
             frame_key(&first).as_str(),
-            "frame-key/v1/0b572cf5e408d770c7febfbf5b801b2ddb92c474b84a8af92982af81f3de2572"
+            "frame-key/v1/53008d3473dd2ee526755b78d7196ea64f53a974171fb81be1dcc61b19696cff"
         );
         assert_eq!(
             frame_key(&second).as_str(),
-            "frame-key/v1/624fd5579b368c383f70175b3374ab3885bf8598867583340143971ca984c837"
+            "frame-key/v1/63b76fc1b7953f10b0e6acd7a9528dfc02e2df440bd7742f7ed1766346fc49a8"
         );
     }
 

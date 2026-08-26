@@ -457,11 +457,13 @@ fn session_originator_elevation_changes_registration_fingerprint() {
         metadata: serde_json::Value::Null,
     });
     first.provenance = crate::ProcessProvenance::session(crate::SessionScope::for_agent_frame(
-        "session", "frame-a",
+        "session",
+        crate::facade_support::frame_node_id("session", "frame-a"),
     ));
     let mut second = first.clone();
     second.provenance = crate::ProcessProvenance::session(crate::SessionScope::for_agent_frame(
-        "session", "frame-b",
+        "session",
+        crate::facade_support::frame_node_id("session", "frame-b"),
     ));
     assert_ne!(
         process_registration_fingerprint(&first, &[]),

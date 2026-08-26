@@ -383,11 +383,15 @@ mod process_work_tests {
         };
         let registry = lash::testing::TestLocalProcessRegistry::default();
         let process_id = "invoice-export";
-        let scope = SessionScope::for_agent_frame("session-finance", "frame-review");
-        assert_eq!(scope.id().as_str(), "session:session-finance/frame:frame-review");
+        let frame_node_id = lash::testing::frame_node_id("session-finance", "frame-review");
+        let scope = SessionScope::for_agent_frame("session-finance", frame_node_id.clone());
+        assert_eq!(
+            scope.id().as_str(),
+            format!("session:session-finance/frame:{frame_node_id}")
+        );
         assert!(!scope.is_empty());
         assert_eq!(scope.session_id, "session-finance");
-        assert_eq!(scope.agent_frame_id.as_deref(), Some("frame-review"));
+        assert_eq!(scope.agent_frame_id.as_ref(), Some(&frame_node_id));
 
         let cause = CausalRef::TriggerOccurrence {
             occurrence_id: "occurrence-42".to_string(),
@@ -404,7 +408,7 @@ mod process_work_tests {
             panic!("session work must retain a session originator");
         };
         assert_eq!(session_id, "session-finance");
-        assert_eq!(agent_frame_id.as_deref(), Some("frame-review"));
+        assert_eq!(agent_frame_id.as_ref(), Some(&frame_node_id));
         let Some(CausalRef::TriggerOccurrence {
             occurrence_id,
             subscription_id,
@@ -494,7 +498,7 @@ mod process_work_tests {
         assert_eq!(record.input.engine_specific_kind(), Some("report-export"));
         assert_eq!(record.provenance.originator, ProcessOriginator::Session {
             session_id: "session-finance".to_string(),
-            agent_frame_id: Some("frame-review".to_string()),
+            agent_frame_id: Some(frame_node_id.clone()),
         });
         assert_eq!(
             record.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),

@@ -107,7 +107,7 @@ impl AttemptProcessReads {
 pub struct AttemptContext<'run> {
     session_id: String,
     execution_scope_id: String,
-    agent_frame_id: crate::AgentFrameId,
+    agent_frame_id: crate::FrameNodeId,
     sessions: AttemptSessionReads,
     processes: AttemptProcessReads,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
@@ -202,7 +202,7 @@ impl<'run> AttemptContext<'run> {
         &self.execution_scope_id
     }
     /// Integrator class 3 agent-frame identity that authorized this provider attempt.
-    pub fn agent_frame_id(&self) -> &str {
+    pub fn agent_frame_id(&self) -> &crate::FrameNodeId {
         &self.agent_frame_id
     }
     /// Integrator class 3 controller-free session reads for this attempt.
@@ -350,7 +350,7 @@ impl ToolCompletionState {
 #[derive(Clone)]
 pub struct ToolContext<'run> {
     pub(crate) session_id: String,
-    pub(crate) agent_frame_id: crate::AgentFrameId,
+    pub(crate) agent_frame_id: crate::FrameNodeId,
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(crate) processes: Arc<dyn crate::ProcessService>,
@@ -423,7 +423,7 @@ pub(crate) struct ToolProcessEventContext {
 
 pub(crate) struct ToolContextBuilder<'run> {
     session_id: String,
-    agent_frame_id: crate::AgentFrameId,
+    agent_frame_id: crate::FrameNodeId,
     sessions: Arc<dyn SessionStateService>,
     session_lifecycle: Arc<dyn SessionLifecycleService>,
     session_graph: Arc<dyn SessionGraphService>,
@@ -660,7 +660,7 @@ impl<'run> ToolContext<'run> {
     ) -> ToolContextBuilder<'run> {
         ToolContextBuilder {
             session_id,
-            agent_frame_id: String::new(),
+            agent_frame_id: crate::FrameNodeId::new(String::new()),
             sessions,
             session_lifecycle,
             session_graph,
@@ -701,18 +701,15 @@ impl<'run> ToolContext<'run> {
 
     /// Exposes agent frame id to protocol and process-engine implementors while preparing or
     /// executing an authorized tool call.
-    pub fn agent_frame_id(&self) -> &str {
+    pub fn agent_frame_id(&self) -> &crate::FrameNodeId {
         &self.agent_frame_id
     }
 
     /// Overrides the current frame lineage in an isolated tool-provider test.
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
-    pub fn with_agent_frame_id_for_testing(
-        mut self,
-        agent_frame_id: impl Into<crate::AgentFrameId>,
-    ) -> Self {
-        self.agent_frame_id = agent_frame_id.into();
+    pub fn with_agent_frame_id_for_testing(mut self, agent_frame_id: crate::FrameNodeId) -> Self {
+        self.agent_frame_id = agent_frame_id;
         self
     }
 

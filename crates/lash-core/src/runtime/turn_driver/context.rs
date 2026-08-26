@@ -62,8 +62,8 @@ impl<'run> RuntimeTurnDriver<'run> {
                 self.turn_pipeline
                     .state()
                     .current_frame_node_id
-                    .as_deref()
-                    .unwrap_or_default(),
+                    .clone()
+                    .unwrap_or_else(|| crate::FrameNodeId::new(String::new())),
                 manager.state_service(),
                 manager.lifecycle_service(),
                 manager.graph_service(),

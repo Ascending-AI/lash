@@ -76,7 +76,7 @@ fn queued_work(session_id: &str, source: &str) -> crate::QueuedWorkBatchDraft {
         session_id,
         crate::DeliveryPolicy::EarliestSafeBoundary,
         vec![crate::QueuedWorkPayload::agent_frame_task(
-            format!("frame:{source}"),
+            crate::session_graph::frame_node_id(session_id, &format!("frame:{source}")),
             source,
             None,
         )],

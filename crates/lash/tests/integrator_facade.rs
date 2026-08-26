@@ -25,7 +25,7 @@ use lash::persistence::{
 use lash::plugins::{
     AgentFrameAssignment, AgentFrameId, AgentFrameReason, AgentFrameRecord, ChatContextProjector,
     CheckpointApplication, CodeExecutorPlugin, ContextProjector, ExecRequest, ExecResponse,
-    ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HostTurnProtocol,
+    ExecutionStateComponentSnapshot, ExecutionStateSnapshot, FrameNodeId, HostTurnProtocol,
     HydratedExecutionState, LlmToolSpec, PersistedSegmentHandover, PluginAbort, PluginExtensions,
     PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry, PrepareTurnRequest,
     ProcessEngine, ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
@@ -121,6 +121,14 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
     assert_driver::<Driver>();
     assert_projector::<ChatContextProjector>();
 
+    let frame_node_id: FrameNodeId = serde_json::from_str(r#""frame-node/v2/facade-witness""#)
+        .expect("transparent frame node id");
+    assert_eq!(frame_node_id.as_str(), "frame-node/v2/facade-witness");
+    assert_eq!(
+        frame_node_id.clone().into_inner(),
+        "frame-node/v2/facade-witness"
+    );
+
     let preamble = Driver.build_preamble(ProtocolBuildInput {
         tool_catalog: Arc::new(ToolCatalog::default()),
         plugin_extensions: PluginExtensions::default(),
@@ -132,6 +140,39 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
     assert!(preamble.tool_names.is_empty());
     assert_eq!(&*preamble.execution_prompt, "facade protocol witness");
     assert!(preamble.prompt_contributions.is_empty());
+}
+
+#[test]
+fn snapshot_agent_frame_can_target_queued_work_from_the_facade() {
+    let frame_node_id: FrameNodeId = serde_json::from_str(r#""frame-node/v2/host-path""#)
+        .expect("transparent frame node id restore");
+    let policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
+    let mut snapshot = lash::runtime::SessionSnapshot::new(policy.clone());
+    snapshot.agent_frames.push(AgentFrameRecord {
+        frame_node_id,
+        session_id: "host-session".to_string(),
+        previous_frame_node_id: None,
+        reason: AgentFrameReason::initial(),
+        created_at: "2026-08-25T00:00:00Z".to_string(),
+        assignment: AgentFrameAssignment::from_policy(policy),
+        protocol_turn_options: Default::default(),
+    });
+
+    let record = snapshot
+        .agent_frames
+        .into_iter()
+        .next()
+        .expect("snapshot agent frame");
+    let payload = lash::persistence::QueuedWorkPayload::agent_frame_task(
+        record.frame_node_id,
+        "resume frame work",
+        None,
+    );
+
+    let lash::persistence::QueuedWorkPayload::AgentFrameTask { frame_id, .. } = payload else {
+        panic!("expected agent frame task");
+    };
+    assert_eq!(frame_id.as_str(), "frame-node/v2/host-path");
 }
 
 #[test]
