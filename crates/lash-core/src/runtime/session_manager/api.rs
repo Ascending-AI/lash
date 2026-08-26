@@ -177,10 +177,20 @@ impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.services
-            .processes
-            .list_process_handles(&self.services.current, session_id, mode, scope)
-            .await
+        if self
+            .visibility
+            .consults_filter(ProcessVisibilityOperation::ListVisible)
+        {
+            self.services
+                .processes
+                .list_model_tool_process_handles(&self.services.current, session_id, mode, scope)
+                .await
+        } else {
+            self.services
+                .processes
+                .list_process_handles(&self.services.current, session_id, mode, scope)
+                .await
+        }
     }
 }
 
@@ -191,10 +201,24 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         session_id: &str,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.services
-            .processes
-            .list_model_tool_process_handles_for_attempt(&self.services.current, session_id, mode)
-            .await
+        if self
+            .visibility
+            .consults_filter(ProcessVisibilityOperation::ListVisibleForAttempt)
+        {
+            self.services
+                .processes
+                .list_model_tool_process_handles_for_attempt(
+                    &self.services.current,
+                    session_id,
+                    mode,
+                )
+                .await
+        } else {
+            self.services
+                .processes
+                .list_process_handles_for_attempt(&self.services.current, session_id, mode)
+                .await
+        }
     }
 
     async fn start_from_request(
@@ -313,10 +337,20 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.services
-            .processes
-            .list_process_handles(&self.services.current, session_id, mode, scope)
-            .await
+        if self
+            .visibility
+            .consults_filter(ProcessVisibilityOperation::ListVisible)
+        {
+            self.services
+                .processes
+                .list_model_tool_process_handles(&self.services.current, session_id, mode, scope)
+                .await
+        } else {
+            self.services
+                .processes
+                .list_process_handles(&self.services.current, session_id, mode, scope)
+                .await
+        }
     }
 
     async fn validate_visible(
@@ -325,16 +359,26 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         handle_ids: &[String],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
-        self.services
-            .processes
-            .validate_process_handles_observed(
-                &self.services.current,
-                &self.services.managed,
-                session_id,
-                handle_ids,
-                scope,
-            )
-            .await
+        if self
+            .visibility
+            .consults_filter(ProcessVisibilityOperation::ValidateVisible)
+        {
+            self.services
+                .processes
+                .validate_model_tool_process_handles(&self.services.current, session_id, handle_ids)
+                .await
+        } else {
+            self.services
+                .processes
+                .validate_process_handles_observed(
+                    &self.services.current,
+                    &self.services.managed,
+                    session_id,
+                    handle_ids,
+                    scope,
+                )
+                .await
+        }
     }
 
     async fn cancel(
@@ -475,295 +519,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 scope,
             )
             .await
-    }
-
-    async fn signal_possessed(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.services
-            .processes
-            .signal_possessed_process(
-                &self.services.current,
-                session_id,
-                process_id,
-                signal_name,
-                signal_id,
-                payload,
-                scope,
-            )
-            .await
-    }
-
-    async fn transfer(
-        &self,
-        from_session_id: &str,
-        to_session_id: &str,
-        process_ids: Vec<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
-        self.services
-            .processes
-            .transfer_process_handles(
-                &self.services.current,
-                &self.services.managed,
-                from_session_id,
-                to_session_id,
-                process_ids,
-                scope,
-            )
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::ProcessService for ModelToolSessionProcessService {
-    async fn list_visible_for_attempt(
-        &self,
-        session_id: &str,
-        mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.services
-            .processes
-            .list_model_tool_process_handles_for_attempt(&self.services.current, session_id, mode)
-            .await
-    }
-
-    async fn start_from_request(
-        &self,
-        session_id: &str,
-        request: crate::ProcessStartRequest,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::start_from_request(&host, session_id, request, scope).await
-    }
-
-    async fn start_from_recorded_intent(
-        &self,
-        session_id: &str,
-        request: crate::ProcessStartRequest,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessHandleView, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::start_from_recorded_intent(&host, session_id, request, scope).await
-    }
-
-    async fn start(
-        &self,
-        session_id: &str,
-        registration: crate::ProcessRegistration,
-        options: crate::ProcessStartOptions,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::start(&host, session_id, registration, options, scope).await
-    }
-
-    async fn complete_external(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        await_output: crate::ProcessAwaitOutput,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::complete_external(&host, session_id, process_id, await_output, scope)
-            .await
-    }
-
-    async fn report_caller_departure(
-        &self,
-        session_id: &str,
-        process_id: &str,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::report_caller_departure(&host, session_id, process_id).await
-    }
-
-    async fn await_process(
-        &self,
-        process_id: &str,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
-        self.services
-            .processes
-            .await_process(&self.services.current, process_id, scope)
-            .await
-    }
-
-    async fn list_visible(
-        &self,
-        session_id: &str,
-        mode: crate::ProcessListMode,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.services
-            .processes
-            .list_model_tool_process_handles(&self.services.current, session_id, mode, scope)
-            .await
-    }
-
-    async fn validate_visible(
-        &self,
-        session_id: &str,
-        process_ids: &[String],
-        _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
-        self.services
-            .processes
-            .validate_model_tool_process_handles(&self.services.current, session_id, process_ids)
-            .await
-    }
-
-    async fn cancel(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.services
-            .processes
-            .cancel_process(
-                &self.services.current,
-                &self.services.managed,
-                session_id,
-                process_id,
-                scope,
-            )
-            .await
-    }
-
-    async fn cancel_with_reason(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        reason: Option<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.services
-            .processes
-            .cancel_process_with_reason(
-                &self.services.current,
-                &self.services.managed,
-                session_id,
-                process_id,
-                reason,
-                scope,
-            )
-            .await
-    }
-
-    async fn cancel_recorded_intent(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        reason: Option<String>,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::cancel_recorded_intent(&host, session_id, process_id, reason, scope)
-            .await
-    }
-
-    async fn finish_recorded_intent_parent(
-        &self,
-        session_id: &str,
-        identity: crate::ToolIntentIdentity,
-        process_id: String,
-        policy: crate::ProcessParentEndPolicy,
-        reason: String,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ToolIntentParentEndOutcome, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::finish_recorded_intent_parent(
-            &host, session_id, identity, process_id, policy, reason, scope,
-        )
-        .await
-    }
-
-    async fn signal_recorded_intent(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::signal_recorded_intent(
-            &host,
-            session_id,
-            process_id,
-            signal_name,
-            signal_id,
-            payload,
-            scope,
-        )
-        .await
-    }
-
-    async fn emit_event(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.services
-            .processes
-            .emit_process_event(
-                &self.services.current,
-                session_id,
-                process_id,
-                event_type,
-                replay_key,
-                payload,
-                scope,
-            )
-            .await
-    }
-
-    async fn emit_event_recorded_intent(
-        &self,
-        session_id: &str,
-        process_id: &str,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let host = RuntimeSessionProcessService {
-            services: Arc::clone(&self.services),
-        };
-        crate::ProcessService::emit_event_recorded_intent(
-            &host, session_id, process_id, event_type, replay_key, payload, scope,
-        )
-        .await
     }
 
     async fn signal_possessed(

@@ -631,18 +631,29 @@ impl ProcessCapability {
         session_id: &str,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        let records = self
+            .list_process_handles_for_attempt(current, session_id, mode)
+            .await?;
+        Ok(Self::narrow_tool_visible_records(
+            current, session_id, records,
+        ))
+    }
+
+    pub(in crate::runtime::session_manager) async fn list_process_handles_for_attempt(
+        &self,
+        current: &CurrentSessionCapability,
+        session_id: &str,
+        mode: crate::ProcessListMode,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
         let registry = current.host.process_registry.as_ref().ok_or_else(|| {
             crate::PluginError::Session(
                 "process registry is unavailable in this runtime".to_string(),
             )
         })?;
-        let records = match mode {
-            crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await?,
-            crate::ProcessListMode::All => registry.list_observed_by(session_id).await?,
-        };
-        Ok(Self::narrow_tool_visible_records(
-            current, session_id, records,
-        ))
+        match mode {
+            crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await,
+            crate::ProcessListMode::All => registry.list_observed_by(session_id).await,
+        }
     }
 
     pub(in crate::runtime::session_manager) async fn cancel_process(
