@@ -8,9 +8,9 @@ use super::guards::required_phases;
 use super::{RuntimePerfScenario, ScenarioHarnessKind};
 use crate::perf_support::stack::StackProfile;
 use crate::runtime_perf::measurement::{
-    HighTrafficConfig, RuntimePerfPhaseProbe, phase_name, run_once,
+    CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY_FLOOR, CheckpointCurveAxis, CheckpointCurveConfig,
+    HighTrafficConfig, RuntimePerfPhaseProbe, checkpoint_curve_points, phase_name, run_once,
 };
-use crate::runtime_perf::scenarios::DURABLE_CHECKPOINT_CURVE_BYTES;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 
 const STABLE_DURABLE_PHASES: [&str; 5] = [
@@ -30,6 +30,10 @@ fn high_traffic_config() -> HighTrafficConfig {
         1.25,
     )
     .expect("valid high-traffic test config")
+}
+
+fn checkpoint_curve_config() -> CheckpointCurveConfig {
+    CheckpointCurveConfig::new(8 * 1024, 2, 4, 8).expect("valid checkpoint curve test config")
 }
 
 #[test]
@@ -88,9 +92,15 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
         .into_iter()
         .filter(|scenario| !scenario.uses_postgres())
     {
-        let result = Box::pin(run_once(scenario, 1, 4, &high_traffic_config()))
-            .await
-            .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
+        let result = Box::pin(run_once(
+            scenario,
+            1,
+            4,
+            &checkpoint_curve_config(),
+            &high_traffic_config(),
+        ))
+        .await
+        .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
         for phase in STABLE_DURABLE_PHASES {
             assert!(
                 result.phase_profile.contains_key(phase),
@@ -301,6 +311,30 @@ fn durable_queued_work_contention_inventory_is_backend_complete_and_opt_in() {
     }
 }
 
+#[test]
+fn durable_checkpoint_curve_inventory_is_backend_complete_and_opt_in() {
+    let scenarios = [
+        RuntimePerfScenario::DurableCheckpointCurveSqlite,
+        RuntimePerfScenario::DurableCheckpointCurvePostgres,
+    ];
+    assert!(!scenarios[0].uses_postgres());
+    assert!(scenarios[1].uses_postgres());
+    for scenario in scenarios {
+        assert!(scenario.is_durable());
+        assert!(scenario.is_checkpoint_curve());
+        assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
+        let metadata = RuntimePerfScenario::METADATA
+            .iter()
+            .find(|metadata| metadata.scenario == scenario)
+            .unwrap_or_else(|| panic!("{} is missing metadata", scenario.name()));
+        assert_eq!(
+            metadata.scenario_harness,
+            ScenarioHarnessKind::RuntimeScenario
+        );
+        assert!(metadata.harness_rationale.contains("CLI-configurable"));
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters() {
     let workers = 4;
@@ -309,6 +343,7 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
         turns,
         workers,
+        &checkpoint_curve_config(),
         &high_traffic_config(),
     ))
     .await
@@ -420,27 +455,142 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn durable_sqlite_checkpoint_curve_reports_each_target_size() {
+async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
+    let config = checkpoint_curve_config();
+    let samples = 2;
     let result = Box::pin(run_once(
         RuntimePerfScenario::DurableCheckpointCurveSqlite,
-        DURABLE_CHECKPOINT_CURVE_BYTES.len(),
+        samples,
         4,
+        &config,
         &high_traffic_config(),
     ))
     .await
     .expect("durable checkpoint curve should run");
 
-    for target_bytes in DURABLE_CHECKPOINT_CURVE_BYTES {
-        let checkpoint_bytes = result
-            .extra_counters
-            .get(&format!("checkpoint_curve.{target_bytes}.checkpoint_bytes"))
-            .copied()
-            .unwrap_or_else(|| panic!("missing checkpoint measurement for {target_bytes}"));
+    let points = checkpoint_curve_points(&config);
+    assert_eq!(
+        result.extra_counters["checkpoint_curve.point_count"],
+        points.len() as u64
+    );
+    for point in &points {
+        let prefix = point.prefix();
+        for metric in [
+            "manifest_count",
+            "changed_body_count",
+            "changed_body_bytes",
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
+        ] {
+            assert_eq!(
+                result
+                    .metric_samples
+                    .get(&format!("{prefix}.{metric}"))
+                    .map(Vec::len),
+                Some(samples),
+                "{prefix} must report a complete {metric} sample vector"
+            );
+        }
+        for phase in ["capture", "serialize", "commit", "load"] {
+            assert_eq!(
+                result
+                    .metric_samples_ms
+                    .get(&format!("{prefix}.{phase}_ms"))
+                    .map(Vec::len),
+                Some(samples),
+                "{prefix} must report a complete {phase} sample vector"
+            );
+        }
+        for sample in 0..samples {
+            let value =
+                |metric: &str| result.metric_samples[&format!("{prefix}.{metric}")][sample] as u64;
+            let changed_count = value("changed_body_count");
+            let changed_bytes = value("changed_body_bytes");
+            assert!(
+                changed_count > 0,
+                "{prefix} sample {sample} must change bodies"
+            );
+            assert!(
+                changed_bytes > 0,
+                "{prefix} sample {sample} must change bytes"
+            );
+            let hash_count = value("runtime_hash_count");
+            let hash_bytes = value("runtime_hash_bytes");
+            let copy_count = value("runtime_body_copy_count");
+            let copy_bytes = value("runtime_body_copy_bytes");
+            let manifest_count = value("manifest_count");
+            let minimum_hash_count =
+                changed_count * CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY_FLOOR + manifest_count;
+            assert!(
+                hash_count >= minimum_hash_count,
+                "{prefix} sample {sample} observed {hash_count} runtime hash passes for {changed_count} changed bodies and {manifest_count} loaded bodies; expected at least {minimum_hash_count}"
+            );
+            assert!(
+                hash_bytes >= changed_bytes,
+                "{prefix} sample {sample} hashed {hash_bytes} bytes for {changed_bytes} changed-body bytes"
+            );
+            assert!(
+                copy_count >= changed_count,
+                "{prefix} sample {sample} observed {copy_count} runtime body copies for {changed_count} changed bodies"
+            );
+            assert!(
+                copy_bytes >= changed_bytes,
+                "{prefix} sample {sample} copied {copy_bytes} bytes for {changed_bytes} changed-body bytes"
+            );
+        }
+    }
+
+    let component_points = points
+        .iter()
+        .filter(|point| point.axis == CheckpointCurveAxis::Components)
+        .collect::<Vec<_>>();
+    for pair in component_points.windows(2) {
+        let left = &result.metric_samples[&format!("{}.manifest_count", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.manifest_count", pair[1].prefix())];
         assert!(
-            checkpoint_bytes >= target_bytes as u64
-                && checkpoint_bytes <= target_bytes as u64 + 16 * 1024,
-            "checkpoint size for target {target_bytes} was {checkpoint_bytes}"
+            left.iter().zip(right).all(|(left, right)| left < right),
+            "component curve manifest count must increase monotonically: left={left:?}, right={right:?}"
         );
+        for metric in [
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
+        ] {
+            let left = &result.metric_samples[&format!("{}.{metric}", pair[0].prefix())];
+            let right = &result.metric_samples[&format!("{}.{metric}", pair[1].prefix())];
+            assert!(
+                left.iter().zip(right).all(|(left, right)| left <= right),
+                "component curve {metric} must be monotonic"
+            );
+        }
+    }
+    let byte_points = points
+        .iter()
+        .filter(|point| point.axis == CheckpointCurveAxis::Bytes)
+        .collect::<Vec<_>>();
+    for pair in byte_points.windows(2) {
+        let left = &result.metric_samples[&format!("{}.changed_body_bytes", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.changed_body_bytes", pair[1].prefix())];
+        assert!(
+            left.iter().zip(right).all(|(left, right)| left < right),
+            "byte curve changed-body bytes must increase strictly: left={left:?}, right={right:?}"
+        );
+        for metric in [
+            "runtime_hash_count",
+            "runtime_hash_bytes",
+            "runtime_body_copy_count",
+            "runtime_body_copy_bytes",
+        ] {
+            let left = &result.metric_samples[&format!("{}.{metric}", pair[0].prefix())];
+            let right = &result.metric_samples[&format!("{}.{metric}", pair[1].prefix())];
+            assert!(
+                left.iter().zip(right).all(|(left, right)| left <= right),
+                "byte curve {metric} must be monotonic"
+            );
+        }
     }
 }
 
@@ -450,6 +600,7 @@ async fn high_traffic_sqlite_smoke_reports_load_structure() {
         RuntimePerfScenario::HighTrafficLoadSqlite,
         1,
         4,
+        &checkpoint_curve_config(),
         &high_traffic_config(),
     ))
     .await
@@ -506,6 +657,7 @@ async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
         RuntimePerfScenario::HighTrafficKneeSqlite,
         1,
         4,
+        &checkpoint_curve_config(),
         &high_traffic_config(),
     ))
     .await
@@ -570,6 +722,7 @@ async fn high_traffic_trigger_waits_for_terminal_delivery() {
         RuntimePerfScenario::HighTrafficLoadSqlite,
         1,
         4,
+        &checkpoint_curve_config(),
         &config,
     ))
     .await

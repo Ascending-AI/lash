@@ -193,22 +193,26 @@ impl HydratedCheckpointComponent {
         }
     }
 
-    fn projected_descriptor(
-        &self,
-        key: &str,
-    ) -> Result<CheckpointComponentDescriptor, StoreError> {
+    fn projected_descriptor(&self, key: &str) -> Result<CheckpointComponentDescriptor, StoreError> {
         ensure_checkpoint_component_encoding_version(key, self.encoding_version())?;
         match self {
             Self::Changed {
                 encoding_version,
                 body,
-            } => Ok(CheckpointComponentDescriptor {
-                blob_ref: BlobRef(crate::stable_hash::sha256_hex(body)),
-                encoding_version: *encoding_version,
-            }),
+            } => {
+                let blob_ref = BlobRef(crate::stable_hash::sha256_hex(body));
+                #[cfg(feature = "perf-witness")]
+                crate::perf_witness::record_hash_pass(body.len());
+                Ok(CheckpointComponentDescriptor {
+                    blob_ref,
+                    encoding_version: *encoding_version,
+                })
+            }
             Self::Unchanged { descriptor } => Ok(descriptor.clone()),
             Self::Hydrated { descriptor, body } => {
                 let actual_ref = BlobRef(crate::stable_hash::sha256_hex(body));
+                #[cfg(feature = "perf-witness")]
+                crate::perf_witness::record_hash_pass(body.len());
                 if actual_ref != descriptor.blob_ref {
                     return Err(StoreError::StoredDataCorrupt {
                         record_kind: "HydratedSessionCheckpoint",
@@ -274,7 +278,8 @@ impl HydratedSessionCheckpoint {
     /// present [`HydratedCheckpointComponent::Changed`] entry still needs its
     /// address derived and persisted.
     pub fn component_ref(&self, key: &str) -> Option<&BlobRef> {
-        self.component(key).and_then(HydratedCheckpointComponent::blob_ref)
+        self.component(key)
+            .and_then(HydratedCheckpointComponent::blob_ref)
     }
 
     /// Returns logical bytes for a changed or store-hydrated component entry.
@@ -284,7 +289,8 @@ impl HydratedSessionCheckpoint {
     /// entry from an absent key. Only the latter means deletion in this complete
     /// component set.
     pub fn component_body(&self, key: &str) -> Option<&[u8]> {
-        self.component(key).and_then(HydratedCheckpointComponent::body)
+        self.component(key)
+            .and_then(HydratedCheckpointComponent::body)
     }
 
     /// Returns a hydrated component body after enforcing the component codec.

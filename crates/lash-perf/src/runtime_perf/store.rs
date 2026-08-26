@@ -398,6 +398,7 @@ pub(crate) struct RuntimePerfStoreFactory {
     child_stores: Arc<Mutex<HashMap<String, Arc<RuntimePerfStore>>>>,
     inner: Option<Arc<dyn SessionStoreFactory>>,
     metrics: Arc<RuntimePerfStoreMetrics>,
+    measure_commit_bytes: bool,
 }
 
 impl RuntimePerfStoreFactory {
@@ -409,21 +410,36 @@ impl RuntimePerfStoreFactory {
             child_stores: Arc::new(Mutex::new(HashMap::new())),
             inner: None,
             metrics,
+            measure_commit_bytes: false,
         }
     }
 
     pub(crate) fn decorating(inner: Arc<dyn SessionStoreFactory>) -> Self {
+        Self::decorating_with_commit_measurement(inner, true)
+    }
+
+    pub(crate) fn decorating_without_commit_measurement(
+        inner: Arc<dyn SessionStoreFactory>,
+    ) -> Self {
+        Self::decorating_with_commit_measurement(inner, false)
+    }
+
+    fn decorating_with_commit_measurement(
+        inner: Arc<dyn SessionStoreFactory>,
+        measure_commit_bytes: bool,
+    ) -> Self {
         let metrics = Arc::new(RuntimePerfStoreMetrics::default());
         Self {
             store: Arc::new(RuntimePerfStore::wrap(
                 Arc::new(lash_core::facade_support::InMemorySessionStore::default()),
                 Arc::clone(&metrics),
-                true,
+                measure_commit_bytes,
             )),
             root_session_ids: Arc::new(Mutex::new(HashSet::new())),
             child_stores: Arc::new(Mutex::new(HashMap::new())),
             inner: Some(inner),
             metrics,
+            measure_commit_bytes,
         }
     }
 
@@ -473,7 +489,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
             return Ok(Arc::new(RuntimePerfStore::wrap(
                 store,
                 Arc::clone(&self.metrics),
-                true,
+                self.measure_commit_bytes,
             )));
         }
         if request.parent_session_id().is_none() {
@@ -499,7 +515,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
                 Arc::new(RuntimePerfStore::wrap(
                     store,
                     Arc::clone(&self.metrics),
-                    true,
+                    self.measure_commit_bytes,
                 )) as Arc<dyn RuntimePersistence>
             }));
         }
@@ -516,7 +532,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
                 Arc::new(RuntimePerfStore::wrap(
                     store,
                     Arc::clone(&self.metrics),
-                    true,
+                    self.measure_commit_bytes,
                 )) as Arc<dyn RuntimePersistence>
             }));
         }

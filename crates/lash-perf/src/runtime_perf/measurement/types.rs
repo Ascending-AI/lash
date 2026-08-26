@@ -3,6 +3,49 @@ const DEFAULT_RUNTIME_PERF_TURN_TIMEOUT: Duration = Duration::from_secs(10);
 
 const HIGH_TRAFFIC_KINDS: [&str; 6] = ["plain", "tool", "queued", "child", "wake", "trigger"];
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CheckpointCurveConfig {
+    pub(crate) transcript_bytes: usize,
+    pub(crate) message_count: usize,
+    pub(crate) graph_rows: usize,
+    pub(crate) component_count: usize,
+}
+
+impl CheckpointCurveConfig {
+    pub(crate) fn new(
+        transcript_bytes: usize,
+        message_count: usize,
+        graph_rows: usize,
+        component_count: usize,
+    ) -> anyhow::Result<Self> {
+        if transcript_bytes < 2_048 {
+            anyhow::bail!("checkpoint transcript bytes must be at least 2048");
+        }
+        if message_count == 0 {
+            anyhow::bail!("checkpoint message count must be positive");
+        }
+        if transcript_bytes < message_count {
+            anyhow::bail!(
+                "checkpoint transcript bytes must be at least the checkpoint message count"
+            );
+        }
+        if graph_rows <= message_count {
+            anyhow::bail!(
+                "checkpoint graph rows must exceed the checkpoint message count to include the initial frame"
+            );
+        }
+        if component_count < 4 {
+            anyhow::bail!("checkpoint component count must be at least 4");
+        }
+        Ok(Self {
+            transcript_bytes,
+            message_count,
+            graph_rows,
+            component_count,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct HighTrafficConfig {
     pub(crate) population: usize,

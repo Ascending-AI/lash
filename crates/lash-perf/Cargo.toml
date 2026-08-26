@@ -26,15 +26,15 @@ workspace = true
 
 [dependencies]
 lash-sansio = { workspace = true }
-lash-core = { workspace = true, features = ["testing"] }
+lash-core = { workspace = true, features = ["perf-witness", "testing"] }
 lash-lashlang-runtime = { workspace = true }
-lash-postgres-store = { workspace = true, features = ["testing"] }
+lash-postgres-store = { workspace = true, features = ["perf-witness", "testing"] }
 lash = { workspace = true, features = ["rlm"] }
 lash-llm-tools = { workspace = true, features = ["lashlang"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-provider-openai = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["perf-witness"] }
 lash-standard-plugins = { workspace = true, features = ["lashlang"] }
 lash-subagents = { workspace = true }
 anyhow = { workspace = true }

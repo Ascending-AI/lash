@@ -72,6 +72,22 @@ struct Args {
     #[arg(long, default_value_t = 4)]
     runtime_perf_contention_workers: usize,
 
+    /// Fixed transcript/body byte target at the center of the durable checkpoint curve
+    #[arg(long, default_value_t = 8 * 1024)]
+    runtime_perf_checkpoint_transcript_bytes: usize,
+
+    /// Messages represented in every durable checkpoint curve commit
+    #[arg(long, default_value_t = 8)]
+    runtime_perf_checkpoint_messages: usize,
+
+    /// Graph rows represented in every durable checkpoint curve commit
+    #[arg(long, default_value_t = 16)]
+    runtime_perf_checkpoint_graph_rows: usize,
+
+    /// Fixed component count at the center of the durable checkpoint curve
+    #[arg(long, default_value_t = 32)]
+    runtime_perf_checkpoint_components: usize,
+
     /// Open-loop arrivals per second for high-traffic scenarios; zero starts
     /// every session immediately
     #[arg(long, default_value_t = 0)]
@@ -167,6 +183,10 @@ fn main() -> anyhow::Result<()> {
         args.runtime_perf_scenario,
         args.runtime_perf_turns,
         args.runtime_perf_contention_workers,
+        args.runtime_perf_checkpoint_transcript_bytes,
+        args.runtime_perf_checkpoint_messages,
+        args.runtime_perf_checkpoint_graph_rows,
+        args.runtime_perf_checkpoint_components,
         args.runtime_perf_load_population,
         args.runtime_perf_load_arrival_rate,
         args.runtime_perf_load_mix,

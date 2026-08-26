@@ -505,14 +505,19 @@ pub(crate) async fn put_checkpoint_tx(
                 })?;
         if let Some(body) = component.body() {
             let stored_ref = BlobRef(format!("{:x}", Sha256::digest(body)));
+            #[cfg(feature = "perf-witness")]
+            lash_core::perf_witness::record_hash_pass(body.len());
             lash_core::store::ensure_checkpoint_component_hash_agreement(
                 key,
                 &stored_ref,
                 &descriptor.blob_ref,
             )?;
-            supplied_blobs
-                .entry(stored_ref.0)
-                .or_insert_with(|| body.to_vec());
+            supplied_blobs.entry(stored_ref.0).or_insert_with(|| {
+                let copied = body.to_vec();
+                #[cfg(feature = "perf-witness")]
+                lash_core::perf_witness::record_body_copy(body.len());
+                copied
+            });
         }
     }
     put_checkpoint_blobs_tx(tx, &supplied_blobs).await?;
@@ -553,13 +558,15 @@ pub(crate) async fn get_checkpoint_tx(
     let bodies = checkpoint_component_bodies_tx(tx, &manifest).await?;
     let mut components = std::collections::BTreeMap::new();
     for (key, descriptor) in &manifest.components {
-        let bytes = bodies
-            .get(descriptor.blob_ref.as_str())
-            .cloned()
-            .ok_or_else(|| StoreError::CheckpointComponentMissing {
+        let body = bodies.get(descriptor.blob_ref.as_str()).ok_or_else(|| {
+            StoreError::CheckpointComponentMissing {
                 key: key.clone(),
                 blob_ref: descriptor.blob_ref.clone(),
-            })?;
+            }
+        })?;
+        let bytes = body.clone();
+        #[cfg(feature = "perf-witness")]
+        lash_core::perf_witness::record_body_copy(body.len());
         components.insert(
             key.clone(),
             lash_core::HydratedCheckpointComponent::hydrated(descriptor.clone(), bytes),
