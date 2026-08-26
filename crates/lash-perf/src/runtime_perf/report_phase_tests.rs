@@ -76,11 +76,10 @@ fn ending_an_unstarted_phase_is_a_no_op() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
-    for scenario in [
-        RuntimePerfScenario::DurableStandardToolTurnSqlite,
-        RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
-        RuntimePerfScenario::DurableAgentChildTurnSqlite,
-    ] {
+    for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS
+        .into_iter()
+        .filter(|scenario| !scenario.uses_postgres())
+    {
         let result = Box::pin(run_once(scenario, 1, &high_traffic_config()))
             .await
             .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
@@ -88,6 +87,31 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
             !result.phase_profile.is_empty(),
             "{} emitted no phase measurements",
             scenario.name()
+        );
+        for counter in [
+            "store_calls.commit_runtime_state",
+            "store_calls.load_session",
+            "durable_commit.logical_bytes",
+            "durable_commit.logical_rows",
+        ] {
+            assert!(
+                result
+                    .extra_counters
+                    .get(counter)
+                    .is_some_and(|value| *value > 0),
+                "{} omitted positive {counter}: {:?}",
+                scenario.name(),
+                result.extra_counters
+            );
+        }
+        assert!(
+            result
+                .phase_profile
+                .values()
+                .all(|phase| phase.rss_growth_kb.is_some()),
+            "{} omitted phase RSS attribution: {:?}",
+            scenario.name(),
+            result.phase_profile
         );
         assert!(
             result
@@ -134,6 +158,11 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
             1,
             &StackProfile::capture(None, None),
         );
+        assert!(summaries[0].total_ms.p95 >= summaries[0].total_ms.p50);
+        assert!(summaries[0].phase_summary.values().all(|phase| {
+            phase.duration_ms.p95 >= phase.duration_ms.p50
+                && phase.alloc_bytes.p95 >= phase.alloc_bytes.p50
+        }));
         for family in result
             .metric_samples
             .keys()
@@ -205,6 +234,40 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
             !report.contains("turn.cpu"),
             "per-turn CPU attribution must never appear in a report"
         );
+    }
+}
+
+#[test]
+fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
+    assert_eq!(
+        RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS,
+        [
+            RuntimePerfScenario::DurableStandardToolTurnSqlite,
+            RuntimePerfScenario::DurableStandardToolTurnPostgres,
+            RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
+            RuntimePerfScenario::DurableRlmCheckpointTurnPostgres,
+            RuntimePerfScenario::DurableAgentChildTurnSqlite,
+            RuntimePerfScenario::DurableAgentChildTurnPostgres,
+        ]
+    );
+
+    for pair in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS.chunks_exact(2) {
+        assert!(!pair[0].uses_postgres());
+        assert!(pair[1].uses_postgres());
+        assert_eq!(pair[0].execution_mode(), pair[1].execution_mode());
+    }
+
+    for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS {
+        let metadata = RuntimePerfScenario::METADATA
+            .iter()
+            .find(|metadata| metadata.scenario == scenario)
+            .unwrap_or_else(|| panic!("{} is missing metadata", scenario.name()));
+        assert_eq!(
+            metadata.scenario_harness,
+            ScenarioHarnessKind::RuntimeScenario
+        );
+        assert!(scenario.is_durable());
+        assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
     }
 }
 
