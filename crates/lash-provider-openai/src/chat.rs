@@ -1,5 +1,6 @@
 use crate::responses_shared as shared;
 use crate::support::*;
+use lash_core::llm::types::ExecutionEvidenceMergeError;
 use std::borrow::Cow;
 
 const PROVIDER: &str = "OpenAI-compatible";
@@ -585,16 +586,51 @@ impl OpenAiCompatibleProvider {
                 .with_retry_verdict(retry_verdict)
                 .with_raw(raw));
         }
-        // Identity is the monotonic boundary for all other event evidence.
-        // Reject drift before usage or content from the conflicting route can
-        // be merged into the retained partial response.
-        state.capture_identity(event.id, event.model)?;
+        let mut event_evidence = None;
+        merge_execution_evidence(
+            &mut event_evidence,
+            ExecutionEvidence {
+                served_model: event
+                    .model
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                provider_response_id: event
+                    .id
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                reasoning_output_tokens: event.usage.as_ref().and_then(reasoning_output_tokens),
+                ..ExecutionEvidence::default()
+            },
+        )?;
+        for choice in &event.choices {
+            merge_execution_evidence(
+                &mut event_evidence,
+                ExecutionEvidence {
+                    reasoning_output_tokens: choice
+                        .usage
+                        .as_ref()
+                        .and_then(reasoning_output_tokens),
+                    provider_finish_reason: choice.finish_reason.and_then(|finish_reason| {
+                        choice
+                            .native_finish_reason
+                            .filter(|reason| !reason.is_empty())
+                            .or_else(|| (!finish_reason.is_empty()).then_some(finish_reason))
+                            .map(str::to_string)
+                    }),
+                    ..ExecutionEvidence::default()
+                },
+            )?;
+        }
+        // Identity is the monotonic boundary for every field carried by the
+        // event evidence. Reject drift before usage, terminal facts, or
+        // content from the conflicting route can enter the retained state.
+        ExecutionEvidence::merge_optional(&mut state.execution_evidence, event_evidence)
+            .map_err(|error| execution_evidence_error("Chat Completions stream", error))?;
         if let Some(usage) = event.usage.as_ref()
             && !usage.is_null()
         {
             state.provider_usage = Some(usage.clone());
             merge_usage(&mut state.usage, &usage_from_usage_value(usage));
-            state.capture_reasoning_tokens(usage);
         }
         state.final_response_raw = Some(raw.to_string());
         for choice in event.choices {
@@ -603,16 +639,8 @@ impl OpenAiCompatibleProvider {
             {
                 state.provider_usage = Some(usage.clone());
                 merge_usage(&mut state.usage, &usage_from_usage_value(usage));
-                state.capture_reasoning_tokens(usage);
             }
             if let Some(finish_reason) = choice.finish_reason {
-                if state.provider_finish_reason.is_none() {
-                    state.provider_finish_reason = choice
-                        .native_finish_reason
-                        .filter(|reason| !reason.is_empty())
-                        .or_else(|| (!finish_reason.is_empty()).then_some(finish_reason))
-                        .map(str::to_string);
-                }
                 state.terminal_reason =
                     terminal_reason_from_chat_finish_reason(finish_reason, state.terminal_reason);
             }
@@ -703,6 +731,30 @@ pub(crate) struct ChatStreamingToolCall {
     pub(crate) signature: Option<String>,
 }
 
+fn execution_evidence_error(
+    context: &str,
+    error: ExecutionEvidenceMergeError,
+) -> LlmTransportError {
+    LlmTransportError::new(format!("{context} {error}"))
+        .with_kind(ProviderFailureKind::Stream)
+        .with_code(error.code())
+}
+
+fn merge_execution_evidence(
+    accumulated: &mut Option<ExecutionEvidence>,
+    next: ExecutionEvidence,
+) -> Result<(), LlmTransportError> {
+    ExecutionEvidence::merge_optional(accumulated, Some(next))
+        .map_err(|error| execution_evidence_error("Chat Completions stream", error))
+}
+
+fn reasoning_output_tokens(usage: &Value) -> Option<u64> {
+    usage
+        .get("completion_tokens_details")
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_u64)
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ChatStreamState {
     pub(crate) full_text: String,
@@ -715,10 +767,7 @@ pub(crate) struct ChatStreamState {
     emitted_tool_call_indices: std::collections::HashSet<usize>,
     pub(crate) final_response_raw: Option<String>,
     pub(crate) terminal_reason: LlmTerminalReason,
-    pub(crate) provider_response_id: Option<String>,
-    pub(crate) served_model: Option<String>,
-    pub(crate) reasoning_output_tokens: Option<u64>,
-    pub(crate) provider_finish_reason: Option<String>,
+    pub(crate) execution_evidence: Option<ExecutionEvidence>,
 }
 
 impl ChatStreamState {
@@ -726,14 +775,7 @@ impl ChatStreamState {
         &mut self,
         value: &Value,
     ) -> Result<(), LlmTransportError> {
-        self.capture_identity(
-            value.get("id").and_then(Value::as_str),
-            value.get("model").and_then(Value::as_str),
-        )?;
-        if let Some(usage) = value.get("usage") {
-            self.capture_reasoning_tokens(usage);
-        }
-        self.provider_finish_reason = value
+        let provider_finish_reason = value
             .get("choices")
             .and_then(Value::as_array)
             .and_then(|choices| choices.first())
@@ -750,55 +792,25 @@ impl ChatStreamState {
                     })
             })
             .map(str::to_string);
-        Ok(())
-    }
-
-    pub(crate) fn capture_identity(
-        &mut self,
-        id: Option<&str>,
-        model: Option<&str>,
-    ) -> Result<(), LlmTransportError> {
-        let mut accumulated = Some(ExecutionEvidence {
-            served_model: self.served_model.clone(),
-            provider_response_id: self.provider_response_id.clone(),
-            ..ExecutionEvidence::default()
-        });
-        let next = ExecutionEvidence {
-            served_model: model.filter(|value| !value.is_empty()).map(str::to_string),
-            provider_response_id: id.filter(|value| !value.is_empty()).map(str::to_string),
-            ..ExecutionEvidence::default()
-        };
-        ExecutionEvidence::merge_optional(&mut accumulated, Some(next)).map_err(|error| {
-            LlmTransportError::new(format!("Chat Completions stream {error}"))
-                .with_kind(ProviderFailureKind::Stream)
-                .with_code(error.code())
-        })?;
-        let merged = accumulated.unwrap_or_default();
-        self.served_model = merged.served_model;
-        self.provider_response_id = merged.provider_response_id;
-        Ok(())
-    }
-
-    pub(crate) fn capture_reasoning_tokens(&mut self, usage: &Value) {
-        if let Some(tokens) = usage
-            .get("completion_tokens_details")
-            .and_then(|details| details.get("reasoning_tokens"))
-            .and_then(Value::as_u64)
-        {
-            self.reasoning_output_tokens = Some(tokens);
-        }
-    }
-
-    pub(crate) fn execution_evidence(&self) -> Option<ExecutionEvidence> {
-        let evidence = ExecutionEvidence {
-            served_model: self.served_model.clone(),
-            provider_response_id: self.provider_response_id.clone(),
-            provider_request_id: None,
-            reasoning_output_tokens: self.reasoning_output_tokens,
-            provider_finish_reason: self.provider_finish_reason.clone(),
-            collection_interruption: None,
-        };
-        (evidence != ExecutionEvidence::default()).then_some(evidence)
+        ExecutionEvidence::merge_optional(
+            &mut self.execution_evidence,
+            Some(ExecutionEvidence {
+                served_model: value
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                provider_response_id: value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string),
+                reasoning_output_tokens: value.get("usage").and_then(reasoning_output_tokens),
+                provider_finish_reason,
+                ..ExecutionEvidence::default()
+            }),
+        )
+        .map_err(|error| execution_evidence_error("Chat Completions response", error))
     }
     pub(crate) fn push_text_delta(&mut self, piece: &str) {
         if piece.is_empty() {

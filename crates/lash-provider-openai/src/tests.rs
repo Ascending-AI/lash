@@ -16,6 +16,7 @@ pub(crate) mod conformance;
 mod driver_stream_tests;
 mod error_classification_tests;
 mod generation_tests;
+mod openrouter_execution_evidence_tests;
 mod output_started_tests;
 mod replay_provenance_tests;
 mod responses_text_slot_tests;
@@ -1942,38 +1943,6 @@ fn response_failed_server_error_is_retryable() {
     assert_eq!(err.message, "internal stream ended unexpectedly");
 }
 
-#[test]
-fn openrouter_buffered_wire_preserves_concrete_model_and_explicit_zero_reasoning() {
-    let value = json!({
-        "id": "gen-123",
-        "model": "anthropic/claude-sonnet-4.5",
-        "choices": [{
-            "message": { "role": "assistant", "content": "done" },
-            "finish_reason": "stop"
-        }],
-        "usage": {
-            "completion_tokens_details": { "reasoning_tokens": 0 }
-        }
-    });
-    let mut state = ChatStreamState::default();
-    state
-        .capture_response_value(&value)
-        .expect("buffered identity is stable");
-
-    assert_eq!(
-        state.execution_evidence(),
-        Some(ExecutionEvidence {
-            served_model: Some("anthropic/claude-sonnet-4.5".to_string()),
-            provider_response_id: Some("gen-123".to_string()),
-            provider_request_id: None,
-            reasoning_output_tokens: Some(0),
-            provider_finish_reason: Some("stop".to_string()),
-            collection_interruption: None,
-        })
-    );
-    assert_ne!(state.served_model.as_deref(), Some("openrouter/auto"));
-}
-
 #[tokio::test]
 async fn openrouter_handle_records_failed_request_id_then_served_model_evidence() {
     let transport = Arc::new(ScriptedHttpTransport {
@@ -2047,13 +2016,27 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
 #[test]
 fn openrouter_buffered_wire_keeps_absent_reasoning_distinct_from_zero() {
     let mut state = ChatStreamState::default();
-    state.capture_reasoning_tokens(&json!({ "completion_tokens": 3 }));
-    assert_eq!(state.reasoning_output_tokens, None);
+    state
+        .capture_response_value(&json!({
+            "usage": { "completion_tokens": 3 }
+        }))
+        .expect("response evidence merges");
+    assert_eq!(state.execution_evidence, None);
 
-    state.capture_reasoning_tokens(&json!({
-        "completion_tokens_details": { "reasoning_tokens": 0 }
-    }));
-    assert_eq!(state.reasoning_output_tokens, Some(0));
+    state
+        .capture_response_value(&json!({
+            "usage": {
+                "completion_tokens_details": { "reasoning_tokens": 0 }
+            }
+        }))
+        .expect("response evidence merges");
+    assert_eq!(
+        state
+            .execution_evidence
+            .as_ref()
+            .and_then(|evidence| evidence.reasoning_output_tokens),
+        Some(0)
+    );
 }
 
 #[test]
@@ -2067,7 +2050,7 @@ fn openrouter_stream_wire_retains_partial_identity_when_stream_ends_early() {
 
     assert_eq!(state.full_text, "partial");
     assert_eq!(
-        state.execution_evidence(),
+        state.execution_evidence,
         Some(ExecutionEvidence {
             served_model: Some("openai/gpt-5.4-mini".to_string()),
             provider_response_id: Some("gen-partial".to_string()),
@@ -2091,7 +2074,7 @@ fn openrouter_stream_wire_captures_stable_identity_and_terminal_facts() {
             .expect("SSE chunk parses");
     }
 
-    let evidence = state.execution_evidence().expect("observed evidence");
+    let evidence = state.execution_evidence.expect("observed evidence");
     assert_eq!(evidence.provider_response_id.as_deref(), Some("gen-first"));
     assert_eq!(evidence.served_model.as_deref(), Some("provider/model-a"));
     assert_eq!(evidence.reasoning_output_tokens, Some(7));
@@ -2099,16 +2082,17 @@ fn openrouter_stream_wire_captures_stable_identity_and_terminal_facts() {
 }
 
 #[test]
-fn openrouter_stream_wire_rejects_mid_stream_identity_conflict() {
+fn openrouter_stream_wire_fences_all_evidence_on_served_model_conflict() {
     let mut state = ChatStreamState::default();
     OpenAiCompatibleProvider::process_chat_sse_event(
-        r#"{"id":"gen-first","model":"provider/model-a","choices":[{"delta":{}}]}"#,
+        r#"{"id":"gen-first","model":"provider/model-a","choices":[{"delta":{},"finish_reason":"length"}],"usage":{"completion_tokens_details":{"reasoning_tokens":7}}}"#,
         &mut state,
     )
-    .expect("initial SSE identity parses");
+    .expect("initial SSE evidence parses");
+    let initial_evidence = state.execution_evidence.clone();
 
     let error = OpenAiCompatibleProvider::process_chat_sse_event(
-        r#"{"id":"gen-first","model":"provider/model-b","choices":[{"delta":{}}]}"#,
+        r#"{"id":"gen-second","model":"provider/model-b","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"completion_tokens_details":{"reasoning_tokens":99}}}"#,
         &mut state,
     )
     .expect_err("served-model variance must fail");
@@ -2118,6 +2102,8 @@ fn openrouter_stream_wire_rejects_mid_stream_identity_conflict() {
         error.code.as_deref(),
         Some("stream_evidence_identity_conflict")
     );
+    assert!(error.message.contains("served_model"));
+    assert_eq!(state.execution_evidence, initial_evidence);
 }
 
 fn streamed_request(events: Arc<std::sync::Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {

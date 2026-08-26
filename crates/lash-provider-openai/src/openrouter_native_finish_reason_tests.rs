@@ -1,7 +1,10 @@
 use super::*;
 
 fn assert_native_finish_reason(state: &ChatStreamState) {
-    let evidence = state.execution_evidence().expect("execution evidence");
+    let evidence = state
+        .execution_evidence
+        .as_ref()
+        .expect("execution evidence");
     assert_eq!(
         evidence.provider_finish_reason.as_deref(),
         Some("stop_sequence")
