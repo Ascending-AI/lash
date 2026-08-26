@@ -587,3 +587,47 @@ mod tests {
             .expect("session enumeration snippet must preserve catalog state");
     }
 }
+
+fn describe_prune_state(state: &lash::persistence::PruneState) -> String {
+    match state {
+        lash::persistence::PruneState::Intact => "intact".to_string(),
+        lash::persistence::PruneState::Cleared => "cleared".to_string(),
+        lash::persistence::PruneState::Deleted {
+            breadcrumb,
+            archive_hash,
+        } => format!("deleted:{breadcrumb}:{archive_hash}"),
+        lash::persistence::PruneState::Summarized {
+            summary,
+            archive_hash,
+        } => format!("summarized:{summary}:{archive_hash}"),
+    }
+}
+
+fn assert_prune_state_vocabulary() {
+    let states = [
+        lash::persistence::PruneState::Intact,
+        lash::persistence::PruneState::Cleared,
+        lash::persistence::PruneState::Deleted {
+            breadcrumb: "older tool result".to_string(),
+            archive_hash: "deleted-archive".to_string(),
+        },
+        lash::persistence::PruneState::Summarized {
+            summary: "older turns".to_string(),
+            archive_hash: "summary-archive".to_string(),
+        },
+    ];
+
+    let observed_prune_states = states.iter().map(describe_prune_state).collect::<Vec<_>>();
+    let expected_prune_states = [
+        "intact",
+        "cleared",
+        "deleted:older tool result:deleted-archive",
+        "summarized:older turns:summary-archive",
+    ];
+    assert_eq!(observed_prune_states, expected_prune_states);
+}
+
+#[test]
+fn prune_state_is_available_from_the_persistence_facade() {
+    assert_prune_state_vocabulary();
+}

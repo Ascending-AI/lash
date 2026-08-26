@@ -2032,6 +2032,15 @@ lash::persistence::ProtocolEvent::decode
 lash::persistence::ProtocolEvent::payload
 lash::persistence::ProtocolEvent::plugin_id
 lash::persistence::ProtocolEvent::typed
+lash::persistence::PruneState
+lash::persistence::PruneState::Cleared
+lash::persistence::PruneState::Deleted
+lash::persistence::PruneState::Deleted::archive_hash
+lash::persistence::PruneState::Deleted::breadcrumb
+lash::persistence::PruneState::Intact
+lash::persistence::PruneState::Summarized
+lash::persistence::PruneState::Summarized::archive_hash
+lash::persistence::PruneState::Summarized::summary
 lash::persistence::QueuedCheckpointTurnInput
 lash::persistence::QueuedCheckpointTurnInput::messages
 lash::persistence::QueuedCheckpointTurnInput::turn_causes
@@ -8609,6 +8618,7 @@ lash::testing::conformance::worklist_next_scan_recovers_insert_behind_cursor
 lash::testing::frame_node_id
 lash::testing::mock_attempt_context
 lash::testing::mock_tool_context
+lash::testing::run_tool
 lash::testing::test_code_protocol_factories
 lash::tools::AttemptContext
 lash::tools::AttemptContext::__for_testing

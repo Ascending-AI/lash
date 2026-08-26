@@ -557,6 +557,7 @@ pub(crate) use crate::plugin::{
     RuntimeServices, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
     SessionObserverIntent, SessionObserverIntentAttribution,
 };
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use crate::runtime::UnavailableProcessService;
 pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
 
