@@ -68,6 +68,10 @@ struct Args {
     #[arg(long, default_value_t = 4)]
     runtime_perf_load_population: usize,
 
+    /// Concurrent workers for durable queued-work contention scenarios
+    #[arg(long, default_value_t = 4)]
+    runtime_perf_contention_workers: usize,
+
     /// Open-loop arrivals per second for high-traffic scenarios; zero starts
     /// every session immediately
     #[arg(long, default_value_t = 0)]
@@ -162,6 +166,7 @@ fn main() -> anyhow::Result<()> {
         args.runtime_perf_warmups,
         args.runtime_perf_scenario,
         args.runtime_perf_turns,
+        args.runtime_perf_contention_workers,
         args.runtime_perf_load_population,
         args.runtime_perf_load_arrival_rate,
         args.runtime_perf_load_mix,

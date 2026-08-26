@@ -181,8 +181,10 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
         RuntimePerfScenario::HighTrafficLoadSqlite
         | RuntimePerfScenario::HighTrafficLoadPostgres
         | RuntimePerfScenario::HighTrafficKneeSqlite
-        | RuntimePerfScenario::HighTrafficKneePostgres => {
-            unreachable!("high-traffic scenarios construct per-operation prompts")
+        | RuntimePerfScenario::HighTrafficKneePostgres
+        | RuntimePerfScenario::DurableQueuedWorkContentionSqlite
+        | RuntimePerfScenario::DurableQueuedWorkContentionPostgres => {
+            unreachable!("direct-dispatch scenarios construct their own operations")
         }
         RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres => format!(

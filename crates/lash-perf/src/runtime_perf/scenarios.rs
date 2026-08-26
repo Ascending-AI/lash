@@ -100,6 +100,8 @@ pub(crate) enum RuntimePerfScenario {
     DurableAgentChildTurnPostgres,
     DurableCheckpointCurveSqlite,
     DurableCheckpointCurvePostgres,
+    DurableQueuedWorkContentionSqlite,
+    DurableQueuedWorkContentionPostgres,
     WriterContention2Workers,
     WriterContention8Workers,
     AsyncProcessSettlement2Children,
@@ -146,7 +148,7 @@ impl RuntimePerfScenario {
         Self::DurableAgentChildTurnPostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 57] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 59] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -504,6 +506,20 @@ impl RuntimePerfScenario {
             "Measures checkpoint-size attribution inside complete RLM turns against the decorated PostgreSQL persistence boundary."
         ),
         runtime_perf_metadata!(
+            DurableQueuedWorkContentionSqlite,
+            "durable_queued_work_contention_sqlite",
+            Standard,
+            RuntimeScenario,
+            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box."
+        ),
+        runtime_perf_metadata!(
+            DurableQueuedWorkContentionPostgres,
+            "durable_queued_work_contention_postgres",
+            Standard,
+            RuntimeScenario,
+            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared PostgreSQL backend. Wall-clock throughput and latency are meaningful only on a quiet box."
+        ),
+        runtime_perf_metadata!(
             WriterContention2Workers,
             "writer_contention_2_workers",
             Standard,
@@ -560,7 +576,7 @@ impl RuntimePerfScenario {
             "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search."
         ),
     ];
-    pub(crate) const KNOWN: [Self; 57] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 59] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; 38] = runtime_perf_default_scenarios();
@@ -598,6 +614,8 @@ impl RuntimePerfScenario {
                 self,
                 Self::DurableCheckpointCurveSqlite
                     | Self::DurableCheckpointCurvePostgres
+                    | Self::DurableQueuedWorkContentionSqlite
+                    | Self::DurableQueuedWorkContentionPostgres
                     | Self::HighTrafficLoadSqlite
                     | Self::HighTrafficLoadPostgres
                     | Self::HighTrafficKneeSqlite
@@ -612,6 +630,7 @@ impl RuntimePerfScenario {
                 | Self::DurableRlmCheckpointTurnPostgres
                 | Self::DurableAgentChildTurnPostgres
                 | Self::DurableCheckpointCurvePostgres
+                | Self::DurableQueuedWorkContentionPostgres
                 | Self::HighTrafficLoadPostgres
                 | Self::HighTrafficKneePostgres
         )
@@ -624,6 +643,13 @@ impl RuntimePerfScenario {
                 | Self::HighTrafficLoadPostgres
                 | Self::HighTrafficKneeSqlite
                 | Self::HighTrafficKneePostgres
+        )
+    }
+
+    pub(crate) fn is_queued_work_contention(self) -> bool {
+        matches!(
+            self,
+            Self::DurableQueuedWorkContentionSqlite | Self::DurableQueuedWorkContentionPostgres
         )
     }
 
@@ -687,7 +713,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 57] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 59] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -746,6 +772,8 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 57] {
         RuntimePerfScenario::METADATA[54].scenario,
         RuntimePerfScenario::METADATA[55].scenario,
         RuntimePerfScenario::METADATA[56].scenario,
+        RuntimePerfScenario::METADATA[57].scenario,
+        RuntimePerfScenario::METADATA[58].scenario,
     ]
 }
 

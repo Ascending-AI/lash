@@ -67,6 +67,7 @@ pub async fn run_cli(
     warmups: usize,
     scenario_filters: Vec<String>,
     chat_turns: usize,
+    contention_workers: usize,
     high_traffic_population: usize,
     high_traffic_arrival_rate: u64,
     high_traffic_mix: String,
@@ -84,6 +85,7 @@ pub async fn run_cli(
     let scenarios = resolve_scenarios(&scenario_filters)?;
     let runs = runs.max(1);
     let chat_turns = chat_turns.max(1);
+    let contention_workers = contention_workers.max(1);
     let high_traffic = HighTrafficConfig::parse(
         high_traffic_population,
         high_traffic_arrival_rate,
@@ -95,7 +97,13 @@ pub async fn run_cli(
 
     for _ in 0..warmups {
         for scenario in &scenarios {
-            let _ = Box::pin(run_once(*scenario, chat_turns, &high_traffic)).await?;
+            let _ = Box::pin(run_once(
+                *scenario,
+                chat_turns,
+                contention_workers,
+                &high_traffic,
+            ))
+            .await?;
         }
     }
 
@@ -126,7 +134,13 @@ pub async fn run_cli(
     let mut results = Vec::with_capacity(runs * scenarios.len());
     for _ in 0..runs {
         for scenario in &scenarios {
-            let mut result = Box::pin(run_once(*scenario, chat_turns, &high_traffic)).await?;
+            let mut result = Box::pin(run_once(
+                *scenario,
+                chat_turns,
+                contention_workers,
+                &high_traffic,
+            ))
+            .await?;
             result.stack_profile = Some(stack_profile.clone());
             results.push(result);
         }
