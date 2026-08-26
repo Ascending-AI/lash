@@ -11,8 +11,14 @@
 # can change independently of this script.
 set -euo pipefail
 
+# The removals run detached: they free ~25GB well before the compile needs
+# it, and GitHub-hosted runners keep background processes alive across the
+# job's remaining steps, so blocking the job for 60-90s of rm/prune bought
+# nothing. Nothing later in any job reads the reclaimed paths.
 echo "before:"; df -h / | tail -1
-sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-  /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
-sudo docker image prune --all --force >/dev/null 2>&1 || true
-echo "after:"; df -h / | tail -1
+sudo bash -c 'nohup sh -c "
+  rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+    /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null
+  docker image prune --all --force >/dev/null 2>&1
+" >/dev/null 2>&1 &'
+echo "reclaim running in background"

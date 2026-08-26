@@ -118,6 +118,38 @@ def shell_logical_commands(script: str) -> list[str]:
 
 
 class ConfidenceGateCiContractTest(unittest.TestCase):
+    def test_heavy_suites_are_split_between_shard_and_heavy_profiles(self) -> None:
+        """The shard/heavy split lives in nextest profiles, not job scripts.
+
+        `profile.ci` (the shards) must exclude the heavy suites its comment
+        promises, `profile.ci-heavy` (the trunk-only heavy-tests job) must run
+        them, and each job must name its profile — otherwise a rename on one
+        side silently drops the suites from CI entirely.
+        """
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        nextest = (ROOT / ".config" / "nextest.toml").read_text(encoding="utf-8")
+
+        shard = workflow_job_block(workflow, "test-shard")
+        self.assertIn("--profile ci --workspace", shard)
+        heavy = workflow_job_block(workflow, "heavy-tests")
+        self.assertIn("--profile ci-heavy --workspace", heavy)
+
+        self.assertIn("[profile.ci-heavy]", nextest)
+        heavy_filter = (
+            "durable_fault_matrix_real_cargo_filters_chunk_"
+        )
+        ci_profile = nextest.split("[profile.ci]", 1)[1].split("[profile.ci-heavy]", 1)[0]
+        ci_heavy_profile = nextest.split("[profile.ci-heavy]", 1)[1]
+        self.assertIn("default-filter", ci_profile)
+        self.assertIn(heavy_filter, ci_profile)
+        self.assertIn("default-filter", ci_heavy_profile)
+        self.assertIn(heavy_filter, ci_heavy_profile)
+        # The trybuild ui binary leaves the shards without a heavy-side run;
+        # its per-push gate is test-doc's seal step.
+        self.assertIn("binary(ui)", ci_profile)
+        self.assertNotIn("binary(ui)", ci_heavy_profile)
+        self.assertIn("--test ui", workflow_job_block(workflow, "test-doc"))
+
     def test_trunk_only_jobs_defer_on_pr_and_merge_group_events(self) -> None:
         """Heavy suites run on trunk (push/dispatch) only: 2026-08-25 ruling.
 
@@ -128,6 +160,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         """
         workflow = WORKFLOW.read_text(encoding="utf-8")
         trunk_only = {
+            "heavy-tests",
             "semver-advisory",
             "lashlang-git-consumer",
             "package-feature-checks",

@@ -325,10 +325,11 @@ jobs:
       #
       # `--test ui` builds that one test target, not the workspace's other test
       # binaries. The step is named for what it runs, not for the caching:
-      # compile_fail drift now fails here first, minutes ahead of the shard that
-      # would otherwise report it, and a red step named for a cache would send
-      # the reader hunting a caching bug. The shards still run the suite;
-      # nothing here replaces their coverage.
+      # compile_fail drift fails here, and a red step named for a cache would
+      # send the reader hunting a caching bug. This step is the sole per-push
+      # run of the ui suite: `profile.ci`'s default-filter excludes the ui
+      # binary from the shards, where the same tests were a second, slower
+      # report of the same defect.
       - name: Seal-test the API surface (warms the trybuild fixture cache)
         run: |
           # shellcheck disable=SC2086
@@ -867,12 +868,84 @@ jobs:
       # Workspace-wide: every crate's tests run, not a hand-maintained crate
       # list. Live tests (Restate e2e, Postgres conformance without a database
       # URL) are #[ignore]d or self-skip. Partition count:i/4 splits execution
-      # across the four shards.
+      # across the four shards. `profile.ci` carries a default-filter that
+      # excludes the multi-minute heavy suites (fault-matrix chunks, lash-sim
+      # runner/minimizer cases — run by the trunk-only heavy-tests job below)
+      # and the trybuild ui binary (run by test-doc's seal step every push):
+      # each of those tests is a single 3-9 minute serial run, so any one of
+      # them set the shard's wall-clock regardless of parallelism.
       - name: Test workspace shard
         run: |
           # shellcheck disable=SC2086
           cargo nextest run --profile ci --workspace --locked ${LASH_CI_FEATURES} \
             --no-fail-fast --partition count:${{ matrix.shard }}/4
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # The heavy suites excluded from the per-push shards by `profile.ci`'s
+  # default-filter (see .config/nextest.toml): the fault-matrix chunk tests,
+  # which each fork real `cargo` invocations and run 3-9 minutes serially, and
+  # the lash-sim runner/minimizer fixture cases. Deferred to trunk runs
+  # (push/dispatch) like the other trunk-only jobs: any one of these tests set
+  # the wall-clock of a whole shard, and their behavior almost never varies
+  # with a PR's diff.
+  heavy-tests:
+    name: Test heavy suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    needs: plan
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.rust == 'true'
+
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          git fetch \
+            --no-tags --prune --depth=1 origin "${GITHUB_SHA}"
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Install Node for browser projection gates
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Restore cargo cache
+        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        with:
+          cache-bin: false
+          shared-key: linux-debug
+          save-if: false
+
+      - name: Install protoc and nextest
+        uses: ./.github/actions/install-tools
+        with:
+          tool: protoc,nextest
+
+      - name: Setup sccache
+        uses: ./.github/actions/setup-sccache
+
+      - name: Test heavy suites
+        run: |
+          # shellcheck disable=SC2086
+          cargo nextest run --profile ci-heavy --workspace --locked ${LASH_CI_FEATURES} \
+            --no-fail-fast
 
       - name: Report sccache stats
         if: always()
@@ -1942,6 +2015,7 @@ jobs:
       - package-feature-checks
       - runtime-feature-boundary
       - test-shard
+      - heavy-tests
       - lint
       - confidence-fast
       - confidence-fast-summary
