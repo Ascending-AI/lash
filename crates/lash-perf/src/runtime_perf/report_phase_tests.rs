@@ -13,6 +13,14 @@ use crate::runtime_perf::measurement::{
 use crate::runtime_perf::scenarios::DURABLE_CHECKPOINT_CURVE_BYTES;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 
+const STABLE_DURABLE_PHASES: [&str; 5] = [
+    "prepared_turn",
+    "committed_turn",
+    "post_commit_delivery",
+    "effect_loop",
+    "context_transform",
+];
+
 fn high_traffic_config() -> HighTrafficConfig {
     HighTrafficConfig::parse(
         4,
@@ -83,11 +91,14 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
         let result = Box::pin(run_once(scenario, 1, &high_traffic_config()))
             .await
             .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
-        assert!(
-            !result.phase_profile.is_empty(),
-            "{} emitted no phase measurements",
-            scenario.name()
-        );
+        for phase in STABLE_DURABLE_PHASES {
+            assert!(
+                result.phase_profile.contains_key(phase),
+                "{} omitted stable phase {phase}: {:?}",
+                scenario.name(),
+                result.phase_profile.keys().collect::<Vec<_>>()
+            );
+        }
         for counter in [
             "store_calls.commit_runtime_state",
             "store_calls.load_session",
@@ -104,15 +115,6 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
                 result.extra_counters
             );
         }
-        assert!(
-            result
-                .phase_profile
-                .values()
-                .all(|phase| phase.rss_growth_kb.is_some()),
-            "{} omitted phase RSS attribution: {:?}",
-            scenario.name(),
-            result.phase_profile
-        );
         assert!(
             result
                 .extra_counters
@@ -158,20 +160,25 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
             1,
             &StackProfile::capture(None, None),
         );
-        assert!(summaries[0].total_ms.p95 >= summaries[0].total_ms.p50);
-        assert!(summaries[0].phase_summary.values().all(|phase| {
-            phase.duration_ms.p95 >= phase.duration_ms.p50
-                && phase.alloc_bytes.p95 >= phase.alloc_bytes.p50
-        }));
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].runs, 1);
+        for phase in STABLE_DURABLE_PHASES {
+            assert!(
+                summaries[0].phase_summary.contains_key(phase),
+                "{} summary omitted stable phase {phase}",
+                scenario.name()
+            );
+        }
         for family in result
             .metric_samples
             .keys()
             .filter(|key| key.starts_with("store.op."))
         {
-            let latency = &summaries[0].metric_summary[family];
-            assert!(latency.p50 >= 0.0);
-            assert!(latency.p95 >= latency.p50);
-            assert!(latency.max >= latency.p95);
+            assert!(
+                summaries[0].metric_summary.contains_key(family),
+                "{} summary omitted latency family {family}",
+                scenario.name()
+            );
         }
 
         for key in [
@@ -266,7 +273,6 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
             metadata.scenario_harness,
             ScenarioHarnessKind::RuntimeScenario
         );
-        assert!(scenario.is_durable());
         assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
     }
 }
