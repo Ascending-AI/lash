@@ -90,6 +90,27 @@ filter = '''
 test-group = "docker-services"
 
 [profile.ci]
+# The per-push profile. The heavy suites below are excluded here and run by
+# the trunk-only `Test heavy suites` CI job under `profile.ci-heavy`: each of
+# these tests is a 3-9 minute serial run (the fault-matrix chunks fork real
+# `cargo` invocations; the lash-sim runner/minimizer cases replay generated
+# fixtures), so a single one of them set the wall-clock of every per-push
+# shard. The trybuild `ui` binary is excluded WITHOUT a heavy-side run: the
+# `Seal-test the API surface` step in the test-doc job already runs the same
+# suite on every push, so a shard-side run was a second, slower report of the
+# same defect. Keep this expression and the `ci-heavy` default-filter exact
+# complements over the heavy set.
+default-filter = '''
+  not (
+      (
+        package(lash-internal-core)
+        & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+      )
+    + (package(lash-sim) & test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts))
+    + (package(lash-sim) & test(/minimize::tests::(minimizer_preserves_named_contract_execution_fixture_reasons|minimizer_preserves_provider_worker_backend_fixture_reasons|minimizer_writes_replayable_regression_package)/))
+    + (package(lash-runtime) & binary(ui))
+  )
+'''
 # One failing test must never hide the rest of the shard (the alpha.82 lesson,
 # recorded at the shard invocation in ci.yml). The shards pass `--no-fail-fast`
 # explicitly and keep doing so; this makes the same answer the profile's
@@ -108,51 +129,6 @@ flaky-result = "fail"
 # run for tests whose cost depends on a warm or service-backed workspace.
 slow-timeout = { period = "300s", terminate-after = 1 }
 
-# Start the nested-Cargo fault probes first. Isolated runs measured 205-219s;
-# the cold full-workspace run reached 1320s under nested-Cargo contention, so
-# retain a 1500s ceiling without changing their existing two-thread group.
-[[profile.ci.overrides]]
-filter = '''
-  package(lash-internal-core)
-  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
-'''
-priority = 100
-slow-timeout = { period = "300s", terminate-after = 5 }
-
-# Trybuild UI tests are legitimate long runners. CI's warmed fixture path is
-# much shorter, while a cold local run measured 1204s for one test and was
-# still compiling the second at 2781s. The cold cost is the SHARED trybuild
-# scratch-project build, paid by whichever ui test wins the race — so the
-# whole binary gets the wider bound, not the two tests one run happened to
-# charge it to. Keep the cap finite and above both observed cold paths.
-[[profile.ci.overrides]]
-filter = 'package(lash-runtime) & binary(ui)'
-priority = 99
-slow-timeout = { period = "600s", terminate-after = 5 }
-
-# Generated simulation/minimizer cases are the other measured tail. Their
-# completed cold-run times were 182-418s; allow the 411.799s runner case and
-# 418.254s minimizer case, but still terminate a pathological run.
-[[profile.ci.overrides]]
-filter = 'package(lash-sim) & test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)'
-priority = 98
-slow-timeout = { period = "600s", terminate-after = 1 }
-
-[[profile.ci.overrides]]
-filter = 'package(lash-sim) & test(minimize::tests::minimizer_preserves_named_contract_execution_fixture_reasons)'
-priority = 98
-slow-timeout = { period = "600s", terminate-after = 1 }
-
-[[profile.ci.overrides]]
-filter = 'package(lash-sim) & test(minimize::tests::minimizer_preserves_provider_worker_backend_fixture_reasons)'
-priority = 98
-slow-timeout = { period = "600s", terminate-after = 1 }
-
-[[profile.ci.overrides]]
-filter = 'package(lash-sim) & test(minimize::tests::minimizer_writes_replayable_regression_package)'
-priority = 98
-slow-timeout = { period = "600s", terminate-after = 1 }
-
 # The Unicode RGI tests are the longest ordinary tests (66.525s, 130.957s),
 # so start them with the long tail while leaving the five-minute default
 # termination bound intact.
@@ -163,3 +139,46 @@ filter = '''
   & test(/unicode_sets_rgi_emoji_.*/)
 '''
 priority = 97
+
+# The trunk-only heavy profile: the exact complement of `profile.ci`'s
+# default-filter, minus the trybuild `ui` binary (whose per-push gate is the
+# test-doc seal step, not this job). Run by the `Test heavy suites` job in
+# `.github/workflows/ci.yml` on push and workflow_dispatch. Same failure
+# semantics as `ci`: report the whole run, and a flaky pass is a failure.
+[profile.ci-heavy]
+fail-fast = false
+flaky-result = "fail"
+final-status-level = "slow"
+default-filter = '''
+    (
+      package(lash-internal-core)
+      & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+    )
+  + (package(lash-sim) & test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts))
+  + (package(lash-sim) & test(/minimize::tests::(minimizer_preserves_named_contract_execution_fixture_reasons|minimizer_preserves_provider_worker_backend_fixture_reasons|minimizer_writes_replayable_regression_package)/))
+'''
+
+# Start the nested-Cargo fault probes first. Isolated runs measured 205-219s;
+# a cold full-workspace run reached 1320s under nested-Cargo contention, so
+# retain a 1500s ceiling without changing their existing two-thread group.
+[[profile.ci-heavy.overrides]]
+filter = '''
+  package(lash-internal-core)
+  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+'''
+priority = 100
+slow-timeout = { period = "300s", terminate-after = 5 }
+
+# Generated simulation/minimizer cases: completed cold-run times were 182-418s;
+# allow the 411.799s runner case and 418.254s minimizer case, but still
+# terminate a pathological run.
+[[profile.ci-heavy.overrides]]
+filter = '''
+  package(lash-sim)
+  & (
+      test(runner::tests::generated_sim_profile_writes_trace_replay_and_provider_artifacts)
+    + test(/minimize::tests::/)
+  )
+'''
+priority = 98
+slow-timeout = { period = "600s", terminate-after = 1 }

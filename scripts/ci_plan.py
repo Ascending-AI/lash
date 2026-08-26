@@ -21,6 +21,7 @@ GATED_JOBS = {
     "package-feature-checks": "rust",
     "runtime-feature-boundary": "rust",
     "test-shard": "rust",
+    "heavy-tests": "rust",
     "stack-budget": "rust",
     "confidence-fast": "confidence",
     "confidence-fast-summary": "confidence",
@@ -33,6 +34,7 @@ GATED_JOBS = {
 # conditions skip them on pull_request and merge_group events per the
 # 2026-08-25 CI-scope ruling; reassess after the FIG-2169 test-prune sweep.
 TRUNK_ONLY_JOBS = {
+    "heavy-tests",
     "semver-advisory",
     "lashlang-git-consumer",
     "package-feature-checks",
