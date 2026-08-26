@@ -300,6 +300,113 @@ async fn session_affinity_is_disabled_without_endpoint_capability() {
 }
 
 #[tokio::test]
+async fn default_wire_config_uses_bearer_authorization() {
+    let transport = Arc::new(RecordingHttpTransport::default());
+    let mut provider = OpenAiCompatibleProvider::new("secret", "https://proxy.example/v1")
+        .with_transport(transport.clone());
+
+    provider
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .await
+        .expect("request succeeds");
+
+    let requests = transport.requests.lock_recover();
+    let wire_request = requests.first().expect("captured request");
+    assert!(
+        wire_request
+            .headers
+            .iter()
+            .any(|(name, value)| { name == "Authorization" && value == "Bearer secret" })
+    );
+    assert_eq!(
+        wire_request.url,
+        "https://proxy.example/v1/chat/completions"
+    );
+}
+
+#[tokio::test]
+async fn custom_wire_config_controls_auth_header_and_prefix() {
+    let transport = Arc::new(RecordingHttpTransport::default());
+    let mut provider = OpenAiCompatibleProvider::new("secret", "https://proxy.example/v1")
+        .with_wire_config(OpenAiWireConfig {
+            auth_header_name: "api-key".to_string(),
+            auth_value_prefix: "Key ".to_string(),
+            ..OpenAiWireConfig::default()
+        })
+        .with_transport(transport.clone());
+    provider
+        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+        .await
+        .expect("request succeeds");
+    let requests = transport.requests.lock_recover();
+    let wire_request = requests.first().expect("captured request");
+    assert!(
+        wire_request
+            .headers
+            .iter()
+            .any(|(name, value)| name == "api-key" && value == "Key secret")
+    );
+    assert!(
+        wire_request
+            .headers
+            .iter()
+            .all(|(name, _)| name != "Authorization")
+    );
+}
+
+#[tokio::test]
+async fn empty_auth_value_prefix_sends_raw_key_without_spacing() {
+    let transport = Arc::new(RecordingHttpTransport::default());
+    let mut provider = OpenAiCompatibleProvider::new("secret", "https://proxy.example/v1")
+        .with_transport(transport.clone());
+    provider.wire.auth_header_name = "x-api-key".to_string();
+    provider.wire.auth_value_prefix.clear();
+    provider.complete(request(vec![])).await.unwrap();
+    let requests = transport.requests.lock_recover();
+    assert!(
+        requests[0]
+            .headers
+            .contains(&("x-api-key".to_string(), "secret".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn static_query_params_append_to_urls_with_and_without_existing_query() {
+    for (base_url, expected_url) in [
+        (
+            "https://proxy.example/v1",
+            "https://proxy.example/v1/chat/completions?api-version=2026-01-01&region=eu+west",
+        ),
+        (
+            "https://proxy.example/v1?deployment=blue",
+            "https://proxy.example/v1/chat/completions?deployment=blue&api-version=2026-01-01&region=eu+west",
+        ),
+    ] {
+        let transport = Arc::new(RecordingHttpTransport::default());
+        let mut provider = OpenAiCompatibleProvider::new("secret", base_url)
+            .with_wire_config(OpenAiWireConfig {
+                query_params: vec![
+                    ("api-version".to_string(), "2026-01-01".to_string()),
+                    ("region".to_string(), "eu west".to_string()),
+                ],
+                ..OpenAiWireConfig::default()
+            })
+            .with_transport(transport.clone());
+
+        provider
+            .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
+            .await
+            .expect("request succeeds");
+
+        let requests = transport.requests.lock_recover();
+        assert_eq!(
+            requests.first().expect("captured request").url,
+            expected_url
+        );
+    }
+}
+
+#[tokio::test]
 async fn direct_openai_prompt_cache_key_does_not_enable_body_session_affinity() {
     let transport = Arc::new(RecordingHttpTransport::default());
     let mut provider = OpenAiProvider::new("key").with_transport(transport.clone());
@@ -650,6 +757,14 @@ fn providers_serialize_distinct_config_shapes() {
     assert_eq!(compatible_config["api_key"], "key");
     assert_eq!(compatible_config["base_url"], OPENROUTER_BASE_URL);
     assert!(compatible_config.get("wire_api").is_none());
+}
+
+#[test]
+fn openai_compatible_wire_config_serializes_only_when_customized() {
+    let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1");
+    assert!(provider.serialize_config().get("wire").is_none());
+    provider.wire.query_params.push(("v".into(), "1".into()));
+    assert!(provider.serialize_config().get("wire").is_some());
 }
 
 #[test]
