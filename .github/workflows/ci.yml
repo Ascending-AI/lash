@@ -1487,7 +1487,10 @@ jobs:
   linux-release-cache:
     name: Build Linux release cache
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # A fully cold release-profile build exceeded 45 minutes on the 4-vcpu
+    # GitHub-hosted runners (job-timeout shows as 'cancelled', 2026-08-26);
+    # warm rebuilds finish in minutes.
+    timeout-minutes: 90
     # Warms the release-profile cache that release.yml and perf.yml restore on
     # main. A cache written by a pull-request run is scoped to that PR's merge
     # ref and can only be restored by re-runs of the same pull request, so on a
