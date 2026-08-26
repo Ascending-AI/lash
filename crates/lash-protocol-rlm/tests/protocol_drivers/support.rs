@@ -345,8 +345,13 @@ pub(crate) fn exec_response(
     final_output: Option<serde_json::Value>,
 ) -> lash_sansio::ExecResponse {
     lash_sansio::ExecResponse {
-        observations: output.iter().map(|item| (*item).to_string()).collect(),
-        observation_truncation: Vec::new(),
+        observations: output
+            .iter()
+            .map(|item| lash_sansio::Observation {
+                text: (*item).to_string(),
+                projection: Default::default(),
+            })
+            .collect(),
         tool_calls: Vec::new(),
         executed_calls: Vec::new(),
         printed_images: Vec::new(),

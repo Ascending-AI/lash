@@ -6,11 +6,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core::{
-    AttachmentRef, RuntimeExecutionContext, TextProjectionMetadata, ToolExecutionGrant,
-    TraceContext, TraceEvent, facade_support::ToolChildExecutionTraceHook,
-    facade_support::ToolInvocation, facade_support::ToolInvocationReply,
-    facade_support::TraceBranchSelection, facade_support::TraceRecord,
-    facade_support::TraceRuntimeSubject, facade_support::TraceSink,
+    AttachmentRef, Observation, RuntimeExecutionContext, ToolExecutionGrant, TraceContext,
+    TraceEvent, facade_support::ToolChildExecutionTraceHook, facade_support::ToolInvocation,
+    facade_support::ToolInvocationReply, facade_support::TraceBranchSelection,
+    facade_support::TraceRecord, facade_support::TraceRuntimeSubject, facade_support::TraceSink,
 };
 use lash_lashlang_runtime::{
     LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageChildExecution,
@@ -32,8 +31,7 @@ pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
     print_projector: std::sync::Arc<dyn ValueProjector>,
     tool_result_projectors: Vec<crate::RlmToolResultProjector>,
-    observations: Mutex<Vec<String>>,
-    observation_truncation: Mutex<Vec<TextProjectionMetadata>>,
+    observations: Mutex<Vec<Observation>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     tool_calls: Mutex<Vec<lash_core::ToolCallRecord>>,
     executed_calls: Mutex<Vec<(usize, lash_core::ExecutedCallRecord)>>,
@@ -55,7 +53,7 @@ pub(super) struct HostBridgeConfig<'run> {
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     pub artifact_store: std::sync::Arc<dyn lashlang::LashlangArtifactStore>,
     pub trigger_key_manifest: lashlang::TriggerKeyManifest,
-    pub initial_observations: Vec<String>,
+    pub initial_observations: Vec<Observation>,
 }
 
 type HostAbilityFuture<'a> =
@@ -68,7 +66,6 @@ impl<'run> HostBridge<'run> {
             print_projector: config.print_projector,
             tool_result_projectors: config.tool_result_projectors,
             observations: Mutex::new(config.initial_observations),
-            observation_truncation: Mutex::new(Vec::new()),
             printed_images: Mutex::new(Vec::new()),
             tool_calls: Mutex::new(Vec::new()),
             executed_calls: Mutex::new(Vec::new()),
@@ -136,7 +133,6 @@ impl<'run> HostBridge<'run> {
         executed_calls.sort_by_key(|(index, _)| *index);
         CollectedExecutionOutput {
             observations: self.observations.into_inner().recover(),
-            observation_truncation: self.observation_truncation.into_inner().recover(),
             printed_images: self.printed_images.into_inner().recover(),
             tool_calls: self.tool_calls.into_inner().recover(),
             executed_calls: executed_calls
@@ -956,9 +952,12 @@ impl HostBridge<'_> {
                 .await
         };
         let raw_text = format_output_value(&value).await;
-        let metadata = observation_projection_metadata(&raw_text, &projected_text);
-        self.observations.lock_recover().push(raw_text);
-        self.observation_truncation.lock_recover().push(metadata);
+        let projection =
+            crate::rlm_support::observation_projection_metadata(&raw_text, &projected_text);
+        self.observations.lock_recover().push(Observation {
+            text: raw_text,
+            projection,
+        });
         if !images.is_empty() {
             self.printed_images.lock_recover().extend(images);
         }
@@ -1027,26 +1026,6 @@ impl HostBridge<'_> {
             }
         }
     }
-}
-
-fn observation_projection_metadata(original: &str, projected: &str) -> TextProjectionMetadata {
-    TextProjectionMetadata {
-        truncated: projection_is_lossy(original, projected),
-        original_chars: original.chars().count(),
-        projected_chars: projected.chars().count(),
-        original_lines: original.lines().count(),
-        projected_lines: projected.lines().count(),
-        limit: crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_bytes,
-        limit_mode: "bytes".to_string(),
-        max_lines: crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_lines,
-    }
-}
-
-fn projection_is_lossy(original: &str, projected: &str) -> bool {
-    projected.contains("truncated")
-        || projected.contains("omitted")
-        || projected.contains("max depth")
-        || projected.chars().count() < original.chars().count()
 }
 
 impl ExecutionHost for HostBridge<'_> {
@@ -1266,8 +1245,7 @@ fn flow_record_json<'a>(record: &'a FlowRecord) -> ProjectedFuture<'a, Value> {
 }
 
 pub(super) struct CollectedExecutionOutput {
-    pub(super) observations: Vec<String>,
-    pub(super) observation_truncation: Vec<TextProjectionMetadata>,
+    pub(super) observations: Vec<Observation>,
     pub(super) printed_images: Vec<AttachmentRef>,
     pub(super) tool_calls: Vec<lash_core::ToolCallRecord>,
     pub(super) executed_calls: Vec<lash_core::ExecutedCallRecord>,

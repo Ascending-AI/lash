@@ -46,10 +46,15 @@ pub struct DegradedBinding {
     pub reason: String,
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct Observation {
+    pub text: String,
+    pub projection: TextProjectionMetadata,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecResponse {
-    pub observations: Vec<String>,
-    pub observation_truncation: Vec<TextProjectionMetadata>,
+    pub observations: Vec<Observation>,
     pub tool_calls: Vec<ToolCallRecord>,
     #[serde(default)]
     pub executed_calls: Vec<ExecutedCallRecord>,
@@ -85,8 +90,19 @@ mod tests {
     #[test]
     fn legacy_exec_response_payload_with_images_field_still_decodes() {
         let legacy_json = serde_json::json!({
-            "observations": ["step output"],
-            "observation_truncation": [],
+            "observations": [{
+                "text": "step output",
+                "projection": {
+                    "truncated": false,
+                    "original_chars": 11,
+                    "projected_chars": 11,
+                    "original_lines": 1,
+                    "projected_lines": 1,
+                    "limit": 51200,
+                    "limit_mode": "bytes",
+                    "max_lines": 2000
+                }
+            }],
             "tool_calls": [],
             "executed_calls": [],
             "images": [
@@ -104,7 +120,40 @@ mod tests {
 
         let response: ExecResponse = serde_json::from_value(legacy_json)
             .expect("legacy ExecResponse payload with images field should decode");
-        assert_eq!(response.observations, vec!["step output"]);
+        assert_eq!(response.observations[0].text, "step output");
         assert_eq!(response.duration_ms, 42);
+    }
+
+    #[test]
+    fn paired_observation_lists_are_rejected() {
+        let mut paired_json = serde_json::json!({
+            "observations": ["step output"],
+            "tool_calls": [],
+            "executed_calls": [],
+            "printed_images": [],
+            "error": null,
+            "duration_ms": 42,
+            "terminal_finish": null
+        });
+        paired_json.as_object_mut().unwrap().insert(
+            "observation_truncation".to_string(),
+            serde_json::json!([{
+                "truncated": false,
+                "original_chars": 11,
+                "projected_chars": 11,
+                "original_lines": 1,
+                "projected_lines": 1,
+                "limit": 51200,
+                "limit_mode": "bytes",
+                "max_lines": 2000
+            }]),
+        );
+
+        let error = serde_json::from_value::<ExecResponse>(paired_json)
+            .expect_err("paired observation lists must not decode after the hard cutover");
+        assert!(
+            error.to_string().contains("expected struct Observation"),
+            "unexpected decode error: {error}"
+        );
     }
 }

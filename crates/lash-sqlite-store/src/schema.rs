@@ -851,6 +851,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // Version 12 removes the duplicated `LlmResponse.full_text` member from
 // runtime-effect outcomes. Pre-cutover journal JSON is upgraded only at the
 // effect replay decode boundary.
+// Version 13 merges each journaled exec observation with its projection
+// metadata. Pre-13 effect databases are rejected at open; there is no migration
+// arm.
 //
 // The index-only carve-out documented on `SCHEMA_VERSION` applies here for the
 // same reason and with the same limit: an additive non-unique
@@ -869,7 +872,7 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // version guard's projection elides a *new* index statement but not the SQL
 // comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
 // bump the carve-out exists to avoid.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 12;
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 13;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,

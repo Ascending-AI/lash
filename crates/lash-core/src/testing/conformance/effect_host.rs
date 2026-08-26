@@ -1652,7 +1652,6 @@ fn replay_conformance_exec_outcome(effect_id: &str) -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::ExecCode {
         result: Box::new(Ok(crate::ExecResponse {
             observations: Vec::new(),
-            observation_truncation: Vec::new(),
             tool_calls: Vec::new(),
             executed_calls: Vec::new(),
             printed_images: Vec::new(),

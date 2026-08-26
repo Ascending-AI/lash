@@ -694,7 +694,6 @@ fn exec_outcome(marker: &str) -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::ExecCode {
         result: Box::new(Ok(lash_core::ExecResponse {
             observations: Vec::new(),
-            observation_truncation: Vec::new(),
             tool_calls: Vec::new(),
             executed_calls: Vec::new(),
             printed_images: Vec::new(),
@@ -1116,7 +1115,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 12"));
+    assert!(message.contains("supports schema version 13"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
     ));

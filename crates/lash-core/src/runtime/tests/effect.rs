@@ -374,7 +374,6 @@ impl RuntimeEffectController for RecordingEffectController {
             RuntimeEffectCommand::ExecCode { .. } => Ok(RuntimeEffectOutcome::ExecCode {
                 result: Box::new(Ok(crate::ExecResponse {
                     observations: Vec::new(),
-                    observation_truncation: Vec::new(),
                     tool_calls: Vec::new(),
                     executed_calls: Vec::new(),
                     printed_images: Vec::new(),
@@ -2349,8 +2348,10 @@ impl crate::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor {
         _request: crate::ExecRequest,
     ) -> Result<crate::ExecResponse, crate::SessionError> {
         Ok(crate::ExecResponse {
-            observations: vec!["exec output".to_string()],
-            observation_truncation: Vec::new(),
+            observations: vec![crate::Observation {
+                text: "exec output".to_string(),
+                projection: Default::default(),
+            }],
             tool_calls: Vec::new(),
             executed_calls: Vec::new(),
             printed_images: Vec::new(),
@@ -2440,7 +2441,14 @@ impl lash_sansio::ProtocolDriverHandle<crate::HostTurnProtocol> for EffectContro
         match result {
             Ok(response) => vec![crate::DriverAction::Finish(TurnOutcome::Finished(
                 TurnFinish::FinalValue {
-                    value: serde_json::json!(response.observations.join("\n")),
+                    value: serde_json::json!(
+                        response
+                            .observations
+                            .iter()
+                            .map(|observation| observation.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    ),
                 },
             ))],
             Err(error) => vec![

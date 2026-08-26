@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
-use lash_core::PromptUsage;
+use lash_core::{PromptUsage, TextProjectionMetadata};
 use lash_rlm_types::{RlmCreateExtras, RlmTermination};
 use lashlang::{
     BudgetedJsonProjectionConfig, BudgetedJsonProjector, Value as FlowValue, ValueProjectionContext,
@@ -18,6 +18,29 @@ pub(crate) type SharedBoundVariablesPrompt = Arc<RwLock<Arc<str>>>;
 
 pub(crate) fn print_history_projector() -> BudgetedJsonProjector {
     BudgetedJsonProjector::new(PRINT_HISTORY_PROJECTION_CONFIG)
+}
+
+pub(crate) fn observation_projection_metadata(
+    original: &str,
+    projected: &str,
+) -> TextProjectionMetadata {
+    TextProjectionMetadata {
+        truncated: projection_is_lossy(original, projected),
+        original_chars: original.chars().count(),
+        projected_chars: projected.chars().count(),
+        original_lines: original.lines().count(),
+        projected_lines: projected.lines().count(),
+        limit: PRINT_HISTORY_PROJECTION_CONFIG.max_bytes,
+        limit_mode: "bytes".to_string(),
+        max_lines: PRINT_HISTORY_PROJECTION_CONFIG.max_lines,
+    }
+}
+
+pub(crate) fn projection_is_lossy(original: &str, projected: &str) -> bool {
+    projected.contains("truncated")
+        || projected.contains("omitted")
+        || projected.contains("max depth")
+        || projected.chars().count() < original.chars().count()
 }
 
 pub(crate) fn bound_variable_projector() -> BudgetedJsonProjector {

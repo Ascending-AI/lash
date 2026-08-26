@@ -607,7 +607,6 @@ fn rlm_protocol_scenario_exec_result_emits_accounting_without_storing_tool_call_
         ))])
         .exec_result(lash_sansio::ExecResponse {
             observations: Vec::new(),
-            observation_truncation: Vec::new(),
             tool_calls: vec![lash_core::ToolCallRecord {
                 call_id: Some("rlm-call-1".to_string()),
                 tool: "read_file".to_string(),
@@ -653,7 +652,6 @@ fn rlm_protocol_scenario_exec_any_tool_control_frame_switch_is_terminal() {
         ))])
         .exec_result(lash_sansio::ExecResponse {
             observations: Vec::new(),
-            observation_truncation: Vec::new(),
             tool_calls: vec![lash_core::ToolCallRecord {
                 call_id: Some("custom-call-1".to_string()),
                 tool: "custom_frame_switch".to_string(),
@@ -710,7 +708,6 @@ fn rlm_protocol_scenario_exec_any_tool_control_fail_is_terminal_error() {
         ))])
         .exec_result(lash_sansio::ExecResponse {
             observations: Vec::new(),
-            observation_truncation: Vec::new(),
             tool_calls: vec![lash_core::ToolCallRecord {
                 call_id: Some("custom-call-1".to_string()),
                 tool: "custom_fail".to_string(),

@@ -2983,7 +2983,6 @@ lash::plugins::ExecResponse::degraded_bindings
 lash::plugins::ExecResponse::duration_ms
 lash::plugins::ExecResponse::error
 lash::plugins::ExecResponse::executed_calls
-lash::plugins::ExecResponse::observation_truncation
 lash::plugins::ExecResponse::observations
 lash::plugins::ExecResponse::printed_images
 lash::plugins::ExecResponse::terminal_finish
@@ -9472,7 +9471,7 @@ lash::tracing::TraceEvent::ExecCodeCompleted
 lash::tracing::TraceEvent::ExecCodeCompleted::duration_ms
 lash::tracing::TraceEvent::ExecCodeCompleted::error
 lash::tracing::TraceEvent::ExecCodeCompleted::observation_count
-lash::tracing::TraceEvent::ExecCodeCompleted::observation_truncation
+lash::tracing::TraceEvent::ExecCodeCompleted::observation_projections
 lash::tracing::TraceEvent::ExecCodeCompleted::output
 lash::tracing::TraceEvent::ExecCodeCompleted::output_chars
 lash::tracing::TraceEvent::ExecCodeCompleted::terminal_finish

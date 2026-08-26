@@ -676,8 +676,10 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     restored.handle_response(Response::ExecResult {
         id: restored_exec_id,
         result: Ok(lash_sansio::ExecResponse {
-            observations: vec!["hi\n".to_string()],
-            observation_truncation: Vec::new(),
+            observations: vec![lash_sansio::Observation {
+                text: "hi\n".to_string(),
+                projection: Default::default(),
+            }],
             tool_calls: vec![lash_core::ToolCallRecord {
                 call_id: Some("replayed-call".to_string()),
                 tool: "attachment_tool".to_string(),
@@ -826,8 +828,10 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     machine.handle_response(Response::ExecResult {
         id: exec_id,
         result: Ok(lash_sansio::ExecResponse {
-            observations: vec!["fanout done".to_string()],
-            observation_truncation: Vec::new(),
+            observations: vec![lash_sansio::Observation {
+                text: "fanout done".to_string(),
+                projection: Default::default(),
+            }],
             tool_calls: vec![
                 lash_core::ToolCallRecord {
                     call_id: Some("fanout-ok".to_string()),

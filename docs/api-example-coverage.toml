@@ -3955,7 +3955,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::enqueue_seq"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1304#enqueue_seq: row.enqueue_seq,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1430#enqueue_seq: row.enqueue_seq,"
 [[api]]
 symbol = "lash::PendingTurnInput::enqueued_at_ms"
 kind = "field"
@@ -3963,7 +3963,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::enqueued_at_ms"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1311#enqueued_at_ms: row.enqueued_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1434#enqueued_at_ms: row.enqueued_at_ms,"
 [[api]]
 symbol = "lash::PendingTurnInput::ingress"
 kind = "field"
@@ -3995,7 +3995,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::session_id"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1303#session_id: row.session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1429#session_id: row.session_id,"
 [[api]]
 symbol = "lash::PendingTurnInput::source_key"
 kind = "field"
@@ -4003,7 +4003,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::source_key"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1305#source_key: row.source_key,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1431#source_key: row.source_key,"
 [[api]]
 symbol = "lash::PendingTurnInput::state"
 kind = "field"
@@ -13850,7 +13850,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:160#node_id: node_id.to_string(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:191#node_id: node_id.to_string(),"
 [[api]]
 symbol = "lash::persistence::ForkPoint::pinned"
 kind = "field"
@@ -13866,7 +13866,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::source_session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:156#source_session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:193#source_session_id,"
 [[api]]
 symbol = "lash::persistence::ForkSessionRequest"
 kind = "struct"
@@ -13899,7 +13899,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionRequest::relation"]
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/refcount_benchmark.rs:22#relation: SessionRelation::Root,"
+usage = "crates/lash-postgres-store/tests/refcount_benchmark.rs:84#relation: SessionRelation::Root,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -13926,7 +13926,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:334#node_id: request.node_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:513#node_id: request.node_id.clone(),"
 [[api]]
 symbol = "lash::persistence::ForkSessionReceipt::session_id"
 kind = "field"
@@ -13934,7 +13934,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:26#session_id: request.session_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:512#session_id: request.session_id.clone(),"
 [[api]]
 symbol = "lash::persistence::ForkSessionReceipt::source_session_id"
 kind = "field"
@@ -13942,7 +13942,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::source_session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:156#source_session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:514#source_session_id,"
 [[api]]
 symbol = "lash::persistence::GcReport"
 kind = "struct"
@@ -14795,7 +14795,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputClaimDiagnostics::state"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1433#state: row.state,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1506#state: row.state,"
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft"
 kind = "struct"
@@ -20206,7 +20206,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1966#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3861#inputs,"
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
 kind = "field"
@@ -61741,10 +61741,10 @@ disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
 
 [[api]]
-symbol = "lash::tracing::TraceEvent::ExecCodeCompleted::observation_truncation"
+symbol = "lash::tracing::TraceEvent::ExecCodeCompleted::observation_projections"
 kind = "field"
 availability = "default+all-features"
-aliases = ["lash_core::TraceEvent::ExecCodeCompleted::observation_truncation"]
+aliases = ["lash_core::TraceEvent::ExecCodeCompleted::observation_projections"]
 area = "observation-admin"
 disposition = "unused-justify"
 reason = "Concrete host class: custom observability sink implementers consuming structured trace events rather than bundled sinks."
@@ -64325,7 +64325,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Revive::actor"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:740#actor,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:736#actor,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Revive::draft"
@@ -64334,7 +64334,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Revive::draft"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:742#draft,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:738#draft,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Revive::expected_revision"
@@ -64343,7 +64343,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Revive::expected_revision"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:743#expected_revision,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:739#expected_revision,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Revive::owner_scope"
@@ -64352,7 +64352,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Revive::owner_scope"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:739#owner_scope,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:735#owner_scope,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Revive::subscription_key"
@@ -64361,7 +64361,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Revive::subscription_key"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:741#subscription_key,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:737#subscription_key,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Update"
@@ -64379,7 +64379,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Update::actor"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:748#actor,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:744#actor,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Update::draft"
@@ -64388,7 +64388,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Update::draft"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:750#draft,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:746#draft,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Update::expected_revision"
@@ -64397,7 +64397,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Update::expected_revision"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:751#expected_revision,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:747#expected_revision,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Update::owner_scope"
@@ -64406,7 +64406,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Update::owner_scope"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:747#owner_scope,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:743#owner_scope,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::Update::subscription_key"
@@ -64415,7 +64415,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerCommand::Update::subscription_key"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:749#subscription_key,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:745#subscription_key,"
 
 [[api]]
 symbol = "lash::triggers::TriggerCommand::is_mutation"
@@ -65955,7 +65955,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::env_ref"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:673#env_ref,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:669#env_ref,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::event_types"
@@ -65964,7 +65964,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::event_types"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:684#event_types,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:680#event_types,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::for_process"
@@ -65983,7 +65983,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::input_template"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:685#input_template: core_trigger_input_template(&request.inputs),"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:681#input_template: core_trigger_input_template(&request.inputs),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::name"
@@ -65992,7 +65992,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::name"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:675#name: request.name.clone(),"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:671#name: request.name.clone(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::payload_schema"
@@ -66001,7 +66001,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::payload_schema"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:679#payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema("
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:675#payload_schema: lash_core::LashSchema::new(lashlang_type_expr_schema("
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::source"
@@ -66010,7 +66010,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::source"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:678#source: request.source.to_json(),"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:674#source: request.source.to_json(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::source_key"
@@ -66019,7 +66019,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::source_key"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:677#source_key,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:673#source_key,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::source_type"
@@ -66028,7 +66028,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::source_type"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:676#source_type: request.source.source_type.clone(),"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:672#source_type: request.source.source_type.clone(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::subscription_key"
@@ -66037,7 +66037,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::subscription_key"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:672#subscription_key,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:668#subscription_key,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::target"
@@ -66046,7 +66046,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::target"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:682#target,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:678#target,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::target_identity"
@@ -66055,7 +66055,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::target_identity"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:683#target_identity,"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:679#target_identity,"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::target_label"
@@ -66064,7 +66064,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::target_label"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:686#target_label: Some(request.target.process_name.clone()),"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:682#target_label: Some(request.target.process_name.clone()),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::validate"
@@ -66073,7 +66073,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::validate"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:689#.validate()"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:685#.validate()"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::wake_target"
@@ -66082,7 +66082,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TriggerSubscriptionDraft::wake_target"]
 area = "triggers"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:674#wake_target: self.ctx.trigger_registration_wake_target(),"
+usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:670#wake_target: self.ctx.trigger_registration_wake_target(),"
 
 [[api]]
 symbol = "lash::triggers::TriggerSubscriptionDraft::with_event_types"
@@ -68175,7 +68175,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::degraded_bindings"]
 area = "protocol"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:583#degraded_bindings,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:581#degraded_bindings,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::duration_ms"
@@ -68184,7 +68184,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::duration_ms"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:562#duration_ms: start.elapsed().as_millis() as u64,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:580#duration_ms: start.elapsed().as_millis() as u64,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::error"
@@ -68193,16 +68193,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::error"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:561#error: Some(error.into()),"
-
-[[api]]
-symbol = "lash::plugins::ExecResponse::observation_truncation"
-kind = "field"
-availability = "default+all-features"
-aliases = ["lash_core::ExecResponse::observation_truncation"]
-area = "observation-admin"
-disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:577#observation_truncation: collected.observation_truncation,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:579#error: Some(error.into()),"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::observations"
@@ -68211,7 +68202,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::observations"]
 area = "observation-admin"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:576#observations: collected.observations,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:594#observations: collected.observations,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::printed_images"
@@ -68220,7 +68211,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::printed_images"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:580#printed_images: collected.printed_images,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:597#printed_images: collected.printed_images,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::terminal_finish"
@@ -68229,7 +68220,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ExecResponse::terminal_finish"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor.rs:564#terminal_finish: None,"
+usage = "crates/lash-protocol-rlm/src/executor.rs:582#terminal_finish: None,"
 
 [[api]]
 symbol = "lash::plugins::ExecResponse::tool_calls"
@@ -68549,6 +68540,30 @@ area = "sessions-turns"
 disposition = "internal-test-only"
 usage = "crates/lash-remote-protocol/src/core_conversions_tests.rs:1038#retry_after: None,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
+
+[[api]]
+symbol = "lash_core::Observation"
+kind = "struct"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "internal-consumed"
+usage = "crates/lash-sim/src/store.rs:756#observations: vec![lash_core::Observation {"
+
+[[api]]
+symbol = "lash_core::Observation::projection"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "internal-consumed"
+usage = "crates/lash-sim/src/store.rs:758#projection: Default::default(),"
+
+[[api]]
+symbol = "lash_core::Observation::text"
+kind = "field"
+availability = "default+all-features"
+area = "observation-admin"
+disposition = "internal-consumed"
+usage = "crates/lash-sim/src/store.rs:757#text: output.clone(),"
 
 [[api]]
 symbol = "lash::process::ObserverInheritance"
@@ -71417,7 +71432,7 @@ kind = "struct"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1032#fn observation_projection_metadata(original: &str, projected: &str) -> TextProjectionMetadata {"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:26#) -> TextProjectionMetadata {"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::limit"
@@ -71425,7 +71440,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1039#limit: crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_bytes,"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:33#limit: PRINT_HISTORY_PROJECTION_CONFIG.max_bytes,"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::limit_mode"
@@ -71433,7 +71448,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1040#limit_mode: \"bytes\".to_string(),"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:34#limit_mode: \"bytes\".to_string(),"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::max_lines"
@@ -71441,7 +71456,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1041#max_lines: crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_lines,"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:35#max_lines: PRINT_HISTORY_PROJECTION_CONFIG.max_lines,"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::original_chars"
@@ -71449,7 +71464,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1035#original_chars: original.chars().count(),"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:29#original_chars: original.chars().count(),"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::original_lines"
@@ -71457,7 +71472,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1037#original_lines: original.lines().count(),"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:31#original_lines: original.lines().count(),"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::projected_chars"
@@ -71465,7 +71480,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1036#projected_chars: projected.chars().count(),"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:30#projected_chars: projected.chars().count(),"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::projected_lines"
@@ -71473,7 +71488,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1038#projected_lines: projected.lines().count(),"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:32#projected_lines: projected.lines().count(),"
 
 [[api]]
 symbol = "lash_core::TextProjectionMetadata::truncated"
@@ -71481,7 +71496,7 @@ kind = "field"
 availability = "default+all-features"
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-protocol-rlm/src/executor/host_bridge.rs:1034#truncated: projection_is_lossy(original, projected),"
+usage = "crates/lash-protocol-rlm/src/rlm_support.rs:28#truncated: projection_is_lossy(original, projected),"
 
 [[api]]
 symbol = "lash::durability::ToolAttemptLaunch"
@@ -80729,7 +80744,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:17#kind: row.get(4)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:16#kind: row.get(3)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::session_id"
@@ -80737,7 +80752,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:18#session_id: row.get(5)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:17#session_id: row.get(4)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::turn_id"
@@ -80745,7 +80760,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:19#turn_id: row.get(6)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:18#turn_id: row.get(5)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::effect_id"
@@ -80753,7 +80768,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:20#effect_id: row.get(7)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:19#effect_id: row.get(6)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::call_id"
@@ -80761,7 +80776,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:21#call_id: row.get(8)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:20#call_id: row.get(7)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::process_id"
@@ -80769,7 +80784,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:22#process_id: row.get(9)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:21#process_id: row.get(8)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::process_event_sequence"
@@ -80777,7 +80792,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:23#process_event_sequence: row.get(10)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:22#process_event_sequence: row.get(9)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::occurrence_id"
@@ -80785,7 +80800,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:24#occurrence_id: row.get(11)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:23#occurrence_id: row.get(10)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_id"
@@ -80793,7 +80808,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:25#subscription_id: row.get(12)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:24#subscription_id: row.get(11)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_incarnation"
@@ -80801,7 +80816,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:26#subscription_incarnation: row.get(13)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:25#subscription_incarnation: row.get(12)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_revision"
@@ -80809,7 +80824,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:27#subscription_revision: row.get(14)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:26#subscription_revision: row.get(13)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::node_id"
@@ -80817,7 +80832,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:28#node_id: row.get(15)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:27#node_id: row.get(14)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::decode_append_request_identity"
@@ -80881,7 +80896,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:251#let depth = SessionMetaCodec::read_index("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:248#if SessionMetaCodec::read_index("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::corrupt"
@@ -80945,7 +80960,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:15#parent_session_id: row.get(3)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:14#parent_session_id: row.get(2)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::cause"
@@ -80961,7 +80976,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:30#source_session_id: row.get(16)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:29#source_session_id: row.get(15)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::source_node_id"
@@ -80969,7 +80984,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:31#source_node_id: row.get(17)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:30#source_node_id: row.get(16)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::observer_inheritance_kind"
@@ -80977,7 +80992,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:32#observer_inheritance_kind: row.get(18)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:31#observer_inheritance_kind: row.get(17)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::fork_inheritance_processes"
@@ -81049,7 +81064,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1474#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4230#fencing_token: current.fencing_token,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
 kind = "field"

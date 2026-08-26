@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{
-    ExecRequest, ExecResponse, RuntimeEffectKind, RuntimeExecutionContext, TraceContext,
-    facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+    ExecRequest, ExecResponse, Observation, RuntimeEffectKind, RuntimeExecutionContext,
+    TraceContext, facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
     facade_support::TraceSink,
 };
 // Cell execution itself is infallible, so the only fallible surface left in
@@ -23,7 +23,10 @@ use lash_lashlang_runtime::{
     LashlangSurface, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionMap, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
 };
-use lashlang::{ExecutionOutcome, State as FlowState};
+use lashlang::{
+    ExecutionOutcome, State as FlowState, Value as FlowValue, ValueProjectionContext,
+    ValueProjector,
+};
 
 use self::host_bridge::{
     CollectedExecutionOutput, HostBridge, HostBridgeConfig, LashlangExecutionTrace,
@@ -464,16 +467,32 @@ async fn execute_code_inner(
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
+    let print_projector = Arc::new(crate::rlm_support::print_history_projector());
+    let initial_observations = {
+        // Reconciliation warnings use the same projector contract as host prints.
+        let mut observations = Vec::with_capacity(reconcile_warnings.len());
+        for text in reconcile_warnings {
+            let value = FlowValue::String(text.clone().into());
+            let projected = print_projector
+                .project(ValueProjectionContext::new(&value))
+                .await;
+            observations.push(Observation {
+                projection: crate::rlm_support::observation_projection_metadata(&text, &projected),
+                text,
+            });
+        }
+        observations
+    };
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
-        print_projector: Arc::new(crate::rlm_support::print_history_projector()),
+        print_projector,
         tool_result_projectors,
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         host_environment,
         deferred_execution_grants,
         artifact_store: Arc::clone(&artifact_store),
         trigger_key_manifest: linked_module.artifact.trigger_key_manifest.clone(),
-        initial_observations: reconcile_warnings,
+        initial_observations,
     });
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()
@@ -554,7 +573,6 @@ fn exec_setup_failure_with_degraded(
 ) -> ExecResponse {
     ExecResponse {
         observations: Vec::new(),
-        observation_truncation: Vec::new(),
         tool_calls: Vec::new(),
         executed_calls: Vec::new(),
         printed_images: Vec::new(),
@@ -574,7 +592,6 @@ fn exec_response_from(
 ) -> ExecResponse {
     ExecResponse {
         observations: collected.observations,
-        observation_truncation: collected.observation_truncation,
         tool_calls: collected.tool_calls,
         executed_calls: collected.executed_calls,
         printed_images: collected.printed_images,
@@ -1836,7 +1853,9 @@ mod tests {
             );
             assert_eq!(response.observations.len(), 1);
             assert!(
-                response.observations[0].contains("printed before failure"),
+                response.observations[0]
+                    .text
+                    .contains("printed before failure"),
                 "observation should be retained despite runtime failure"
             );
             assert_eq!(
@@ -3007,6 +3026,7 @@ mod tests {
                           inputs: { tick: trigger.event },
                           subscription_key: "new-schedule"
                         })?
+                        print "post-reconcile observation"
                         finish await triggers.list({})?
                     "#
                     .to_string(),
@@ -3021,15 +3041,43 @@ mod tests {
             .await;
 
             assert!(replacement.error.is_none(), "{:?}", replacement.error);
-            assert!(
-                replacement.observations.iter().any(|warning| {
-                    warning.contains("RECONCILE WARNING")
-                        && warning.contains("old-schedule")
-                        && warning.contains("triggers.prune")
-                }),
-                "{:?}",
-                replacement.observations
+            assert_eq!(replacement.observations.len(), 2);
+            let reconcile_warning = replacement
+                .observations
+                .iter()
+                .find(|observation| {
+                    observation.text.contains("RECONCILE WARNING")
+                        && observation.text.contains("old-schedule")
+                        && observation.text.contains("triggers.prune")
+                })
+                .unwrap_or_else(|| panic!("{:?}", replacement.observations));
+            assert!(!reconcile_warning.projection.truncated);
+            assert_eq!(
+                reconcile_warning.projection.projected_chars,
+                reconcile_warning.projection.original_chars
             );
+            assert_eq!(
+                reconcile_warning.projection.projected_lines,
+                reconcile_warning.projection.original_lines
+            );
+            assert!(
+                replacement
+                    .observations
+                    .iter()
+                    .any(|observation| { observation.text.contains("post-reconcile observation") })
+            );
+            for observation in &replacement.observations {
+                assert_eq!(
+                    observation.projection.original_chars,
+                    observation.text.chars().count(),
+                    "projection metadata must belong to its observation"
+                );
+                assert_eq!(
+                    observation.projection.original_lines,
+                    observation.text.lines().count(),
+                    "projection metadata must belong to its observation"
+                );
+            }
             let registrations = replacement
                 .terminal_finish
                 .expect("replacement returns reconciled list");
@@ -3305,12 +3353,16 @@ mod tests {
             assert!(response.error.is_none(), "{:?}", response.error);
             assert_eq!(response.observations.len(), 1);
             assert!(
-                response.observations[0].contains(&large),
+                response.observations[0].text.contains(&large),
                 "raw observation should preserve full printed value"
             );
-            assert_eq!(response.observation_truncation.len(), 1);
-            let metadata = &response.observation_truncation[0];
+            let metadata = &response.observations[0].projection;
             assert!(metadata.truncated, "{metadata:?}");
+            assert_eq!(metadata.original_chars, 61_517);
+            assert_eq!(metadata.projected_chars, 330);
+            assert_ne!(metadata.original_chars, metadata.projected_chars);
+            assert_eq!(metadata.original_lines, 1);
+            assert_eq!(metadata.projected_lines, 1);
             assert_eq!(
                 metadata.limit,
                 crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_bytes
@@ -3898,7 +3950,12 @@ mod tests {
                     .reason
                     .contains("projection ref unavailable")
             );
-            let touched = response.observations.join("\n");
+            let touched = response
+                .observations
+                .iter()
+                .map(|observation| observation.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             assert!(touched.contains("rendered tool text"), "{touched}");
             assert!(
                 touched.contains("projected host descriptor `dead`"),
