@@ -268,7 +268,10 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
         ]
     );
 
-    for pair in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS.chunks_exact(2) {
+    for pair in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS
+        .as_chunks::<2>()
+        .0
+    {
         assert!(!pair[0].uses_postgres());
         assert!(pair[1].uses_postgres());
         assert_eq!(pair[0].execution_mode(), pair[1].execution_mode());
