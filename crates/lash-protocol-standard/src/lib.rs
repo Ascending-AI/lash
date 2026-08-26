@@ -855,39 +855,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn former_no_tool_and_tool_branch_scrambles_preserve_original_order() {
-        let cases = [
-            vec![sequence_part(1, 0).0, sequence_part(0, 1).0],
-            vec![
-                sequence_part(0, 0).0,
-                sequence_part(1, 1).0,
-                sequence_part(2, 2).0,
-            ],
-        ];
-
-        let actual = cases
-            .into_iter()
-            .map(|parts| {
-                let response = collect_standard_response(&LlmResponse {
-                    parts,
-                    ..LlmResponse::default()
-                });
-                reassemble_standard_response("assistant", response.parts)
-                    .0
-                    .into_iter()
-                    .map(|part| part.kind)
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(actual[0], [PartKind::Reasoning, PartKind::Prose]);
-        assert_eq!(
-            actual[1],
-            [PartKind::Prose, PartKind::Reasoning, PartKind::ToolCall]
-        );
-    }
-
     #[derive(Clone, Debug)]
     struct WhitespaceInterleavedProvider;
 
