@@ -552,6 +552,14 @@ match session.turn(input).run().await {
 
     <div class="section" id="end-to-end">
       <div class="section-header">
+        <h2>Part Prune State</h2>
+        <p>Each message part records whether its content survived retention: <code>lash::messages::PruneState</code> distinguishes intact bodies from cleared ones, and hosts render or skip part content accordingly. A host marks a part cleared by setting the field directly:</p>
+        <pre data-lang="rust" data-snippet="persistence#part-prune-state"><code>fn mark_part_cleared(mut part: lash::messages::Part) -> lash::messages::Part {
+    part.prune_state = lash::messages::PruneState::Cleared;
+    assert_eq!(part.prune_state, lash::messages::PruneState::Cleared);
+    part
+}</code></pre>
+
         <h2>End-To-End Example</h2>
         <p>The <code>agent-service</code> example keeps app storage and runtime storage separate: chat rows in one database, Lash sessions in the runtime store.</p>
       </div>
