@@ -3955,7 +3955,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::enqueue_seq"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1304#enqueue_seq: row.enqueue_seq,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1430#enqueue_seq: row.enqueue_seq,"
 [[api]]
 symbol = "lash::PendingTurnInput::enqueued_at_ms"
 kind = "field"
@@ -3963,7 +3963,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::enqueued_at_ms"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1311#enqueued_at_ms: row.enqueued_at_ms,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1434#enqueued_at_ms: row.enqueued_at_ms,"
 [[api]]
 symbol = "lash::PendingTurnInput::ingress"
 kind = "field"
@@ -3995,7 +3995,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::session_id"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1303#session_id: row.session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1429#session_id: row.session_id,"
 [[api]]
 symbol = "lash::PendingTurnInput::source_key"
 kind = "field"
@@ -4003,7 +4003,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInput::source_key"]
 area = "sessions-turns"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1305#source_key: row.source_key,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1431#source_key: row.source_key,"
 [[api]]
 symbol = "lash::PendingTurnInput::state"
 kind = "field"
@@ -13850,7 +13850,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:160#node_id: node_id.to_string(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:191#node_id: node_id.to_string(),"
 [[api]]
 symbol = "lash::persistence::ForkPoint::pinned"
 kind = "field"
@@ -13866,7 +13866,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkPoint::source_session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:156#source_session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:193#source_session_id,"
 [[api]]
 symbol = "lash::persistence::ForkSessionRequest"
 kind = "struct"
@@ -13899,7 +13899,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionRequest::relation"]
 area = "stores"
 disposition = "internal-test-only"
-usage = "crates/lash-postgres-store/tests/refcount_benchmark.rs:22#relation: SessionRelation::Root,"
+usage = "crates/lash-postgres-store/tests/refcount_benchmark.rs:84#relation: SessionRelation::Root,"
 reason = "Relocate: only test code consumes this path, so it belongs behind the `testing` feature (lash_core::testing) rather than in a shipped-code seam (FIG-1223 PR 2)."
 
 [[api]]
@@ -13926,7 +13926,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::node_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:334#node_id: request.node_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:513#node_id: request.node_id.clone(),"
 [[api]]
 symbol = "lash::persistence::ForkSessionReceipt::session_id"
 kind = "field"
@@ -13934,7 +13934,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:26#session_id: request.session_id.clone(),"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:512#session_id: request.session_id.clone(),"
 [[api]]
 symbol = "lash::persistence::ForkSessionReceipt::source_session_id"
 kind = "field"
@@ -13942,7 +13942,7 @@ availability = "default+all-features"
 aliases = ["lash_core::ForkSessionReceipt::source_session_id"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:156#source_session_id,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:514#source_session_id,"
 [[api]]
 symbol = "lash::persistence::GcReport"
 kind = "struct"
@@ -14795,7 +14795,7 @@ availability = "default+all-features"
 aliases = ["lash_core::PendingTurnInputClaimDiagnostics::state"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1433#state: row.state,"
+usage = "crates/lash-postgres-store/src/postgres/session_factory.rs:1506#state: row.state,"
 [[api]]
 symbol = "lash::persistence::PendingTurnInputDraft"
 kind = "struct"
@@ -20206,7 +20206,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1966#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3861#inputs,"
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
 kind = "field"
@@ -80744,7 +80744,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:17#kind: row.get(4)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:16#kind: row.get(3)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::session_id"
@@ -80752,7 +80752,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:18#session_id: row.get(5)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:17#session_id: row.get(4)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::turn_id"
@@ -80760,7 +80760,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:19#turn_id: row.get(6)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:18#turn_id: row.get(5)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::effect_id"
@@ -80768,7 +80768,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:20#effect_id: row.get(7)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:19#effect_id: row.get(6)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::call_id"
@@ -80776,7 +80776,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:21#call_id: row.get(8)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:20#call_id: row.get(7)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::process_id"
@@ -80784,7 +80784,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:22#process_id: row.get(9)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:21#process_id: row.get(8)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::process_event_sequence"
@@ -80792,7 +80792,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:23#process_event_sequence: row.get(10)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:22#process_event_sequence: row.get(9)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::occurrence_id"
@@ -80800,7 +80800,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:24#occurrence_id: row.get(11)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:23#occurrence_id: row.get(10)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_id"
@@ -80808,7 +80808,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:25#subscription_id: row.get(12)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:24#subscription_id: row.get(11)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_incarnation"
@@ -80816,7 +80816,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:26#subscription_incarnation: row.get(13)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:25#subscription_incarnation: row.get(12)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::subscription_revision"
@@ -80824,7 +80824,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:27#subscription_revision: row.get(14)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:26#subscription_revision: row.get(13)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::CausalColumns::node_id"
@@ -80832,7 +80832,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:28#node_id: row.get(15)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:27#node_id: row.get(14)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::decode_append_request_identity"
@@ -80896,7 +80896,7 @@ kind = "function"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:251#let depth = SessionMetaCodec::read_index("
+usage = "crates/lash-sqlite-store/src/session_meta.rs:248#if SessionMetaCodec::read_index("
 
 [[api]]
 symbol = "lash_core::store_backend_support::SessionMetaCodec::corrupt"
@@ -80960,7 +80960,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:15#parent_session_id: row.get(3)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:14#parent_session_id: row.get(2)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::cause"
@@ -80976,7 +80976,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:30#source_session_id: row.get(16)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:29#source_session_id: row.get(15)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::source_node_id"
@@ -80984,7 +80984,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:31#source_node_id: row.get(17)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:30#source_node_id: row.get(16)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::observer_inheritance_kind"
@@ -80992,7 +80992,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-sqlite-store/src/session_meta.rs:32#observer_inheritance_kind: row.get(18)?,"
+usage = "crates/lash-sqlite-store/src/session_meta.rs:31#observer_inheritance_kind: row.get(17)?,"
 
 [[api]]
 symbol = "lash_core::store_backend_support::StoredRelation::fork_inheritance_processes"
@@ -81064,7 +81064,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:1474#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4230#fencing_token: current.fencing_token,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
 kind = "field"

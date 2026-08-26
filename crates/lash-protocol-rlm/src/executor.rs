@@ -3358,6 +3358,11 @@ mod tests {
             );
             let metadata = &response.observations[0].projection;
             assert!(metadata.truncated, "{metadata:?}");
+            assert_eq!(metadata.original_chars, 61_517);
+            assert_eq!(metadata.projected_chars, 330);
+            assert_ne!(metadata.original_chars, metadata.projected_chars);
+            assert_eq!(metadata.original_lines, 1);
+            assert_eq!(metadata.projected_lines, 1);
             assert_eq!(
                 metadata.limit,
                 crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_bytes

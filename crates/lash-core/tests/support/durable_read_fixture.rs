@@ -21,11 +21,11 @@ use lash_core::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, RuntimePersistence,
     RuntimeScope, RuntimeSessionState, SegmentHandover, SessionAppendNode, SessionNodePayload,
     SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest, SessionStoreFactory,
-    StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
-    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
-    WaitState,
+    StoreError, TextProjectionMetadata, TokenLedgerEntry, TokenUsage, TriggerCommand,
+    TriggerCommandOutcome, TriggerDeliveryReservationOutcome, TriggerInputBinding,
+    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
+    WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -404,7 +404,16 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                     result: Box::new(Ok(ExecResponse {
                         observations: vec![lash_core::Observation {
                             text: "durable read effect".to_string(),
-                            projection: Default::default(),
+                            projection: TextProjectionMetadata {
+                                truncated: false,
+                                original_chars: 19,
+                                projected_chars: 19,
+                                original_lines: 1,
+                                projected_lines: 1,
+                                limit: 50 * 1024,
+                                limit_mode: "bytes".to_string(),
+                                max_lines: 2_000,
+                            },
                         }],
                         tool_calls: Vec::new(),
                         executed_calls: Vec::new(),
@@ -1036,6 +1045,20 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     let response = result.expect("durable fixture semantic drift: exec effect became an error");
     assert_eq!(response.observations.len(), 1);
     assert_eq!(response.observations[0].text, "durable read effect");
+    assert_eq!(
+        response.observations[0].projection,
+        TextProjectionMetadata {
+            truncated: false,
+            original_chars: 19,
+            projected_chars: 19,
+            original_lines: 1,
+            projected_lines: 1,
+            limit: 50 * 1024,
+            limit_mode: "bytes".to_string(),
+            max_lines: 2_000,
+        },
+        "durable fixture semantic drift: observation projection changed"
+    );
     assert_eq!(response.duration_ms, 887);
     assert_eq!(
         response.terminal_finish,

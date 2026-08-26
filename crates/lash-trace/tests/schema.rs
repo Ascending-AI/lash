@@ -87,6 +87,18 @@ fn schema_8_exec_protocol_record_is_refused_before_old_envelope_interpretation()
     );
 }
 
+#[test]
+fn schema_9_exec_completion_record_is_refused_before_old_projection_interpretation() {
+    let stored_v9 = r#"{"schema_version":9,"id":"v9-exec","timestamp":"2026-08-26T09:00:00+00:00","context":{},"type":"exec_code_completed","duration_ms":12,"output":"hello","output_chars":5,"observation_count":1,"observation_truncation":[],"error":null,"terminal_finish":null,"tool_calls":[]}"#;
+    let error = serde_json::from_str::<TraceRecord>(stored_v9).expect_err(
+        "schema-9 trace records must be refused before decoding the old projection field",
+    );
+    assert_eq!(
+        error.to_string(),
+        "unsupported trace schema version 9; expected 10"
+    );
+}
+
 fn token_usage_sample() -> TraceTokenUsage {
     TraceTokenUsage {
         input_tokens: 10,
