@@ -142,6 +142,11 @@ IDENTIFIER_RENAME_BASELINES = {
     # FIG-1980: tool_execution_grant_json_layout_is_stable witnesses that the
     # serde surface is unchanged, so TOOL_BATCH_FAMILY_VERSION remains 1.
     'crates/lash-core/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:a8285c2863162c569cafbb16c7fe31c203cba082a809439f21349b8c659de53c',
+    # FIG-2234 fix 4: the generated schema.sql header comment was aligned to
+    # component version 64 (bumped in lib.rs by the BLAKE3 cutover without
+    # regenerating the artifact header). Comment-only; the executed DDL is
+    # semantically unchanged, so SCHEMA_VERSION stays 64.
+    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:ad84fa487a6f19843092785c6fffa288262eae5af183d394465d4c3e21c93e9c',
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved
