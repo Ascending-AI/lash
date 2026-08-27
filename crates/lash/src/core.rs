@@ -1143,6 +1143,7 @@ impl LashCoreBuilder {
             .queued_work_execution_concurrency
             .unwrap_or(facade_support::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY);
         NativeQueuedWork::validate_execution_concurrency(queued_work_execution_concurrency)?;
+        self.native_substrate.validate()?;
         let worker_slot_supplier = self.worker_slot_supplier.clone();
         let native_substrate = self.native_substrate.clone();
         let protocol_factory = self.protocol_factory.clone();

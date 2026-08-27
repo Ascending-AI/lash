@@ -152,6 +152,9 @@ pub enum EmbedError {
     QueuedWorkExecutionConcurrency(
         #[from] lash_core::facade_support::QueuedWorkExecutionConcurrencyError,
     ),
+    #[error("invalid native substrate configuration: {0}")]
+    /// Wraps a native scheduler pacing validation failure.
+    NativeSubstrateConfig(#[from] lash_core::NativeSubstrateConfigError),
     #[error("this operation requires a LashCore store factory")]
     /// Returned when an operation requiring durable session state has no store factory.
     MissingSessionStoreFactory,

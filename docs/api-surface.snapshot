@@ -81,6 +81,8 @@ lash::EmbedError::MissingQueuedWorkSource
 lash::EmbedError::MissingSessionStoreFactory
 lash::EmbedError::MissingTurnBudget
 lash::EmbedError::NativeQueuedWorkRequiresStoreFactory
+lash::EmbedError::NativeSubstrateConfig
+lash::EmbedError::NativeSubstrateConfig::0
 lash::EmbedError::Plugin
 lash::EmbedError::Plugin::0
 lash::EmbedError::ProcessExecutionConcurrency
@@ -3875,6 +3877,8 @@ lash::prelude::EmbedError::MissingQueuedWorkSource
 lash::prelude::EmbedError::MissingSessionStoreFactory
 lash::prelude::EmbedError::MissingTurnBudget
 lash::prelude::EmbedError::NativeQueuedWorkRequiresStoreFactory
+lash::prelude::EmbedError::NativeSubstrateConfig
+lash::prelude::EmbedError::NativeSubstrateConfig::0
 lash::prelude::EmbedError::Plugin
 lash::prelude::EmbedError::Plugin::0
 lash::prelude::EmbedError::ProcessExecutionConcurrency
@@ -7347,8 +7351,10 @@ lash::runtime::NativeQueuedWork::validate_execution_concurrency
 lash::runtime::NativeQueuedWork::with_execution_concurrency
 lash::runtime::NativeQueuedWork::with_worker_slot_supplier
 lash::runtime::NativeSubstrateConfig
+lash::runtime::NativeSubstrateConfig::validate
 lash::runtime::NativeSubstrateConfig::work_cadence
 lash::runtime::NativeSubstrateConfig::worker_sweep
+lash::runtime::NativeSubstrateConfigError
 lash::runtime::NoQueuedWork
 lash::runtime::NoQueuedWork::new
 lash::runtime::NoopEventSink

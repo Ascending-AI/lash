@@ -1,7 +1,7 @@
 use super::*;
 
 fn default_wake_attempts() -> u32 {
-    WorkCadencePolicy::default().max_transient_attempts
+    WorkCadencePolicy::default().max_transient_attempts.get()
 }
 
 fn default_retry_max() -> Duration {

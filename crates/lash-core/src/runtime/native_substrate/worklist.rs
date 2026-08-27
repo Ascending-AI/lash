@@ -78,10 +78,9 @@ impl DurableProcessWorker {
         if available == 0 && state.active != 0 {
             return None;
         }
-        let limit = std::num::NonZeroUsize::new(
-            available.clamp(1, self.config.native_substrate.worker_sweep.intake_page),
-        )
-        .expect("the clamped intake page bound is non-zero");
+        let limit = std::num::NonZeroUsize::new(available)
+            .unwrap_or(std::num::NonZeroUsize::MIN)
+            .min(self.config.native_substrate.worker_sweep.intake_page);
         let ProcessWorklistScan::Ready(continuation) = &state.worklist_scan else {
             return None;
         };
@@ -97,7 +96,8 @@ impl DurableProcessWorker {
     ) -> Result<crate::ProcessWorklistPage, PluginError> {
         let policy = &self.config.native_substrate.worker_sweep;
         let mut retry_after = policy.fetch_retry_base;
-        for attempt in 1..=policy.fetch_attempts {
+        let mut attempt = 1;
+        loop {
             match self
                 .config
                 .process_registry()
@@ -105,7 +105,7 @@ impl DurableProcessWorker {
                 .await
             {
                 Ok(page) => return Ok(page),
-                Err(error) if attempt == policy.fetch_attempts => return Err(error),
+                Err(error) if attempt == policy.fetch_attempts.get() => return Err(error),
                 Err(error) => {
                     tracing::warn!(
                         error = %error,
@@ -114,10 +114,10 @@ impl DurableProcessWorker {
                     );
                     tokio::time::sleep(retry_after).await;
                     retry_after = retry_after.saturating_mul(2);
+                    attempt += 1;
                 }
             }
         }
-        unreachable!("the non-zero worklist retry budget returns from the loop")
     }
 
     pub(super) async fn next_process_execution(&self) -> Option<(ProcessRecord, WorkerSlotPermit)> {

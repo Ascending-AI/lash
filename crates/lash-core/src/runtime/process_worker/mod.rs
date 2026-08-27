@@ -683,10 +683,10 @@ impl DurableProcessWorker {
         let available = std::num::NonZeroUsize::new(
             self.execution_scheduler
                 .slots
-                .available_slots(super::WorkerSlotKind::Process)
-                .clamp(1, self.config.native_substrate.worker_sweep.intake_page),
+                .available_slots(super::WorkerSlotKind::Process),
         )
-        .expect("the clamped intake page bound is non-zero");
+        .unwrap_or(std::num::NonZeroUsize::MIN)
+        .min(self.config.native_substrate.worker_sweep.intake_page);
         let (fetch_initial_page, should_start_dispatcher) = {
             let mut state = self.execution_scheduler.state.lock_recover();
             let fetch_initial_page = if matches!(state.worklist_scan, ProcessWorklistScan::Idle) {

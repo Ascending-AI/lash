@@ -632,7 +632,7 @@ async fn terminal_wake_error_stops_after_one_attempt() {
 
 #[tokio::test]
 async fn transient_wake_error_stops_at_the_attempt_limit() {
-    let max_attempts = WorkCadencePolicy::default().max_transient_attempts as usize;
+    let max_attempts = WorkCadencePolicy::default().max_transient_attempts.get() as usize;
     let attempts = Arc::new(AtomicUsize::new(0));
     let driver = NativeQueuedWork::new(Arc::new(AlwaysFailRunHandle {
         attempts: Arc::clone(&attempts),
@@ -655,7 +655,7 @@ async fn transient_wake_error_stops_at_the_attempt_limit() {
 async fn work_cadence_policy_limits_transient_wake_attempts() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let work_cadence = WorkCadencePolicy {
-        max_transient_attempts: 1,
+        max_transient_attempts: std::num::NonZeroU32::MIN,
         ..WorkCadencePolicy::default()
     };
     let driver = NativeQueuedWork::from_parts_with_work_cadence(

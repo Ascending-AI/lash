@@ -62,7 +62,7 @@ use crate::WorkCadencePolicy;
 /// Runtime loops read their configured [`WorkCadencePolicy`] instead.
 #[cfg(any(test, feature = "testing"))]
 pub const QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS: usize =
-    WorkCadencePolicy::DEFAULT.max_transient_attempts as usize;
+    WorkCadencePolicy::DEFAULT.max_transient_attempts.get() as usize;
 
 /// Default maximum number of queued-work wake executions admitted at once.
 pub const DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY: usize = 64;

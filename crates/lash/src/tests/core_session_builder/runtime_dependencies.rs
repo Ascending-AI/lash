@@ -557,11 +557,11 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
     );
     let native_substrate = lash_core::NativeSubstrateConfig {
         worker_sweep: lash_core::WorkerSweepPolicy {
-            intake_page: 17,
+            intake_page: std::num::NonZeroUsize::new(17).unwrap(),
             ..lash_core::WorkerSweepPolicy::default()
         },
         work_cadence: lash_core::WorkCadencePolicy {
-            delivery_batch: 1,
+            delivery_batch: std::num::NonZeroUsize::MIN,
             ..lash_core::WorkCadencePolicy::default()
         },
     };
@@ -591,8 +591,8 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         config.process_execution_concurrency(),
         lash_core::facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
     );
-    assert_eq!(config.native_substrate.worker_sweep.intake_page, 17);
-    assert_eq!(config.native_substrate.work_cadence.delivery_batch, 1);
+    assert_eq!(config.native_substrate.worker_sweep.intake_page.get(), 17);
+    assert_eq!(config.native_substrate.work_cadence.delivery_batch.get(), 1);
     Ok(())
 }
 
@@ -1380,6 +1380,81 @@ fn builder_rejects_invalid_queued_work_execution_concurrency() {
         "zero queued-work execution concurrency must be rejected",
     );
     assert!(matches!(err, EmbedError::QueuedWorkExecutionConcurrency(_)));
+}
+
+#[test]
+fn builder_rejects_incoherent_native_pacing_durations() {
+    type Edit = fn(&mut lash_core::NativeSubstrateConfig);
+    let cases: [(&str, Edit); 11] = [
+        ("worker_sweep.fetch_retry_base", |config| {
+            config.worker_sweep.fetch_retry_base = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.retry_initial", |config| {
+            config.work_cadence.retry_initial = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.retry_max", |config| {
+            config.work_cadence.retry_max = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.retry_initial", |config| {
+            config.work_cadence.retry_initial = std::time::Duration::from_secs(2);
+        }),
+        ("work_cadence.poll_initial", |config| {
+            config.work_cadence.poll_initial = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.poll_max", |config| {
+            config.work_cadence.poll_max = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.poll_initial", |config| {
+            config.work_cadence.poll_initial = std::time::Duration::from_secs(2);
+        }),
+        ("work_cadence.delivery_retry_initial", |config| {
+            config.work_cadence.delivery_retry_initial = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.delivery_retry_initial", |config| {
+            config.work_cadence.delivery_retry_initial = std::time::Duration::from_micros(500);
+        }),
+        ("work_cadence.delivery_retry_max", |config| {
+            config.work_cadence.delivery_retry_max = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.delivery_retry_max", |config| {
+            config.work_cadence.delivery_retry_max = std::time::Duration::from_micros(500);
+        }),
+    ];
+
+    for (field, edit) in cases {
+        let mut config = lash_core::NativeSubstrateConfig::default();
+        edit(&mut config);
+        let err = expect_build_error(
+            explicit_ephemeral_facets(peer_coherence_builder())
+                .native_substrate_config(config)
+                .build(crate::testing::runtime_lease_owner()),
+            "incoherent native pacing must be rejected",
+        );
+        let EmbedError::NativeSubstrateConfig(source) = err else {
+            panic!("native pacing must use its typed build error, got {err}");
+        };
+        assert!(
+            source.to_string().contains(field),
+            "error must identify {field}: {source}"
+        );
+    }
+}
+
+#[test]
+fn builder_allows_harmless_native_pacing_boundaries() {
+    let mut config = lash_core::NativeSubstrateConfig::default();
+    config.worker_sweep.intake_page = std::num::NonZeroUsize::MIN;
+    config.worker_sweep.fetch_attempts = std::num::NonZeroUsize::MIN;
+    config.work_cadence.max_transient_attempts = std::num::NonZeroU32::MIN;
+    config.work_cadence.delivery_batch = std::num::NonZeroUsize::MIN;
+    config.work_cadence.slow_wake_threshold = std::time::Duration::ZERO;
+    config.work_cadence.delivery_retry_initial = std::time::Duration::from_secs(2);
+    config.work_cadence.delivery_retry_max = std::time::Duration::from_secs(1);
+
+    explicit_ephemeral_facets(peer_coherence_builder())
+        .native_substrate_config(config)
+        .build(crate::testing::runtime_lease_owner())
+        .expect("non-zero count minima, telemetry zero, and clamped delivery retry are valid");
 }
 
 #[tokio::test]

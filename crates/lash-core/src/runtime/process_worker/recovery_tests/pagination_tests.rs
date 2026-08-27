@@ -5,7 +5,7 @@ fn injected_worklist_error(label: &str) -> PluginError {
 }
 
 fn default_fetch_attempts() -> usize {
-    crate::WorkerSweepPolicy::default().fetch_attempts
+    crate::WorkerSweepPolicy::default().fetch_attempts.get()
 }
 
 #[tokio::test]
@@ -13,7 +13,7 @@ async fn worker_sweep_policy_limits_worklist_fetch_attempts() {
     let run_handle = Arc::new(LateBoundProcessWork::default());
     let native_substrate = crate::NativeSubstrateConfig {
         worker_sweep: crate::WorkerSweepPolicy {
-            fetch_attempts: 1,
+            fetch_attempts: std::num::NonZeroUsize::MIN,
             ..crate::WorkerSweepPolicy::default()
         },
         ..crate::NativeSubstrateConfig::default()

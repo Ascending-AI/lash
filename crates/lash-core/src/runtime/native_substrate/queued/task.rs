@@ -225,7 +225,7 @@ impl QueuedWorkTaskDriver {
                     let disposition = match err.class {
                         QueuedWorkRunErrorClass::Terminal => QueuedWorkWakeOutcome::Terminal,
                         QueuedWorkRunErrorClass::Transient
-                            if transient_attempt >= work_cadence.max_transient_attempts =>
+                            if transient_attempt >= work_cadence.max_transient_attempts.get() =>
                         {
                             QueuedWorkWakeOutcome::Exhausted
                         }

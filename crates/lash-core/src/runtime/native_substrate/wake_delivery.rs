@@ -159,7 +159,7 @@ impl WakeDeliveryDriver {
             queued_work,
             Arc::clone(&self.inner.clock),
             self.inner.delivery_policy,
-            self.inner.work_cadence.delivery_batch,
+            self.inner.work_cadence.delivery_batch.get(),
             &self.inner.work_cadence,
         )
         .await
@@ -570,7 +570,7 @@ impl WakeDeliveryDriver {
                 queued_work,
                 Arc::clone(&inner.clock),
                 inner.delivery_policy,
-                inner.work_cadence.delivery_batch,
+                inner.work_cadence.delivery_batch.get(),
                 &inner.work_cadence,
             )
             .await
@@ -591,7 +591,7 @@ impl WakeDeliveryDriver {
                 > 0;
             let delay = if made_progress
                 && report.retryable_failures == 0
-                && report.inspected >= inner.work_cadence.delivery_batch
+                && report.inspected >= inner.work_cadence.delivery_batch.get()
             {
                 poll = inner.work_cadence.poll_initial;
                 Duration::ZERO
