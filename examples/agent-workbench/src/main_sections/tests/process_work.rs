@@ -32,9 +32,12 @@ mod process_work_tests {
         ));
         std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             data_dir.join("lash-sessions"),
@@ -46,25 +49,22 @@ mod process_work_tests {
             .complete_error("await-work route test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::builder("test-model")
-                .context_window_tokens(4096)
-                .build().expect("model spec");
+        let model = lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
+            .expect("model spec");
         let event_tx = SessionEventRegistry::new(16);
         // The app sink, wired exactly as bootstrap wires it — through the
-        // driver's watched decorator, feeding an mpsc channel.
+        // composition-owned watched decorator, feeding an mpsc channel.
         let (sink_tx, mut sink_rx) = mpsc::channel::<lash::process::ProcessEvent>(16);
         let (fault_tx, _fault_rx) = mpsc::channel::<WorkerFaultNotice>(16);
-        let driver = lash::process::ProcessWorkDriver::new_with_sink(
-            Arc::clone(&process_registry),
-            Arc::new(NoopProcessRunHandle),
-            Some(Arc::new(ChannelProcessEventSink::new(sink_tx, fault_tx))),
-        );
+        let (watched, wiring) =
+            watched_process_work(Arc::clone(&process_registry), sink_tx, fault_tx);
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
-            .process_registry(Arc::clone(&process_registry))
+            .process_work(wiring)
             .build(crate::test_core_owner())
             .expect("build core");
         let process_observer = core
@@ -101,8 +101,8 @@ mod process_work_tests {
         };
 
         // Register, append one non-terminal event, and complete — all through
-        // the driver's decorated registry handle, the same one the sink watches.
-        let watched = driver.process_registry();
+        // the composition's decorated registry handle, the same one the sink watches.
+        // It is also the registry installed in the core.
         watched
             .register_process(
                 lash::process::ProcessRegistration::new(
@@ -240,9 +240,12 @@ mod process_work_tests {
         ));
         std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
@@ -255,7 +258,7 @@ mod process_work_tests {
         let model = lash::ModelSpec::builder("test-model")
             .context_window_tokens(4096)
             .build()
-        .expect("model spec");
+            .expect("model spec");
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -333,12 +336,9 @@ mod process_work_tests {
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].process.process_id, process_id);
 
-        let Json(receipt) = cancel_work(
-            AxumPath(process_id.to_string()),
-            State(state.clone()),
-        )
-        .await
-        .expect("submit process cancellation");
+        let Json(receipt) = cancel_work(AxumPath(process_id.to_string()), State(state.clone()))
+            .await
+            .expect("submit process cancellation");
         assert!(receipt.accepted);
         assert_eq!(receipt.process_id, process_id);
         let request = tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
@@ -375,11 +375,11 @@ mod process_work_tests {
         use lash::process::{
             CausalRef, ProcessAwaitOutput, ProcessChangeCursor, ProcessCompletionAuthority,
             ProcessEventAppendRequest, ProcessEventType, ProcessExecutionEnvRef,
-            ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessInput,
-            ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode, ProcessObserverBy,
-            ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
-            ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
-            ProjectionWatermark, RecoveryContract, SessionScope,
+            ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView, ProcessIdentity,
+            ProcessInput, ProcessLeaseClaimOutcome, ProcessListFilter, ProcessListMode,
+            ProcessObserverBy, ProcessOriginator, ProcessProvenance, ProcessRegistration,
+            ProcessRegistry, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+            ProcessWorklistCursor, ProjectionWatermark, RecoveryContract, SessionScope,
         };
         let registry = lash::testing::TestLocalProcessRegistry::default();
         let process_id = "invoice-export";
@@ -421,7 +421,10 @@ mod process_work_tests {
         assert_eq!(occurrence_id, "occurrence-42");
         assert_eq!(subscription_id.as_deref(), Some("subscription-nightly"));
         assert_eq!(*subscription_revision, Some(7));
-        assert_eq!(subscription_incarnation.as_deref(), Some("incarnation-blue"));
+        assert_eq!(
+            subscription_incarnation.as_deref(),
+            Some("incarnation-blue")
+        );
 
         let input = ProcessInput::Engine {
             kind: "report-export".to_string(),
@@ -439,16 +442,18 @@ mod process_work_tests {
             Default::default(),
             lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
         )
-            .stable_ref()
-            .expect("derive process execution environment identity");
+        .stable_ref()
+        .expect("derive process execution environment identity");
         let execution_env_digest = execution_env_ref
             .as_str()
             .strip_prefix("process-env:v4:blake3:")
             .expect("process execution environment uses the v3 identity family");
         assert_eq!(execution_env_digest.len(), 64);
-        assert!(execution_env_digest
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+        assert!(
+            execution_env_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        );
 
         let registration = ProcessRegistration::new(
             process_id,
@@ -470,18 +475,28 @@ mod process_work_tests {
         assert_eq!(registration.disposition, RecoveryContract::Rerunnable);
         assert_eq!(registration.max_attempts, Some(3));
         assert_eq!(
-            registration.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),
+            registration
+                .env_ref
+                .as_ref()
+                .map(ProcessExecutionEnvRef::as_str),
             Some(execution_env_ref.as_str())
         );
-        assert_eq!(registration.wake_session_id.as_deref(), Some("session-finance"));
-        assert_eq!(registration.input.engine_specific_kind(), Some("report-export"));
+        assert_eq!(
+            registration.wake_session_id.as_deref(),
+            Some("session-finance")
+        );
+        assert_eq!(
+            registration.input.engine_specific_kind(),
+            Some("report-export")
+        );
         assert!(registration.event_types.iter().any(|event| {
             event.name == "process.completed" && event.semantics.terminal.is_some()
         }));
 
         let initial_cursor = ProcessChangeCursor::initial();
         assert_eq!(initial_cursor.store_sequence(), 0);
-        assert_eq!(ProcessChangeCursor::from_store_sequence(9).store_sequence(), 9);
+        let stored_cursor = ProcessChangeCursor::from_store_sequence(9);
+        assert_eq!(stored_cursor.store_sequence(), 9);
         let replay_registration = registration.clone();
         let initial_observers = ["session-finance".to_string(), "session-ops".to_string()];
         let record = registry
@@ -492,19 +507,30 @@ mod process_work_tests {
         assert_eq!(record.status, ProcessStatus::Running);
         assert!(!record.is_terminal());
         assert_eq!(record.originator_id(), "session-finance");
-        assert_eq!(record.identity.label.as_deref(), Some("Nightly invoice export"));
+        assert_eq!(
+            record.identity.label.as_deref(),
+            Some("Nightly invoice export")
+        );
         assert_eq!(record.max_attempts, Some(3));
         assert_eq!(record.disposition, RecoveryContract::Rerunnable);
         assert_eq!(record.input.engine_specific_kind(), Some("report-export"));
-        assert_eq!(record.provenance.originator, ProcessOriginator::Session {
-            session_id: "session-finance".to_string(),
-            agent_frame_id: Some(frame_node_id.clone()),
-        });
+        assert_eq!(
+            record.provenance.originator,
+            ProcessOriginator::Session {
+                session_id: "session-finance".to_string(),
+                agent_frame_id: Some(frame_node_id.clone()),
+            }
+        );
         assert_eq!(
             record.env_ref.as_ref().map(ProcessExecutionEnvRef::as_str),
             Some(execution_env_ref.as_str())
         );
-        assert!(record.event_types.iter().any(|event| event.name == "progress"));
+        assert!(
+            record
+                .event_types
+                .iter()
+                .any(|event| event.name == "progress")
+        );
         assert!(record.updated_at_ms >= record.created_at_ms);
         assert!(record.external_ref.is_none());
         assert!(record.first_started.is_none());
@@ -516,9 +542,11 @@ mod process_work_tests {
             .strip_prefix("process-registration-definition:v2:blake3:")
             .expect("process registration uses the v2 BLAKE3 definition-fingerprint family");
         assert_eq!(registration_digest.len(), 64);
-        assert!(registration_digest
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+        assert!(
+            registration_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        );
         let replay = registry
             .register_process_with_observers(
                 replay_registration,
@@ -527,17 +555,22 @@ mod process_work_tests {
             .await
             .expect("replay process registration by lookup id");
         assert_eq!(replay.id, process_id);
-        assert_eq!(replay.registration_fingerprint, record.registration_fingerprint);
+        assert_eq!(
+            replay.registration_fingerprint,
+            record.registration_fingerprint
+        );
 
         let observers = registry
             .observers_for_process(process_id)
             .await
             .expect("list initial observers");
         assert_eq!(observers, ["session-finance", "session-ops"]);
-        assert!(registry
-            .is_observer("session-finance", process_id)
-            .await
-            .expect("read observer edge"));
+        assert!(
+            registry
+                .is_observer("session-finance", process_id)
+                .await
+                .expect("read observer edge")
+        );
         registry
             .transfer_observers(
                 "session-ops",
@@ -562,7 +595,8 @@ mod process_work_tests {
             )
             .await
             .expect("remove inherited observer");
-        assert_eq!(ProcessObserverBy::ForkInheritance.replay_component(), "fork_inheritance");
+        let inherited_observer = ProcessObserverBy::ForkInheritance;
+        assert_eq!(inherited_observer.replay_component(), "fork_inheritance");
 
         let external_ref = ProcessExternalRef {
             backend: "restate".to_string(),
@@ -576,7 +610,13 @@ mod process_work_tests {
         assert_eq!(record.external_ref.as_ref().unwrap().backend, "restate");
         assert_eq!(record.external_ref.as_ref().unwrap().id, "invocation-778");
         assert_eq!(
-            record.external_ref.as_ref().unwrap().metadata.as_ref().unwrap()["region"],
+            record
+                .external_ref
+                .as_ref()
+                .unwrap()
+                .metadata
+                .as_ref()
+                .unwrap()["region"],
             "eu-central-1"
         );
 
@@ -587,7 +627,10 @@ mod process_work_tests {
         .with_replay_key("invoice-export:progress:8");
         assert_eq!(progress.event_type, "progress");
         assert_eq!(progress.payload["completed_rows"], 8);
-        assert_eq!(progress.replay.as_ref().unwrap().key, "invoice-export:progress:8");
+        assert_eq!(
+            progress.replay.as_ref().unwrap().key,
+            "invoice-export:progress:8"
+        );
         let first_progress = registry
             .append_event(process_id, progress.clone())
             .await
@@ -599,7 +642,10 @@ mod process_work_tests {
             )
             .await
             .expect("replay progress append");
-        assert_eq!(replayed_progress.event.sequence, first_progress.event.sequence);
+        assert_eq!(
+            replayed_progress.event.sequence,
+            first_progress.event.sequence
+        );
         assert_eq!(replayed_progress.event.process_id, process_id);
         assert_eq!(replayed_progress.event.event_type, "progress");
         assert_eq!(replayed_progress.event.payload["total_rows"], 12);
@@ -628,7 +674,10 @@ mod process_work_tests {
         {
             ProcessLeaseClaimOutcome::Acquired(lease) => lease,
             ProcessLeaseClaimOutcome::Busy { holder } => {
-                panic!("fresh process unexpectedly held by {}", holder.owner.owner_id)
+                panic!(
+                    "fresh process unexpectedly held by {}",
+                    holder.owner.owner_id
+                )
             }
         };
         assert_eq!(lease.process_id, process_id);
@@ -701,7 +750,10 @@ mod process_work_tests {
         );
         assert!(ProcessStatusFilter::Any.matches(ProcessStatus::Running));
         assert_eq!(ProcessStatusFilter::Any.list_mode(), ProcessListMode::All);
-        assert_eq!(ProcessStatusFilter::decode(Some("completed")), Ok(ProcessStatusFilter::Completed));
+        assert_eq!(
+            ProcessStatusFilter::decode(Some("completed")),
+            Ok(ProcessStatusFilter::Completed)
+        );
 
         let live_refs = registry
             .live_reference_summary()
@@ -744,11 +796,13 @@ mod process_work_tests {
         assert!(completion.is_terminal());
         assert_eq!(completion.outcome.as_ref(), Some(&success));
         let completed = (*completion).clone();
-        assert!(registry
-            .get_process_lease(process_id)
-            .await
-            .expect("read released lease")
-            .is_none());
+        assert!(
+            registry
+                .get_process_lease(process_id)
+                .await
+                .expect("read released lease")
+                .is_none()
+        );
 
         let replay = registry
             .complete_process_with_lease(&renewed, success.clone())
@@ -756,12 +810,14 @@ mod process_work_tests {
             .expect("replay terminal completion");
         assert_eq!(replay.status, ProcessStatus::Completed);
         assert_eq!(replay.outcome.as_ref(), Some(&success));
-        let cancellation = ProcessAwaitOutput::from_tool_output(
-            lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime(
-                "operator cancelled",
-            )),
+        let cancellation =
+            ProcessAwaitOutput::from_tool_output(lash::tools::ToolCallOutput::cancelled(
+                lash::tools::ToolCancellation::runtime("operator cancelled"),
+            ));
+        assert_eq!(
+            cancellation.terminal_status(),
+            Some(ProcessStatus::Cancelled)
         );
-        assert_eq!(cancellation.terminal_status(), Some(ProcessStatus::Cancelled));
         assert_eq!(
             cancellation.into_tool_output().value_for_projection()["message"],
             "operator cancelled"
@@ -846,7 +902,10 @@ mod process_work_tests {
                         == "batch service rejected the export"
                     && output.value_for_projection()["raw"]["retryable"] == false
         ));
-        assert_eq!(ProcessCompletionAuthority::workflow_key("wf-1").label(), "workflow-key");
+        assert_eq!(
+            ProcessCompletionAuthority::workflow_key("wf-1").label(),
+            "workflow-key"
+        );
 
         let report = registry
             .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
@@ -867,21 +926,16 @@ mod process_work_tests {
             [process_id, external_id]
         );
         let compacted = registry
-            .compact_process_tombstones(
-                u64::MAX,
-                ProjectionWatermark::UpTo(initial_cursor),
-                None,
-            )
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(initial_cursor), None)
             .await
             .expect("compact projected tombstones");
-        assert_eq!(compacted, 0, "unprojected deletions must retain their tombstones");
+        assert_eq!(
+            compacted, 0,
+            "unprojected deletions must retain their tombstones"
+        );
         assert_eq!(
             registry
-                .compact_process_tombstones(
-                    u64::MAX,
-                    ProjectionWatermark::NoProjector,
-                    None,
-                )
+                .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None,)
                 .await
                 .expect("compact tombstones without a projector"),
             2
@@ -926,11 +980,10 @@ mod process_work_tests {
             .complete_error("session delete retention test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::builder("test-model")
-                .context_window_tokens(4096)
-                .build()
-                .expect("model spec");
+        let model = lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
+            .expect("model spec");
         let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -983,7 +1036,10 @@ mod process_work_tests {
                 "trigger-delivery-of-deleted-session",
                 Some(deleted_session_id.clone()),
             ),
-            ("live-work-of-deleted-session", Some(deleted_session_id.clone())),
+            (
+                "live-work-of-deleted-session",
+                Some(deleted_session_id.clone()),
+            ),
             (
                 "trigger-delivery-of-surviving-session",
                 Some(surviving_session_id.clone()),
@@ -1056,8 +1112,14 @@ mod process_work_tests {
             .await
             .expect("delete the session and reclaim its finished work");
         assert_eq!(retention.pruned_processes, 1, "one finished row reclaimed");
-        assert_eq!(retention.pruned_events, 1, "its terminal event went with it");
-        assert_eq!(retention.pruned_trigger_deliveries, 0, "no delivery reserved");
+        assert_eq!(
+            retention.pruned_events, 1,
+            "its terminal event went with it"
+        );
+        assert_eq!(
+            retention.pruned_trigger_deliveries, 0,
+            "no delivery reserved"
+        );
 
         let rail = work_rail_process_ids(&state).await;
         assert!(!rail.contains(&reclaimed), "reclaimed work leaves the rail");
@@ -1097,9 +1159,11 @@ mod process_work_tests {
     /// call failed without anyone parsing the message.
     const RENDERED_BACKEND_FAULT: &str = "kind=recovery-backend-error process=workbench-faulted-row operation=WriteTerminal error=terminal write rejected by the store";
     /// A run that failed after admission names its row and no registry call.
-    const RENDERED_RUN_FAILURE: &str = "kind=recovery-run-failed process=workbench-failed-run operation=- error=engine run failed";
+    const RENDERED_RUN_FAILURE: &str =
+        "kind=recovery-run-failed process=workbench-failed-run operation=- error=engine run failed";
     /// A scan that gave up part-way is pass-scoped, so it blames no row.
-    const RENDERED_SCAN_FAILURE: &str = "kind=worklist-scan-incomplete process=- operation=- error=worklist page read failed";
+    const RENDERED_SCAN_FAILURE: &str =
+        "kind=worklist-scan-incomplete process=- operation=- error=worklist page read failed";
 
     /// Hand one typed fault to the workbench's sink the way the durable process
     /// worker does, and return the line the host would render for it.
@@ -1117,18 +1181,27 @@ mod process_work_tests {
             operation: lash::durability::ProcessRecoveryOperation::WriteTerminal,
             error: "terminal write rejected by the store".to_string(),
         };
-        assert_eq!(rendered_worker_fault(backend_fault).await, RENDERED_BACKEND_FAULT);
+        assert_eq!(
+            rendered_worker_fault(backend_fault).await,
+            RENDERED_BACKEND_FAULT
+        );
 
         let run_failure = lash::process::ProcessWorkerFault::RecoveryRunFailed {
             process_id: "workbench-failed-run".to_string(),
             error: "engine run failed".to_string(),
         };
-        assert_eq!(rendered_worker_fault(run_failure).await, RENDERED_RUN_FAILURE);
+        assert_eq!(
+            rendered_worker_fault(run_failure).await,
+            RENDERED_RUN_FAILURE
+        );
 
         let scan_failure = lash::process::ProcessWorkerFault::WorklistScanIncomplete {
             error: "worklist page read failed".to_string(),
         };
-        assert_eq!(rendered_worker_fault(scan_failure).await, RENDERED_SCAN_FAILURE);
+        assert_eq!(
+            rendered_worker_fault(scan_failure).await,
+            RENDERED_SCAN_FAILURE
+        );
     }
 
     /// The rendering test above hands faults to the sink directly, so it would
@@ -1139,8 +1212,14 @@ mod process_work_tests {
     #[test]
     fn bootstrap_installs_the_fault_sink_on_the_core() {
         const BOOTSTRAP_SOURCE: &str = include_str!("../bootstrap.rs");
-        assert!(BOOTSTRAP_SOURCE.contains("ChannelProcessEventSink::new("), "bootstrap must build the fault-observing process event sink");
-        assert!(BOOTSTRAP_SOURCE.contains(".process_event_sink(Arc::clone(&process_event_sink))"), "bootstrap must install the fault-observing sink on the core builder");
+        assert!(
+            BOOTSTRAP_SOURCE.contains("ChannelProcessEventSink::new("),
+            "bootstrap must build the fault-observing process event sink"
+        );
+        assert!(
+            BOOTSTRAP_SOURCE.contains(".process_event_sink(Arc::clone(&process_event_sink))"),
+            "bootstrap must install the fault-observing sink on the core builder"
+        );
     }
 
     /// The process ids the work rail renders with no session selected: the
@@ -1155,5 +1234,26 @@ mod process_work_tests {
             .collect::<Vec<_>>();
         ids.sort();
         ids
+    }
+
+    fn watched_process_work(
+        registry: Arc<dyn lash::process::ProcessRegistry>,
+        sink_tx: tokio::sync::mpsc::Sender<lash::process::ProcessEvent>,
+        fault_tx: tokio::sync::mpsc::Sender<WorkerFaultNotice>,
+    ) -> (
+        Arc<dyn lash::process::ProcessRegistry>,
+        lash::process::ProcessWorkWiring,
+    ) {
+        let (registry, hub) = lash::process::watch_process_registry_with_sink(
+            registry,
+            Some(Arc::new(ChannelProcessEventSink::new(sink_tx, fault_tx))),
+        );
+        let process_work = lash::process::NativeProcessWork::for_registry(Arc::clone(&registry));
+        let wiring = lash::process::ProcessWorkWiring::new(
+            Arc::clone(&registry),
+            hub,
+            Arc::new(process_work),
+        );
+        (registry, wiring)
     }
 }

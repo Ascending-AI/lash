@@ -285,7 +285,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         .await
         .expect("retire queued-work session");
     let queued_work_driver =
-        lash::runtime::QueuedWorkDriver::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {
+        lash::runtime::NativeQueuedWork::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {
             sessions: crate::WorkbenchSessions::fresh(),
             store_factory,
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
@@ -294,7 +294,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         }));
 
     let error = queued_work_driver
-        .claim_and_run_pending(Some(session_id), "retired_session_regression")
+        .drain_session(session_id, "retired_session_regression")
         .await
         .expect_err("the queued-work wake must refuse the retired session");
     let classified = AppError::runtime(lash::EmbedError::Plugin(error.clone()));
@@ -724,3 +724,29 @@ fn settlement_reader_treats_ambiguous_errors_as_retryable() {
 }
 
 include!("restate_cron_tests.rs");
+
+#[async_trait::async_trait]
+trait QueuedWorkExt {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError>;
+}
+
+#[async_trait::async_trait]
+impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError> {
+        lash::runtime::QueuedWorkSubstrate::drain_session_work(
+            self,
+            lash::runtime::SessionWorkTarget::Session(session_id.to_string()),
+            reason,
+        )
+        .await
+        .map(|_| ())
+    }
+}

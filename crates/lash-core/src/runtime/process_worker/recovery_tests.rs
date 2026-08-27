@@ -87,12 +87,12 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
 }
 
 #[derive(Default)]
-struct LateBoundProcessRunHandle {
+struct LateBoundProcessWork {
     worker: OnceLock<DurableProcessWorker>,
     enabled: AtomicBool,
 }
 
-impl LateBoundProcessRunHandle {
+impl LateBoundProcessWork {
     async fn enable_and_drive(&self) -> Result<ProcessAdmissionReport, PluginError> {
         self.enabled.store(true, Ordering::SeqCst);
         self.worker
@@ -104,8 +104,11 @@ impl LateBoundProcessRunHandle {
 }
 
 #[async_trait::async_trait]
-impl crate::ProcessRunHandle for LateBoundProcessRunHandle {
-    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
+impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
+    async fn admit_pending_processes(
+        &self,
+        _reason: &str,
+    ) -> Result<ProcessAdmissionReport, PluginError> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(ProcessAdmissionReport::default());
         }
@@ -115,6 +118,37 @@ impl crate::ProcessRunHandle for LateBoundProcessRunHandle {
             .drive_pending_processes()
             .await
     }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &str,
+    ) -> Result<crate::ProcessTerminalWait, PluginError> {
+        crate::NativeProcessWork::for_registry(Arc::clone(
+            &self
+                .worker
+                .get()
+                .expect("test process worker is bound before execution")
+                .config
+                .process_registry,
+        ))
+        .await_terminal(process_id)
+        .await
+        .map(crate::ProcessTerminalWait::Terminal)
+    }
+}
+
+fn late_bound_process_work_wiring(
+    registry: Arc<dyn ProcessRegistry>,
+    process_work: Arc<LateBoundProcessWork>,
+) -> (
+    Arc<dyn ProcessRegistry>,
+    crate::ProcessChangeHub,
+    crate::ProcessWorkWiring,
+) {
+    let (registry, hub) = crate::watch_process_registry(registry);
+    let port: Arc<dyn crate::ProcessWorkSubstrate> = process_work;
+    let wiring = crate::ProcessWorkWiring::new(Arc::clone(&registry), hub.clone(), port);
+    (registry, hub, wiring)
 }
 
 fn engine_registration(
@@ -220,15 +254,10 @@ fn reentrant_worker_with_trigger_store(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
 ) -> DurableProcessWorker {
-    let driver = crate::ProcessWorkDriver::new(
-        Arc::clone(&registry),
-        Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
-    );
-    let driver_registry = driver.process_registry();
-    let driver_hub = driver.change_hub();
-    let process_work = crate::testing::process_work_wiring_from_driver(driver);
+    let (driver_registry, driver_hub, process_work) =
+        late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
@@ -260,7 +289,7 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     run_handle.enabled.store(true, Ordering::SeqCst);
     let worker = reentrant_worker_with_trigger_store(
         Arc::clone(&registry),
@@ -438,7 +467,7 @@ async fn process_count(registry: &Arc<dyn ProcessRegistry>, process_id: &str) ->
 }
 
 async fn await_terminal(registry: &Arc<dyn ProcessRegistry>, process_id: &str) {
-    let awaiter = crate::ProcessAwaiter::polling(Arc::clone(registry));
+    let awaiter = crate::NativeProcessWork::for_registry(Arc::clone(registry));
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         awaiter.await_terminal(process_id),
@@ -560,7 +589,7 @@ struct ProductionChainState {
     max_active_work: AtomicUsize,
     all_roots_running: tokio::sync::Notify,
     all_roots_ready_to_park: tokio::sync::Notify,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
 }
 
 struct ProductionChainEngine {
@@ -885,7 +914,7 @@ async fn run_production_chain(
     nodes: usize,
     nested_wait_task: bool,
 ) {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let state = Arc::new(ProductionChainState {
         roots,
         root_runs: AtomicUsize::new(0),
@@ -1028,13 +1057,10 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     let nested_engine = Arc::new(NestedProcessEngine {
         runs: Arc::clone(&nested_runs),
     });
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let driver = crate::ProcessWorkDriver::new(
-        Arc::clone(&raw_registry),
-        Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
-    );
-    let registry = driver.process_registry();
+    let (registry, hub, process_work) =
+        late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
     let mut runtime_host = RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
@@ -1049,13 +1075,12 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         crate::PluginSpec::new().with_orchestrating_tool(NestedProcessWaitTool::orchestrating()),
     )));
     let worker = DurableProcessWorker::new({
-        let process_work = crate::testing::process_work_wiring_from_driver(driver.clone());
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(plugin_factories)),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
             Arc::clone(&registry),
-            driver.change_hub(),
+            hub,
             crate::WorkerProcessWork::External(process_work),
             local_owner("session-turn-worker", "host-a", "session-turn-start"),
         )
@@ -1100,7 +1125,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     })
     .await
     .expect("production SessionTurn path completes without permit starvation");
-    let outer = crate::ProcessAwaiter::polling(Arc::clone(&registry))
+    let outer = crate::NativeProcessWork::for_registry(Arc::clone(&registry))
         .await_terminal(outer_process_id)
         .await
         .expect("outer session-turn process is terminal");
@@ -1898,7 +1923,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
 
 #[tokio::test]
 async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (worker, registry, run_handle, env_ref) = worker_with_engine(
         1,
         Arc::new(SnapshotRecordingEngine {
@@ -1962,7 +1987,7 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
 #[tokio::test]
 async fn transient_engine_artifact_read_retries_and_terminally_commits() {
     let reads = Arc::new(AtomicUsize::new(0));
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (_worker, registry, run_handle, env_ref) = worker_with_engine(
         1,
         Arc::new(FailOnceArtifactReadEngine {
@@ -2136,7 +2161,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
 async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     let started = Arc::new(tokio::sync::Notify::new());
     let fail = Arc::new(tokio::sync::Notify::new());
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (worker, registry, run_handle, env_ref) = worker_with_engine(
         1,
         Arc::new(PausedInfraEngine {

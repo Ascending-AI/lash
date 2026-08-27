@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-use crate::runtime::session_execution_lease::queued_lane_wait;
+use crate::runtime::native_substrate::lane_wait as queued_lane_wait;
 use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
@@ -636,7 +636,7 @@ impl QueuedLaneHolder {
     }
 
     /// The holder's own persisted lease term. The only honest budget unit for
-    /// waiting one out — see `session_execution_lease/queued_lane_wait.rs:26-31`.
+    /// waiting one out — see `native_substrate/lane_wait.rs`.
     pub fn lease_term_ms(&self) -> u64 {
         self.0.lease_term_ms
     }

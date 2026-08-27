@@ -132,7 +132,8 @@ mod tests {
         execution_write_authority: lash_core::ProcessExecutionWriteAuthority,
         cancel: CancellationToken,
     ) -> lash_core::ToolContext<'static> {
-        let context = lash_core::testing::mock_tool_context().with_async_process(process_id, cancel);
+        let context =
+            lash_core::testing::mock_tool_context().with_async_process(process_id, cancel);
         lash_core::ToolContext::with_process_events_for_testing(
             context,
             process_id,
@@ -202,12 +203,10 @@ mod tests {
                 )
                 .await?;
             let definition = record.identity.definition.clone();
-            Ok(lash_core::ProcessHandleView::new(
-                record.id,
-                record.identity,
-                record.status,
+            Ok(
+                lash_core::ProcessHandleView::new(record.id, record.identity, record.status)
+                    .with_definition(definition),
             )
-            .with_definition(definition))
         }
 
         async fn start(
@@ -229,11 +228,7 @@ mod tests {
             await_output: lash_core::ProcessAwaitOutput,
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
-            if !self
-                .registry
-                .is_observer(session_id, process_id)
-                .await?
-            {
+            if !self.registry.is_observer(session_id, process_id).await? {
                 return Err(PluginError::Session(format!(
                     "process handle `{process_id}` is not visible in this session"
                 )));
@@ -281,7 +276,7 @@ mod tests {
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessAwaitOutput, PluginError> {
             let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
-            lash_core::facade_support::ProcessAwaiter::polling(registry)
+            lash_core::NativeProcessWork::for_registry(registry)
                 .await_terminal(process_id)
                 .await
         }
@@ -297,9 +292,7 @@ mod tests {
                 lash_core::ProcessListMode::Live => {
                     self.registry.list_live_observed_by(session_id).await
                 }
-                lash_core::ProcessListMode::All => {
-                    self.registry.list_observed_by(session_id).await
-                }
+                lash_core::ProcessListMode::All => self.registry.list_observed_by(session_id).await,
             }
         }
 
@@ -311,11 +304,7 @@ mod tests {
         ) -> Result<(), PluginError> {
             let _ = scope;
             for process_id in process_ids {
-                if !self
-                    .registry
-                    .is_observer(session_id, process_id)
-                    .await?
-                {
+                if !self.registry.is_observer(session_id, process_id).await? {
                     return Err(PluginError::Session(format!(
                         "process handle `{process_id}` is not live or visible in this session"
                     )));
@@ -453,7 +442,6 @@ mod tests {
         ) -> Result<(), PluginError> {
             Ok(())
         }
-
     }
 
     fn context_with_processes(
@@ -675,8 +663,7 @@ mod tests {
             .lock_recover()
             .append("nonzero-start", &vec![b'x'; MAX_OUTPUT + 1]);
 
-        let (output, _, full_output_path) =
-            render_buffer_output("nonzero-start", &buffer, None);
+        let (output, _, full_output_path) = render_buffer_output("nonzero-start", &buffer, None);
 
         assert!(output.ends_with("\n[truncated]"));
         assert!(full_output_path.is_some());
@@ -939,10 +926,8 @@ mod tests {
     #[tokio::test]
     async fn shell_start_and_write_are_literal_leaf_intents() {
         let shell = test_shell();
-        let context = context_with_processes(
-            Arc::new(TestProcessService::default()),
-            "shell-intent-call",
-        );
+        let context =
+            context_with_processes(Arc::new(TestProcessService::default()), "shell-intent-call");
         let attempt = lash_core::AttemptContext::__for_testing(&context, "shell-intent-scope");
         let start = shell
             .execute_attempt(ToolCall {
@@ -973,7 +958,10 @@ mod tests {
             "the recorded process body must retain detach semantics"
         );
         assert_eq!(intent.session_id, "test-session");
-        assert_eq!(intent.on_parent_end, lash_core::ProcessParentEndPolicy::Abandon);
+        assert_eq!(
+            intent.on_parent_end,
+            lash_core::ProcessParentEndPolicy::Abandon
+        );
         assert_eq!(
             intent.request.id,
             "tool-intent:v1:blake3:d087b5296a95eac74a4606f890cd20667a2e4a5106c3703a1ae50a93d6c411fa"
@@ -1147,7 +1135,10 @@ mod tests {
             launch.pgid, launch.pid,
             "setsid makes the child its own process-group leader",
         );
-        assert!(process_alive(launch.pid), "detached child should be running");
+        assert!(
+            process_alive(launch.pid),
+            "detached child should be running"
+        );
         assert_ne!(
             process_parent_pid(launch.pid),
             Some(std::process::id()),
@@ -1205,7 +1196,10 @@ mod tests {
             record.disposition,
             lash_core::RecoveryContract::ExternallyOwned
         );
-        assert!(record.is_terminal(), "detached audit row is terminal from birth");
+        assert!(
+            record.is_terminal(),
+            "detached audit row is terminal from birth"
+        );
 
         #[cfg(unix)]
         let pid = value["pid"].as_u64().expect("detached pid") as u32;
@@ -1360,11 +1354,7 @@ mod tests {
             .await
             .expect("read terminal change cursor");
         let report = registry
-            .prune_terminal_processes(
-                u64::MAX,
-                None,
-                lash_core::ProjectionWatermark::UpTo(cursor),
-            )
+            .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::UpTo(cursor))
             .await
             .expect("prune terminal target");
         assert_eq!(report.pruned_processes, 1);
@@ -1464,10 +1454,10 @@ mod tests {
             "detach-ordering-call",
         );
         let args = json!({
-                "cmd": "touch launched",
-                "detach": true,
-                "detached_process_id": "detach-ordering-audit",
-            });
+            "cmd": "touch launched",
+            "detach": true,
+            "detached_process_id": "detach-ordering-audit",
+        });
         let internal = lash_core::InternalProcessContext::__for_testing(&ctx);
         let result = shell
             .execute_internal(lash_core::InternalProcessToolCall {
@@ -1506,9 +1496,10 @@ mod tests {
             "detach": true,
             "detached_process_id": "detach-cancel-audit",
         });
-        let task = tokio::spawn(async move {
-            run_with_context(&shell, "start_command", &args, &ctx).await
-        });
+        let task =
+            tokio::spawn(
+                async move { run_with_context(&shell, "start_command", &args, &ctx).await },
+            );
 
         let audit = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
@@ -1576,7 +1567,7 @@ mod tests {
         );
 
         // (d): an await on that row is typed-refused instead of parking forever.
-        let refusal = lash_core::facade_support::ProcessAwaiter::polling(
+        let refusal = lash_core::NativeProcessWork::for_registry(
             Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>
         )
         .await_terminal("detach-cancel-audit")
@@ -1615,9 +1606,9 @@ mod tests {
             let shell = Arc::clone(&shell);
             let ctx = Arc::clone(&ctx);
             let args = Arc::clone(&args);
-            tokio::spawn(async move {
-                run_with_context(&shell, "start_command", &args, &ctx).await
-            })
+            tokio::spawn(
+                async move { run_with_context(&shell, "start_command", &args, &ctx).await },
+            )
         };
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1663,9 +1654,9 @@ mod tests {
             let shell = Arc::clone(&shell);
             let ctx = Arc::clone(&ctx);
             let args = Arc::clone(&args);
-            tokio::spawn(async move {
-                run_with_context(&shell, "start_command", &args, &ctx).await
-            })
+            tokio::spawn(
+                async move { run_with_context(&shell, "start_command", &args, &ctx).await },
+            )
         };
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1751,9 +1742,9 @@ mod tests {
             let shell = Arc::clone(&shell);
             let ctx = Arc::clone(&ctx);
             let args = Arc::clone(&args);
-            tokio::spawn(async move {
-                run_with_context(&shell, "start_command", &args, &ctx).await
-            })
+            tokio::spawn(
+                async move { run_with_context(&shell, "start_command", &args, &ctx).await },
+            )
         };
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -1901,7 +1892,8 @@ mod tests {
         assert_eq!(defs.len(), 4);
         assert_eq!(
             defs.iter()
-                .filter(|definition| definition.manifest.activation == lash_core::ToolActivation::Internal)
+                .filter(|definition| definition.manifest.activation
+                    == lash_core::ToolActivation::Internal)
                 .map(|definition| definition.name())
                 .collect::<Vec<_>>(),
             vec!["run_start_command"]
@@ -1963,9 +1955,14 @@ mod tests {
         // description a TypeScript session reads verbatim (ADR 0063). The RLM
         // catalog now refuses to register prose that names a dialect, so the
         // wording is pinned here as dialect-neutral rather than merely present.
-        assert!(!description.to_lowercase().contains("lashlang"), "{description}");
+        assert!(
+            !description.to_lowercase().contains("lashlang"),
+            "{description}"
+        );
         assert!(!description.contains(")?"), "{description}");
-        assert!(description.contains("Timed-out commands are killed and returned as a tool failure"));
+        assert!(
+            description.contains("Timed-out commands are killed and returned as a tool failure")
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ mod parent_end;
 mod permit;
 mod recovery;
 mod registration;
+#[path = "../native_substrate/worklist.rs"]
 mod worklist;
 
 #[doc(hidden)]
@@ -656,7 +657,7 @@ impl DurableProcessWorker {
     /// reconcile, or its own intake read).
     ///
     /// Waiting for a terminal outcome is the engine seam's job, not this one:
-    /// use [`ProcessWorkDriver::await_terminal`](crate::ProcessWorkDriver::await_terminal).
+    /// use [`ProcessWorkSubstrate::await_process_terminal`](crate::ProcessWorkSubstrate::await_process_terminal).
     ///
     /// The report covers the rows this call took intake responsibility for: its
     /// own page. When a scan is already in flight this call records a rescan for

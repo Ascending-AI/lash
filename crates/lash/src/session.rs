@@ -259,7 +259,8 @@ impl SessionBuilder {
             &self.plugin_options,
             self.parent_session_id.is_none(),
         )?;
-        if let Some(process_work) = env.process_work() {
+        let process_work = env.process_work();
+        if let Some(process_work) = process_work.as_ref() {
             drive_process_on_open(ports.drive_process_on_open, process_work.as_ref()).await?;
         }
         let handle = RuntimeHandle::with_live_replay_store(
@@ -280,6 +281,7 @@ impl SessionBuilder {
             effect_host,
             parent_session_id: self.parent_session_id,
             active_plugins: self.active_plugins,
+            process_work,
             process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
@@ -426,6 +428,7 @@ pub struct LashSession {
     pub(crate) effect_host: Arc<dyn EffectHost>,
     pub(crate) parent_session_id: Option<String>,
     pub(crate) active_plugins: Vec<ActivePluginBinding>,
+    pub(crate) process_work: Option<Arc<dyn lash_core::ProcessWorkSubstrate>>,
     pub(crate) process_phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
     pub(crate) turn_cancels: crate::turn::TurnCancelRegistry,
 }
@@ -704,6 +707,7 @@ impl LashSession {
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),
+            process_work: self.process_work.clone(),
         }
     }
 

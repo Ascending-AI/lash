@@ -6,6 +6,9 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::PluginError;
+use crate::runtime::{WorkerSlotKind, WorkerSlotSupplier};
+
+use super::{QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget};
 
 mod scheduler;
 mod task;
@@ -45,12 +48,12 @@ pub struct QueuedWorkExecutionConcurrencyError {
 }
 
 #[derive(Clone)]
-pub struct QueuedWorkDriver {
-    inner: Arc<QueuedWorkDriverInner>,
-    _lifetime: Arc<QueuedWorkDriverLifetime>,
+pub struct NativeQueuedWork {
+    inner: Arc<NativeQueuedWorkInner>,
+    _lifetime: Arc<NativeQueuedWorkLifetime>,
 }
 
-pub(crate) struct QueuedWorkDriverInner {
+pub(crate) struct NativeQueuedWorkInner {
     pub(super) run_handle: Arc<dyn QueuedWorkRunHandle>,
     pub(super) shutdown: CancellationToken,
     pub(super) wake_tasks: TaskTracker,
@@ -58,19 +61,19 @@ pub(crate) struct QueuedWorkDriverInner {
     pub(super) slow_wake_threshold: Duration,
 }
 
-pub(crate) struct QueuedWorkDriverLifetime {
+pub(crate) struct NativeQueuedWorkLifetime {
     pub(super) shutdown: CancellationToken,
     pub(super) wake_tasks: TaskTracker,
 }
 
-impl Drop for QueuedWorkDriverLifetime {
+impl Drop for NativeQueuedWorkLifetime {
     fn drop(&mut self) {
         self.shutdown.cancel();
         self.wake_tasks.close();
     }
 }
 
-impl QueuedWorkDriver {
+impl NativeQueuedWork {
     pub fn validate_execution_concurrency(
         concurrency: usize,
     ) -> Result<(), QueuedWorkExecutionConcurrencyError> {
@@ -107,7 +110,7 @@ impl QueuedWorkDriver {
     #[doc(hidden)]
     pub fn with_worker_slot_supplier(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
-        supplier: Arc<dyn super::WorkerSlotSupplier>,
+        supplier: Arc<dyn WorkerSlotSupplier>,
     ) -> Self {
         Self::from_parts_with_supplier(
             run_handle,
@@ -116,13 +119,6 @@ impl QueuedWorkDriver {
             Some(supplier),
             QUEUED_WORK_SLOW_WAKE_THRESHOLD,
         )
-    }
-
-    pub fn with_shutdown_token(
-        run_handle: Arc<dyn QueuedWorkRunHandle>,
-        shutdown: CancellationToken,
-    ) -> Self {
-        Self::from_parts(run_handle, shutdown, None, QUEUED_WORK_SLOW_WAKE_THRESHOLD)
     }
 
     pub(crate) fn from_parts(
@@ -138,13 +134,13 @@ impl QueuedWorkDriver {
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         shutdown: CancellationToken,
         concurrency: Option<QueuedWorkExecutionConcurrency>,
-        supplier: Option<Arc<dyn super::WorkerSlotSupplier>>,
+        supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         slow_wake_threshold: Duration,
     ) -> Self {
         let shutdown = shutdown.child_token();
         let wake_tasks = TaskTracker::new();
         Self {
-            inner: Arc::new(QueuedWorkDriverInner {
+            inner: Arc::new(NativeQueuedWorkInner {
                 run_handle,
                 shutdown: shutdown.clone(),
                 wake_tasks: wake_tasks.clone(),
@@ -157,14 +153,14 @@ impl QueuedWorkDriver {
                 }),
                 slow_wake_threshold,
             }),
-            _lifetime: Arc::new(QueuedWorkDriverLifetime {
+            _lifetime: Arc::new(NativeQueuedWorkLifetime {
                 shutdown,
                 wake_tasks,
             }),
         }
     }
 
-    pub async fn claim_and_run_pending(
+    pub(crate) async fn claim_and_run_pending(
         &self,
         session_id: Option<&str>,
         reason: &str,
@@ -188,7 +184,7 @@ impl QueuedWorkDriver {
     /// semaphore bounds admitted executions across sessions. Callers therefore
     /// return their durable acceptance receipt without creating one task per
     /// signal.
-    pub fn notify_pending_work(&self, session_id: Option<&str>, reason: &str) {
+    pub(crate) fn notify_pending_work(&self, session_id: Option<&str>, reason: &str) {
         let session_id = session_id.map(str::to_string);
         let reason = reason.to_string();
         let should_start_dispatcher = {
@@ -213,7 +209,7 @@ impl QueuedWorkDriver {
         {
             let state = self.inner.scheduler.lock_state();
             self.inner.scheduler.metrics.intake_depth(
-                super::WorkerSlotKind::QueuedWork,
+                WorkerSlotKind::QueuedWork,
                 state.pending.len() + state.rerun.len(),
             );
         }
@@ -226,5 +222,22 @@ impl QueuedWorkDriver {
                 .wake_tasks
                 .spawn(async move { driver.run_dispatcher().await });
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl QueuedWorkSubstrate for NativeQueuedWork {
+    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str) {
+        self.notify_pending_work(target.as_session_id(), reason);
+    }
+
+    async fn drain_session_work(
+        &self,
+        target: SessionWorkTarget,
+        reason: &str,
+    ) -> Result<SessionDrainOutcome, PluginError> {
+        self.claim_and_run_pending(target.as_session_id(), reason)
+            .await?;
+        Ok(SessionDrainOutcome::Ran)
     }
 }

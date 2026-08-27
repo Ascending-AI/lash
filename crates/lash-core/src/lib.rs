@@ -334,7 +334,6 @@ pub mod facade_support {
     pub use crate::runtime::InMemorySessionStore;
     pub use crate::runtime::InMemorySessionStoreFactory;
     pub use crate::runtime::InlineEffectHost;
-    pub use crate::runtime::InlineProcessRunHandle;
     pub use crate::runtime::InlineRuntimeEffectController;
     pub use crate::runtime::LashRuntime;
     pub use crate::runtime::LiveReplayGap;
@@ -348,8 +347,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessAdmissionDeferred;
     pub use crate::runtime::ProcessAdmissionIntake;
     pub use crate::runtime::ProcessAdmissionReport;
-    pub use crate::runtime::ProcessAttach;
-    pub use crate::runtime::ProcessAwaiter;
     pub use crate::runtime::ProcessChangeHub;
     pub use crate::runtime::ProcessDrainDeferred;
     pub use crate::runtime::ProcessDrainReport;
@@ -360,7 +357,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessExecutionConcurrencyError;
     pub use crate::runtime::ProcessRecoveryAttemptOutcome;
     pub use crate::runtime::ProcessRecoveryOperation;
-    pub use crate::runtime::ProcessRunHandle;
     pub use crate::runtime::ProcessRuntimeHost;
     pub use crate::runtime::ProcessStartPlan;
     pub use crate::runtime::ProcessTerminalSemantics;
@@ -370,7 +366,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessTurnCancellation;
     pub use crate::runtime::ProcessWake;
     pub use crate::runtime::ProcessWakeDeliveryRequest;
-    pub use crate::runtime::ProcessWorkDriver;
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
     pub use crate::runtime::ProcessWorkerFault;
@@ -382,7 +377,6 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkClaimPolicy;
-    pub use crate::runtime::QueuedWorkDriver;
     pub use crate::runtime::QueuedWorkExecutionConcurrencyError;
     pub use crate::runtime::QueuedWorkKind;
     pub use crate::runtime::QueuedWorkRunError;

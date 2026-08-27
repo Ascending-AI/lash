@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::QueuedWorkDriverInner;
+use crate::runtime::{WorkerSlotKind, WorkerSlotPermit};
+
+use super::NativeQueuedWorkInner;
 use super::scheduler::{
     QueuedWorkDemand, QueuedWorkExecutionDispatcherGuard, QueuedWorkExecutionTaskCompletion,
 };
@@ -12,7 +14,7 @@ use super::types::{
 };
 
 pub(super) struct QueuedWorkTaskDriver {
-    pub(super) inner: Arc<QueuedWorkDriverInner>,
+    pub(super) inner: Arc<NativeQueuedWorkInner>,
 }
 
 pub(super) enum QueuedWorkRunAttemptOutcome {
@@ -41,7 +43,7 @@ impl QueuedWorkTaskDriver {
                     let _completion = completion;
                     match (permit, scheduler.slots.as_ref()) {
                         (Some(permit), Some(slots)) => {
-                            super::super::process_worker::scope_queued_work_execution_permit(
+                            crate::runtime::process_worker::scope_queued_work_execution_permit(
                                 Arc::clone(slots),
                                 permit,
                                 Arc::clone(&scheduler.changed),
@@ -84,7 +86,7 @@ impl QueuedWorkTaskDriver {
                         state.scheduled.remove(&session_id);
                     }
                     self.inner.scheduler.metrics.intake_depth(
-                        super::super::WorkerSlotKind::QueuedWork,
+                        WorkerSlotKind::QueuedWork,
                         state.pending.len() + state.rerun.len(),
                     );
                 }
@@ -95,13 +97,13 @@ impl QueuedWorkTaskDriver {
 
     pub(super) async fn next_execution(
         &self,
-    ) -> Option<(QueuedWorkDemand, Option<super::super::WorkerSlotPermit>)> {
+    ) -> Option<(QueuedWorkDemand, Option<WorkerSlotPermit>)> {
         if self.inner.scheduler.lock_state().pending.is_empty() {
             return None;
         }
         let permit = match self.inner.scheduler.slots.as_ref() {
             Some(slots) => {
-                let reserve = slots.reserve_slot(super::super::WorkerSlotKind::QueuedWork);
+                let reserve = slots.reserve_slot(WorkerSlotKind::QueuedWork);
                 tokio::pin!(reserve);
                 Some(tokio::select! {
                     biased;
@@ -125,7 +127,7 @@ impl QueuedWorkTaskDriver {
         }
         state.active += 1;
         self.inner.scheduler.metrics.intake_depth(
-            super::super::WorkerSlotKind::QueuedWork,
+            WorkerSlotKind::QueuedWork,
             state.pending.len() + state.rerun.len(),
         );
         Some((demand, permit))
@@ -285,7 +287,7 @@ impl QueuedWorkTaskDriver {
     }
 
     async fn wait_for_retry(&self, retry_after: Duration) -> bool {
-        let backoff = super::super::process_worker::release_process_execution_permit_while(
+        let backoff = crate::runtime::process_worker::release_process_execution_permit_while(
             tokio::time::sleep(retry_after),
         );
         tokio::pin!(backoff);

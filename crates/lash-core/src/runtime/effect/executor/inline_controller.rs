@@ -278,7 +278,7 @@ impl InlineRuntimeEffectController {
     ///
     /// The inline controller no longer runs the process here: the registry's
     /// non-terminal row *is* the durable work queue, and the host-owned
-    /// [`ProcessWorkDriver`](crate::ProcessWorkDriver) is the sole executor.
+    /// [`ProcessWorkSubstrate`](crate::ProcessWorkSubstrate) is the sole executor.
     /// Registering the row is all this path does; the control seam drives the
     /// host driver after a successful start.
     pub(crate) async fn start_process(

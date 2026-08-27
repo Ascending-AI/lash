@@ -1076,7 +1076,7 @@ impl LashRuntime {
     /// Ordinary controllers retain the public one-shot drain contract: Busy is
     /// reported as `None` and the durable row stays pending. A durable workflow
     /// controller instead applies the aliveness-aware policy in
-    /// [`queued_lane_wait`](super::session_execution_lease::queued_lane_wait):
+    /// [`lane_wait`](super::native_substrate::lane_wait):
     /// wait out a crashed-looking holder's TTL and retry, but report the typed
     /// retryable [`RuntimeErrorCode::SessionExecutionLaneBusy`] the moment the
     /// holder proves it is alive or the wait budget elapses, so the engine's

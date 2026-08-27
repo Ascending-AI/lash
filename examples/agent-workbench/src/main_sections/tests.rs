@@ -75,7 +75,7 @@ mod tests {
                 data_dir.join("attachments"),
             )))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .process_env_store(Arc::new(sync_await({
                 let path = data_dir.join("process-env.db");
                 async move {
@@ -207,8 +207,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let session_path = temp.path().join("session-id");
         let turns_path = temp.path().join("active-turns.json");
-        let sessions =
-            WorkbenchSessions::persistent(session_path.clone()).expect("session ids");
+        let sessions = WorkbenchSessions::persistent(session_path.clone()).expect("session ids");
         let session_id = sessions.current();
         let turns = ActiveTurns::persistent(turns_path.clone()).expect("active turns");
         turns.insert_with_prompt(
@@ -405,9 +404,12 @@ mod tests {
         let process_registry = Arc::new(sync_await({
             let path = data_dir.join("processes.db");
             async move {
-                lash_sqlite_store::SqliteProcessRegistry::open(&path, path.with_extension("sessions"))
-                    .await
-                    .expect("open registry")
+                lash_sqlite_store::SqliteProcessRegistry::open(
+                    &path,
+                    path.with_extension("sessions"),
+                )
+                .await
+                .expect("open registry")
             }
         })) as Arc<dyn lash::process::ProcessRegistry>;
         let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
@@ -489,9 +491,12 @@ mod tests {
         let process_registry = Arc::new(sync_await({
             let path = data_dir.join("processes.db");
             async move {
-                lash_sqlite_store::SqliteProcessRegistry::open(&path, path.with_extension("sessions"))
-                    .await
-                    .expect("open registry")
+                lash_sqlite_store::SqliteProcessRegistry::open(
+                    &path,
+                    path.with_extension("sessions"),
+                )
+                .await
+                .expect("open registry")
             }
         })) as Arc<dyn lash::process::ProcessRegistry>;
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
@@ -549,7 +554,10 @@ mod tests {
         state.track_turn(&session_id, "foreground-turn");
         state.publish_trigger_dispatch_done(&session_id, "trigger-running");
         assert!(
-            matches!(events.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
+            matches!(
+                events.try_recv(),
+                Err(broadcast::error::TryRecvError::Empty)
+            ),
             "trigger dispatch must not publish Done while a foreground turn is active"
         );
 
@@ -761,9 +769,12 @@ finish "gap source"
         ));
         std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             data_dir.join("lash-sessions"),
@@ -902,9 +913,12 @@ finish "gap source"
         let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
             session_store_factory;
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let mail_world = mail::MailWorld::new();
         mail_world.add_account("test").expect("add test");
@@ -970,9 +984,12 @@ finish "gap source"
         let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
             session_store_factory;
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let mail_world = mail::MailWorld::new();
         mail_world.add_account("test").expect("add test");
@@ -1045,9 +1062,12 @@ finish initial
         let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
             session_store_factory;
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let mail_world = mail::MailWorld::new();
         let provider = lash::testing::TestProvider::builder()
@@ -1210,9 +1230,12 @@ finish initial
         let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
             session_store_factory;
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let trigger_store = Arc::new(
             lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
@@ -1239,9 +1262,8 @@ finish initial
         let model = test_model();
         let model = with_workbench_model_capability(model);
         let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-        let event_tx =
-            SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
-                .expect("open durable product events");
+        let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
+            .expect("open durable product events");
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
@@ -1369,7 +1391,8 @@ finish initial
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
-    pub(super) async fn spawn_restate_ingress_capture() -> (String, mpsc::UnboundedReceiver<Value>) {
+    pub(super) async fn spawn_restate_ingress_capture() -> (String, mpsc::UnboundedReceiver<Value>)
+    {
         let (tx, rx) = mpsc::unbounded_channel();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -1421,9 +1444,12 @@ finish initial
         let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
             session_store_factory;
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let provider = trigger_registration_provider();
         let model = test_model();
@@ -1523,7 +1549,9 @@ finish initial
             .add_account("Reset Probe")
             .expect("add account before reset");
         drop(session);
-        let query = Query(SessionQuery { session_id: Some(old_session_id.clone()) });
+        let query = Query(SessionQuery {
+            session_id: Some(old_session_id.clone()),
+        });
         let Json(snapshot) = Box::pin(reset_chat(State(state.clone()), query))
             .await
             .expect("reset");
@@ -1581,8 +1609,8 @@ finish initial
         );
         let Json(graph_index) =
             list_lashlang_graphs(State(state.clone()), Query(SessionQuery::default()))
-            .await
-            .expect("list graphs after reset");
+                .await
+                .expect("list graphs after reset");
         assert!(
             graph_index.graphs.is_empty(),
             "new session graph index should be empty after reset: {graph_index:#?}"
@@ -1743,12 +1771,11 @@ finish initial
         invocation_id: &lash_restate::RestateInvocationId,
         timeout: Duration,
     ) {
-        let admin = lash_restate::RestateAdminClient::new(
-            lash_restate::RestateConnection::with_client(
-            state.restate_admin_url.clone(),
+        let admin =
+            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+                state.restate_admin_url.clone(),
                 state.restate_http.clone(),
-            ),
-        );
+            ));
         let deadline = std::time::Instant::now() + timeout;
         loop {
             match admin
@@ -1780,12 +1807,11 @@ finish initial
     }
 
     async fn assert_no_active_lash_restate_invocations(state: &AppState, timeout: Duration) {
-        let admin = lash_restate::RestateAdminClient::new(
-            lash_restate::RestateConnection::with_client(
-            state.restate_admin_url.clone(),
+        let admin =
+            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
+                state.restate_admin_url.clone(),
                 state.restate_http.clone(),
-            ),
-        );
+            ));
         let deadline = std::time::Instant::now() + timeout;
         loop {
             let active = admin
@@ -1880,20 +1906,20 @@ finish initial
             process_continuations,
         );
         let restate_http = reqwest::Client::new();
-        let turn_deployment = lash_restate::RestateTurnDeployment::new(
-            lash_restate::RestateConnection::with_client(
+        let turn_deployment =
+            lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::with_client(
                 restate_ingress_url.clone(),
                 restate_http.clone(),
-            ),
-        );
+            ));
         let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
-                sessions: sessions.clone(),
-                store_factory: Arc::clone(&core_store_factory),
-                restate_ingress_url: restate_ingress_url.clone(),
-                restate_http: restate_http.clone(),
-                active_turns: active_turns.clone(),
-            });
-        let queued_work_driver = lash::runtime::QueuedWorkDriver::new(queued_run_handle.clone()); let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
+            sessions: sessions.clone(),
+            store_factory: Arc::clone(&core_store_factory),
+            restate_ingress_url: restate_ingress_url.clone(),
+            restate_http: restate_http.clone(),
+            active_turns: active_turns.clone(),
+        });
+        let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
+        let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
@@ -1912,15 +1938,13 @@ finish initial
                 data_dir.join("attachments"),
             )))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .process_env_store(process_env_store)
             .trigger_store(Arc::clone(&trigger_store))
             .trace_sink(Arc::clone(&trace_sink))
             .trace_level(TraceLevel::Extended)
             .plugin(Arc::new(WorkbenchPluginFactory::new("")))
-            .plugin(Arc::new(
-                lash_llm_tools::LlmToolsPluginFactory::default(),
-            ))
+            .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
             .effect_host(turn_deployment.effect_host())
             .process_work(process_deployment.process_work())
             .queued_work(queued_work_port)
@@ -1935,9 +1959,8 @@ finish initial
             .processes()
             .observer()
             .expect("process observer configured");
-        let event_tx =
-            SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
-                .expect("open durable product events");
+        let event_tx = SessionEventRegistry::persistent(data_dir.join("product-events.json"), 1024)
+            .expect("open durable product events");
         let state = AppState {
             core,
             rlm_dialect: lash::rlm::RlmDialect::Lashlang,
@@ -2022,10 +2045,7 @@ finish initial
     ) {
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            let known_jobs = state
-                .restate_cron_job_keys
-                .lock_recover()
-                .clone();
+            let known_jobs = state.restate_cron_job_keys.lock_recover().clone();
             let trace_text = std::fs::read_to_string(trace_path).unwrap_or_default();
             if !known_jobs.is_empty()
                 && trace_text.contains("agent_workbench.cron.restate.sync_upserted")
@@ -2117,9 +2137,12 @@ finish initial
             let artifact_store_for_core: Arc<dyn lashlang::LashlangArtifactStore> =
                 artifact_store.clone();
             let process_registry = Arc::new(
-                lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, process_registry_path.with_extension("sessions"))
-                    .await
-                    .expect("open registry"),
+                lash_sqlite_store::SqliteProcessRegistry::open(
+                    &process_registry_path,
+                    process_registry_path.with_extension("sessions"),
+                )
+                .await
+                .expect("open registry"),
             ) as Arc<dyn lash::process::ProcessRegistry>;
             let trigger_store = Arc::new(
                 lash_sqlite_store::SqliteTriggerStore::open(&trigger_store_path)
@@ -2159,9 +2182,12 @@ finish initial
         let artifact_store_for_core: Arc<dyn lashlang::LashlangArtifactStore> =
             artifact_store.clone();
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, process_registry_path.with_extension("sessions"))
-                .await
-                .expect("reopen registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &process_registry_path,
+                process_registry_path.with_extension("sessions"),
+            )
+            .await
+            .expect("reopen registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let trigger_store = Arc::new(
             lash_sqlite_store::SqliteTriggerStore::open(&trigger_store_path)
@@ -2190,7 +2216,7 @@ finish initial
             .expect("reopen session");
         let report = emit_test_button_trigger(&core, ButtonChoice::Blue).await;
         assert_eq!(report.started_process_ids().len(), 1);
-        lash::process::ProcessAwaiter::polling(Arc::clone(&process_registry))
+        lash::process::NativeProcessWork::for_registry(Arc::clone(&process_registry))
             .await_terminal(&report.started_process_ids()[0])
             .await
             .expect("trigger process should finish");
@@ -2336,10 +2362,7 @@ finish initial
             request = request.for_session(session_id);
         }
         core.triggers()
-            .emit(
-                request,
-                scoped_effect_controller,
-            )
+            .emit(request, scoped_effect_controller)
             .await
             .expect("emit button trigger occurrence")
     }
@@ -2376,5 +2399,4 @@ finish initial
     include!("tests/concurrent_send.rs");
     include!("tests/no_progress_budget.rs");
     include!("tests/session_open_admission.rs");
-
 }

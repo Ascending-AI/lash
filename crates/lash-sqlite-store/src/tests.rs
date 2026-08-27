@@ -711,7 +711,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
         lash_core::ProcessOriginator::session(session_scope.clone())
     );
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
             .await_terminal("proc-persist")
             .await
             .expect("await persisted"),

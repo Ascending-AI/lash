@@ -429,7 +429,7 @@ finish "registered"
         }
 
         async fn await_success(registry: &Arc<dyn lash_core::ProcessRegistry>, process_id: &str) {
-            let awaiter = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(registry));
+            let awaiter = lash_core::NativeProcessWork::for_registry(Arc::clone(registry));
             let outcome =
                 tokio::time::timeout(Duration::from_secs(10), awaiter.await_terminal(process_id))
                     .await

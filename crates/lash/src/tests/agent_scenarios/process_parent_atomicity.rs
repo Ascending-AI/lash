@@ -554,7 +554,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .drive_pending_processes()
         .await
         .expect("drive PostgreSQL segmented parent through public worker path");
-    let terminal = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+    let terminal = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
         .await_terminal(SEGMENTED_PARENT)
         .await
         .expect("await PostgreSQL segmented parent terminal");
@@ -878,7 +878,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .await
         .expect("drive PostgreSQL ToolCall parent through public worker path");
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
             .await_terminal(TOOL_PARENT)
             .await
             .expect("await PostgreSQL ToolCall parent"),

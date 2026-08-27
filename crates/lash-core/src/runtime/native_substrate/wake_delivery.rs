@@ -5,7 +5,7 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use super::process_wake_batch_draft_with_delivery_policy;
+use crate::runtime::process_wake_batch_draft_with_delivery_policy;
 use crate::{
     Clock, PluginError, ProcessRegistry, QueuedWorkSubstrate, SessionPolicy, SessionRelation,
     SessionStoreCreateRequest, SessionStoreFactory, SessionWorkTarget, StoreError,

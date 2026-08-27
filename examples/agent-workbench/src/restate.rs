@@ -205,7 +205,7 @@ impl WorkbenchTurnWorkflow for WorkbenchTurnWorkflowImpl {
             .await?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "user_turn_completed")
+            .drain_session(&session_id, "user_turn_completed")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -244,7 +244,7 @@ impl WorkbenchQueuedTurnWorkflow for WorkbenchQueuedTurnWorkflowImpl {
         .await?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "queued_turn_completed")
+            .drain_session(&session_id, "queued_turn_completed")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -287,7 +287,7 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
             .map_err(terminal_handler_error)?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "button_trigger")
+            .drain_session(&session_id, "button_trigger")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -323,7 +323,7 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
             .map_err(terminal_handler_error)?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "mail_received")
+            .drain_session(&session_id, "mail_received")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -528,7 +528,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
         .await?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&state.request.session_id), "cron_tick")
+            .drain_session(&state.request.session_id, "cron_tick")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -1562,3 +1562,30 @@ fn classified_plugin_handler_error(error: lash::plugins::PluginError) -> Handler
 #[cfg(test)]
 #[path = "restate_tests.rs"]
 mod tests;
+
+#[async_trait::async_trait]
+trait QueuedWorkExt {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError>;
+}
+
+#[async_trait::async_trait]
+impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError> {
+        use lash::runtime::QueuedWorkSubstrate as _;
+
+        self.drain_session_work(
+            lash::runtime::SessionWorkTarget::Session(session_id.to_string()),
+            reason,
+        )
+        .await
+        .map(|_| ())
+    }
+}

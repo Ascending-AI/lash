@@ -1,10 +1,18 @@
 use std::sync::Arc;
 
-use super::process::{ProcessAwaiter, ProcessChangeHub, ProcessRegistry};
-use super::{
-    DurableProcessWorker, InlineProcessRunHandle, ProcessAdmissionReport, ProcessWorkDriver,
-    QueuedWorkDriver, QueuedWorkExecutionConcurrencyError, QueuedWorkRunHandle, WorkerSlotSupplier,
-};
+mod awaiter;
+pub(crate) mod lane_wait;
+mod process_work;
+mod queued;
+mod wake_delivery;
+
+pub(crate) use awaiter::NativeProcessAwaiter;
+pub use process_work::NativeProcessWork;
+pub use queued::*;
+pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
+
+use super::ProcessAdmissionReport;
+use super::process::{ProcessChangeHub, ProcessRegistry};
 use crate::{PluginError, ProcessAwaitOutput};
 
 /// Deployment port for durable **queued session work**: work already committed
@@ -92,7 +100,7 @@ pub enum ProcessTerminalWait {
 pub struct ProcessWorkWiring {
     registry: Arc<dyn ProcessRegistry>,
     port: Arc<dyn ProcessWorkSubstrate>,
-    event_awaiter: ProcessAwaiter,
+    event_awaiter: NativeProcessAwaiter,
 }
 
 impl ProcessWorkWiring {
@@ -104,7 +112,7 @@ impl ProcessWorkWiring {
         hub: ProcessChangeHub,
         port: Arc<dyn ProcessWorkSubstrate>,
     ) -> Self {
-        let event_awaiter = ProcessAwaiter::new(Arc::clone(&registry), hub);
+        let event_awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
         Self {
             registry,
             port,
@@ -120,75 +128,8 @@ impl ProcessWorkWiring {
         &self.port
     }
 
-    pub(crate) fn event_awaiter(&self) -> &ProcessAwaiter {
+    pub(crate) fn event_awaiter(&self) -> &NativeProcessAwaiter {
         &self.event_awaiter
-    }
-}
-
-/// First-party queued-work port backed by the existing native dispatcher.
-#[derive(Clone)]
-pub struct NativeQueuedWork {
-    driver: QueuedWorkDriver,
-}
-
-impl NativeQueuedWork {
-    /// Construct the native queued-work port.
-    pub fn new(run_handle: Arc<dyn QueuedWorkRunHandle>) -> Self {
-        Self {
-            driver: QueuedWorkDriver::new(run_handle),
-        }
-    }
-
-    /// Construct the native queued-work port with a host-selected admission bound.
-    pub fn with_execution_concurrency(
-        run_handle: Arc<dyn QueuedWorkRunHandle>,
-        concurrency: usize,
-    ) -> Result<Self, QueuedWorkExecutionConcurrencyError> {
-        Ok(Self {
-            driver: QueuedWorkDriver::with_execution_concurrency(run_handle, concurrency)?,
-        })
-    }
-
-    /// Construct the native queued-work port admitted by `supplier`.
-    #[doc(hidden)]
-    pub fn with_worker_slot_supplier(
-        run_handle: Arc<dyn QueuedWorkRunHandle>,
-        supplier: Arc<dyn WorkerSlotSupplier>,
-    ) -> Self {
-        Self {
-            driver: QueuedWorkDriver::with_worker_slot_supplier(run_handle, supplier),
-        }
-    }
-
-    /// Validate a host-selected queued-work execution concurrency.
-    pub fn validate_execution_concurrency(
-        concurrency: usize,
-    ) -> Result<(), QueuedWorkExecutionConcurrencyError> {
-        QueuedWorkDriver::validate_execution_concurrency(concurrency)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn from_driver(driver: QueuedWorkDriver) -> Self {
-        Self { driver }
-    }
-}
-
-#[async_trait::async_trait]
-impl QueuedWorkSubstrate for NativeQueuedWork {
-    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str) {
-        self.driver
-            .notify_pending_work(target.as_session_id(), reason);
-    }
-
-    async fn drain_session_work(
-        &self,
-        target: SessionWorkTarget,
-        reason: &str,
-    ) -> Result<SessionDrainOutcome, PluginError> {
-        self.driver
-            .claim_and_run_pending(target.as_session_id(), reason)
-            .await?;
-        Ok(SessionDrainOutcome::Ran)
     }
 }
 
@@ -224,78 +165,6 @@ impl QueuedWorkSubstrate for NoQueuedWork {
             "queued work deferred: deployment has no queued lane"
         );
         Ok(SessionDrainOutcome::Deferred)
-    }
-}
-
-/// First-party process-work port backed by the existing native worker and awaiter.
-#[derive(Clone)]
-pub struct NativeProcessWork {
-    driver: ProcessWorkDriver,
-}
-
-impl NativeProcessWork {
-    /// Construct native process work over an already-watched registry.
-    pub fn new(
-        registry: Arc<dyn ProcessRegistry>,
-        hub: ProcessChangeHub,
-        worker: DurableProcessWorker,
-    ) -> Self {
-        Self {
-            driver: ProcessWorkDriver::from_watched(
-                registry,
-                hub,
-                Arc::new(InlineProcessRunHandle::new(worker)),
-            ),
-        }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    #[allow(dead_code)]
-    pub(crate) fn from_driver(driver: ProcessWorkDriver) -> Self {
-        Self { driver }
-    }
-
-    /// Construct a registry-only process port for tests that do not admit work.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn for_registry(registry: Arc<dyn ProcessRegistry>) -> Self {
-        Self {
-            driver: ProcessWorkDriver::from_watched(
-                registry,
-                ProcessChangeHub::new(),
-                Arc::new(RegistryOnlyRunHandle),
-            ),
-        }
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
-struct RegistryOnlyRunHandle;
-
-#[cfg(any(test, feature = "testing"))]
-#[async_trait::async_trait]
-impl super::ProcessRunHandle for RegistryOnlyRunHandle {
-    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
-        Ok(ProcessAdmissionReport::default())
-    }
-}
-
-#[async_trait::async_trait]
-impl ProcessWorkSubstrate for NativeProcessWork {
-    async fn admit_pending_processes(
-        &self,
-        reason: &str,
-    ) -> Result<ProcessAdmissionReport, PluginError> {
-        self.driver.claim_and_run_pending(reason).await
-    }
-
-    async fn await_process_terminal(
-        &self,
-        process_id: &str,
-    ) -> Result<ProcessTerminalWait, PluginError> {
-        self.driver
-            .await_terminal(process_id)
-            .await
-            .map(ProcessTerminalWait::Terminal)
     }
 }
 

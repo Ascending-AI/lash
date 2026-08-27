@@ -1,9 +1,9 @@
 use super::*;
 
-struct NoopProcessRunHandle;
+struct NoopProcessWork;
 
 #[async_trait]
-impl lash_core::ProcessWorkSubstrate for NoopProcessRunHandle {
+impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
     async fn admit_pending_processes(
         &self,
         _reason: &str,
@@ -741,11 +741,8 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
     let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
-    let wiring = lash_core::ProcessWorkWiring::new(
-        Arc::clone(&registry),
-        hub,
-        Arc::new(NoopProcessRunHandle),
-    );
+    let wiring =
+        lash_core::ProcessWorkWiring::new(Arc::clone(&registry), hub, Arc::new(NoopProcessWork));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -904,11 +901,8 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
         let process_registry = registry.clone() as Arc<dyn lash_core::ProcessRegistry>;
         let (process_registry, hub) =
             lash_core::facade_support::watch_process_registry(process_registry);
-        let wiring = lash_core::ProcessWorkWiring::new(
-            process_registry,
-            hub,
-            Arc::new(NoopProcessRunHandle),
-        );
+        let wiring =
+            lash_core::ProcessWorkWiring::new(process_registry, hub, Arc::new(NoopProcessWork));
         let mut builder =
             explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
                 .provider(mock_provider())

@@ -284,7 +284,7 @@ async fn drain_release_failure_overrides_absent_disposition() {
 
 #[tokio::test]
 async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let started = Arc::new(tokio::sync::Notify::new());
     let fail = Arc::new(tokio::sync::Notify::new());
     let (worker, registry, _, env_ref, test_registry) = worker_with_engine_and_registry(
@@ -327,7 +327,7 @@ async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
 
 #[tokio::test]
 async fn recovered_live_renewal_uses_backend_error_telemetry() {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let started = Arc::new(tokio::sync::Notify::new());
     let fail = Arc::new(tokio::sync::Notify::new());
     let timings = crate::LeaseTimings::new(Duration::from_millis(30), Duration::from_millis(10))

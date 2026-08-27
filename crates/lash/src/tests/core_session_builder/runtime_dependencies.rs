@@ -339,10 +339,10 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
     Ok(())
 }
 
-struct NoopProcessRunHandle;
+struct NoopProcessWork;
 
 #[async_trait]
-impl lash_core::ProcessWorkSubstrate for NoopProcessRunHandle {
+impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
     async fn admit_pending_processes(
         &self,
         _reason: &str,
@@ -371,7 +371,7 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
     let wiring = lash_core::ProcessWorkWiring::new(
         Arc::clone(&registry),
         hub,
-        Arc::new(NoopProcessRunHandle),
+        Arc::new(NoopProcessWork),
     );
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .process_work(wiring)
@@ -394,7 +394,7 @@ async fn external_process_port_composes_native_queued_port_and_refreshes_after_r
     let wiring = lash_core::ProcessWorkWiring::new(
         Arc::clone(&registry),
         hub,
-        Arc::new(NoopProcessRunHandle),
+        Arc::new(NoopProcessWork),
     );
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(

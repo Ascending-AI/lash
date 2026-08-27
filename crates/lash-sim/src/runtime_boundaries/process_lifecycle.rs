@@ -156,7 +156,7 @@ pub(super) async fn record_lifecycle_started(
 /// against ground truth rather than trusting it.
 pub(super) async fn lifecycle_process_fact(
     registry: &Arc<dyn ProcessRegistry>,
-    awaiter: &lash_core::facade_support::ProcessAwaiter,
+    awaiter: &lash_core::NativeProcessWork,
     id: &str,
     disposition: RecoveryContract,
     expected_holder: Option<&LeaseOwnerIdentity>,

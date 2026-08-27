@@ -62,7 +62,7 @@ async fn burst_for_one_session_drains_ordered_batches_with_coalesced_hydrations(
         reasons: Mutex::new(Vec::new()),
         completed: tokio::sync::Notify::new(),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     for index in 0..SIGNALS {
         let reason = if index % 2 == 0 {
             "queued_turn_input"
@@ -141,7 +141,7 @@ async fn default_slot_supplier_releases_permits_and_preserves_admission_bound() 
         changed: tokio::sync::Notify::new(),
         release: tokio::sync::Semaphore::new(0),
     });
-    let driver = QueuedWorkDriver::with_execution_concurrency(handle.clone(), CONCURRENCY)
+    let driver = NativeQueuedWork::with_execution_concurrency(handle.clone(), CONCURRENCY)
         .expect("valid concurrency");
     for index in 0..SIGNALS {
         driver.notify_pending_work(Some(&format!("session-{index}")), "queued_turn_input");
@@ -190,7 +190,7 @@ async fn external_engine_submitters_do_not_inherit_the_inline_admission_bound() 
         changed: tokio::sync::Notify::new(),
         release: tokio::sync::Semaphore::new(0),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     for index in 0..SIGNALS {
         driver.notify_pending_work(Some(&format!("engine-session-{index}")), "engine_submit");
     }
@@ -226,7 +226,7 @@ impl QueuedWorkRunHandle for ParkAwareRunHandle {
         match request.session_id.as_deref() {
             Some("session-parked") => {
                 self.first_parked.notify_one();
-                super::super::process_worker::release_process_execution_permit_while(async {
+                crate::runtime::process_worker::release_process_execution_permit_while(async {
                     self.resume_first
                         .acquire()
                         .await
@@ -252,7 +252,7 @@ async fn inline_admission_slot_is_released_while_a_turn_is_parked() {
         completed: AtomicUsize::new(0),
     });
     let driver =
-        QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
+        NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
     driver.notify_pending_work(Some("session-parked"), "queued_turn_input");
     handle.first_parked.notified().await;
 
@@ -321,7 +321,7 @@ async fn signal_during_an_inflight_run_schedules_exactly_one_rerun() {
         release_first: tokio::sync::Semaphore::new(0),
         completed: tokio::sync::Notify::new(),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     driver.notify_pending_work(Some("session-rerun"), "first");
     handle.first_entered.notified().await;
 
@@ -382,7 +382,7 @@ async fn empty_claimable_peek_skips_hydration() {
         hydrations: AtomicUsize::new(0),
         peeked: tokio::sync::Notify::new(),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     driver.notify_pending_work(Some("session-empty"), "queued_turn_input");
     handle.peeked.notified().await;
     for _ in 0..10 {
@@ -487,7 +487,7 @@ async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
         peeks: AtomicUsize::new(0),
         hydrations: AtomicUsize::new(0),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
 
     driver.notify_pending_work(Some("session-public-probe"), "queued_turn_input");
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -536,7 +536,7 @@ async fn one_notification_during_live_lease_contention_has_bounded_hydrations() 
         hydrations: AtomicUsize::new(0),
     });
     let driver =
-        QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
+        NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
     driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -580,7 +580,7 @@ async fn best_effort_wake_reenters_pending_claim_without_an_external_event() {
         accepted: tokio::sync::Notify::new(),
     });
     let accepted = handle.accepted.notified();
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
 
     driver.notify_pending_work(Some("session-1"), "queued_turn_input");
 
@@ -613,7 +613,7 @@ impl QueuedWorkRunHandle for AlwaysFailRunHandle {
 #[tokio::test]
 async fn terminal_wake_error_stops_after_one_attempt() {
     let attempts = Arc::new(AtomicUsize::new(0));
-    let driver = QueuedWorkDriver::new(Arc::new(AlwaysFailRunHandle {
+    let driver = NativeQueuedWork::new(Arc::new(AlwaysFailRunHandle {
         attempts: Arc::clone(&attempts),
         class: QueuedWorkRunErrorClass::Terminal,
     }));
@@ -633,7 +633,7 @@ async fn terminal_wake_error_stops_after_one_attempt() {
 #[tokio::test]
 async fn transient_wake_error_stops_at_the_attempt_limit() {
     let attempts = Arc::new(AtomicUsize::new(0));
-    let driver = QueuedWorkDriver::new(Arc::new(AlwaysFailRunHandle {
+    let driver = NativeQueuedWork::new(Arc::new(AlwaysFailRunHandle {
         attempts: Arc::clone(&attempts),
         class: QueuedWorkRunErrorClass::Transient,
     }));
@@ -681,7 +681,7 @@ async fn dropping_the_driver_cancels_an_inflight_wake() {
         dropped: Arc::clone(&dropped),
     });
     let entered = handle.entered.notified();
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     driver.notify_pending_work(Some("session-shutdown"), "queued_turn_input");
     entered.await;
 

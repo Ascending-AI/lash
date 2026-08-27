@@ -22,18 +22,16 @@ mod in_memory_store;
 mod io;
 mod lifecycle;
 mod logical_turn;
-mod native_substrate;
+pub(crate) mod native_substrate;
 mod observation;
 mod process;
-mod process_work_driver;
 mod process_worker;
 pub(crate) use process_worker::ensure_process_execution_permit;
 #[doc(hidden)]
 pub use process_worker::release_process_execution_permit_while;
 mod queued_drain_policy;
-mod queued_work_driver;
 #[doc(hidden)]
-pub use queued_work_driver::bounded_multiplicative_jitter;
+pub use native_substrate::bounded_multiplicative_jitter;
 pub mod scenario_contracts;
 mod session_api;
 mod session_catalog;
@@ -66,7 +64,6 @@ pub(crate) mod turn_input_ingress;
 pub(crate) mod turn_loop;
 mod turn_queue;
 mod usage;
-mod wake_delivery_driver;
 mod worker_capacity;
 
 use std::any::Any;
@@ -178,10 +175,19 @@ pub use host::{
 pub use in_memory_store::RawSessionExecutionLeaseRow;
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
+#[cfg(any(test, feature = "testing"))]
+pub use native_substrate::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
+pub use native_substrate::{
+    DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+    QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
+    QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
+    QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
+};
 pub use native_substrate::{
     NativeProcessWork, NativeQueuedWork, NoQueuedWork, ProcessTerminalWait, ProcessWorkSubstrate,
     ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget,
 };
+pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
@@ -197,29 +203,29 @@ pub use process::{
     AbandonEvidence, AbandonRequest, AbandonWriter, DEFAULT_WAKE_DELIVERY_EXPIRY_MS,
     InMemoryProcessExecutionEnvStore, ObservedProcess, ObservedProcessEvent, ObservedWorkItem,
     ObserverInheritance, PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    PersistedSegmentHandover, ProcessAttach, ProcessAwaitOutput, ProcessAwaiter,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore, ProcessEngine,
-    ProcessEngineProcessContext, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessEngineValidationContext,
-    ProcessEvent, ProcessEventAppendPlan, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType,
-    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessHandleView, ProcessId, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessListMode,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessOpScope, ProcessOriginator, ProcessOutcome,
-    ProcessParentEndPlan, ProcessProvenance, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
-    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
-    ProcessStartPlan, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTombstone, ProcessToolVisibilityFilter,
-    ProcessTransition, ProcessTransitionPlan, ProcessValueSelector, ProcessWake,
-    ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeSpec, ProcessWorkObserver,
-    ProcessWorkSnapshot, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark,
-    RecoveryContract, SegmentHandover, SessionId, SessionObserverIntentSource, SessionScope,
-    SessionScopeId, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState,
-    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    PersistedSegmentHandover, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessChangeHub, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessEngine, ProcessEngineProcessContext, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext,
+    ProcessEngineValidationContext, ProcessEvent, ProcessEventAppendPlan,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventSemantics,
+    ProcessEventSemanticsSpec, ProcessEventSink, ProcessEventType, ProcessExecutionContext,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
+    ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessOpScope, ProcessOriginator, ProcessOutcome, ProcessParentEndPlan,
+    ProcessProvenance, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSpawnProvenance,
+    ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan, ProcessStartRequest,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSemantics,
+    ProcessTerminalSpec, ProcessTombstone, ProcessToolVisibilityFilter, ProcessTransition,
+    ProcessTransitionPlan, ProcessValueSelector, ProcessWake, ProcessWakeDelivery,
+    ProcessWakeDeliveryRequest, ProcessWakeSpec, ProcessWorkObserver, ProcessWorkSnapshot,
+    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, RecoveryContract,
+    SegmentHandover, SessionId, SessionObserverIntentSource, SessionScope, SessionScopeId,
+    UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     allocate_process_event_sequence, apply_process_event_projection,
     apply_process_status_projection, current_epoch_ms, epoch_ms_from_system_time,
@@ -235,7 +241,6 @@ pub use process::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{TestLocalProcessRegistry, TestProcessRegistryWriteExt};
-pub use process_work_driver::{InlineProcessRunHandle, ProcessRunHandle, ProcessWorkDriver};
 pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
@@ -248,14 +253,6 @@ pub use queued_drain_policy::{
 };
 pub(crate) use queued_drain_policy::{
     default_queued_drain_policy, exact_selection_drain_policy, shared_drain_mode_policy,
-};
-#[cfg(any(test, feature = "testing"))]
-pub use queued_work_driver::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
-pub use queued_work_driver::{
-    DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedWorkDriver,
-    QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
-    QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
-    QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
 };
 pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use session_manager::DirectCompletionClient;
@@ -295,7 +292,6 @@ pub use usage::{
     diff_usage_reports,
 };
 use usage::{merge_ledger_entry_saturating, normalize_prompt_usage};
-pub use wake_delivery_driver::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use worker_capacity::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
 macro_rules! define_runtime_turn_phases {

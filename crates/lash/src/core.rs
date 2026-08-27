@@ -298,6 +298,7 @@ impl LashCore {
         let effect_host = Arc::clone(&env.core.control.effect_host);
         let ports = self.substrate_slot.ports().await;
         env = env.with_work_ports(ports.process.clone(), ports.queued_port());
+        let process_work = env.process_work();
         let runtime =
             LashRuntime::resume(parked.inner, &env, self.session_execution_owner.clone()).await?;
         let handle =
@@ -307,6 +308,7 @@ impl LashCore {
             effect_host,
             parent_session_id: None,
             active_plugins: Vec::new(),
+            process_work,
             process_phase_probe_slot: self.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
@@ -1257,7 +1259,7 @@ impl LashCoreBuilder {
 
     /// Decide how a built [`LashCore`] sources its process-work port.
     ///
-    /// - no registry => nothing to run ([`ProcessWorkDriverSetup::None`]);
+    /// - no registry => nothing to run ([`ProcessWorkSource::None`]);
     /// - external wiring supplied => use it ([`ProcessPortSetup::External`]);
     /// - inline registry wired => lazily construct the native port on first open. Its
     ///   [`DurableProcessWorkerConfig`] is built eagerly when a store factory is
@@ -1377,7 +1379,7 @@ impl LashCoreBuilder {
     ///
     /// Event emission applies to the inline registry path
     /// ([`Self::process_registry`]); a host that supplies its own
-    /// [`ProcessWorkDriver`](facade_support::ProcessWorkDriver) installs the
+    /// [`ProcessWorkWiring`] installs the
     /// sink through the deployment's constructor for those.
     ///
     /// Worker faults are not registry events and do not follow that split: the
@@ -1403,10 +1405,10 @@ impl LashCoreBuilder {
 
     /// Configure an externally owned process work runner.
     ///
-    /// Durable hosts construct a [`ProcessWorkDriver`] from the same process
-    /// registry and wake handle used by their deployment runner, then pass it
-    /// here. The wiring's registry becomes the core's process registry and no
-    /// inline runner is spawned.
+    /// Durable hosts construct [`ProcessWorkWiring`] from the same watched
+    /// registry and port used by their deployment runner, then pass it here.
+    /// The wiring's registry becomes the core's process registry and no inline
+    /// runner is spawned.
     pub fn process_work(mut self, wiring: ProcessWorkWiring) -> Self {
         self.process_work_source = ProcessWorkSource::External(wiring);
         self

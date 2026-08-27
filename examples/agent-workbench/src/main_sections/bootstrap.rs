@@ -211,7 +211,7 @@ async fn async_main() -> AnyhowResult<()> {
         Some(Arc::clone(&process_event_sink)),
     );
     // Retained so a host-facing "wait for the work item" flow can route through
-    // `ProcessWorkDriver::await_terminal` (see the `/api/work/{id}/await` route).
+    // the process-work port (see the `/api/work/{id}/await` route).
     let process_work_driver = process_deployment.process_work();
     let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
             sessions: sessions.clone(),
@@ -220,7 +220,7 @@ async fn async_main() -> AnyhowResult<()> {
             restate_http: restate_http.clone(),
             active_turns: active_turns.clone(),
         });
-    let queued_work_driver = lash::runtime::QueuedWorkDriver::new(queued_run_handle.clone());
+    let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
     let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
 
     let turn_deployment = lash_restate::RestateTurnDeployment::new(

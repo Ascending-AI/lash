@@ -3,11 +3,11 @@ use super::*;
 pub(super) async fn worker_with_engine(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
-    Arc<LateBoundProcessRunHandle>,
+    Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
 ) {
     let (worker, registry, run_handle, env_ref, _) =
@@ -18,11 +18,11 @@ pub(super) async fn worker_with_engine(
 pub(super) async fn worker_with_engine_and_registry(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
-    Arc<LateBoundProcessRunHandle>,
+    Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
     Arc<TestLocalProcessRegistry>,
 ) {
@@ -33,12 +33,12 @@ pub(super) async fn worker_with_engine_and_registry(
 pub(super) async fn worker_with_engine_registry_and_timings(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
     lease_timings: Option<crate::LeaseTimings>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
-    Arc<LateBoundProcessRunHandle>,
+    Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
     Arc<TestLocalProcessRegistry>,
 ) {
@@ -92,11 +92,11 @@ impl crate::ProcessEventSink for RecordingProcessEventSink {
 pub(super) async fn worker_with_engine_and_fault_sink(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
-    Arc<LateBoundProcessRunHandle>,
+    Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
     Arc<TestLocalProcessRegistry>,
     Arc<RecordingProcessEventSink>,
@@ -118,13 +118,13 @@ pub(super) async fn worker_with_engine_and_fault_sink(
 pub(super) async fn worker_with_engine_registry_timings_and_supplier(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
     lease_timings: Option<crate::LeaseTimings>,
     supplier: Option<Arc<dyn crate::WorkerSlotSupplier>>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
-    Arc<LateBoundProcessRunHandle>,
+    Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
     Arc<TestLocalProcessRegistry>,
 ) {
@@ -142,24 +142,21 @@ pub(super) async fn worker_with_engine_registry_timings_and_supplier(
 pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
     lease_timings: Option<crate::LeaseTimings>,
     supplier: Option<Arc<dyn crate::WorkerSlotSupplier>>,
     sink: Option<Arc<dyn crate::ProcessEventSink>>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
-    Arc<LateBoundProcessRunHandle>,
+    Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
     Arc<TestLocalProcessRegistry>,
 ) {
     let test_registry = Arc::new(TestLocalProcessRegistry::default());
     let raw_registry: Arc<dyn ProcessRegistry> = test_registry.clone();
-    let driver = crate::ProcessWorkDriver::new(
-        Arc::clone(&raw_registry),
-        Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
-    );
-    let registry = driver.process_registry();
+    let (registry, driver_hub, process_work) =
+        late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
     let mut runtime_host = RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
@@ -175,8 +172,6 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     )
     .await
     .expect("persist process env");
-    let driver_hub = driver.change_hub();
-    let process_work = crate::testing::process_work_wiring_from_driver(driver);
     let mut config = DurableProcessWorkerConfig::new(
         Arc::new(PluginHost::new(Vec::new())),
         runtime_host,

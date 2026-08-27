@@ -591,7 +591,7 @@ impl AgentSessionTurnProcessScenario {
 
     async fn assert_process_output(&self, runtime: &AgentScenarioRuntime) -> Result<()> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = runtime.process_registry.clone();
-        let await_output = lash_core::facade_support::ProcessAwaiter::polling(registry)
+        let await_output = lash_core::NativeProcessWork::for_registry(registry)
             .await_terminal(self.process_id)
             .await?;
         let output = await_output.into_tool_output();

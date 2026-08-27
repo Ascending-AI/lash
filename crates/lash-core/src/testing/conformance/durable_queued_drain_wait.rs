@@ -1,7 +1,7 @@
 //! Cross-backend laws for the aliveness-aware durable queued-drain wait.
 //!
 //! The policy itself
-//! ([`queued_lane_wait`](crate::runtime::session_execution_lease::queued_lane_wait))
+//! ([`lane_wait`](crate::runtime::native_substrate::lane_wait))
 //! is pure, and the runtime-level regressions in `runtime::tests::turns` drive
 //! it through a real turn on the in-memory store. What those cannot show is that
 //! the *backend* cooperates: that a crashed holder's row really becomes
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use super::runtime_persistence::RuntimePersistenceLeaseTiming;
 use crate::QueuedLaneHolder;
-use crate::runtime::session_execution_lease::queued_lane_wait::{
+use crate::runtime::native_substrate::lane_wait::{
     QueuedLaneGiveUp, QueuedLaneWait, QueuedLaneWaitStep,
 };
 use crate::store::{RuntimePersistence, SessionExecutionLeaseClaimOutcome};

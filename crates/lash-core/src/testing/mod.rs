@@ -53,19 +53,6 @@ pub(crate) fn process_work_wiring_for_registry(
     )
 }
 
-#[cfg(test)]
-pub(crate) fn process_work_wiring_from_driver(
-    driver: crate::ProcessWorkDriver,
-) -> crate::ProcessWorkWiring {
-    let registry = driver.process_registry();
-    let hub = driver.change_hub();
-    crate::ProcessWorkWiring::new(
-        registry,
-        hub,
-        Arc::new(crate::NativeProcessWork::from_driver(driver)),
-    )
-}
-
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent};
 use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};
@@ -1481,7 +1468,7 @@ impl crate::ProcessService for MockSessionManager {
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
         let registry: Arc<dyn crate::ProcessRegistry> = self.process_registry.clone();
-        crate::ProcessAwaiter::polling(registry)
+        crate::NativeProcessWork::for_registry(registry)
             .await_terminal(process_id)
             .await
     }

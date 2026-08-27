@@ -221,7 +221,7 @@ pub trait QueuedWorkRunHandle: Send + Sync {
 
     /// Host-driven single pass: claim and submit ready queued work, optionally
     /// narrowed to one session. The symmetric counterpart to
-    /// [`ProcessRunHandle::claim_and_run_pending`](super::super::ProcessRunHandle::claim_and_run_pending).
+    /// [`ProcessWorkSubstrate::admit_pending_processes`](crate::ProcessWorkSubstrate::admit_pending_processes).
     ///
     /// Idempotency is the store scheduler's job, not a same-process memory
     /// guard. Hosts call this on an event (enqueue, process wake, turn

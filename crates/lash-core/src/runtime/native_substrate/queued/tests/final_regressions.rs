@@ -44,7 +44,7 @@ async fn contention_preserves_the_full_transient_error_attempt_budget() {
         transient_attempts: AtomicUsize::new(0),
     });
     let driver =
-        QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
+        NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
     driver.notify_pending_work(Some("session-contended-then-failing"), "queued_turn_input");
     for _ in 0..(WAKE_MAX_ATTEMPTS * 3) {
@@ -97,7 +97,7 @@ async fn unknown_claimability_transient_errors_exhaust_then_notification_rearms(
         attempts: AtomicUsize::new(0),
     });
     let driver =
-        QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
+        NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
     driver.notify_pending_work(Some("session-unknown-failing"), "first_enqueue");
     for _ in 0..(WAKE_MAX_ATTEMPTS * 2) {
@@ -138,7 +138,7 @@ async fn indefinite_contention_emits_repeating_typed_heartbeats() {
     });
     let captured_handle = Arc::clone(&handle);
     let ((), capture) = crate::runtime::tests::trace_capture::capturing(|| async move {
-        let driver = QueuedWorkDriver::from_parts(
+        let driver = NativeQueuedWork::from_parts(
             captured_handle,
             CancellationToken::new(),
             Some(QueuedWorkExecutionConcurrency::new(1).expect("valid concurrency")),

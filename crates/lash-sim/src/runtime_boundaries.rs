@@ -980,7 +980,7 @@ impl RuntimeBoundaryHarness {
         let _ = worker.drive_pending_processes().await.map_err(|err| {
             RuntimeBoundaryError::new(format!("recovery sweep dispatch failed: {err}"))
         })?;
-        let awaiter = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry));
+        let awaiter = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry));
 
         let ob_crashed = lifecycle_process_fact(
             &registry,

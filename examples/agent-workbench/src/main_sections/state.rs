@@ -27,7 +27,7 @@ struct AppState {
     trace_sink: Option<Arc<dyn TraceSink>>,
     lashlang_execution: Arc<TraceLashlangGraphStore>,
     event_tx: SessionEventRegistry,
-    queued_work_driver: lash::runtime::QueuedWorkDriver,
+    queued_work_driver: lash::runtime::NativeQueuedWork,
     restate_ingress_url: String,
     #[cfg_attr(not(test), allow(dead_code))]
     restate_admin_url: String,
@@ -1389,8 +1389,8 @@ impl lash::runtime::QueuedWorkRunHandle for NoopQueuedWorkRunHandle {
 }
 
 #[cfg(test)]
-fn inert_queued_work() -> lash::runtime::QueuedWorkDriver {
-    lash::runtime::QueuedWorkDriver::new(Arc::new(NoopQueuedWorkRunHandle))
+fn inert_queued_work() -> lash::runtime::NativeQueuedWork {
+    lash::runtime::NativeQueuedWork::new(Arc::new(NoopQueuedWorkRunHandle))
 }
 
 #[cfg(test)]
@@ -1398,19 +1398,6 @@ fn inert_queued_work_port() -> Arc<dyn lash::runtime::QueuedWorkSubstrate> {
     Arc::new(lash::runtime::NativeQueuedWork::new(Arc::new(
         NoopQueuedWorkRunHandle,
     )))
-}
-
-#[cfg(test)]
-struct NoopProcessRunHandle;
-
-#[cfg(test)]
-#[async_trait]
-impl lash::process::ProcessRunHandle for NoopProcessRunHandle {
-    async fn claim_and_run_pending(
-        &self,
-    ) -> std::result::Result<lash::process::ProcessAdmissionReport, PluginError> {
-        Ok(lash::process::ProcessAdmissionReport::default())
-    }
 }
 
 // Process work is now resolved through LashCore's substrate port.

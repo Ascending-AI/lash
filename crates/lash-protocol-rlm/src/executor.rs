@@ -2151,7 +2151,7 @@ mod tests {
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
             let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
-            lash_core::facade_support::ProcessAwaiter::polling(registry)
+            lash_core::NativeProcessWork::for_registry(registry)
                 .await_terminal(process_id)
                 .await
         }
@@ -2391,8 +2391,7 @@ mod tests {
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
         let terminal = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            lash_core::facade_support::ProcessAwaiter::polling(registry_dyn)
-                .await_terminal(&record.id),
+            lash_core::NativeProcessWork::for_registry(registry_dyn).await_terminal(&record.id),
         )
         .await
         {

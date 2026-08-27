@@ -1,7 +1,6 @@
 use lash_sansio::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
 
 use super::events::{
     ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt,
@@ -16,20 +15,15 @@ use super::model::{
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
 use crate::PluginError;
 
-mod attach;
 mod change_hub;
 #[path = "awaiter/event_sink.rs"]
 mod event_sink;
 mod registry_support;
-pub use attach::ProcessAttach;
 pub use change_hub::ProcessChangeHub;
 pub use event_sink::ProcessEventSink;
 
-const AWAIT_BACKOFF_MIN: Duration = Duration::from_millis(25);
-const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
-
 /// [`ProcessRegistry`] decorator: publishes in-process change ticks on every
-/// mutation (so [`ProcessAwaiter`] wakes without polling) and, when a
+/// mutation (so native process waits wake without polling) and, when a
 /// [`ProcessEventSink`] is installed, emits each appended event to it.
 ///
 /// The sink is installed once at wrap time via
@@ -71,179 +65,6 @@ pub fn watch_process_registry_with_sink(
         }),
         hub,
     )
-}
-
-/// Core waiter for process terminal state and events (ADR 0016).
-///
-/// The awaiter is the store-only fallback that
-/// [`ProcessWorkDriver`](crate::ProcessWorkDriver) uses when no engine-native
-/// [`ProcessAttach`] owns the wait. It performs narrow point reads
-/// (`get_process`, `events_after`) and, when constructed with a
-/// [`ProcessChangeHub`], wakes promptly on local mutations instead of polling.
-/// Callers still bound every wait with [`tokio::time::timeout`].
-#[derive(Clone)]
-pub struct ProcessAwaiter {
-    registry: Arc<dyn ProcessRegistry>,
-    hub: Option<ProcessChangeHub>,
-}
-
-impl ProcessAwaiter {
-    /// Hub-backed awaiter: local mutations published to `hub` wake waiters
-    /// without database polling. This is what [`watch_process_registry`]
-    /// wraps `registry` to provide.
-    pub fn new(registry: Arc<dyn ProcessRegistry>, hub: ProcessChangeHub) -> Self {
-        Self {
-            registry,
-            hub: Some(hub),
-        }
-    }
-
-    /// Hubless awaiter: correct without any change signal, using only the
-    /// bounded backoff point-read loop (25ms floor, doubling, 1s cap). Use when
-    /// the registry is not wrapped in-process — e.g. a store-only test.
-    pub fn polling(registry: Arc<dyn ProcessRegistry>) -> Self {
-        Self {
-            registry,
-            hub: None,
-        }
-    }
-
-    /// Resolve once `process_id` is terminal, returning its outcome. See
-    /// [`ProcessWorkDriver::await_terminal`](crate::ProcessWorkDriver::await_terminal)
-    /// for the timeout-bounding contract.
-    pub async fn await_terminal(
-        &self,
-        process_id: &str,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
-        if let Some(output) = self.try_terminal(process_id).await? {
-            return Ok(output);
-        }
-        crate::runtime::process_worker::release_process_execution_permit_while(
-            self.wait_for(process_id, || self.try_terminal(process_id)),
-        )
-        .await
-    }
-
-    /// Resolve with the first `event_type` event on `process_id` past
-    /// `after_sequence`. Historical matches resolve immediately.
-    pub async fn await_event(
-        &self,
-        process_id: &str,
-        event_type: &str,
-        after_sequence: u64,
-    ) -> Result<ProcessEvent, PluginError> {
-        if let Some(event) = self
-            .read_event(process_id, event_type, after_sequence)
-            .await?
-        {
-            return Ok(event);
-        }
-        crate::runtime::process_worker::release_process_execution_permit_while(
-            self.wait_for(process_id, || {
-                self.read_event(process_id, event_type, after_sequence)
-            }),
-        )
-        .await
-    }
-
-    pub(crate) async fn wait_for<T, F, Fut>(
-        &self,
-        process_id: &str,
-        mut check: F,
-    ) -> Result<T, PluginError>
-    where
-        F: FnMut() -> Fut,
-        Fut: std::future::Future<Output = Result<Option<T>, PluginError>>,
-    {
-        let mut backoff = AWAIT_BACKOFF_MIN;
-        if let Some(hub) = self.hub.as_ref() {
-            let mut rx = hub.subscribe(process_id);
-            loop {
-                if let Some(item) = check().await? {
-                    return Ok(item);
-                }
-                tokio::select! {
-                    changed = rx.changed() => {
-                        match changed {
-                            Ok(()) => backoff = AWAIT_BACKOFF_MIN,
-                            // Sender dropped (unreachable today given the hub
-                            // GC invariant, but latent): a dead receiver would
-                            // otherwise fire immediately on every loop turn.
-                            // Stop selecting on it and degrade to the
-                            // sleep-only backoff loop below.
-                            Err(_) => break,
-                        }
-                    }
-                    _ = tokio::time::sleep(backoff) => {
-                        backoff = next_backoff(backoff);
-                    }
-                }
-            }
-        }
-        loop {
-            if let Some(item) = check().await? {
-                return Ok(item);
-            }
-            tokio::time::sleep(backoff).await;
-            backoff = next_backoff(backoff);
-        }
-    }
-
-    /// Classify `process_id` into terminal outcome, no-longer-retained, caller-departed,
-    /// or unknown/running (ADR 0019, FIG-1744).
-    ///
-    /// Refuses with [`PluginError::ProcessCallerDeparted`] if the process status is
-    /// `CallerDeparted`, even if a terminal outcome is present.
-    pub(crate) async fn try_terminal(
-        &self,
-        process_id: &str,
-    ) -> Result<Option<ProcessAwaitOutput>, PluginError> {
-        let record = match self.registry.get_process(process_id).await {
-            Ok(Some(record)) => record,
-            Ok(None) => {
-                return Err(PluginError::ProcessUnknown {
-                    process_id: process_id.to_string(),
-                });
-            }
-            Err(PluginError::ProcessNoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            }) => {
-                return Ok(Some(ProcessAwaitOutput::NoLongerRetained {
-                    terminal_label,
-                    pruned_at_ms,
-                }));
-            }
-            Err(error) => return Err(error),
-        };
-        // A caller-departed row is the one non-terminal state no writer will
-        // ever resolve, so parking on it is a guaranteed permanent park. Refuse
-        // with the typed error instead (FIG-1383, FIG-1744).
-        if record.status == crate::ProcessStatus::CallerDeparted {
-            return Err(PluginError::ProcessCallerDeparted {
-                process_id: process_id.to_string(),
-            });
-        }
-        Ok(record.outcome)
-    }
-
-    async fn read_event(
-        &self,
-        process_id: &str,
-        event_type: &str,
-        after_sequence: u64,
-    ) -> Result<Option<ProcessEvent>, PluginError> {
-        Ok(self
-            .registry
-            .events_after(process_id, after_sequence)
-            .await?
-            .into_iter()
-            .find(|event| event.event_type == event_type))
-    }
-}
-
-fn next_backoff(current: Duration) -> Duration {
-    current.saturating_mul(2).min(AWAIT_BACKOFF_MAX)
 }
 
 #[async_trait::async_trait]
@@ -782,6 +603,3 @@ impl ProcessRegistry for WatchedProcessRegistry {
             .await
     }
 }
-
-#[cfg(test)]
-mod tests;

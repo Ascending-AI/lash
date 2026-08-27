@@ -1306,15 +1306,13 @@ async fn prune_reregister_sender_floor_delivers_through_driver(
 
     let turn_handle = Arc::new(RecordingWakeTurnHandle::default());
     let prior_runs = turn_handle.len().await;
-    let queued_work_driver = crate::QueuedWorkDriver::new(
+    let queued_work = crate::NativeQueuedWork::new(
         Arc::clone(&turn_handle) as Arc<dyn crate::QueuedWorkRunHandle>
     );
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         factory,
-        Arc::new(crate::NativeQueuedWork::from_driver(
-            queued_work_driver.clone(),
-        )),
+        Arc::new(queued_work.clone()),
         Arc::clone(&clock) as Arc<dyn crate::Clock>,
         32,
     )

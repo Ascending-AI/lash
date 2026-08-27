@@ -60,8 +60,6 @@ use crate::store::{
 };
 
 mod observability;
-pub(crate) mod queued_lane_wait;
-
 pub(crate) use observability::trace_acquisition;
 pub(crate) use observability::trace_busy;
 pub(super) use observability::trace_commit_cas_rejected;

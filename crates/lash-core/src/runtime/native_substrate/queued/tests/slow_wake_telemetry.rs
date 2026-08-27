@@ -47,7 +47,7 @@ async fn hung_executions_are_bounded_warn_when_slow_and_shutdown_cleanly() {
     });
     let captured_handle = Arc::clone(&handle);
     let ((), capture) = crate::runtime::tests::trace_capture::capturing(|| async move {
-        let driver = QueuedWorkDriver::from_parts(
+        let driver = NativeQueuedWork::from_parts(
             captured_handle.clone(),
             CancellationToken::new(),
             Some(QueuedWorkExecutionConcurrency::new(CONCURRENCY).expect("valid concurrency")),

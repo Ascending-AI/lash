@@ -1100,7 +1100,7 @@ fn process_test_core_with_sink(
 }
 
 /// Inline-tier end to end across the process wait, observation, and retention
-/// interfaces: a host starts a process, holds `ProcessWorkDriver::await_terminal`
+/// interfaces: a host starts a process, holds `ProcessWorkSubstrate::await_process_terminal`
 /// (through `core.processes().await_output`), signals it to completion, and
 /// observes its intermediate events through a wired `ProcessEventSink` — then
 /// prunes the terminal registry rows while the host's projected copies survive.

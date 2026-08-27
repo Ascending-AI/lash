@@ -664,7 +664,7 @@ async fn sqlite_seeded_segment_crash_matrix_preserves_results_and_effect_identit
             .await
             .expect("complete real terminal");
         assert_eq!(
-            lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+            lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
                 .await_terminal(&process_id)
                 .await
                 .expect("terminal after crash matrix"),

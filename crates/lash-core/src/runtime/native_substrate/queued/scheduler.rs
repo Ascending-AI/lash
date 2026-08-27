@@ -2,11 +2,11 @@ use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use super::super::worker_capacity::{
-    DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
-    WorkerSlotSupplier as _,
-};
 use super::QueuedWorkExecutionConcurrency;
+use crate::runtime::worker_capacity::{
+    DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
+};
+use crate::runtime::{DEFAULT_PROCESS_EXECUTION_CONCURRENCY, WorkerSlotKind, WorkerSlotSupplier};
 
 #[derive(Clone, Debug)]
 pub(super) struct QueuedWorkDemand {
@@ -45,7 +45,7 @@ pub(super) struct QueuedWorkExecutionSchedulerState {
 }
 
 pub(crate) struct QueuedWorkExecutionScheduler {
-    pub(super) slots: Option<Arc<dyn super::super::WorkerSlotSupplier>>,
+    pub(super) slots: Option<Arc<dyn WorkerSlotSupplier>>,
     pub(super) admission_limit: Option<usize>,
     pub(super) metrics: WorkerCapacityMetrics,
     pub(super) state: Mutex<QueuedWorkExecutionSchedulerState>,
@@ -103,24 +103,24 @@ impl QueuedWorkExecutionScheduler {
 
     pub(super) fn inline(concurrency: QueuedWorkExecutionConcurrency) -> Self {
         let supplier = Arc::new(DefaultWorkerSlotSupplier::new(
-            super::super::DEFAULT_PROCESS_EXECUTION_CONCURRENCY,
+            DEFAULT_PROCESS_EXECUTION_CONCURRENCY,
             concurrency.get(),
         ));
         Self::with_supplier(supplier, Some(concurrency.get()))
     }
 
     pub(super) fn with_supplier(
-        supplier: Arc<dyn super::super::WorkerSlotSupplier>,
+        supplier: Arc<dyn WorkerSlotSupplier>,
         admission_limit: Option<usize>,
     ) -> Self {
         let metrics = WorkerCapacityMetrics::default();
         let slots = ObservedWorkerSlotSupplier::new(supplier, metrics.clone());
         metrics.slots(
-            super::super::WorkerSlotKind::QueuedWork,
+            WorkerSlotKind::QueuedWork,
             0,
-            slots.available_slots(super::super::WorkerSlotKind::QueuedWork),
+            slots.available_slots(WorkerSlotKind::QueuedWork),
         );
-        metrics.intake_depth(super::super::WorkerSlotKind::QueuedWork, 0);
+        metrics.intake_depth(WorkerSlotKind::QueuedWork, 0);
         Self {
             slots: Some(slots),
             admission_limit,
@@ -139,6 +139,6 @@ impl QueuedWorkExecutionScheduler {
     pub(super) fn available_permits(&self) -> Option<usize> {
         self.slots
             .as_ref()
-            .map(|slots| slots.available_slots(super::super::WorkerSlotKind::QueuedWork))
+            .map(|slots| slots.available_slots(WorkerSlotKind::QueuedWork))
     }
 }

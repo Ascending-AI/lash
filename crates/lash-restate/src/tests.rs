@@ -35,8 +35,7 @@ use lash_core::{
     QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
-    facade_support::DurableProcessWorker, facade_support::ProcessAttach,
-    facade_support::ProcessRunHandle, facade_support::TurnAddress, facade_support::TurnAttach,
+    facade_support::DurableProcessWorker, facade_support::TurnAddress, facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, RuntimeScope, TriggerStore};
 use lash_http_transport::HttpRequest;
@@ -12321,7 +12320,7 @@ async fn durable_segment_handover_resumes_once_and_terminalizes_once() {
         1,
         "only the true terminal is process-visible"
     );
-    let awaited = lash_core::facade_support::ProcessAwaiter::polling(registry)
+    let awaited = lash_core::NativeProcessWork::for_registry(registry)
         .await_terminal("segmented-durable")
         .await
         .expect("await true terminal");
@@ -12546,7 +12545,7 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
             .await
             .expect("write root terminal");
         let attach_after_retention =
-            lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry));
+            lash_core::NativeProcessWork::for_registry(Arc::clone(&registry));
         assert_eq!(
             attach_after_retention
                 .await_terminal(&process_id)
@@ -13495,7 +13494,7 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
         .drive_pending_processes()
         .await
         .expect("drive ToolCall process parent");
-    let tool_terminal = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+    let tool_terminal = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
         .await_terminal("tool-call-process-parent")
         .await
         .expect("await ToolCall parent terminal");
@@ -13523,13 +13522,10 @@ async fn process_parents_teardown_after_durable_end_across_segments_and_tool_cal
                 )
             })
             .unwrap_or_else(|| panic!("missing {child_name} child in {children:?}"));
+        let awaiter = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry));
         tokio::time::timeout(
             Duration::from_secs(5),
-            lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry)).await_event(
-                &child.id,
-                "process.cancel_requested",
-                0,
-            ),
+            awaiter.await_event(&child.id, "process.cancel_requested", 0),
         )
         .await
         .unwrap_or_else(|_| panic!("timed out awaiting {child_name} child Cancel delivery"))
@@ -13751,7 +13747,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
     assert_eq!(observed.len(), 1);
     assert_eq!(observed[0].id, "recover-tool");
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal("recover-tool")
             .await
             .expect("await recovered terminal process"),
@@ -13863,7 +13859,7 @@ async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_r
         .expect("recover snapshot-backed process");
 
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal("snapshot-ok")
             .await
             .expect("await recovered snapshot-backed process"),
@@ -13911,7 +13907,7 @@ async fn sqlite_process_recovery_terminalizes_revoked_snapshot_plugin_options() 
         .await
         .expect("recover revoked snapshot-backed process");
 
-    let await_output = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
+    let await_output = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
         .await_terminal("snapshot-revoked")
         .await
         .expect("await terminal revoked snapshot-backed process");
@@ -14059,7 +14055,7 @@ async fn typescript_artifact_runs_through_process_engine_to_terminal() {
         .await
         .expect("run stored TypeScript artifact");
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
             .await_terminal("typescript-worker")
             .await
             .expect("await TypeScript process"),
@@ -14176,7 +14172,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
         .expect("recover non-terminal trigger-started process");
 
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal("trigger-notify")
             .await
             .expect("await recovered trigger-started process"),
@@ -14203,7 +14199,7 @@ async fn sqlite_trigger_started_process_recovered_after_worker_registry_reopen()
         .await
         .expect("second recovery sweep is idempotent");
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry_b))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal("trigger-notify")
             .await
             .expect("await after idempotent re-sweep"),
@@ -15126,9 +15122,12 @@ async fn ingress_runner_submits_non_terminal_process_by_workflow_key() {
         registry.clone(),
         continuation_store(),
     );
-    let _ = runner.claim_and_run_pending().await.expect("drive pending");
     let _ = runner
-        .claim_and_run_pending()
+        .admit_pending_processes("test")
+        .await
+        .expect("drive pending");
+    let _ = runner
+        .admit_pending_processes("test")
         .await
         .expect("drive pending again");
     server.await.expect("mock ingress server task");
@@ -15203,7 +15202,10 @@ async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
     }])
     .await;
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuations);
-    let _ = runner.claim_and_run_pending().await.expect("drive pending");
+    let _ = runner
+        .admit_pending_processes("test")
+        .await
+        .expect("drive pending");
     server.await.expect("capture server");
 
     let requests = captured.lock_recover();
@@ -15270,7 +15272,7 @@ async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_request() {
     let runner =
         RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
     let report = runner
-        .claim_and_run_pending()
+        .admit_pending_processes("test")
         .await
         .expect("sweep skips externally-owned rows and submits the rerunnable one");
     server.await.expect("mock ingress server task");
@@ -16104,6 +16106,18 @@ async fn restate_ingress_client_pins_effect_replay_with_idempotency_key() {
     );
 }
 
+async fn await_process_terminal_until_terminal(
+    process_work: &dyn lash_core::ProcessWorkSubstrate,
+    process_id: &str,
+) -> Result<ProcessAwaitOutput, PluginError> {
+    loop {
+        match process_work.await_process_terminal(process_id).await? {
+            lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
+            lash_core::ProcessTerminalWait::Reattach => {}
+        }
+    }
+}
+
 #[tokio::test]
 async fn restate_process_attach_calls_await_terminal_ingress() {
     let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
@@ -16114,8 +16128,7 @@ async fn restate_process_attach_calls_await_terminal_ingress() {
     let runner =
         RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
 
-    let output = runner
-        .await_terminal("process-1")
+    let output = await_process_terminal_until_terminal(&runner, "process-1")
         .await
         .expect("attach await");
     server.await.expect("capture server");
@@ -16150,8 +16163,7 @@ async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolve
         RestateProcessIngressRunner::new("http://127.0.0.1:1", registry, continuation_store());
 
     assert_eq!(
-        runner
-            .await_terminal("retained-terminal")
+        await_process_terminal_until_terminal(&runner, "retained-terminal")
             .await
             .expect("registry terminal bypasses expired workflow key"),
         expected
@@ -16168,8 +16180,7 @@ async fn restate_process_attach_maps_ingress_error_to_plugin_error() {
     let runner =
         RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
 
-    let err = runner
-        .await_terminal("process-1")
+    let err = await_process_terminal_until_terminal(&runner, "process-1")
         .await
         .expect_err("attach error");
     server.await.expect("capture server");
@@ -16218,9 +16229,16 @@ async fn restate_process_attach_reattaches_after_timeout_until_terminal() {
         continuation_store(),
     );
 
-    let output = ProcessAttach::await_terminal(&runner, "process-1")
-        .await
-        .expect("legacy attach re-enters after a bounded wait timeout");
+    let output = loop {
+        match runner
+            .await_process_terminal("process-1")
+            .await
+            .expect("process port re-enters after a bounded wait timeout")
+        {
+            lash_core::ProcessTerminalWait::Terminal(output) => break output,
+            lash_core::ProcessTerminalWait::Reattach => {}
+        }
+    };
     server.await.expect("timeout-then-terminal server");
 
     assert_eq!(output, expected);
@@ -16403,8 +16421,7 @@ async fn restate_process_attach_maps_malformed_ingress_body_to_plugin_error() {
     let runner =
         RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
 
-    let err = runner
-        .await_terminal("process-1")
+    let err = await_process_terminal_until_terminal(&runner, "process-1")
         .await
         .expect_err("a malformed ingress body must surface as an error");
     server.await.expect("capture server");
@@ -16511,12 +16528,10 @@ async fn restate_process_attach_is_reentrant_across_sequential_awaits() {
     let runner =
         RestateProcessIngressRunner::new(base_url, process_registry(), continuation_store());
 
-    let first = runner
-        .await_terminal("process-1")
+    let first = await_process_terminal_until_terminal(&runner, "process-1")
         .await
         .expect("first attach await");
-    let second = runner
-        .await_terminal("process-1")
+    let second = await_process_terminal_until_terminal(&runner, "process-1")
         .await
         .expect("second attach await");
     server.await.expect("capture server");
@@ -16618,7 +16633,7 @@ async fn a_failed_ingress_submit_defers_its_row_without_discarding_the_pass() {
     let runner =
         RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
     let report = runner
-        .claim_and_run_pending()
+        .admit_pending_processes("test")
         .await
         .expect("a per-row submit failure does not fail the pass");
     server.await.expect("mock ingress server task");
@@ -16658,7 +16673,7 @@ async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink() {
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store())
         .with_event_sink(Some(Arc::new(sink.clone())));
     let report = runner
-        .claim_and_run_pending()
+        .admit_pending_processes("test")
         .await
         .expect("a per-row submit failure does not fail the pass");
     server.await.expect("mock ingress server task");

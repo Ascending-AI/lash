@@ -93,6 +93,7 @@ impl CoreTriggerAdmin {
 /// Facade handle for session administration.
 pub struct SessionAdmin {
     pub(crate) runtime: RuntimeHandle,
+    pub(crate) process_work: Option<Arc<dyn lash_core::ProcessWorkSubstrate>>,
 }
 
 impl SessionAdmin {
@@ -391,10 +392,17 @@ impl SessionAdmin {
         &self,
         process_id: &str,
     ) -> Result<lash_core::ProcessAwaitOutput> {
-        lash_core::facade_support::ProcessAwaiter::polling(self.process_registry()?)
-            .await_terminal(process_id)
-            .await
-            .map_err(Into::into)
+        let process_work = self.process_work.as_ref().ok_or_else(|| {
+            EmbedError::Plugin(lash_core::PluginError::Session(
+                "process work is unavailable in this runtime".to_string(),
+            ))
+        })?;
+        loop {
+            match process_work.await_process_terminal(process_id).await? {
+                lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
+                lash_core::ProcessTerminalWait::Reattach => {}
+            }
+        }
     }
 
     async fn request_process_abandon(
