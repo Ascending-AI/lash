@@ -1394,6 +1394,12 @@ jobs:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
+      - name: Test runtime pool-wait binding
+        run: cargo nextest run -p lash-perf -E 'test(pool_wait)' --locked
+        env:
+          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+          LASH_REQUIRE_POSTGRES: "1"
+
       # The differential compares backend semantics, not catalog rendering, so it
       # runs once on the primary major instead of three times.
       - name: Test cross-backend store differential

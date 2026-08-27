@@ -16,6 +16,8 @@ static HASH_PASSES: AtomicU64 = AtomicU64::new(0);
 static HASHED_BYTES: AtomicU64 = AtomicU64::new(0);
 static BODY_COPY_PASSES: AtomicU64 = AtomicU64::new(0);
 static COPIED_BYTES: AtomicU64 = AtomicU64::new(0);
+// Pool-wait sample serialization is acceptable here because this recorder is
+// compiled in only for the explicitly enabled performance-witness feature.
 static POOL_CHECKOUT_WAIT_NANOS: LazyLock<Mutex<Vec<u64>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
