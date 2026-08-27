@@ -3847,6 +3847,7 @@ impl LashRuntime {
             event_tx,
             cancel.clone(),
             protocol_run_offset,
+            Arc::clone(&self.host.core.clock),
             Arc::clone(&turn_control),
             Arc::clone(&turn_control_host),
             turn_cancel_peek_controller,
@@ -4148,6 +4149,7 @@ async fn run_turn_effect_loop(
     event_tx: mpsc::Sender<RuntimeStreamEvent>,
     cancellation: CancellationToken,
     protocol_run_offset: usize,
+    clock: Arc<dyn Clock>,
     turn_control: Arc<ActiveTurnControl>,
     turn_control_host: Arc<dyn EffectHost>,
     cancel_controller: &dyn RuntimeEffectController,
@@ -4168,7 +4170,7 @@ async fn run_turn_effect_loop(
         driver.turn_phase_probe.clone(),
         "turn_cancel.start_gate",
     );
-    let pending_cancel = await_turn_cancellation_start_gate(|| {
+    let pending_cancel = await_turn_cancellation_start_gate(clock.as_ref(), || {
         turn_control.observe_pending_cancel(
             cancel_controller,
             crate::runtime::turn_control::TurnCancelPeekIdentity::StartGate,
@@ -4182,8 +4184,9 @@ async fn run_turn_effect_loop(
     let cancel_watcher = crate::task::spawn({
         let turn_control = Arc::clone(&turn_control);
         let cancellation = cancellation.clone();
+        let clock = Arc::clone(&clock);
         async move {
-            if await_turn_cancellation_with_retry(|| {
+            if await_turn_cancellation_with_retry(clock.as_ref(), || {
                 turn_control.await_cancel(turn_control_host.as_ref(), CancellationToken::new())
             })
             .await
@@ -4226,7 +4229,15 @@ const TURN_CANCEL_WATCH_RETRY_MAX: std::time::Duration = std::time::Duration::fr
 /// unknown keys) burn attempts.
 const TURN_CANCEL_START_GATE_ATTEMPTS: usize = 3;
 
+/// Bound the live watcher to a useful transient-recovery window without letting
+/// a broken resolver outlive the turn indefinitely. Eight attempts traverse
+/// the whole exponential ladder through its one-second ceiling (2.575 seconds
+/// of injected sleep); exhaustion merely stops observation, which turn teardown
+/// already tolerates by aborting the watcher unconditionally.
+pub(super) const TURN_CANCEL_WATCH_MAX_ATTEMPTS: usize = 8;
+
 async fn await_turn_cancellation_start_gate<F, C>(
+    clock: &dyn Clock,
     mut watch: F,
 ) -> Result<Option<TurnCancellationEvidence>, RuntimeError>
 where
@@ -4246,7 +4257,7 @@ where
                     retry_after_ms = backoff.as_millis(),
                     "turn cancellation start gate failed; retrying before failing the invocation"
                 );
-                tokio::time::sleep(backoff).await;
+                clock.sleep(backoff).await;
                 backoff = backoff.saturating_mul(2).min(TURN_CANCEL_WATCH_RETRY_MAX);
             }
         }
@@ -4254,26 +4265,41 @@ where
     unreachable!("positive start-gate attempt limit")
 }
 
-async fn await_turn_cancellation_with_retry<F, C>(mut watch: F) -> Option<TurnCancellationEvidence>
+async fn await_turn_cancellation_with_retry<F, C>(
+    clock: &dyn Clock,
+    mut watch: F,
+) -> Option<TurnCancellationEvidence>
 where
     F: FnMut() -> C,
     C: std::future::Future<Output = Result<Option<TurnCancellationEvidence>, RuntimeError>>,
 {
     let mut backoff = TURN_CANCEL_WATCH_RETRY_INITIAL;
-    loop {
+    for attempt in 1..=TURN_CANCEL_WATCH_MAX_ATTEMPTS {
         match watch().await {
             Ok(observation) => return observation,
+            Err(err) if attempt == TURN_CANCEL_WATCH_MAX_ATTEMPTS => {
+                tracing::warn!(
+                    error = %err,
+                    attempts = attempt,
+                    max_attempts = TURN_CANCEL_WATCH_MAX_ATTEMPTS,
+                    "turn cancellation watcher exhausted its retry budget; stopping observation"
+                );
+                return None;
+            }
             Err(err) => {
                 tracing::warn!(
                     error = %err,
+                    attempt,
+                    max_attempts = TURN_CANCEL_WATCH_MAX_ATTEMPTS,
                     retry_after_ms = backoff.as_millis(),
                     "turn cancellation watcher failed; retrying while the turn remains active"
                 );
-                tokio::time::sleep(backoff).await;
+                clock.sleep(backoff).await;
                 backoff = backoff.saturating_mul(2).min(TURN_CANCEL_WATCH_RETRY_MAX);
             }
         }
     }
+    unreachable!("positive cancellation-watch attempt limit")
 }
 
 /// Pump the turn driver's event channel into the host sinks while the run
@@ -4352,19 +4378,68 @@ async fn emit_runtime_stream_event_to_sinks(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use super::{
-        ActiveTurnControl, TURN_CANCEL_START_GATE_ATTEMPTS, agent_frame_follow_turn_id,
-        await_turn_cancellation_start_gate, await_turn_cancellation_with_retry,
-        publish_terminal_after_commit,
+        ActiveTurnControl, TURN_CANCEL_START_GATE_ATTEMPTS, TURN_CANCEL_WATCH_MAX_ATTEMPTS,
+        agent_frame_follow_turn_id, await_turn_cancellation_start_gate,
+        await_turn_cancellation_with_retry, publish_terminal_after_commit,
     };
     use crate::{
         AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope,
         InlineRuntimeEffectController, Resolution, ResolveOutcome, RuntimeError, TurnAddress,
         TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnTerminal,
     };
+
+    #[derive(Debug)]
+    struct RecordingTestClock {
+        inner: crate::testing::TestClock,
+        sleeps: Mutex<Vec<std::time::Duration>>,
+    }
+
+    impl RecordingTestClock {
+        fn new() -> Self {
+            Self {
+                inner: crate::testing::TestClock::new(0),
+                sleeps: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn sleeps(&self) -> Vec<std::time::Duration> {
+            self.sleeps.lock().expect("recording clock sleeps").clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::Clock for RecordingTestClock {
+        fn now(&self) -> std::time::Instant {
+            self.inner.now()
+        }
+
+        fn timestamp_ms(&self) -> u64 {
+            self.inner.timestamp_ms()
+        }
+
+        fn timestamp_rfc3339(&self) -> String {
+            self.inner.timestamp_rfc3339()
+        }
+
+        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+            self.inner.timestamp_datetime()
+        }
+
+        async fn sleep(&self, duration: std::time::Duration) {
+            self.sleeps
+                .lock()
+                .expect("record cancellation-watch sleep")
+                .push(duration);
+        }
+
+        async fn sleep_until(&self, deadline: std::time::Instant) {
+            self.inner.sleep_until(deadline).await;
+        }
+    }
 
     #[derive(Default)]
     struct RejectTerminalPublication {
@@ -4444,9 +4519,10 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_watch_retries_transient_errors_until_evidence_arrives() {
+        let clock = RecordingTestClock::new();
         let attempts = Arc::new(AtomicUsize::new(0));
         let observed_attempts = Arc::clone(&attempts);
-        let evidence = await_turn_cancellation_with_retry(move || {
+        let evidence = await_turn_cancellation_with_retry(&clock, move || {
             let attempt = observed_attempts.fetch_add(1, Ordering::SeqCst);
             async move {
                 if attempt < 2 {
@@ -4469,13 +4545,47 @@ mod tests {
 
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
         assert_eq!(evidence.request_id, "retry-request");
+        assert_eq!(
+            clock.sleeps(),
+            vec![
+                std::time::Duration::from_millis(25),
+                std::time::Duration::from_millis(50),
+            ],
+            "watcher retries must sleep on the injected clock"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_watch_stops_after_its_error_budget() {
+        let clock = RecordingTestClock::new();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let observed_attempts = Arc::clone(&attempts);
+        let observed = await_turn_cancellation_with_retry(&clock, move || {
+            observed_attempts.fetch_add(1, Ordering::SeqCst);
+            async {
+                Err(RuntimeError::new(
+                    crate::RuntimeErrorCode::TransientCancelWatch,
+                    "cancel resolver remains unavailable",
+                ))
+            }
+        })
+        .await;
+
+        assert!(observed.is_none());
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            TURN_CANCEL_WATCH_MAX_ATTEMPTS,
+            "the live cancellation watcher must stop observing after its retry budget"
+        );
+        assert_eq!(clock.sleeps().len(), TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1);
     }
 
     #[tokio::test]
     async fn cancellation_start_gate_fails_after_bounded_retries() {
+        let clock = RecordingTestClock::new();
         let attempts = Arc::new(AtomicUsize::new(0));
         let observed_attempts = Arc::clone(&attempts);
-        let err = await_turn_cancellation_start_gate(move || {
+        let err = await_turn_cancellation_start_gate(&clock, move || {
             observed_attempts.fetch_add(1, Ordering::SeqCst);
             async {
                 Err(RuntimeError::new(
@@ -4492,6 +4602,14 @@ mod tests {
             TURN_CANCEL_START_GATE_ATTEMPTS
         );
         assert_eq!(err.code.to_string(), "cancel_start_gate_unavailable");
+        assert_eq!(
+            clock.sleeps(),
+            vec![
+                std::time::Duration::from_millis(25),
+                std::time::Duration::from_millis(50),
+            ],
+            "start-gate retries must sleep on the injected clock"
+        );
     }
 
     #[tokio::test]

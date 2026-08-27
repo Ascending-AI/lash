@@ -515,6 +515,49 @@ fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
 }
 
 #[derive(Debug)]
+struct CancelWatchTestClock {
+    inner: crate::testing::TestClock,
+    sleeps: AtomicUsize,
+}
+
+impl CancelWatchTestClock {
+    fn new(epoch_ms: u64) -> Self {
+        Self {
+            inner: crate::testing::TestClock::new(epoch_ms),
+            sleeps: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for CancelWatchTestClock {
+    fn now(&self) -> std::time::Instant {
+        self.inner.now()
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        self.inner.timestamp_ms()
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.inner.timestamp_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        self.inner.timestamp_datetime()
+    }
+
+    async fn sleep(&self, _duration: std::time::Duration) {
+        self.sleeps.fetch_add(1, Ordering::SeqCst);
+        tokio::task::yield_now().await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        self.inner.sleep_until(deadline).await;
+    }
+}
+
+#[derive(Debug)]
 struct ManualClock {
     epoch_ms: std::sync::atomic::AtomicU64,
 }
@@ -5975,6 +6018,67 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
             .await
             .expect("queued work after commit")
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn cancellation_watch_exhaustion_does_not_block_turn_completion() {
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default().with_always_failing_cancel_watch(),
+    );
+    let controller_for_provider = Arc::clone(&controller);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .complete(move |_| {
+            let controller = Arc::clone(&controller_for_provider);
+            async move {
+                controller.wait_for_cancel_watch_exhaustion().await;
+                // Give an unbounded watcher a deterministic chance to enter a
+                // ninth resolver attempt before the turn ends and aborts it.
+                tokio::task::yield_now().await;
+                tokio::task::yield_now().await;
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "turn completed after cancel-watch exhaustion".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let clock = Arc::new(CancelWatchTestClock::new(0));
+    let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let host = EmbeddedRuntimeHost::new(
+        super::effect::runtime_host_config_with_inline_controller(controller.clone())
+            .with_clock(host_clock),
+    );
+    let mut runtime = standard_runtime_with_transport_and_host(transport, host).await;
+
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("complete despite a failed cancellation resolver"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "bounded-cancel-watch"),
+            ),
+        )
+        .await
+        .expect("cancel-watch exhaustion must not block turn completion");
+
+    assert_eq!(
+        turn.assistant_output.safe_text,
+        "turn completed after cancel-watch exhaustion"
+    );
+    assert_eq!(
+        controller.cancel_watch_attempts(),
+        crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS
+    );
+    assert_eq!(
+        clock.sleeps.load(Ordering::SeqCst),
+        crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1,
+        "every retry backoff before exhaustion must use the injected TestClock"
     );
 }
 

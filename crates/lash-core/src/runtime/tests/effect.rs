@@ -15,6 +15,17 @@ struct EffectControllerRecord {
     turn_id: Option<String>,
     replay_key: String,
 }
+
+#[derive(Clone, Default)]
+enum CancelWatchBehavior {
+    #[default]
+    Delegate,
+    AlwaysError {
+        attempts: Arc<std::sync::atomic::AtomicUsize>,
+        exhausted: Arc<tokio::sync::Notify>,
+    },
+}
+
 #[derive(Clone, Default)]
 pub(super) struct RecordingEffectController {
     records: Arc<Mutex<Vec<EffectControllerRecord>>>,
@@ -26,6 +37,7 @@ pub(super) struct RecordingEffectController {
     durable_workflow_controller: bool,
     replay_by_key: bool,
     execute_llm_locally: bool,
+    cancel_watch: CancelWatchBehavior,
     fail_next_tool_parent_end: Arc<std::sync::atomic::AtomicBool>,
     /// Model a host crash in the window between the journaled raw provider
     /// completion (phase 1) and hook post-processing (phase 2).
@@ -70,6 +82,41 @@ impl RecordingEffectController {
     pub(super) fn with_local_llm_execution(mut self) -> Self {
         self.execute_llm_locally = true;
         self
+    }
+
+    pub(super) fn with_always_failing_cancel_watch(mut self) -> Self {
+        self.cancel_watch = CancelWatchBehavior::AlwaysError {
+            attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            exhausted: Arc::new(tokio::sync::Notify::new()),
+        };
+        self
+    }
+
+    pub(super) fn cancel_watch_attempts(&self) -> usize {
+        match &self.cancel_watch {
+            CancelWatchBehavior::Delegate => 0,
+            CancelWatchBehavior::AlwaysError { attempts, .. } => attempts.load(Ordering::SeqCst),
+        }
+    }
+
+    pub(super) async fn wait_for_cancel_watch_exhaustion(&self) {
+        match &self.cancel_watch {
+            CancelWatchBehavior::Delegate => {
+                panic!("cancel-watch exhaustion is unavailable in delegate mode")
+            }
+            CancelWatchBehavior::AlwaysError {
+                attempts,
+                exhausted,
+            } => loop {
+                let notified = exhausted.notified();
+                if attempts.load(Ordering::SeqCst)
+                    >= crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS
+                {
+                    return;
+                }
+                notified.await;
+            },
+        }
     }
 
     pub(super) fn with_next_tool_parent_end_failure(self) -> Self {
@@ -183,7 +230,24 @@ impl crate::AwaitEventResolver for RecordingEffectController {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+        match &self.cancel_watch {
+            CancelWatchBehavior::Delegate => {
+                self.inline.await_await_event(key, cancel, deadline).await
+            }
+            CancelWatchBehavior::AlwaysError {
+                attempts,
+                exhausted,
+            } => {
+                let attempts = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                if attempts == crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS {
+                    exhausted.notify_one();
+                }
+                Err(RuntimeError::new(
+                    crate::RuntimeErrorCode::TransientCancelWatch,
+                    "cancel resolver remains unavailable",
+                ))
+            }
+        }
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
