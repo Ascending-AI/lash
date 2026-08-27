@@ -49,21 +49,21 @@ async fn open_creates_a_missing_database_and_preflight_does_not() {
 }
 
 #[tokio::test]
-async fn durable_core_generation_43_is_reported_as_migratable() {
+async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     let root = temp_root();
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
-    assert_eq!(expected, 44, "the pinned migration target changed");
+    assert_eq!(expected, 45, "the pinned BLAKE3 target changed");
 
     rewind_user_version(&path, 43);
 
     let found = verify_schema_at(&path, SqliteDatabase::DurableCore).await;
-    assert_eq!(found.verdict, StoreSchemaVerdict::Migratable { found: 43 });
+    assert_eq!(found.verdict, StoreSchemaVerdict::Mismatch { found: 43 });
     assert_eq!(found.expected, expected);
     assert!(
-        !found.verdict.refuses_open(),
-        "generation 43 is the declared 43 -> 44 migration source"
+        found.verdict.refuses_open(),
+        "every SHA-256-era generation must be refused"
     );
 }
 
@@ -105,7 +105,7 @@ async fn preflight_answers_while_another_connection_holds_the_write_lock() {
     .expect("preflight answers while the write lock is held");
     assert_eq!(
         answered.verdict,
-        StoreSchemaVerdict::Migratable {
+        StoreSchemaVerdict::Mismatch {
             found: expected - 1
         }
     );
@@ -360,10 +360,12 @@ mod walk {
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
         let store = Store::open(&core).await.expect("provision durable core");
-        let artifact = lashlang::ModuleArtifact::from_store_bytes(include_bytes!(
+        let frozen: lashlang::ModuleArtifact = serde_json::from_slice(include_bytes!(
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
-        .expect("decode frozen artifact");
+        .expect("decode frozen artifact shape");
+        let artifact = lashlang::ModuleArtifact::from_program(frozen.canonical_ir)
+            .expect("mint the current identity generation");
         store
             .put_module_artifact(&artifact)
             .await

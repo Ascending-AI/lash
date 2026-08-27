@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "rlm")]
-    fn a_frozen_module_artifact_contributes_a_verified_identity() {
+    fn a_frozen_sha256_module_artifact_is_an_identity_refusal() {
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(
@@ -540,12 +540,17 @@ mod tests {
                     .to_string(),
             ),
         ));
-        assert!(extractions.iter().any(|extraction| matches!(
-            extraction,
-            Extraction::IdentityMatch {
-                format: DurableFormat::ModuleArtifact
-            }
-        )));
+        let detail = extractions
+            .iter()
+            .find_map(|extraction| match extraction {
+                Extraction::IdentityMismatch {
+                    format: DurableFormat::ModuleArtifact,
+                    detail,
+                } => Some(detail.as_str()),
+                _ => None,
+            })
+            .expect("the SHA-256 artifact should be refused by its identity fence");
+        assert!(detail.contains("lashlang:v2:blake3:"), "{detail}");
     }
 
     #[test]

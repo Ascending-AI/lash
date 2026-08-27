@@ -73,7 +73,7 @@ fn leaf_provider_copies_the_recorded_process_environment() {
         .stable_ref()
         .expect("recorded process environment is serializable");
 
-    assert!(stable_ref.to_string().starts_with("process-env:v3:sha256:"));
+    assert!(stable_ref.to_string().starts_with("process-env:v4:blake3:"));
 }
 
 #[cfg(test)]

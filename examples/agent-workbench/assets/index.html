@@ -2197,7 +2197,7 @@
     }
 
     /* ─── shared: nothing is truncated without recourse ───
-       Every abbreviated identity in the console (sha256 ids, trigger keys,
+       Every abbreviated identity in the console (BLAKE3 ids, trigger keys,
        process ids, graph keys, session ids) renders as a value row: the full
        string is in the DOM and in the title, the visible text is elided in the
        middle so head *and* tail stay distinguishing, and a copy control puts
@@ -2217,7 +2217,7 @@
     }
 
     /* The rail is ~250px wide: a side-by-side key column would leave a
-       sha256 four characters per line. Stack the key over its value instead. */
+       blake3 four characters per line. Stack the key over its value instead. */
     .trigger-registration-full .value-row { grid-template-columns: minmax(0, 1fr) auto; }
     .trigger-registration-full .value-key { grid-column: 1 / -1; }
     .trigger-registration-full .value-row + .value-row {
@@ -5050,10 +5050,10 @@
     }
 
     function truncateSubscriptionId(value) {
-      const prefix = "trigger-subscription:v2:sha256:";
+      const prefix = "trigger-subscription:v2:blake3:";
       if (!value) return "unknown";
       if (value.startsWith(prefix)) {
-        return "sha256:" + truncateTriggerDetail(value.slice(prefix.length), 10);
+        return "blake3:" + truncateTriggerDetail(value.slice(prefix.length), 10);
       }
       return truncateTriggerDetailTail(value, 12);
     }

@@ -398,7 +398,7 @@ mod tests {
             invocation
                 .replay_key()
                 .expect("replay key")
-                .starts_with("direct:v2:sha256:")
+                .starts_with("direct:v2:blake3:")
         );
     }
 

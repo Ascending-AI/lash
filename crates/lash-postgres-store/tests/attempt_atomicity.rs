@@ -961,8 +961,8 @@ fn assert_fig1293_literal_outputs(
                 serde_json::json!({
                     "__handle__": "process",
                     "done": false,
-                    "id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
-                    "process_id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
+                    "id": "tool-intent:v1:blake3:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
+                    "process_id": "tool-intent:v1:blake3:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
                     "running": true,
                     "status": "running",
                 }),
@@ -972,8 +972,8 @@ fn assert_fig1293_literal_outputs(
                 serde_json::json!({
                     "__handle__": "process",
                     "done": true,
-                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
-                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
+                    "id": "tool-intent:v1:blake3:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
+                    "process_id": "tool-intent:v1:blake3:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
                     "running": false,
                     "status": "detached",
                 }),

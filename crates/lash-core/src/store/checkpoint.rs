@@ -200,7 +200,7 @@ impl HydratedCheckpointComponent {
                 encoding_version,
                 body,
             } => {
-                let blob_ref = BlobRef(crate::stable_hash::sha256_hex(body));
+                let blob_ref = BlobRef::for_content(body);
                 #[cfg(feature = "perf-witness")]
                 crate::perf_witness::record_hash_pass(body.len());
                 Ok(CheckpointComponentDescriptor {
@@ -210,7 +210,7 @@ impl HydratedCheckpointComponent {
             }
             Self::Unchanged { descriptor } => Ok(descriptor.clone()),
             Self::Hydrated { descriptor, body } => {
-                let actual_ref = BlobRef(crate::stable_hash::sha256_hex(body));
+                let actual_ref = BlobRef::for_content(body);
                 #[cfg(feature = "perf-witness")]
                 crate::perf_witness::record_hash_pass(body.len());
                 if actual_ref != descriptor.blob_ref {

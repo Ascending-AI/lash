@@ -35,7 +35,6 @@ base64 = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream", "rustls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true, features = ["v4"] }
 

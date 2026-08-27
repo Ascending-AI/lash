@@ -1255,8 +1255,10 @@ pub(crate) fn append_session_nodes_to_state_with_clock(
         .iter()
         .enumerate()
         .map(|(ordinal, node)| {
-            let fallback_digest =
-                crate::stable_hash::sha256_hex(format!("{draft_namespace}:{ordinal}").as_bytes());
+            let fallback_digest = crate::stable_hash::blake3_hex(
+                "lash-session-append-draft-fallback/v2",
+                format!("{draft_namespace}:{ordinal}").as_bytes(),
+            );
             session_append_node_draft(node, &format!("m_append_{fallback_digest}"))
         })
         .collect::<Vec<_>>();

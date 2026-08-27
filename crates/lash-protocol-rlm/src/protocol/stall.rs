@@ -120,8 +120,10 @@ fn trajectory_entry_turn_prefix(turn_id: &str) -> String {
 /// rather than stored, because the diagnostic is durable session history and a
 /// reply is not small. Derived from the reply alone, so it is replay-stable.
 pub(super) fn reply_fingerprint(assistant_text: &str) -> String {
-    use sha2::Digest as _;
-    let digest = sha2::Sha256::digest(assistant_text.as_bytes());
+    let digest = lash_sansio::core_support::blake3_domain_hash(
+        "lash-rlm-stall-reply/v2",
+        assistant_text.as_bytes(),
+    );
     digest[..8]
         .iter()
         .map(|byte| format!("{byte:02x}"))

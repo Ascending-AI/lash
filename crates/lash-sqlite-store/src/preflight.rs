@@ -96,9 +96,7 @@ impl SqliteDatabase {
 ///
 /// This is SQLite's counterpart to `PostgresStorage::verify_schema_for`: it
 /// never provisions, never migrates, never stamps a version, and never fails on
-/// drift. It reports the durable-core generation-43 source as
-/// [`StoreSchemaVerdict::Migratable`] because the next open migrates it to 44;
-/// other mismatches are refusals, not errors. A database that exists but cannot
+/// drift. Every older generation is a refusal at the BLAKE3 boundary. A database that exists but cannot
 /// be read yields [`StoreSchemaVerdict::Unreadable`] carrying SQLite's own
 /// words, because an unreadable database is undecided rather than refused.
 pub async fn verify_schema_at(path: &Path, database: SqliteDatabase) -> StoreSchemaDatabase {
@@ -106,9 +104,6 @@ pub async fn verify_schema_at(path: &Path, database: SqliteDatabase) -> StoreSch
     let verdict = match verdict {
         Ok(None) => StoreSchemaVerdict::Absent,
         Ok(Some(found)) if found == database.expected_version() => StoreSchemaVerdict::Matches,
-        Ok(Some(43)) if database == SqliteDatabase::DurableCore => {
-            StoreSchemaVerdict::Migratable { found: 43 }
-        }
         Ok(Some(found)) => StoreSchemaVerdict::Mismatch { found },
         Err(reason) => StoreSchemaVerdict::Unreadable { reason },
     };

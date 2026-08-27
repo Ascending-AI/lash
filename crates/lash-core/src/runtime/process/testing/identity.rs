@@ -73,11 +73,11 @@ fn process_execution_env_identity_golden_corpus() {
         [
             (
                 "{\"plugin_options\":{},\"policy\":{\"model\":{\"id\":\"\",\"variant\":\"provider_default\",\"limits\":{\"context_window_tokens\":1}},\"provider_id\":\"\",\"session_id\":null,\"autonomous\":false,\"turn_budget\":\"unbounded\"}}".to_string(),
-                "process-env:v3:sha256:3889c03ef030a2c50f57de91cb03927423b8a83a5c9f29bbf8a5be3b9722b1b7".to_string(),
+                "process-env:v4:blake3:daf76b156fd4e60c481117453fb793e488e495df6d82e16c190df609fb200377".to_string(),
             ),
             (
                 "{\"plugin_options\":{\"plugins\":{\"a:b\":{\"enabled\":true}}},\"policy\":{\"model\":{\"id\":\"model:rich\",\"variant\":{\"effort\":\"high\"},\"limits\":{\"context_window_tokens\":8192,\"output_token_capacity\":2048},\"capability\":{\"reasoning\":{\"efforts\":[\"low\",\"high\"],\"default_effort\":\"low\",\"aliases\":{\"max\":\"high\"},\"encoding\":{\"budget\":{\"high\":1024,\"low\":256}},\"disable\":\"toggle_false\",\"mandatory\":true},\"cache_control\":\"anthropic\",\"stream_termination\":\"eof_tolerated\",\"sampling\":\"pinned\"}},\"provider_id\":\"provider\",\"session_id\":\"session\",\"autonomous\":true,\"turn_budget\":{\"bounded\":1},\"prompt\":{\"template\":{\"sections\":[]}},\"generation\":{\"output_token_cap\":1024,\"temperature\":0.25,\"seed\":-7}}}".to_string(),
-                "process-env:v3:sha256:1ff5df8ecc6360d7069534b2c46e6f07ef963f4113a5a5aa187992e7252b10a4".to_string(),
+                "process-env:v4:blake3:00c09251c190501bd728dd6d5c9ba8093c451cad96ce45ad06888e17634af34c".to_string(),
             ),
         ]
     );

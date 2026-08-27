@@ -50,9 +50,9 @@ assert.ok(
 );
 
 function expectedSubscriptionIdDetail(value) {
-  const prefix = "trigger-subscription:v2:sha256:";
-  assert.match(value, /^trigger-subscription:v2:sha256:[0-9a-f]{64}$/);
-  return `sha256:${value.slice(prefix.length, prefix.length + 10)}…`;
+  const prefix = "trigger-subscription:v2:blake3:";
+  assert.match(value, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
+  return `blake3:${value.slice(prefix.length, prefix.length + 10)}…`;
 }
 
 const context = { Set };
@@ -2103,8 +2103,8 @@ test("trigger registration rows separate display name, identity, and trigger key
     rowContext,
   );
 
-  assert.match(subscriptionIdA, /^trigger-subscription:v2:sha256:[0-9a-f]{64}$/);
-  assert.match(subscriptionIdB, /^trigger-subscription:v2:sha256:[0-9a-f]{64}$/);
+  assert.match(subscriptionIdA, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
+  assert.match(subscriptionIdB, /^trigger-subscription:v2:blake3:[0-9a-f]{64}$/);
   assert.equal(rowContext.rows[0].name, "mirror_job ← cron.Schedule (every 2s)");
   assert.equal(rowContext.rows[1].name, rowContext.rows[0].name);
   assert.equal(

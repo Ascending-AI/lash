@@ -248,7 +248,7 @@ fn continue_as_record(args: &Record) -> Value {
     record.insert(
         "frame_key".to_string(),
         Value::String(
-            "frame-key/v1/7516a6c3aefb1a9e2a39e3c9178e8a241ffa1da902f032f93c1ae9149e4dae33".into(),
+            "frame-key/v2/7516a6c3aefb1a9e2a39e3c9178e8a241ffa1da902f032f93c1ae9149e4dae33".into(),
         ),
     );
     record.insert(

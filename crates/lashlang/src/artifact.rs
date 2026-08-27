@@ -72,7 +72,7 @@ pub struct ModuleRef(String);
 
 impl ModuleRef {
     pub fn new(hash: &ContentHash) -> Self {
-        Self(format!("lashlang:v1:sha256:{hash}"))
+        Self(format!("lashlang:v2:blake3:{hash}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -80,7 +80,7 @@ impl ModuleRef {
     }
 
     pub fn hash_hex(&self) -> Option<&str> {
-        self.0.strip_prefix("lashlang:v1:sha256:")
+        self.0.strip_prefix("lashlang:v2:blake3:")
     }
 }
 
@@ -108,7 +108,7 @@ pub struct HostRequirementsRef(String);
 
 impl HostRequirementsRef {
     pub fn new(hash: &ContentHash) -> Self {
-        Self(format!("lashlang-host-requirements:v1:sha256:{hash}"))
+        Self(format!("lashlang-host-requirements:v2:blake3:{hash}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -1085,18 +1085,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frozen_old_artifact_decodes_and_verifies() {
-        let artifact = ModuleArtifact::from_store_bytes(
+    fn frozen_sha256_artifact_is_rejected_by_the_blake3_identity_fence() {
+        let error = ModuleArtifact::from_store_bytes(
             include_str!("../tests/fixtures/module-artifact-old.json").as_bytes(),
         )
-        .expect("frozen old artifact should decode");
-        artifact
-            .verify()
-            .expect("frozen old artifact should verify");
-        assert_eq!(
-            artifact.compilation_dialect,
-            crate::CompilationDialect::Lashlang
-        );
+        .expect_err("a SHA-256 artifact must not verify under the BLAKE3 generation");
+        assert!(matches!(error, ModuleArtifactError::HashMismatch { .. }));
+        assert!(error.to_string().contains("lashlang:v2:blake3:"));
     }
 
     #[test]

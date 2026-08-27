@@ -7,7 +7,6 @@ use lashlang::{
     State as FlowState, Value as FlowValue, validate_canonical_messagepack_structure,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::projection::{prune_protected_bindings, prune_reserved_projected_bindings};
 
@@ -293,7 +292,10 @@ fn persist_value_body(
 }
 
 fn leaf_component_key(body: &[u8]) -> String {
-    format!("execution_state/sha256/{:x}", Sha256::digest(body))
+    format!(
+        "execution_state/blake3/{}",
+        lash_sansio::core_support::blake3_domain_hash_hex("lash-rlm-execution-state-leaf/v2", body,)
+    )
 }
 
 #[cfg(test)]
@@ -320,7 +322,7 @@ pub(super) fn measure_snapshot(
             }
             lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
                 let hash = key
-                    .strip_prefix("execution_state/sha256/")
+                    .strip_prefix("execution_state/blake3/")
                     .expect("RLM leaf component key");
                 lash_core::HydratedCheckpointComponent::unchanged(
                     &lash_core::CheckpointComponentDescriptor {

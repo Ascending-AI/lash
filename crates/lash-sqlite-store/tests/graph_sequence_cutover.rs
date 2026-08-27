@@ -32,7 +32,7 @@ async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
         .to_string();
     assert_eq!(
         error,
-        "Error(\"Unsupported lash session schema: this binary supports schema version 44, but the database reports version 41. There is no migration chain — delete the session database and start fresh.\")"
+        "Error(\"Unsupported lash session schema: this binary supports schema version 45, but the database reports version 41. There is no migration chain — delete the session database and start fresh.\")"
     );
     let connection = rusqlite::Connection::open(&path).expect("inspect refused SQLite catalog");
     assert_eq!(

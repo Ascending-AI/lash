@@ -710,39 +710,39 @@ mod effect_group_contract_tests {
         let golden = [
             (
                 "sleep",
-                "d96891003664a61763bb49284f8dd1d0b35a64aa15d01127bb754150b42ecb09",
+                "d40de91326afc4ef26b20013fc5197fa62410ecdf3ea24d9cd5a647494e636b8",
             ),
             (
                 "exec_code",
-                "9ffc0e3ba1eb152f1e60ba4edce481582dd4b8e925862ac97782f19f625f0fee",
+                "f732ad1e1a254c6f4232bbbd16276be45f2d88910eba4d18d1ca3cd4b9f712e4",
             ),
             (
                 "sync_execution_environment",
-                "07a4d4add2e90b0ce01aecd5d0cf974219f83952d3cb690e0a1e74cf7c09243e",
+                "b3c652f6db0337411e0740a6fb92be08b290674316479ea3ef73ab77c28997c4",
             ),
             (
                 "language_runtime_value",
-                "4455bba80fe1d30eef4d39c65f4c3022bce004b3c13ab2e88d1df39f57cae1b9",
+                "a8f991dd43c72316b9c512705cae50a9351fdb5e144910bd586ea37b663a3ef4",
             ),
             (
                 "tool_attempt",
-                "a13d8587fef4c3a19f4ca8b5b2d42e5007ba80b466b130cd6487d6d6ce8832e1",
+                "fc930fc72e8e725e08c30f38dccbe6b77d15f0daf3282fe766c4997c528f1dbf",
             ),
             (
                 "tool_batch",
-                "7430bb8de237ee74cfc8d6e26393af1ef65dc4f0ef22a83ad5d9bd75b1945e5e",
+                "edb08f2ebaea5cf00b0d4002f049d820afb3266c67a26931ec60350835b69912",
             ),
             (
                 "checkpoint",
-                "9502f267e1461eb176dd29da35d919ec9f56fa723b367da6bdd3ea3b038863b7",
+                "a0d8165b0bf9ce83ce3250f9a0d16c33398ec0ddc001da1d759cee3c6e811499",
             ),
             (
                 "await_event",
-                "0ff3f3b752fa9a9407430ccea9f0f9689fc966356f63a55d64524c0f4532d424",
+                "5b23f79fe88d65702391870e2587169752418308f85701054979e07d7bf2238d",
             ),
             (
                 "peek_await_event",
-                "a142ddb9de882b71b028178d4d4cd698256d5029835ad786061a758b384ec3d2",
+                "87723cdf5d8741e9126e14c321b2eee91eac7e3de8d86ea8223847cc050d570d",
             ),
         ];
         let corpus = ungrouped_corpus();

@@ -90,7 +90,7 @@ fn tool_start_and_frame_switch_records_are_jsonl_shaped() {
         TraceEvent::TurnCompleted {
             outcome: TraceTurnOutcome::AgentFrameSwitch {
                 frame_switch: TraceAgentFrameSwitch {
-                    frame_key: "frame-key/v1/example".to_string(),
+                    frame_key: "frame-key/v2/example".to_string(),
                 },
             },
         },
@@ -105,7 +105,7 @@ fn tool_start_and_frame_switch_records_are_jsonl_shaped() {
     assert_eq!(completed_json["outcome"]["status"], "agent_frame_switch");
     assert_eq!(
         completed_json["outcome"]["frame_switch"]["frame_key"],
-        "frame-key/v1/example"
+        "frame-key/v2/example"
     );
 }
 

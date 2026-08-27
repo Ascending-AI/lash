@@ -1096,13 +1096,13 @@ mod tests {
             assert_eq!(
                 without_trace.call_id.as_deref(),
                 Some(
-                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:82541028d85291e9d3275727:1"
+                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:24074777f4d91617b7de1aaf:1"
                 )
             );
             assert_eq!(
                 with_trace.call_id.as_deref(),
                 Some(
-                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:82541028d85291e9d3275727:1"
+                    "lashlang:effect:test-session:turn-7:exec-code-3:resource:tool:continue_as:resource_operation:24074777f4d91617b7de1aaf:1"
                 )
             );
 
@@ -1116,11 +1116,11 @@ mod tests {
             };
             assert_eq!(
                 without_trace_key.as_str(),
-                "frame-key/v1/dcbfa2438c3591445220f0d38a3dd6394513c8b91caedbd391db04d98b3a3b63"
+                "frame-key/v2/36468bb73b95be8fbefc0d063cf60aeb68332484d1b8764e367b68ecbb6ae6a4"
             );
             assert_eq!(
                 with_trace_key.as_str(),
-                "frame-key/v1/dcbfa2438c3591445220f0d38a3dd6394513c8b91caedbd391db04d98b3a3b63"
+                "frame-key/v2/36468bb73b95be8fbefc0d063cf60aeb68332484d1b8764e367b68ecbb6ae6a4"
             );
         });
     }
@@ -2856,7 +2856,7 @@ mod tests {
             assert!(response.error.is_none(), "{:?}", response.error);
 
             let expected_key =
-                "derived/v2/b53772ec2996e72a7fc77c087803dc0dd3e127ccb946d6a9ab585c0a09fb7149";
+                "derived/v3/9956413528fb2c204e9f9941784a6e9d51ef7926b69d3e31e0f20cc493309a4b";
             let (effect_owner_scope, effect_subscription_key) = {
                 let envelopes = controller.envelopes.lock_recover();
                 let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[0].command

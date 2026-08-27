@@ -711,7 +711,9 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
             continue;
         }
         assert!(
-            process.process_id.starts_with("process:lashlang:sha256:"),
+            process
+                .process_id
+                .starts_with("process:lashlang:v2:blake3:"),
             "lashlang process `{}` did not use a deterministic process id",
             process.process_id
         );

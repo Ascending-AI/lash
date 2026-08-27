@@ -14,7 +14,7 @@
 const MAGIC: &[u8] = b"lash-stable-identity";
 
 /// Scheme-wide salt folded into every framed family header.
-pub(crate) const GLOBAL_SALT: u8 = 1;
+pub(crate) const GLOBAL_SALT: u8 = 2;
 
 /// Reserved durable identity family domains. Entries are append-only: retired
 /// families remain reserved so a later projection cannot silently reuse them.
@@ -136,8 +136,8 @@ pub(crate) fn provider_route(
 
 pub(crate) fn rendered_hash(prefix: &str, family_version: u8, preimage: &[u8]) -> String {
     format!(
-        "{prefix}:v{family_version}:sha256:{}",
-        crate::stable_hash::sha256_hex(preimage)
+        "{prefix}:v{family_version}:blake3:{}",
+        crate::stable_hash::blake3_hex("lash-stable-identity/v2", preimage)
     )
 }
 
@@ -164,7 +164,7 @@ mod tests {
 
         assert_eq!(
             hex(&encoder.finish()),
-            "6c6173682d737461626c652d6964656e74697479010700000000000000047465737403010203040102030405060708fffffffffffffffe0000000000000003613a620000000000000002000100010900000000000000020405"
+            "6c6173682d737461626c652d6964656e74697479020700000000000000047465737403010203040102030405060708fffffffffffffffe0000000000000003613a620000000000000002000100010900000000000000020405"
         );
     }
 

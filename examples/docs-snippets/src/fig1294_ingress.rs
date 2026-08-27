@@ -261,7 +261,7 @@ async fn host_ingress_has_typed_identity_dedupe_and_refusals() -> anyhow::Result
     else {
         panic!("forged replay key must be refused")
     };
-    assert!(expected_replay_key.starts_with("tool-intent:v1:sha256:"));
+    assert!(expected_replay_key.starts_with("tool-intent:v1:blake3:"));
     assert_eq!(recorded_replay_key, "forged");
     Ok(())
 }

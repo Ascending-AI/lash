@@ -272,7 +272,7 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
 fn committing_execution_state_leaves_releases_their_resident_bodies() {
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
-    let leaf_key = "execution_state/sha256/aa".to_string();
+    let leaf_key = "execution_state/blake3/aa".to_string();
     let leaf_body = vec![7u8; 4096];
     let mut snapshot = crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root".to_vec()));
     snapshot.changed_component(leaf_key.clone(), leaf_body.clone());
@@ -316,7 +316,7 @@ fn committing_execution_state_leaves_releases_their_resident_bodies() {
 
     // The next turn changes the same logical value: its new leaf body is
     // dirty, so a body discard must leave it alone.
-    let next_leaf_key = "execution_state/sha256/bb".to_string();
+    let next_leaf_key = "execution_state/blake3/bb".to_string();
     let next_leaf_body = vec![9u8; 2048];
     let mut next = crate::plugin::ExecutionStateSnapshot::from_root(Some(b"root-2".to_vec()));
     next.changed_component(next_leaf_key, next_leaf_body.clone());
@@ -336,7 +336,7 @@ fn descriptorless_execution_state_leaves_without_a_root_remain_corrupt() {
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     state.checkpoint_components.entries.insert(
-        "execution_state/sha256/corrupt".to_string(),
+        "execution_state/blake3/corrupt".to_string(),
         ResidentCheckpointComponent {
             descriptor: None,
             body: ResidentCheckpointComponentBody::Opaque(None),

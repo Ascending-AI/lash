@@ -499,18 +499,18 @@ impl SurfaceRunner {
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 0,
-                            replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            replay_key: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                         },
                         kind: lash_core::ToolIntentKind::StartProcess,
                         result: serde_json::json!({
                             "__handle__": "process",
-                            "id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
-                            "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "process_id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                             "kind": "external",
                             "status": "running"
                         }),
                         parent_end: Some(lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            process_id: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         }),
                     },
@@ -520,18 +520,18 @@ impl SurfaceRunner {
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 1,
-                            replay_key: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            replay_key: "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
                         },
                         kind: lash_core::ToolIntentKind::StartProcess,
                         result: serde_json::json!({
                             "__handle__": "process",
-                            "id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
-                            "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "process_id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
                             "kind": "external",
                             "status": "running"
                         }),
                         parent_end: Some(lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            process_id: "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         }),
                     },
@@ -549,10 +549,10 @@ impl SurfaceRunner {
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 0,
-                            replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            replay_key: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                         },
                         parent_end: lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            process_id: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         },
                     },
@@ -562,10 +562,10 @@ impl SurfaceRunner {
                             execution_scope_id: "surface-turn".to_string(),
                             tool_call_id: "surface-intent-call".to_string(),
                             intent_index: 1,
-                            replay_key: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            replay_key: "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
                         },
                         parent_end: lash_core::ToolIntentParentEnd {
-                            process_id: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            process_id: "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
                             policy: lash_core::ProcessParentEndPolicy::Cancel,
                         },
                     },
@@ -660,9 +660,9 @@ impl SurfaceRunner {
                                 execution_scope_id: "surface-turn".to_string(),
                                 tool_call_id: "surface-intent-call".to_string(),
                                 intent_index: 0,
-                                replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                                replay_key: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                             },
-                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            process_id: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                         },
                         lash_core::ToolIntentParentEndOutcome::Cancelled {
                             identity: lash_core::ToolIntentIdentity {
@@ -670,9 +670,9 @@ impl SurfaceRunner {
                                 execution_scope_id: "surface-turn".to_string(),
                                 tool_call_id: "surface-intent-call".to_string(),
                                 intent_index: 0,
-                                replay_key: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                                replay_key: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                             },
-                            process_id: "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
+                            process_id: "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc".to_string(),
                         },
                         lash_core::ToolIntentParentEndOutcome::Cancelled {
                             identity: lash_core::ToolIntentIdentity {
@@ -680,9 +680,9 @@ impl SurfaceRunner {
                                 execution_scope_id: "surface-turn".to_string(),
                                 tool_call_id: "surface-intent-call".to_string(),
                                 intent_index: 1,
-                                replay_key: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                                replay_key: "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
                             },
-                            process_id: "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
+                            process_id: "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0".to_string(),
                         },
                     ]
                 {
@@ -712,7 +712,7 @@ impl SurfaceRunner {
                     .collect::<Vec<_>>();
                 let expected_parent_end_frames = vec![
                     serde_json::json!({
-                        "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc:parent-end:process:parent-end:tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                        "replay_key": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc:parent-end:process:parent-end:tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                         "command": {
                             "op": "parent_end",
                             "identity": {
@@ -720,15 +720,15 @@ impl SurfaceRunner {
                                 "execution_scope_id": "surface-turn",
                                 "tool_call_id": "surface-intent-call",
                                 "intent_index": 0,
-                                "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
+                                "replay_key": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
                             },
-                            "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "process_id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                             "policy": "cancel",
                             "reason": "differential parent ended"
                         }
                     }),
                     serde_json::json!({
-                        "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc:parent-end:process:parent-end:tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                        "replay_key": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc:parent-end:process:parent-end:tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                         "command": {
                             "op": "parent_end",
                             "identity": {
@@ -736,15 +736,15 @@ impl SurfaceRunner {
                                 "execution_scope_id": "surface-turn",
                                 "tool_call_id": "surface-intent-call",
                                 "intent_index": 0,
-                                "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
+                                "replay_key": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
                             },
-                            "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "process_id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                             "policy": "cancel",
                             "reason": "differential parent ended"
                         }
                     }),
                     serde_json::json!({
-                        "replay_key": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0:parent-end:process:parent-end:tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                        "replay_key": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0:parent-end:process:parent-end:tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
                         "command": {
                             "op": "parent_end",
                             "identity": {
@@ -752,9 +752,9 @@ impl SurfaceRunner {
                                 "execution_scope_id": "surface-turn",
                                 "tool_call_id": "surface-intent-call",
                                 "intent_index": 1,
-                                "replay_key": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0"
+                                "replay_key": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0"
                             },
-                            "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "process_id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
                             "policy": "cancel",
                             "reason": "differential parent ended"
                         }
@@ -812,12 +812,12 @@ impl SurfaceRunner {
                 if durable_children
                     != vec![
                         serde_json::json!({
-                            "id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                            "id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                             "input": {"type": "external", "metadata": {"source": "literal-intent-row", "index": 0}},
                             "status": "running"
                         }),
                         serde_json::json!({
-                            "id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                            "id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
                             "input": {"type": "external", "metadata": {"source": "literal-intent-row", "index": 1}},
                             "status": "running"
                         }),
@@ -825,12 +825,12 @@ impl SurfaceRunner {
                     || durable_cancel_events
                         != vec![
                             serde_json::json!({
-                                "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                "process_id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                                 "event_type": "process.cancel_requested",
                                 "payload": {"reason": "differential parent ended"}
                             }),
                             serde_json::json!({
-                                "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                "process_id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
                                 "event_type": "process.cancel_requested",
                                 "payload": {"reason": "differential parent ended"}
                             }),
@@ -871,11 +871,11 @@ impl SurfaceRunner {
                                     {"type": "text", "text": "{\"ok\":true}"},
                                     {
                                         "type": "text",
-                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"status\":\"running\"}]"
+                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc\",\"status\":\"running\"}]"
                                     },
                                     {
                                         "type": "text",
-                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"status\":\"running\"}]"
+                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"process\",\"id\":\"tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"kind\":\"external\",\"process_id\":\"tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0\",\"status\":\"running\"}]"
                                     }
                                 ]
                             },
@@ -888,18 +888,18 @@ impl SurfaceRunner {
                                         "execution_scope_id": "surface-turn",
                                         "tool_call_id": "surface-intent-call",
                                         "intent_index": 0,
-                                        "replay_key": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
+                                        "replay_key": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc"
                                     },
                                     "kind": "start_process",
                                     "result": {
                                         "__handle__": "process",
-                                        "id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
-                                        "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                        "id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                        "process_id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                                         "kind": "external",
                                         "status": "running"
                                     },
                                     "parent_end": {
-                                        "process_id": "tool-intent:v1:sha256:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
+                                        "process_id": "tool-intent:v1:blake3:a4aac0741ba5e493f40f98796fe5103331fcc50d48953086b0d61e7eabbb3dcc",
                                         "policy": "cancel"
                                     }
                                 },
@@ -910,18 +910,18 @@ impl SurfaceRunner {
                                         "execution_scope_id": "surface-turn",
                                         "tool_call_id": "surface-intent-call",
                                         "intent_index": 1,
-                                        "replay_key": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0"
+                                        "replay_key": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0"
                                     },
                                     "kind": "start_process",
                                     "result": {
                                         "__handle__": "process",
-                                        "id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
-                                        "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                        "id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                        "process_id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
                                         "kind": "external",
                                         "status": "running"
                                     },
                                     "parent_end": {
-                                        "process_id": "tool-intent:v1:sha256:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
+                                        "process_id": "tool-intent:v1:blake3:32670235130e12b51f6cfdf25fccd79fd9d7088209b7d6e248702662a1cd56a0",
                                         "policy": "cancel"
                                     }
                                 }
@@ -2188,7 +2188,7 @@ async fn attachment_blob_store_differential_agrees() {
 
 fn raw_file_blobs(root: &Path) -> Vec<(lash_core::AttachmentId, Vec<u8>)> {
     let mut rows = Vec::new();
-    let content_root = root.join("sha256");
+    let content_root = root.join("blake3");
     if !content_root.exists() {
         return rows;
     }

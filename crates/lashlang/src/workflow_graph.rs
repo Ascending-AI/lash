@@ -8,7 +8,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::ast::{
@@ -35,7 +34,7 @@ pub use execution_sites::runtime_execution_site_for_workflow_site;
 pub use facets::*;
 
 /// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 4;
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 5;
 
 /// A deterministic node identifier minted from canonical source and AST position.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -386,7 +385,7 @@ impl<'a> GraphProjector<'a> {
     ) -> Self {
         Self {
             program,
-            source_hash: hex_digest(canonical.as_bytes()),
+            source_hash: hex_digest("lash-workflow-source/v2", canonical.as_bytes()),
             spans: program
                 .expression_source_spans
                 .iter()
@@ -724,7 +723,10 @@ impl<'a> GraphProjector<'a> {
                 .join(".")
         };
         let material = format!("{}\0{owner}\0{path}\0{kind}", self.source_hash);
-        WorkflowNodeId(format!("{kind}:{}", &hex_digest(material.as_bytes())[..24]))
+        WorkflowNodeId(format!(
+            "{kind}:{}",
+            &hex_digest("lash-workflow-node/v2", material.as_bytes())[..24]
+        ))
     }
 }
 
@@ -1396,7 +1398,10 @@ fn edge(from: WorkflowNodeId, to: WorkflowNodeId, kind: WorkflowEdgeKind) -> Wor
     };
     let material = format!("{}\0{}\0{kind_key}", from.as_str(), to.as_str());
     WorkflowEdge {
-        id: format!("edge:{}", &hex_digest(material.as_bytes())[..24]),
+        id: format!(
+            "edge:{}",
+            &hex_digest("lash-workflow-edge/v2", material.as_bytes())[..24]
+        ),
         from,
         to,
         kind,
@@ -1586,8 +1591,8 @@ fn child_path(path: &[u32], child: impl TryInto<u32>) -> Vec<u32> {
     result
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+fn hex_digest(domain: &str, bytes: &[u8]) -> String {
+    lash_sansio::core_support::blake3_domain_hash_hex(domain, bytes)
 }
 
 #[cfg(test)]

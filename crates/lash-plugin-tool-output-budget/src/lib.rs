@@ -2,8 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sha2::{Digest, Sha256};
-
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
     ToolResultProjectionContext,
@@ -540,11 +538,12 @@ fn spill_tool_output(
         return None;
     }
 
-    let mut hasher = Sha256::new();
+    let mut hasher =
+        lash_sansio::core_support::Blake3DomainHasher::new("lash-tool-output-spill/v2");
     hasher.update(tool_name.as_bytes());
     hasher.update(args.to_string().as_bytes());
     hasher.update(full_output.as_bytes());
-    let digest = format!("{:x}", hasher.finalize());
+    let digest = hasher.finalize_hex();
     let stem = tool_name
         .chars()
         .map(|ch| {

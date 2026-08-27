@@ -3,7 +3,6 @@
 
 use crate::config::{UploadedAttachmentCacheKey, UploadedAttachmentRef};
 use crate::support::*;
-use sha2::{Digest, Sha256};
 
 const GEMINI_FILES_UPLOAD_URL: &str =
     "https://generativelanguage.googleapis.com/upload/v1beta/files";
@@ -31,10 +30,10 @@ impl GoogleOAuthProvider {
         media_type: &lash_core::MediaType,
         content_id: &lash_core::AttachmentId,
     ) -> UploadedAttachmentCacheKey {
-        let credential_hash = Sha256::digest(credential_scope_seed.as_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
+        let credential_hash = lash_sansio::core_support::blake3_domain_hash_hex(
+            "lash-google-upload-credential-scope/v2",
+            credential_scope_seed.as_bytes(),
+        );
         UploadedAttachmentCacheKey {
             provider: Self::PROVIDER_KIND,
             credential_scope: format!("{}:{}", credential_hash, project_id.unwrap_or_default()),

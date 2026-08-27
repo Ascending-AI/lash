@@ -22,7 +22,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 14;
+pub const RLM_SNAPSHOT_VERSION: u32 = 15;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

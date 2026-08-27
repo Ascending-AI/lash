@@ -1,5 +1,4 @@
 use lash_sansio::sync::MutexExt;
-use sha2::Digest as _;
 use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;
@@ -460,7 +459,7 @@ impl Session {
 fn tool_catalog_authority_fingerprint(tool_access: &crate::SessionToolAccess) -> [u8; 32] {
     let encoded = serde_json::to_vec(tool_access)
         .expect("SessionToolAccess is composed entirely of serializable authority values");
-    sha2::Sha256::digest(encoded).into()
+    lash_sansio::core_support::blake3_domain_hash("lash-tool-catalog-authority/v2", encoded)
 }
 
 #[cfg(test)]

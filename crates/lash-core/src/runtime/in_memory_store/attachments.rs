@@ -284,7 +284,7 @@ mod attachment_reconciliation_tests {
         crate::AttachmentIntent {
             attachment_id: crate::AttachmentId::parse(id).expect("valid attachment id"),
             session_id: session.to_string(),
-            canonical_uri: format!("lash-attachment://sha256/{id}"),
+            canonical_uri: format!("lash-attachment://blake3/{id}"),
             intent_at_epoch_ms: at_ms,
             owner_kind: None,
             owner_id: None,

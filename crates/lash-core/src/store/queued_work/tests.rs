@@ -845,7 +845,7 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
     assert_eq!(lease.lease_token, again.lease_token);
     assert_eq!(
         lease.lease_token,
-        "1f1c63a8753631156dc9fd52d5493cd8855684f3a28d65dded7f8f1a57c7c48e"
+        "d367bfde39e7d937ecbe2916cb02a5144a7221c318bcdb45aa2939567f176acc"
     );
 }
 

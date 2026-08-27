@@ -1,5 +1,5 @@
+use lash_sansio::core_support::Blake3DomainHasher;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::{ModuleRef, ProcessRef};
 
@@ -196,12 +196,12 @@ impl WorkflowExecutionSite {
 }
 
 fn stable_id(prefix: &str, parts: &[String]) -> String {
-    let mut hasher = Sha256::new();
+    let mut hasher = Blake3DomainHasher::new("lash-lashlang-execution-site/v2");
     for part in parts {
         hasher.update(part.as_bytes());
         hasher.update([0]);
     }
-    let hash = format!("{:x}", hasher.finalize());
+    let hash = hasher.finalize_hex();
     format!("{prefix}:{}", &hash[..24])
 }
 

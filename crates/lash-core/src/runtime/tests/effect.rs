@@ -2008,8 +2008,8 @@ async fn direct_clients_from_one_turn_share_sequential_replay_ordinals() {
         .map(|record| record.replay_key)
         .collect::<Vec<_>>();
     assert_eq!(replay_keys.len(), 2);
-    assert!(replay_keys[0].starts_with("direct:v2:sha256:"));
-    assert!(replay_keys[1].starts_with("direct:v2:sha256:"));
+    assert!(replay_keys[0].starts_with("direct:v2:blake3:"));
+    assert!(replay_keys[1].starts_with("direct:v2:blake3:"));
     assert_ne!(replay_keys[0], replay_keys[1]);
 }
 

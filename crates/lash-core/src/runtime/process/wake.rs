@@ -39,7 +39,7 @@ fn process_wake_id(target_session_id: &str, process_id: &str, sequence: u64) -> 
 pub(super) fn is_process_wake_id(value: &str) -> bool {
     value
         .strip_prefix("wake:v")
-        .and_then(|value| value.split_once(":sha256:"))
+        .and_then(|value| value.split_once(":blake3:"))
         .is_some_and(|(version, digest)| {
             !version.is_empty()
                 && version.bytes().all(|byte| byte.is_ascii_digit())
@@ -147,11 +147,11 @@ mod identity_tests {
         let preimage = process_wake_identity_preimage("session\0x", "process:λ", 42);
         assert_eq!(
             hex(&preimage),
-            "6c6173682d737461626c652d6964656e74697479010100000000000000116c6173682e70726f636573732d77616b65000000000000000973657373696f6e0078000000000000000a70726f636573733acebb000000000000002a"
+            "6c6173682d737461626c652d6964656e74697479020100000000000000116c6173682e70726f636573732d77616b65000000000000000973657373696f6e0078000000000000000a70726f636573733acebb000000000000002a"
         );
         assert_eq!(
             process_wake_id("session\0x", "process:λ", 42),
-            "wake:v1:sha256:d0ffae31aa4049177a4803af2cd3609c766e5d95e841239523f6e942619fac87"
+            "wake:v1:blake3:81131142482e7a7371fbfa4ca163e15ad0f4e0b1eae3436b475176426ec223d1"
         );
     }
 }

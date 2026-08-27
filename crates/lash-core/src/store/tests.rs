@@ -265,7 +265,7 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 fn intent_hash_golden_vector() {
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "a29052d6d60cb1d126fe8a34ba073bd390830f1cc5540a01926f1236ab354e81"
+        "7e5b11079818497ba41093c8df1e14a1351db03a19580218e3bf4622f425c5cf"
     );
 }
 
@@ -335,7 +335,7 @@ fn node_id_golden_vector() {
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     assert_eq!(
         derive_history_node_id("golden-session", &operation, 3).expect("golden node"),
-        "n_38b8d1d55ece31f85383dbdbba3e0d2dfa134bc6f9c9b7ada0847479edf63280"
+        "n_f49e2d5bb98b94bf5530b52f34bf226d1742ed60a999302b542abf50a8d030c6"
     );
 }
 
@@ -343,7 +343,7 @@ fn node_id_golden_vector() {
 fn frame_node_id_golden_vector() {
     assert_eq!(
         crate::frame_node_id("golden-session", "frame-42").as_str(),
-        "frame-node/v2/dea90a18d10331ef6adf1493fb73edb50b45b8e51d375e4d524524928cfa18bc"
+        "frame-node/v3/591a075378ab921fd73a0a4d1825ab1ebf32830427f41c332a3ae6807305c128"
     );
 }
 

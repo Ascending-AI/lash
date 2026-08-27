@@ -204,6 +204,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayvec"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+
+[[package]]
 name = "ast_node"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -392,6 +398,19 @@ name = "bitflags"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
+
+[[package]]
+name = "blake3"
+version = "1.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
+dependencies = [
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures 0.3.0",
+]
 
 [[package]]
 name = "block-buffer"
@@ -689,6 +708,12 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "core-foundation"
@@ -2087,7 +2112,6 @@ dependencies = [
  "lash-internal-trace",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -2167,9 +2191,9 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-internal-core",
  "lash-internal-protocol-standard",
+ "lash-internal-sansio",
  "serde",
  "serde_json",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -2220,7 +2244,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
  "syn 2.0.118",
  "thiserror 2.0.18",
  "tokio",
@@ -2295,7 +2318,6 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tokio",
  "uuid",
 ]
@@ -2318,7 +2340,6 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -2402,12 +2423,12 @@ dependencies = [
 name = "lash-internal-sansio"
 version = "0.0.0-dev"
 dependencies = [
+ "blake3",
  "jsonschema",
  "proptest",
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -2427,7 +2448,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tokio-rusqlite",
@@ -2633,7 +2653,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",

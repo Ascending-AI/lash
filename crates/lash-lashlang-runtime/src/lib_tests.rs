@@ -175,7 +175,7 @@ fn process_input_remote_helpers_use_generic_engine_and_identity() {
     let draft = input
         .remote_trigger_subscription_draft(
             "button-main",
-            "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .parse()
                 .expect("canonical env ref"),
             "ui.button.pressed",
@@ -509,7 +509,7 @@ fn deterministic_process_id_reuses_replayed_start_site_and_args() {
         .expect("process id derives");
 
     assert_eq!(first, second);
-    assert!(first.starts_with("process:lashlang:sha256:"));
+    assert!(first.starts_with("process:lashlang:v2:blake3:"));
 }
 
 #[test]

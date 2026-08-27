@@ -5060,7 +5060,7 @@ async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             process_record_bytes,
-            br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-process-cmd\",\"kind\":\"process\"},\"replay\":{\"key\":\"fig1767-process-cmd\"}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"c282f7946c2d914f62cc9d3494999c640754549700179d2df1dd31a78450da5e"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
+            br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-process-cmd\",\"kind\":\"process\"},\"replay\":{\"key\":\"fig1767-process-cmd\"}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"parent_end\",\"identity\":{\"session_id\":\"fig1767\",\"execution_scope_id\":\"scope\",\"tool_call_id\":\"call\",\"intent_index\":0,\"replay_key\":\"key\"},\"process_id\":\"fig1767-proc\",\"policy\":\"cancel\",\"reason\":\"fig1767-test\"}}}","hash":"5835270dc6c0d47c9127a1a10a99091198b46c65364b8882a6536e600b41bcc3"},"outcome":{"Ok":{"type":"process","result":{"op":"parent_end","outcome":{"status":"refused","identity":{"session_id":"fig1767","execution_scope_id":"scope","tool_call_id":"call","intent_index":0,"replay_key":"key"},"process_id":"fig1767-proc","code":"plugin","message":"unknown process `fig1767-proc`"}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -5111,7 +5111,7 @@ async fn fig1767_journal_entry_byte_sequence_equality() {
     );
     assert_eq!(
         batch_record_bytes,
-        br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-tool-batch\",\"kind\":\"tool_batch\"},\"replay\":{\"key\":\"fig1767-tool-batch\"}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"fig1767-batch\",\"calls\":[{\"call\":{\"call_id\":\"call-1\",\"tool_id\":\"tool:tool\",\"tool_name\":\"tool\",\"args\":{}},\"replay_suffix\":\"child:0:call-1\"}]}}}","hash":"053953e6fdac9aa935e9ca8c4b79bb6d7457792445c864505ca308bfffe7a3c6"},"outcome":{"Ok":{"type":"tool_batch","launches":[],"settlement_order":[]}}}"##,
+        br##"{"envelope":{"json":"{\"invocation\":{\"scope\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"fig1767-tool-batch\",\"kind\":\"tool_batch\"},\"replay\":{\"key\":\"fig1767-tool-batch\"}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"fig1767-batch\",\"calls\":[{\"call\":{\"call_id\":\"call-1\",\"tool_id\":\"tool:tool\",\"tool_name\":\"tool\",\"args\":{}},\"replay_suffix\":\"child:0:call-1\"}]}}}","hash":"0bf2599c0b0e7a6f1d853291fe89fd801d018c76bc12e25fb5e48a0632777a38"},"outcome":{"Ok":{"type":"tool_batch","launches":[],"settlement_order":[]}}}"##,
         "tool batch recorded effect golden bytes changed"
     );
     assert_eq!(
@@ -9540,8 +9540,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                 serde_json::json!({
                     "__handle__": "process",
                     "done": false,
-                    "id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
-                    "process_id": "tool-intent:v1:sha256:d12cb7271490769b5b5c5ab863c95b415580cebaba0d2e7dadb13f23ebc4b9ae",
+                    "id": "tool-intent:v1:blake3:38fe75a23e6a480ef35585ffe4f231bc3df10b2626da8f6da26740b0bfb715ea",
+                    "process_id": "tool-intent:v1:blake3:38fe75a23e6a480ef35585ffe4f231bc3df10b2626da8f6da26740b0bfb715ea",
                     "running": true,
                     "status": "running",
                 }),
@@ -9551,8 +9551,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
                 serde_json::json!({
                     "__handle__": "process",
                     "done": true,
-                    "id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
-                    "process_id": "tool-intent:v1:sha256:18bd210d837d743200aea291e68d5c8769976320090c8ab5680b4683ded5a3ac:detached",
+                    "id": "tool-intent:v1:blake3:46535e8757014700cdfcf2a2bab0a5fa1bb0c7f170326057729832f833347f55:detached",
+                    "process_id": "tool-intent:v1:blake3:46535e8757014700cdfcf2a2bab0a5fa1bb0c7f170326057729832f833347f55:detached",
                     "running": false,
                     "status": "detached",
                 }),
@@ -9905,7 +9905,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             }))
             .collect::<Vec<_>>(),
         vec![serde_json::json!({
-            "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d:parent-end:process:parent-end:tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+            "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b:parent-end:process:parent-end:tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
             "command": {
                 "type": "process",
                 "command": {
@@ -9915,9 +9915,9 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                         "execution_scope_id": "restate-parent-end-turn-1",
                         "tool_call_id": "restate-parent-end-call",
                         "intent_index": 0,
-                        "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d"
+                        "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b"
                     },
-                    "process_id": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                    "process_id": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
                     "policy": "cancel",
                     "reason": "recorded start intent parent ended with cancel policy"
                 }
@@ -9976,9 +9976,9 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                 execution_scope_id: "restate-parent-end-turn-1".to_string(),
                 tool_call_id: "restate-parent-end-call".to_string(),
                 intent_index: 0,
-                replay_key: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+                replay_key: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
             },
-            process_id: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+            process_id: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
         }]
     );
     assert_eq!(
@@ -10049,26 +10049,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
         literal_parent_end_frames,
         vec![
             serde_json::json!({
-                "replay_key": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c:parent-end:process:parent-end:tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c",
-                "command": {
-                    "type": "process",
-                    "command": {
-                        "op": "parent_end",
-                        "identity": {
-                            "session_id": "restate-parent-end-replay",
-                            "execution_scope_id": "restate-parent-end-turn-1",
-                            "tool_call_id": "restate-parent-end-call",
-                            "intent_index": 1,
-                            "replay_key": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c"
-                        },
-                        "process_id": "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c",
-                        "policy": "cancel",
-                        "reason": "recorded start intent parent ended with cancel policy"
-                    }
-                }
-            }),
-            serde_json::json!({
-                "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d:parent-end:process:parent-end:tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b:parent-end:process:parent-end:tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
                 "command": {
                     "type": "process",
                     "command": {
@@ -10078,9 +10059,28 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                             "execution_scope_id": "restate-parent-end-turn-1",
                             "tool_call_id": "restate-parent-end-call",
                             "intent_index": 0,
-                            "replay_key": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d"
+                            "replay_key": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b"
                         },
-                        "process_id": "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d",
+                        "process_id": "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b",
+                        "policy": "cancel",
+                        "reason": "recorded start intent parent ended with cancel policy"
+                    }
+                }
+            }),
+            serde_json::json!({
+                "replay_key": "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4:parent-end:process:parent-end:tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4",
+                "command": {
+                    "type": "process",
+                    "command": {
+                        "op": "parent_end",
+                        "identity": {
+                            "session_id": "restate-parent-end-replay",
+                            "execution_scope_id": "restate-parent-end-turn-1",
+                            "tool_call_id": "restate-parent-end-call",
+                            "intent_index": 1,
+                            "replay_key": "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4"
+                        },
+                        "process_id": "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4",
                         "policy": "cancel",
                         "reason": "recorded start intent parent ended with cancel policy"
                     }
@@ -10122,20 +10122,20 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
                     session_id: "restate-parent-end-replay".to_string(),
                     execution_scope_id: "restate-parent-end-turn-1".to_string(),
                     tool_call_id: "restate-parent-end-call".to_string(),
-                    intent_index: 1,
-                    replay_key: "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c".to_string(),
+                    intent_index: 0,
+                    replay_key: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
                 },
-                process_id: "tool-intent:v1:sha256:86bea9a96b9f63fecf1a6a7c5bde6c1222dee41b6cf511413f3309a01df9af7c".to_string(),
+                process_id: "tool-intent:v1:blake3:0db47b73e2ba8223dd40be905e92d24ca364c99c2e6dada35453db15707e601b".to_string(),
             },
             lash_core::ToolIntentParentEndOutcome::Cancelled {
                 identity: lash_core::ToolIntentIdentity {
                     session_id: "restate-parent-end-replay".to_string(),
                     execution_scope_id: "restate-parent-end-turn-1".to_string(),
                     tool_call_id: "restate-parent-end-call".to_string(),
-                    intent_index: 0,
-                    replay_key: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+                    intent_index: 1,
+                    replay_key: "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4".to_string(),
                 },
-                process_id: "tool-intent:v1:sha256:aed2b39895a632b1e3f05b495f23810921cfa9b446cea68dc924c868562d4a7d".to_string(),
+                process_id: "tool-intent:v1:blake3:38e45eac3bf722392e41f2a27b147edd9a89747eab7c6a45369ae6b313ed3cf4".to_string(),
             },
         ]
     );

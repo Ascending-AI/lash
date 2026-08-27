@@ -36,7 +36,8 @@ impl CanonicalRuntimeEffectEnvelope {
                 format!("failed to serialize runtime effect envelope: {err}"),
             )
         })?;
-        let hash = crate::stable_hash::sha256_hex(json.as_bytes());
+        let hash =
+            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v2", json.as_bytes());
         Ok(Self { json, hash })
     }
 
@@ -60,7 +61,8 @@ impl CanonicalRuntimeEffectEnvelope {
     }
 
     fn verify(&self, side: &str) -> Result<(), RuntimeEffectControllerError> {
-        let actual = crate::stable_hash::sha256_hex(self.json.as_bytes());
+        let actual =
+            crate::stable_hash::blake3_hex("lash-runtime-effect-envelope/v2", self.json.as_bytes());
         if actual == self.hash {
             return Ok(());
         }

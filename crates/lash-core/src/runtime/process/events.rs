@@ -827,11 +827,11 @@ mod cancellation_identity_tests {
         );
         assert_eq!(
             key,
-            "process-cancellation:v1:sha256:7425a370ae338e834838427bafeae1ecedd7a7e2ed75d2b69e53572e2fc556b2"
+            "process-cancellation:v1:blake3:77db45e3a150a0d172e3d62585d286d98911baec6f414a627ec260b317cde22a"
         );
         assert_eq!(
             hex(&cancellation_replay_preimage("process\0id", None)),
-            "6c6173682d737461626c652d6964656e74697479010100000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d72657175657374000000000000000a70726f6365737300696400"
+            "6c6173682d737461626c652d6964656e74697479020100000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d72657175657374000000000000000a70726f6365737300696400"
         );
         assert_ne!(
             cancellation_replay_key("process\0id", None),

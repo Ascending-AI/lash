@@ -436,7 +436,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// Version 44 folds the two pending observer-intent encodings into one
 /// attributed table and removes the relation-wrapper depth counter. Version 43
 /// is migrated forward in place; older stores remain recreate-only.
-pub(crate) const SCHEMA_VERSION: i32 = 44;
+/// Version 45 switches content and semantic identities to domain-tagged BLAKE3.
+/// Existing stores are rejected rather than reinterpreting SHA-256 rows.
+pub(crate) const SCHEMA_VERSION: i32 = 45;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -666,7 +668,8 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 // payload includes the required per-turn budget.
 // Version 23 indexes the bounded non-terminal recovery worklist by process id.
 // Version 24 durably retains pending process-parent teardown beside terminal completion.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 24;
+// Version 25 switches durable process identities to domain-tagged BLAKE3.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 25;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -741,7 +744,8 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // Version 5 stores v3 process-environment refs and the resulting trigger
 // definition fingerprints after the required per-turn budget cutover.
 // Version 6 durably arms occurrence reclaim eligibility at fan-out terminality.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 6;
+// Version 7 switches durable trigger identities to domain-tagged BLAKE3.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 7;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
@@ -872,7 +876,8 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // version guard's projection elides a *new* index statement but not the SQL
 // comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
 // bump the carve-out exists to avoid.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 13;
+// Version 14 switches durable effect identities to domain-tagged BLAKE3.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 14;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -978,6 +983,8 @@ fn prepare_versioned_schema<'connection>(
         tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);
     }
+    // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
+    // unreachable for production opens now that SCHEMA_VERSION is 45.
     if database_kind == "session" && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(schema)?;
@@ -1037,9 +1044,9 @@ mod observer_intent_migration_tests {
     use super::*;
 
     #[test]
-    fn component_43_folds_layer_and_fork_intents_with_attribution() {
+    fn historical_component_43_to_44_migration_stays_pinned() {
         let mut connection = Connection::open_in_memory().expect("open migration fixture");
-        prepare_versioned_schema(&mut connection, "session", SCHEMA, SCHEMA_VERSION)
+        prepare_versioned_schema(&mut connection, "session", SCHEMA, 44)
             .expect("create current fixture")
             .commit()
             .expect("commit current fixture");
@@ -1075,7 +1082,7 @@ mod observer_intent_migration_tests {
             )
             .expect("build component-43 observer-intent fixture");
 
-        prepare_versioned_schema(&mut connection, "session", SCHEMA, SCHEMA_VERSION)
+        prepare_versioned_schema(&mut connection, "session", SCHEMA, 44)
             .expect("migrate component 43")
             .commit()
             .expect("commit component-44 migration");

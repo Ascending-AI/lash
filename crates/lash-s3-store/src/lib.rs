@@ -165,7 +165,7 @@ impl S3AttachmentStore {
         }
     }
 
-    /// Flat, content-addressed key for a blob: `<prefix>/sha256/<first2>/<hash>`.
+    /// Flat, content-addressed key for a blob: `<prefix>/blake3/<first2>/<hash>`.
     /// No session namespace — identical bytes from any session share one object.
     fn content_path(&self, id: GuardedAttachmentId<'_>) -> Result<Path, AttachmentStoreError> {
         let hash = id.as_str();
@@ -175,7 +175,7 @@ impl S3AttachmentStore {
             path.push_str(prefix);
             path.push('/');
         }
-        path.push_str("sha256/");
+        path.push_str("blake3/");
         path.push_str(first);
         path.push('/');
         path.push_str(hash);
@@ -191,7 +191,7 @@ impl S3AttachmentStore {
             path.push_str(prefix);
             path.push('/');
         }
-        path.push_str("sha256");
+        path.push_str("blake3");
         Path::parse(path).map_err(|err| {
             AttachmentStoreError::Backend(format!("invalid S3 attachment list prefix: {err}"))
         })
@@ -481,7 +481,7 @@ mod tests {
         // attachment-id length bound.
         object_store
             .put(
-                &Path::from(format!("skip/sha256/zz/{}", "z".repeat(200))),
+                &Path::from(format!("skip/blake3/zz/{}", "z".repeat(200))),
                 object_store::PutPayload::from_static(b"not an attachment"),
             )
             .await

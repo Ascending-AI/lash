@@ -109,7 +109,10 @@ pub use usage_activity::*;
 // disposition. Older peers would silently apply the legacy defer policy.
 // Bumped to 47: one generic envelope owns the remote protocol version instead
 // of duplicating it across each request, response, and nested body.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 48;
+// Bumped to 48: every physical turn begins with a `turn_started` activity.
+// Bumped to 49: process-environment refs move to the domain-tagged BLAKE3 v4
+// identity family. Exact-version negotiation rejects SHA-256-era peers.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 49;
 
 /// One versioned remote-protocol message.
 ///

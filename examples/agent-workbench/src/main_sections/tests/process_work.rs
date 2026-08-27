@@ -443,7 +443,7 @@ mod process_work_tests {
             .expect("derive process execution environment identity");
         let execution_env_digest = execution_env_ref
             .as_str()
-            .strip_prefix("process-env:v3:sha256:")
+            .strip_prefix("process-env:v4:blake3:")
             .expect("process execution environment uses the v3 identity family");
         assert_eq!(execution_env_digest.len(), 64);
         assert!(execution_env_digest
@@ -513,8 +513,8 @@ mod process_work_tests {
         assert!(record.outcome.is_none());
         let registration_digest = record
             .registration_fingerprint
-            .strip_prefix("process-registration-definition:v2:sha256:")
-            .expect("process registration uses the v2 definition-fingerprint family");
+            .strip_prefix("process-registration-definition:v2:blake3:")
+            .expect("process registration uses the v2 BLAKE3 definition-fingerprint family");
         assert_eq!(registration_digest.len(), 64);
         assert!(registration_digest
             .bytes()

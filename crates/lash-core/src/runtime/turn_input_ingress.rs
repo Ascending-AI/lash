@@ -1,9 +1,8 @@
 use crate::{CheckpointKind, PluginMessage, TurnCause, TurnInput};
-use sha2::{Digest, Sha256};
 
 /// Mint a newly created pending turn-input ID from explicit deterministic facts.
 ///
-/// The stable format is `ti:<sha256-hex>`, where the digest input remains the
+/// The stable format is `ti:<blake3-hex>`, where the digest input remains the
 /// FIG-886 continuity seed
 /// `{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}`. Callers must supply a
 /// `(now_epoch_ms, nonce)` pair unique per `(session_id, source_key)` across
@@ -17,8 +16,11 @@ pub fn derive_pending_turn_input_id(
     nonce: u64,
 ) -> String {
     format!(
-        "ti:{:x}",
-        Sha256::digest(format!("{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}").as_bytes())
+        "ti:{}",
+        crate::stable_hash::blake3_hex(
+            "lash-turn-input/v2",
+            format!("{session_id}:{source_key:?}:{now_epoch_ms}:{nonce}").as_bytes(),
+        )
     )
 }
 
@@ -948,7 +950,7 @@ mod tests {
     fn pending_turn_input_id_mint_preserves_the_fig_886_format() {
         assert_eq!(
             derive_pending_turn_input_id("session", Some("source"), 123, 7),
-            "ti:57f04cf281275e1916bcbbb9b8541466110f642648709b4b45bb3d6bfcf68698"
+            "ti:f876d5a24aeb836217de2df548afda96b5194380cfb630d3a4ececf306ec20eb"
         );
         assert_ne!(
             derive_pending_turn_input_id("session", Some("source"), 123, 7),

@@ -296,9 +296,9 @@ fn draft_node_ids_are_opaque_distinct_and_ignore_message_ids() {
     let plugin_id = graph.append_plugin("example", serde_json::json!({"ok": true}));
 
     assert_ne!(message_id, "m1");
-    assert!(message_id.starts_with("draft-node/v2/"));
-    assert!(protocol_id.starts_with("draft-node/v2/"));
-    assert!(plugin_id.starts_with("draft-node/v2/"));
+    assert!(message_id.starts_with("draft-node/v3/"));
+    assert!(protocol_id.starts_with("draft-node/v3/"));
+    assert!(plugin_id.starts_with("draft-node/v3/"));
     assert_ne!(message_id, protocol_id);
     assert_ne!(protocol_id, plugin_id);
 }
@@ -701,7 +701,7 @@ fn graph_writers_keep_payload_kind_out_of_draft_identity() {
     graph.append_plugin("example", serde_json::json!({"ok": true}));
 
     for node in &graph.nodes {
-        assert!(node.node_id.starts_with("draft-node/v2/"), "{:?}", node);
+        assert!(node.node_id.starts_with("draft-node/v3/"), "{:?}", node);
     }
 }
 

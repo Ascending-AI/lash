@@ -1305,7 +1305,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 message: error.to_string(),
             }
         })?;
-        let checkpoint_ref = crate::BlobRef(crate::stable_hash::sha256_hex(&checkpoint_bytes));
+        let checkpoint_ref = crate::BlobRef::for_content(&checkpoint_bytes);
         let (
             staged_queued_work,
             staged_wake_redelivery_fences,

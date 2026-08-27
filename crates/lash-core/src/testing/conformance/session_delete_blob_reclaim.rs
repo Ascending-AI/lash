@@ -2,7 +2,6 @@
 
 use super::session_store_factory::session_store_request;
 use super::*;
-use sha2::Digest as _;
 
 /// Backend observation and fault seam for the session-delete blob laws.
 ///
@@ -147,7 +146,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
     let aliased = committed_checkpoint(factory, aliased_session_id).await;
     let aliased_root_bytes = encoded_checkpoint_manifest(&aliased.manifest);
     assert_eq!(
-        crate::BlobRef(format!("{:x}", sha2::Sha256::digest(&aliased_root_bytes))),
+        crate::BlobRef::for_content(&aliased_root_bytes),
         aliased.checkpoint_ref,
         "the law must reproduce the backend's checkpoint-root content address"
     );
@@ -182,10 +181,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
                 .checkpoint
                 .manifest()
                 .expect("project dependent root");
-            let root = crate::BlobRef(format!(
-                "{:x}",
-                sha2::Sha256::digest(encoded_checkpoint_manifest(&manifest))
-            ));
+            let root = crate::BlobRef::for_content(&encoded_checkpoint_manifest(&manifest));
             (aliased.checkpoint_ref.as_str() < root.as_str()).then_some(root)
         })
         .expect("find a dependent checkpoint root that sorts after its aliased component root");
