@@ -306,6 +306,78 @@ impl CommitAdmissionCoordinator {
 
 static PROCESS_COMMIT_ADMISSION: OnceLock<CommitAdmissionCoordinator> = OnceLock::new();
 
+pub(super) fn record_product_commit_admission(
+    path: &'static str,
+    session_id: &str,
+    work_identity: &str,
+    waited: Duration,
+    queue_depth: usize,
+) {
+    tracing::debug!(
+        path,
+        session_id,
+        work_identity,
+        waited_nanos = waited.as_nanos().min(u128::from(u64::MAX)) as u64,
+        queue_depth = queue_depth as u64,
+        event = "commit_admission.product_path",
+        "product commit path entered after same-session admission"
+    );
+    #[cfg(test)]
+    product_observations()
+        .lock_recover()
+        .entry(session_id.to_string())
+        .or_default()
+        .push(ProductCommitAdmissionObservation {
+            path,
+            work_identity: work_identity.to_string(),
+            waited,
+            queue_depth,
+        });
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ProductCommitAdmissionObservation {
+    pub(super) path: &'static str,
+    pub(super) work_identity: String,
+    pub(super) waited: Duration,
+    pub(super) queue_depth: usize,
+}
+
+#[cfg(test)]
+fn product_observations() -> &'static Mutex<HashMap<String, Vec<ProductCommitAdmissionObservation>>>
+{
+    static OBSERVATIONS: OnceLock<Mutex<HashMap<String, Vec<ProductCommitAdmissionObservation>>>> =
+        OnceLock::new();
+    OBSERVATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+pub(super) fn take_product_commit_admission_observations(
+    session_id: &str,
+) -> Vec<ProductCommitAdmissionObservation> {
+    product_observations()
+        .lock_recover()
+        .remove(session_id)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+pub(super) fn process_commit_admission_queue_depth(session_id: &str) -> usize {
+    PROCESS_COMMIT_ADMISSION
+        .get()
+        .and_then(|coordinator| {
+            coordinator
+                .inner
+                .state
+                .lock_recover()
+                .sessions
+                .get(session_id)
+                .map(|session| session.waiters.len())
+        })
+        .unwrap_or_default()
+}
+
 /// Run one head-advancing attempt after process-wide FIFO admission.
 ///
 /// `attempt` is not invoked until this claim owns the session, so its durable

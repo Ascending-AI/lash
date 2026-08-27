@@ -1888,6 +1888,29 @@ impl crate::runtime::RuntimeTurnPhaseProbe for PauseAtPreparedTurn {
     fn end(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
 }
 
+struct PauseFirstProductCommitAttempt {
+    entered: Arc<AtomicBool>,
+    release: Arc<AtomicBool>,
+    attempts: AtomicUsize,
+}
+
+impl crate::runtime::RuntimeTurnPhaseProbe for PauseFirstProductCommitAttempt {
+    fn begin(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn end(&self, _phase: crate::runtime::RuntimeTurnPhase) {}
+
+    fn begin_named(&self, phase: &str) {
+        if phase == "commit_admission.product_attempt"
+            && self.attempts.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            self.entered.store(true, Ordering::SeqCst);
+            while !self.release.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+        }
+    }
+}
+
 struct PauseAfterEffectLoop {
     entered: Arc<AtomicBool>,
     release: Arc<AtomicBool>,
@@ -7188,6 +7211,122 @@ async fn idle_queued_work_claim_lease_expiry_surfaces_session_execution_lease_lo
         .expect_err("expired idle queued-work claim lease must fail as lease lost");
 
     assert_eq!(err.code, crate::RuntimeErrorCode::SessionExecutionLeaseLost);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_real_turn_commits_record_product_admission_waits() {
+    let session_id = "root";
+    let _ =
+        crate::runtime::commit_admission::take_product_commit_admission_observations(session_id);
+    let clock = Arc::new(ManualClock::new(1_000));
+    let store_clock: Arc<dyn crate::Clock> = clock.clone();
+    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let build_runtime = |answer: &'static str| {
+        let transport = mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: answer.to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        }]);
+        let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+        let host_clock: Arc<dyn crate::Clock> = clock.clone();
+        async move {
+            runtime_with_plugins_and_tools_and_host_and_store(
+                Vec::new(),
+                Arc::new(EmptyTools),
+                transport,
+                crate::EmbeddedRuntimeHost::new(
+                    crate::RuntimeHostConfig::in_memory(
+                        crate::CommitBudget::bounded(1024 * 1024, 512),
+                        crate::QueuedWorkBatchingConfig::new(1),
+                    )
+                    .with_clock(host_clock),
+                ),
+                runtime_store,
+            )
+            .await
+        }
+    };
+    let mut first_runtime = build_runtime("first committed turn").await;
+    let mut second_runtime = build_runtime("second stale turn").await;
+    let entered = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let probe = Arc::new(PauseFirstProductCommitAttempt {
+        entered: Arc::clone(&entered),
+        release: Arc::clone(&release),
+        attempts: AtomicUsize::new(0),
+    });
+    first_runtime.set_turn_phase_probe(probe.clone());
+    second_runtime.set_turn_phase_probe(probe);
+
+    let first = crate::task::spawn(async move {
+        first_runtime
+            .run_turn_assembled(
+                TurnInput::text("first concurrent commit"),
+                CancellationToken::new(),
+                named_turn_scope(session_id, "product-admission-first"),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !entered.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first real turn entered the admitted product commit attempt");
+
+    // Let a second same-process runtime take over the advisory execution lease
+    // while the first remains current at the store head. This reaches two real
+    // final-commit attempts without weakening the store CAS authority.
+    clock.advance_ms(crate::LeaseTimings::default().ttl_ms() + 1);
+    let second = crate::task::spawn(async move {
+        second_runtime
+            .run_turn_assembled(
+                TurnInput::text("second concurrent commit"),
+                CancellationToken::new(),
+                named_turn_scope(session_id, "product-admission-second"),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while crate::runtime::commit_admission::process_commit_admission_queue_depth(session_id)
+            == 0
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("second real turn queued behind product commit admission");
+    release.store(true, Ordering::SeqCst);
+
+    let first_result = first.await.expect("first product turn task");
+    let second_result = second.await.expect("second product turn task");
+    assert!(
+        first_result.is_ok() || second_result.is_ok(),
+        "one admitted real turn must advance the store head: first={first_result:?}, second={second_result:?}"
+    );
+    assert!(
+        first_result.is_err() || second_result.is_err(),
+        "the stale/superseded real turn must still be refused by durable authority"
+    );
+
+    let observations =
+        crate::runtime::commit_admission::take_product_commit_admission_observations(session_id);
+    assert!(
+        observations.iter().any(|observation| {
+            observation.path == "turn_final_commit"
+                && observation.work_identity == "product-admission-second"
+                && observation.queue_depth > 0
+                && !observation.waited.is_zero()
+        }),
+        "real runtime turn commits must record a nonzero product admission wait: {observations:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

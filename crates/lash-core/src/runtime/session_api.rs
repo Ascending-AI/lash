@@ -591,8 +591,13 @@ impl LashRuntime {
                 batch_id: format!("inline-command:{}", uuid::Uuid::new_v4()),
                 source_key,
             };
-            self.apply_session_command(vec![command], None, None)
-                .await?;
+            self.apply_session_command(
+                vec![command],
+                None,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
         self.persist_materialized_protocol_config()
@@ -807,6 +812,18 @@ impl LashRuntime {
         &mut self,
         session_execution_lease: &crate::SessionExecutionLeaseAuthority,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
+        self.drain_next_session_command_with_cancellation(
+            session_execution_lease,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub(super) async fn drain_next_session_command_with_cancellation(
+        &mut self,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
         let Some(store) = self
             .session
@@ -854,12 +871,69 @@ impl LashRuntime {
             commands,
             Some(claim.completion()),
             Some(session_execution_lease),
+            cancellation,
         )
         .await?;
         Ok(receipts.into_iter().next())
     }
 
     async fn apply_session_command(
+        &mut self,
+        commands: Vec<crate::SessionCommand>,
+        completion: Option<crate::QueuedWorkCompletion>,
+        session_execution_lease: Option<&crate::SessionExecutionLeaseAuthority>,
+        cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        let has_durable_store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+            .is_some();
+        if !has_durable_store {
+            return self
+                .apply_session_command_after_admission(
+                    commands,
+                    completion,
+                    session_execution_lease,
+                )
+                .await;
+        }
+        let session_id = self.state.session_id.clone();
+        let work_identity = completion
+            .as_ref()
+            .map(|completion| completion.claim_id.clone())
+            .unwrap_or_else(|| "inline-session-command".to_string());
+        let result: Result<(), RuntimeCommitAdmissionError> =
+            super::run_head_advancing_commit_attempt(
+                session_id.clone(),
+                work_identity.clone(),
+                cancellation,
+                move |waited, queue_depth| async move {
+                    super::commit_admission::record_product_commit_admission(
+                        "session_command_commit",
+                        &session_id,
+                        &work_identity,
+                        waited,
+                        queue_depth,
+                    );
+                    let _product_commit_phase = super::RuntimeNamedPhase::begin(
+                        self.turn_phase_probe.clone(),
+                        "commit_admission.product_attempt",
+                    );
+                    self.apply_session_command_after_admission(
+                        commands,
+                        completion,
+                        session_execution_lease,
+                    )
+                    .await
+                    .map_err(RuntimeCommitAdmissionError)
+                },
+            )
+            .await;
+        result.map_err(|error| error.0)
+    }
+
+    async fn apply_session_command_after_admission(
         &mut self,
         commands: Vec<crate::SessionCommand>,
         completion: Option<crate::QueuedWorkCompletion>,
@@ -955,6 +1029,14 @@ impl LashRuntime {
             self.state = next_state;
         }
         Ok(())
+    }
+}
+
+struct RuntimeCommitAdmissionError(RuntimeError);
+
+impl From<crate::StoreError> for RuntimeCommitAdmissionError {
+    fn from(error: crate::StoreError) -> Self {
+        Self(super::runtime_error_from_store_commit(error))
     }
 }
 
