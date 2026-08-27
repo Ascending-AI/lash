@@ -66,9 +66,9 @@ pub use lash_core::facade_support::{
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, DrainMode,
-    DrainModePolicy, EffectReplayOwnership, FrameKey, InputItem, LlmCallRecord, ModelLimits,
-    ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    DrainModePolicy, FrameKey, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec,
+    ModelSpecBuilder, NoProgressBudget, PendingTurnInput, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, QueuedDrainCandidate, QueuedDrainPolicy,
     QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, QueuedWorkClaimRefusal,
     Resolution, ResolveOutcome, SessionCreateRequest, SessionError, SessionListFilter,
@@ -723,12 +723,11 @@ pub mod durability {
         ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
-        EffectHost, EffectJournalAddressing, WorkerProcessWork,
-        facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
-        facade_support::InlineEffectHost, facade_support::LeaseTimings,
-        facade_support::LeaseTimingsError, facade_support::ProcessDrainReport,
-        facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig,
-        facade_support::TerminationPolicy,
+        EffectHost, WorkerProcessWork, facade_support::DurableProcessWorker,
+        facade_support::DurableProcessWorkerConfig, facade_support::InlineEffectHost,
+        facade_support::LeaseTimings, facade_support::LeaseTimingsError,
+        facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
+        facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
     };
 }
 
@@ -746,23 +745,26 @@ pub mod runtime {
     /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
         ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver,
-        CheckpointClaimSet, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient,
-        EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        GroupExecutors, GroupSettlement, GroupWakePolicy, InlineRuntimeEffectController,
-        LashRuntime, LlmAttachmentSpec, LlmRequestSpec, LoserPolicy, NativeQueuedWork,
-        NoQueuedWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
-        QueuedLaneHolder, QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
-        QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,
-        QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure,
-        QueuedWorkWakeOutcome, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        CheckpointClaimSet, CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
+        DirectCompletionClient, EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost,
+        EventSink, ExecutionScope, GroupExecutors, GroupSettlement, GroupWakePolicy,
+        InlineRuntimeEffectController, LashRuntime, LlmAttachmentSpec, LlmRequestSpec, LoserPolicy,
+        NativeQueuedWork, NoQueuedWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, QUEUED_WORK_SLOW_WAKE_THRESHOLD, QueuedLaneAcquisition,
+        QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
+        QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
+        QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
+        QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
+        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
         RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-        RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
-        RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation,
-        RuntimePromptConfig, RuntimeProviderConfig, RuntimeScope, RuntimeTracingConfig,
-        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkTarget, TurnContext,
+        RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
+        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
+        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
+        RuntimeProviderConfig, RuntimeScope, RuntimeTracingConfig, RuntimeTurnPhase,
+        RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        SessionWorkTarget, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+        TurnContext, TurnControlBinding, TurnControlParticipation,
     };
     /// The host clock accepted by
     /// [`LashCoreBuilder::clock`](crate::LashCoreBuilder::clock), used for

@@ -188,14 +188,6 @@ pub(super) fn scoped_test_turn<'a>(
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for RecordingEffectController {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        if self.controller_owned_replay {
-            crate::EffectReplayOwnership::Controller
-        } else {
-            crate::EffectReplayOwnership::Runtime
-        }
-    }
-
     async fn acquire_queued_lane(
         &self,
         lane: Arc<dyn crate::QueuedLaneProbe>,
@@ -277,6 +269,27 @@ impl crate::AwaitEventResolver for RecordingEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for RecordingEffectController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(if self.controller_owned_replay {
+            crate::RuntimeEffectFailureDisposition::AbortInvocation
+        } else {
+            crate::RuntimeEffectFailureDisposition::RecordTurnFailure
+        })
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, RuntimeError> {
+        Ok(if self.controller_owned_replay {
+            crate::TurnControlParticipation::DurableJournaled
+        } else {
+            crate::TurnControlParticipation::Local
+        })
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -990,10 +1003,6 @@ impl CapturingRuntimeReplayController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for CapturingRuntimeReplayController {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        crate::EffectReplayOwnership::Runtime
-    }
-
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,

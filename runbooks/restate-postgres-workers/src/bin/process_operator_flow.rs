@@ -283,10 +283,6 @@ impl JournalController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for JournalController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -340,6 +336,20 @@ impl AwaitEventResolver for JournalController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for JournalController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

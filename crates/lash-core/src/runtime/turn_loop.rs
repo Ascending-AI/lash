@@ -353,21 +353,13 @@ fn scoped_child_turn_controller<'run>(
     scoped_effect_controller.rescope(scope)
 }
 
-/// Select the resolver that owns turn-control promises for this deployment.
-///
-/// Runtime-owned promise identity is instance-owned, so every control operation
-/// must use the configured host that [`TurnWorkDriver`] addresses. Controllers
-/// that own replay use the run-scoped controller so control reads and writes
-/// remain replay-aware while the deployment host supplies the live watch.
-fn turn_control_resolver<'a>(
+async fn turn_control_binding<'a>(
     effect_host: &'a dyn EffectHost,
     scoped_effect_controller: &'a ScopedEffectController<'_>,
-) -> &'a dyn AwaitEventResolver {
-    if effect_host.replay_ownership() == crate::EffectReplayOwnership::Runtime {
-        effect_host
-    } else {
-        scoped_effect_controller.controller()
-    }
+) -> Result<crate::TurnControlBinding<'a>, RuntimeError> {
+    effect_host
+        .turn_control_binding(scoped_effect_controller)
+        .await
 }
 
 pub(in crate::runtime) fn queued_work_trace_payload(
@@ -1490,8 +1482,15 @@ impl LashRuntime {
         turn_control: &ActiveTurnControl,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_resolver =
-            turn_control_resolver(turn_control_host.as_ref(), scoped_effect_controller);
+        let turn_control_binding =
+            turn_control_binding(turn_control_host.as_ref(), scoped_effect_controller).await?;
+        let turn_control_resolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            | crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
+        };
         let TurnFinishInput {
             mut turn_pipeline,
             assembler,
@@ -1931,8 +1930,15 @@ impl LashRuntime {
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_resolver =
-            turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
+        let turn_control_binding =
+            turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
+        let turn_control_resolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            | crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
+        };
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
@@ -3188,8 +3194,16 @@ impl LashRuntime {
                 // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                 let turn_index = self.state.turn_index + 1;
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-                let turn_control_resolver =
-                    turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
+                let turn_control_binding =
+                    turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller)
+                        .await?;
+                let turn_control_resolver = match &turn_control_binding {
+                    crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+                    | crate::TurnControlBinding::RunScoped {
+                        resolver,
+                        durable_cancel_after_llm: _,
+                    } => *resolver,
+                };
                 let turn_control = ActiveTurnControl::new(
                     turn_control_resolver,
                     TurnAddress::new(&self.state.session_id, &trace_turn_id),
@@ -3639,14 +3653,15 @@ impl LashRuntime {
         };
         let turn_events: &dyn TurnActivitySink = &scoped_turn_events;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_resolver =
-            turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
-        let inline_turn_control_controller =
-            if turn_control_host.replay_ownership() == crate::EffectReplayOwnership::Runtime {
-                Some(turn_control_host.scoped(scoped_effect_controller.execution_scope().clone())?)
-            } else {
-                None
-            };
+        let turn_control_binding =
+            turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
+        let turn_control_resolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            | crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
+        };
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
@@ -3770,16 +3785,19 @@ impl LashRuntime {
             })?;
         let cancel_state = cancel.clone();
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
-        let turn_cancel_peek_controller = inline_turn_control_controller
-            .as_ref()
-            .map(ScopedEffectController::controller)
-            .unwrap_or_else(|| finish_scoped_effect_controller.controller());
-        let observes_durable_cancel_after_llm = turn_control_host.replay_ownership()
-            == crate::EffectReplayOwnership::Controller
-            && finish_scoped_effect_controller
-                .controller()
-                .replay_ownership()
-                == crate::EffectReplayOwnership::Controller;
+        let (turn_cancel_peek_controller, observes_durable_cancel_after_llm) =
+            match &turn_control_binding {
+                crate::TurnControlBinding::HostOwned { resolver: _, peek } => {
+                    (peek.controller(), false)
+                }
+                crate::TurnControlBinding::RunScoped {
+                    resolver: _,
+                    durable_cancel_after_llm,
+                } => (
+                    finish_scoped_effect_controller.controller(),
+                    *durable_cancel_after_llm,
+                ),
+            };
         let session = self
             .session
             .take()
@@ -3789,7 +3807,7 @@ impl LashRuntime {
             policy: resolved_turn_policy,
             host: self.host.clone(),
             turn_id: crate::TurnId::from(scoped_effect_controller.scope_id()),
-            scoped_effect_controller,
+            scoped_effect_controller: scoped_effect_controller.clone(),
             session_id: self.state.session_id.clone(),
             turn_index,
             turn_pipeline,

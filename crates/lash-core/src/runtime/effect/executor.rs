@@ -20,10 +20,13 @@ mod task_panic;
 mod trigger;
 
 pub use control::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
-    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
-    Resolution, ResolveOutcome, RuntimeEffectController, ScopedEffectController, SegmentProgress,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
+    ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
+    RuntimeEffectController, RuntimeEffectFailureDisposition, ScopedEffectController,
+    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TurnControlBinding, TurnControlParticipation,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,

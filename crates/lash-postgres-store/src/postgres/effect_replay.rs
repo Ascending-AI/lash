@@ -111,16 +111,18 @@ impl PostgresEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for PostgresEffectHost {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -193,6 +195,25 @@ impl EffectHost for PostgresEffectHost {
         )?))
     }
 
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> Result<lash_core::ToolIntentPreparation, RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
+
     async fn retire_effect_journal(
         &self,
         retirement: lash_core::EffectJournalRetirement,
@@ -228,16 +249,18 @@ impl PostgresRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for PostgresRuntimeEffectController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -283,6 +306,19 @@ impl AwaitEventResolver for PostgresRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for PostgresRuntimeEffectController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

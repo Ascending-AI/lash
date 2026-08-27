@@ -35,43 +35,39 @@ const DIRECT_MODEL: &str = "mock-model";
 const DIRECT_TEXT: &str = "unstubbed direct answer";
 const FOLLOW_ON_EFFECT_ID: &str = "attempt-atomicity-follow-on";
 
-/// A controller-owned tier stand-in with an explicit journal-addressing model.
+/// A controller-owned tier stand-in.
 struct ControllerOwnedTier {
     inner: crate::InlineRuntimeEffectController,
-    addressing: crate::EffectJournalAddressing,
 }
 
 impl ControllerOwnedTier {
     fn ordinal_addressed() -> Self {
         Self {
             inner: crate::InlineRuntimeEffectController::default(),
-            addressing: crate::EffectJournalAddressing::OrdinalAddressed,
         }
     }
 
     fn key_addressed() -> Self {
         Self {
             inner: crate::InlineRuntimeEffectController::default(),
-            addressing: crate::EffectJournalAddressing::KeyAddressed,
         }
     }
 }
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for ControllerOwnedTier {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        crate::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        self.addressing
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        // Opted in so `completion_key()` reaches its await-event derivation
-        // instead of stopping at the process-lifetime refusal; the derivation
-        // is the route this matrix is classifying.
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
+        if !may_defer {
+            return Ok(crate::CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(crate::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -93,6 +89,19 @@ impl crate::AwaitEventResolver for ControllerOwnedTier {
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for ControllerOwnedTier {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+        Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+        Ok(crate::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: crate::RuntimeEffectEnvelope,
@@ -1032,14 +1041,6 @@ impl OrdinalJournaledTier {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for OrdinalJournaledTier {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        crate::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        crate::EffectJournalAddressing::OrdinalAddressed
-    }
-
     async fn await_event_key(
         &self,
         scope: &crate::ExecutionScope,
@@ -1059,6 +1060,19 @@ impl crate::AwaitEventResolver for OrdinalJournaledTier {
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for OrdinalJournaledTier {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+        Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+        Ok(crate::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: crate::RuntimeEffectEnvelope,

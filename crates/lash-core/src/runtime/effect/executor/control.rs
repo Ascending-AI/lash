@@ -610,6 +610,92 @@ impl QueuedLaneGuard {
     }
 }
 
+/// Opaque guard holding one facade tool-intent submission gate.
+#[allow(dead_code)]
+pub struct ToolIntentSubmissionGuard(tokio::sync::OwnedMutexGuard<()>);
+
+impl ToolIntentSubmissionGuard {
+    /// Wrap the owned mutex guard supplied by the facade's submission-gate
+    /// collaborator.
+    #[doc(hidden)]
+    pub fn from_owned_mutex_guard(guard: tokio::sync::OwnedMutexGuard<()>) -> Self {
+        Self(guard)
+    }
+}
+
+/// Core-provided collaborator for durable tool-intent admission and outcome
+/// recording. The effect-host seam never learns which registry or lock table
+/// backs these operations.
+#[async_trait::async_trait]
+pub trait ToolIntentOutcomeSink: Send + Sync {
+    async fn lock_submission_gate(&self, replay_key: &str) -> ToolIntentSubmissionGuard;
+
+    async fn admit(
+        &self,
+        record: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, RuntimeError>;
+
+    async fn complete_submission(
+        &self,
+        identity: &crate::ToolIntentIdentity,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError>;
+
+    async fn retain_in_journal(
+        &self,
+        identity: &crate::ToolIntentIdentity,
+        submitted: crate::ToolIntent,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError>;
+}
+
+/// Preparation chosen by the effect host before one tool intent is realized.
+pub enum ToolIntentPreparation {
+    /// The controller journal owns the submission.
+    ControllerOwned,
+    /// The runtime registry owns the submission row and the gate remains held
+    /// until realization and outcome recording finish.
+    RuntimeOwned {
+        admission: crate::ToolIntentSubmissionAdmission,
+        _guard: ToolIntentSubmissionGuard,
+    },
+}
+
+/// Whether a runtime-effect failure should end the controller invocation or
+/// be recorded as an ordinary failed turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeEffectFailureDisposition {
+    AbortInvocation,
+    RecordTurnFailure,
+}
+
+/// Whether turn-control reads participate in a durable controller journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnControlParticipation {
+    Local,
+    DurableJournaled,
+}
+
+/// How turn-control promises are addressed for one turn. Exhaustive: there is
+/// no third arrangement, and no field is optional.
+pub enum TurnControlBinding<'a> {
+    HostOwned {
+        resolver: &'a dyn AwaitEventResolver,
+        peek: ScopedEffectController<'a>,
+    },
+    RunScoped {
+        resolver: &'a dyn AwaitEventResolver,
+        durable_cancel_after_llm: bool,
+    },
+}
+
+/// Result of preparing an externally routable tool completion key.
+pub enum CompletionKeyPreparation {
+    NotNeeded,
+    Unsupported,
+    Issued(AwaitEventKey),
+}
+
 /// One attempt at the durable lane a queued drain must own, plus the facts a
 /// bounded wait needs. Opaque: no store type, no lease timings, no guard
 /// internals cross the seam.
@@ -706,6 +792,19 @@ pub(crate) enum EffectControllerTaskRequest {
         cancel: CancellationToken,
         response: oneshot::Sender<Result<QueuedLaneAcquisition, RuntimeError>>,
     },
+    PrepareCompletionKey {
+        scope: ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+        response: oneshot::Sender<Result<CompletionKeyPreparation, RuntimeError>>,
+    },
+    RuntimeEffectFailureDisposition {
+        code: RuntimeErrorCode,
+        response: oneshot::Sender<Result<RuntimeEffectFailureDisposition, RuntimeError>>,
+    },
+    TurnControlParticipation {
+        response: oneshot::Sender<Result<TurnControlParticipation, RuntimeError>>,
+    },
 }
 
 impl EffectControllerTaskRequest {
@@ -742,6 +841,24 @@ impl EffectControllerTaskRequest {
             } => Box::pin(async move {
                 let _ = response.send(controller.acquire_queued_lane(lane, cancel).await);
             }),
+            Self::PrepareCompletionKey {
+                scope,
+                wait,
+                may_defer,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(
+                    controller
+                        .prepare_completion_key(&scope, wait, may_defer)
+                        .await,
+                );
+            }),
+            Self::RuntimeEffectFailureDisposition { code, response } => Box::pin(async move {
+                let _ = response.send(controller.runtime_effect_failure_disposition(code).await);
+            }),
+            Self::TurnControlParticipation { response } => Box::pin(async move {
+                let _ = response.send(controller.turn_control_participation().await);
+            }),
         }
     }
 }
@@ -755,9 +872,6 @@ pub(super) struct RemoteLocalExecutionRequest {
 #[derive(Clone)]
 pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
-    replay_ownership: crate::EffectReplayOwnership,
-    journal_addressing: crate::EffectJournalAddressing,
-    allows_process_lifetime_completion_keys: bool,
     supports_concurrent_effects: bool,
 }
 
@@ -775,10 +889,6 @@ impl EffectTaskController {
         let (requests, request_rx) = mpsc::unbounded_channel();
         let proxy = Self {
             requests,
-            replay_ownership: controller.replay_ownership(),
-            journal_addressing: controller.journal_addressing(),
-            allows_process_lifetime_completion_keys: controller
-                .allows_process_lifetime_completion_keys(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
         };
         Ok((
@@ -790,18 +900,6 @@ impl EffectTaskController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for EffectTaskController {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        self.replay_ownership
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        self.journal_addressing
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.allows_process_lifetime_completion_keys
-    }
-
     async fn acquire_queued_lane(
         &self,
         lane: Arc<dyn QueuedLaneProbe>,
@@ -824,6 +922,34 @@ impl AwaitEventResolver for EffectTaskController {
             RuntimeError::new(
                 crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                 "queued-lane controller response was dropped",
+            )
+        })?
+    }
+
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::PrepareCompletionKey {
+                scope: scope.clone(),
+                wait,
+                may_defer,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "completion-key controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "completion-key controller response was dropped",
             )
         })?
     }
@@ -885,6 +1011,52 @@ impl AwaitEventResolver for EffectTaskController {
 impl RuntimeEffectController for EffectTaskController {
     fn supports_concurrent_effects(&self) -> bool {
         self.supports_concurrent_effects
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(
+                EffectControllerTaskRequest::RuntimeEffectFailureDisposition {
+                    code,
+                    response: response_tx,
+                },
+            )
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "effect-failure disposition controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "effect-failure disposition controller response was dropped",
+            )
+        })?
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::TurnControlParticipation {
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "turn-control participation controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "turn-control participation controller response was dropped",
+            )
+        })?
     }
 
     async fn execute_effect(
@@ -997,17 +1169,12 @@ pub(crate) async fn drive_effect_controller_task(
     }
 }
 
-/// Shared effect replay and AwaitEvent contract for effect boundaries.
+/// Shared AwaitEvent contract for effect boundaries.
 ///
 /// Both the deployment-level [`EffectHost`] factory and the per-run
-/// [`RuntimeEffectController`] resolve AwaitEvents and describe which layer
-/// owns effect replay.
+/// [`RuntimeEffectController`] resolve AwaitEvents.
 #[async_trait::async_trait]
 pub trait AwaitEventResolver: Send + Sync {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        crate::EffectReplayOwnership::Runtime
-    }
-
     /// Acquire the authoritative session-execution lane a durable queued drain
     /// needs before it may claim work.
     ///
@@ -1083,22 +1250,18 @@ pub trait AwaitEventResolver: Send + Sync {
         }
     }
 
-    /// Describes how this boundary addresses replayed journal entries.
-    ///
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        crate::EffectJournalAddressing::Runtime
-    }
-
-    /// Whether [`ToolContext::completion_key`](crate::ToolContext::completion_key)
-    /// may issue an externally routable key through this resolver.
-    ///
-    /// Replay ownership is only a routing fact and does not imply that another
-    /// process can resolve a key after this one exits. Implementations must opt
-    /// in explicitly either because their await-event ingress and state survive
-    /// process loss or because the deployment explicitly accepts process-local
-    /// key lifetime.
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        false
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        let _ = (scope, wait);
+        if may_defer {
+            Ok(CompletionKeyPreparation::Unsupported)
+        } else {
+            Ok(CompletionKeyPreparation::NotNeeded)
+        }
     }
 
     async fn await_event_key(
@@ -1189,6 +1352,52 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(None)
     }
 
+    async fn turn_control_binding<'a>(
+        &'a self,
+        scoped: &'a ScopedEffectController<'_>,
+    ) -> Result<TurnControlBinding<'a>, RuntimeError> {
+        let durable_cancel_after_llm =
+            match scoped.controller().turn_control_participation().await? {
+                TurnControlParticipation::Local => false,
+                TurnControlParticipation::DurableJournaled => true,
+            };
+        Ok(TurnControlBinding::RunScoped {
+            resolver: scoped.controller(),
+            durable_cancel_after_llm,
+        })
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        sink: &dyn ToolIntentOutcomeSink,
+        identity: &crate::ToolIntentIdentity,
+        intent: crate::ToolIntent,
+    ) -> Result<ToolIntentPreparation, RuntimeError> {
+        let guard = sink.lock_submission_gate(&identity.replay_key).await;
+        let record =
+            crate::ToolIntentSubmissionRecord::new(identity.clone(), intent).map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RecordEncodingFailed,
+                    format!("failed to hash tool-intent submission: {error}"),
+                )
+            })?;
+        let admission = sink.admit(record).await?;
+        Ok(ToolIntentPreparation::RuntimeOwned {
+            admission,
+            _guard: guard,
+        })
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn ToolIntentOutcomeSink,
+        identity: &crate::ToolIntentIdentity,
+        _submitted: crate::ToolIntent,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError> {
+        sink.complete_submission(identity, outcome).await
+    }
+
     /// Retire durable effect history after its owning lifecycle is no longer
     /// executable.
     async fn retire_effect_journal(
@@ -1205,6 +1414,17 @@ pub trait EffectHost: AwaitEventResolver {
 /// Boundary for nondeterministic runtime work.
 #[async_trait::async_trait]
 pub trait RuntimeEffectController: AwaitEventResolver {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(RuntimeEffectFailureDisposition::RecordTurnFailure)
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        Ok(TurnControlParticipation::Local)
+    }
+
     /// Advises an engine to end the current in-process execution segment at a
     /// quiescent point. Engines may decline when live state is not capturable,
     /// but must make progress before returning another decline. In particular,
@@ -1486,6 +1706,159 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ToolIntentGateSink {
+        gate: Arc<tokio::sync::Mutex<()>>,
+        admissions: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Default for ToolIntentGateSink {
+        fn default() -> Self {
+            Self {
+                gate: Arc::new(tokio::sync::Mutex::new(())),
+                admissions: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolIntentOutcomeSink for ToolIntentGateSink {
+        async fn lock_submission_gate(&self, _replay_key: &str) -> ToolIntentSubmissionGuard {
+            ToolIntentSubmissionGuard::from_owned_mutex_guard(
+                Arc::clone(&self.gate).lock_owned().await,
+            )
+        }
+
+        async fn admit(
+            &self,
+            _record: crate::ToolIntentSubmissionRecord,
+        ) -> Result<crate::ToolIntentSubmissionAdmission, RuntimeError> {
+            self.admissions
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(crate::ToolIntentSubmissionAdmission::Admitted)
+        }
+
+        async fn complete_submission(
+            &self,
+            _identity: &crate::ToolIntentIdentity,
+            _outcome: crate::ToolIntentExecutionOutcome,
+        ) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+
+        async fn retain_in_journal(
+            &self,
+            _identity: &crate::ToolIntentIdentity,
+            _submitted: crate::ToolIntent,
+            _outcome: crate::ToolIntentExecutionOutcome,
+        ) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+    }
+
+    fn test_tool_intent() -> (crate::ToolIntentIdentity, crate::ToolIntent) {
+        let identity = crate::derive_tool_intent_identity(
+            "tool-intent-gate-session",
+            "tool-intent-gate-turn",
+            Some("tool-intent-gate-call"),
+            0,
+        )
+        .expect("tool-intent gate identity");
+        let intent = crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
+            session_id: "tool-intent-gate-session".to_string(),
+            process_id: "tool-intent-gate-process".to_string(),
+            reason: None,
+        });
+        (identity, intent)
+    }
+
+    #[tokio::test]
+    async fn runtime_tool_intent_preparation_holds_the_gate_until_dropped() {
+        let host = crate::InlineEffectHost::default();
+        let sink = ToolIntentGateSink::default();
+        let (identity, intent) = test_tool_intent();
+        let first = host
+            .prepare_tool_intent(&sink, &identity, intent.clone())
+            .await
+            .expect("first tool-intent preparation");
+
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            host.prepare_tool_intent(&sink, &identity, intent.clone()),
+        )
+        .await;
+        assert!(
+            blocked.is_err(),
+            "a duplicate preparation must remain blocked while the first preparation is held"
+        );
+
+        drop(first);
+        let second = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            host.prepare_tool_intent(&sink, &identity, intent),
+        )
+        .await
+        .expect("duplicate preparation unblocks after release")
+        .expect("second tool-intent preparation");
+        assert!(matches!(second, ToolIntentPreparation::RuntimeOwned { .. }));
+        assert_eq!(sink.admissions.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    struct CompletionKeyProbe {
+        issue_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl AwaitEventResolver for CompletionKeyProbe {
+        async fn await_event_key(
+            &self,
+            _scope: &ExecutionScope,
+            _wait: AwaitEventWaitIdentity,
+        ) -> Result<AwaitEventKey, RuntimeError> {
+            self.issue_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(RuntimeError::new(
+                RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
+                "probe must not issue a key",
+            ))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeEffectController for CompletionKeyProbe {
+        async fn execute_effect(
+            &self,
+            _envelope: RuntimeEffectEnvelope,
+            _local_executor: RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            unreachable!("completion-key preparation test does not execute effects")
+        }
+    }
+
+    #[tokio::test]
+    async fn completion_key_preparation_issues_nothing_when_deferral_is_impossible() {
+        let probe = CompletionKeyProbe {
+            issue_calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let preparation = probe
+            .prepare_completion_key(
+                &ExecutionScope::turn("completion-key-session", "completion-key-turn"),
+                AwaitEventWaitIdentity::tool_completion("completion-key-call"),
+                false,
+            )
+            .await
+            .expect("completion-key preparation");
+
+        assert!(
+            matches!(preparation, CompletionKeyPreparation::NotNeeded),
+            "non-deferring work must select NotNeeded"
+        );
+        assert_eq!(
+            probe.issue_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "NotNeeded must not issue an await-event key"
+        );
+    }
 
     struct TestResolver;
 

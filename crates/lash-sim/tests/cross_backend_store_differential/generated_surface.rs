@@ -246,24 +246,39 @@ struct LiteralFrameController {
     frames: Arc<Mutex<Vec<RuntimeEffectEnvelope>>>,
 }
 
+#[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for LiteralFrameController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.controller().replay_ownership()
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.controller().journal_addressing()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
         self.inner
             .controller()
-            .allows_process_lifetime_completion_keys()
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for LiteralFrameController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .runtime_effect_failure_disposition(code)
+            .await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        self.inner.controller().turn_control_participation().await
+    }
+
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,

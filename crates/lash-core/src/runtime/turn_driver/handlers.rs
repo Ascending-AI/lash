@@ -81,7 +81,10 @@ impl RuntimeTurnDriver<'_> {
             Ok(None) => {}
             Err(err) => {
                 let err_string = err.to_string();
-                if self.should_abort_for_runtime_effect_error() {
+                if self
+                    .should_abort_for_runtime_effect_error(RuntimeErrorCode::ProtocolBeforeLlmCall)
+                    .await?
+                {
                     return Err(RuntimeError::new(
                         RuntimeErrorCode::ProtocolBeforeLlmCall,
                         err_string,
@@ -103,7 +106,8 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(result) => result,
             Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)
+                    .await?;
                 return Ok(());
             }
         };
@@ -129,7 +133,8 @@ impl RuntimeTurnDriver<'_> {
                 {
                     Ok(response) => Ok(response),
                     Err(err) => {
-                        self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                        self.fail_or_abort_runtime_effect_controller(machine, err)
+                            .await?;
                         return Ok(());
                     }
                 }
@@ -244,7 +249,8 @@ impl RuntimeTurnDriver<'_> {
                         .await
                         .map_err(crate::runtime::runtime_error_from_store_commit)?;
                 }
-                self.fail_or_abort_runtime_effect_controller(machine, err.into())?;
+                self.fail_or_abort_runtime_effect_controller(machine, err.into())
+                    .await?;
             }
         }
         Ok(())
@@ -270,7 +276,8 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(result) => result,
             Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)
+                    .await?;
                 return Ok(());
             }
         };
@@ -297,7 +304,8 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(results) => results,
             Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)
+                    .await?;
                 return Ok(());
             }
         };
@@ -318,7 +326,8 @@ impl RuntimeTurnDriver<'_> {
                             crate::RuntimeErrorCode::AttachmentSourcePolicyDenied,
                             err.to_string(),
                         ),
-                    )?;
+                    )
+                    .await?;
                     return Ok(());
                 }
             }
@@ -376,7 +385,8 @@ impl RuntimeTurnDriver<'_> {
                     },
                 )
                 .await;
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)
+                    .await?;
                 return Ok(());
             }
         };
@@ -426,7 +436,8 @@ impl RuntimeTurnDriver<'_> {
                     },
                 )
                 .await;
-                self.fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)
+                    .await?;
                 return Ok(());
             }
         };

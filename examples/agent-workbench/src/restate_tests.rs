@@ -492,8 +492,8 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 /// handler, but that refusal now comes from the scoped host controller rather
 /// than from a facade ownership preflight.
 #[tokio::test]
-async fn effect_replay_ownership_routes_foreground_turns_through_the_configured_host() {
-    let data_dir = tempfile::tempdir().expect("effect replay ownership tempdir");
+async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
+    let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
 
     let inline_host: Arc<dyn lash::durability::EffectHost> =
         Arc::new(lash::durability::InlineEffectHost::default());
@@ -502,18 +502,29 @@ async fn effect_replay_ownership_routes_foreground_turns_through_the_configured_
             "http://127.0.0.1:8080",
         ))
         .effect_host();
-    let inline_ownership = inline_host.replay_ownership();
-    assert_eq!(
-        inline_ownership,
-        lash::EffectReplayOwnership::Runtime,
-        "the workbench's foreground host executes effects itself"
-    );
-    let durable_ownership = durable_host.replay_ownership();
-    assert_eq!(
-        durable_ownership,
-        lash::EffectReplayOwnership::Controller,
-        "the Restate host hands effect replay to the controller"
-    );
+    let scope = lash::runtime::ExecutionScope::turn("routing-session", "routing-turn");
+    let inline_scoped = inline_host.scoped(scope.clone()).expect("inline scope");
+    assert!(matches!(
+        inline_host
+            .turn_control_binding(&inline_scoped)
+            .await
+            .expect("inline binding"),
+        lash::runtime::TurnControlBinding::HostOwned {
+            resolver: _,
+            peek: _,
+        }
+    ));
+    let durable_scoped = durable_host.scoped(scope).expect("durable scope");
+    assert!(matches!(
+        durable_host
+            .turn_control_binding(&durable_scoped)
+            .await
+            .expect("durable binding"),
+        lash::runtime::TurnControlBinding::RunScoped {
+            resolver: _,
+            durable_cancel_after_llm: true,
+        }
+    ));
 
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let ownership_core = |effect_host: Arc<dyn lash::durability::EffectHost>, name: &str| {

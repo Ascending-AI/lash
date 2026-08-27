@@ -21,13 +21,15 @@ pub use envelope::{
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
-    InlineRuntimeEffectController, ProcessLocalExecution, ProcessOutcomeObserver,
-    ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
-    QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
-    RuntimeSleepOptions, ScopedEffectController, SegmentProgress, TriggerLocalExecution,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
+    ExecutionScope, ExternalCompletionError, InlineRuntimeEffectController, ProcessLocalExecution,
+    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
+    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
+    ScopedEffectController, SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding, TurnControlParticipation,
 };
 pub use group::{
     EffectGroupHandle, EffectGroupMembership, GroupSettlement, GroupWakePolicy, LoserPolicy,
@@ -65,14 +67,23 @@ mod tests {
 
     struct ControllerOwnedReplay;
 
-    impl AwaitEventResolver for ControllerOwnedReplay {
-        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-            crate::EffectReplayOwnership::Controller
-        }
-    }
+    impl AwaitEventResolver for ControllerOwnedReplay {}
 
     #[async_trait::async_trait]
     impl RuntimeEffectController for ControllerOwnedReplay {
+        async fn runtime_effect_failure_disposition(
+            &self,
+            _code: crate::RuntimeErrorCode,
+        ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+            Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
+        }
+
+        async fn turn_control_participation(
+            &self,
+        ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+            Ok(crate::TurnControlParticipation::DurableJournaled)
+        }
+
         async fn execute_effect(
             &self,
             _envelope: RuntimeEffectEnvelope,
@@ -82,25 +93,62 @@ mod tests {
         }
     }
 
-    #[test]
-    fn inline_host_and_scoped_controller_forward_replay_ownership_without_inferring_key_lifetime() {
+    #[tokio::test]
+    async fn inline_host_forwards_tagged_controller_operations_without_inferring_key_lifetime() {
         let host = InlineEffectHost::new(Arc::new(ControllerOwnedReplay));
         assert_eq!(
-            host.replay_ownership(),
-            crate::EffectReplayOwnership::Controller
+            host.runtime_effect_failure_disposition(crate::RuntimeErrorCode::Plugin)
+                .await
+                .expect("disposition"),
+            crate::RuntimeEffectFailureDisposition::AbortInvocation
         );
-        assert!(!host.allows_process_lifetime_completion_keys());
         let scoped = host
             .scoped(ExecutionScope::turn("ownership-session", "ownership-turn"))
             .expect("scope wrapped controller");
         assert_eq!(
-            scoped.controller().replay_ownership(),
-            crate::EffectReplayOwnership::Controller
-        );
-        assert!(
-            !scoped
+            scoped
                 .controller()
-                .allows_process_lifetime_completion_keys()
+                .turn_control_participation()
+                .await
+                .expect("participation"),
+            crate::TurnControlParticipation::DurableJournaled
+        );
+        assert!(matches!(
+            scoped
+                .controller()
+                .prepare_completion_key(
+                    &ExecutionScope::turn("ownership-session", "ownership-turn"),
+                    AwaitEventWaitIdentity::tool_completion("call"),
+                    true,
+                )
+                .await
+                .expect("preparation"),
+            crate::CompletionKeyPreparation::Unsupported
+        ));
+        assert!(matches!(
+            host.turn_control_binding(&scoped).await.expect("binding"),
+            crate::TurnControlBinding::RunScoped {
+                resolver: _,
+                durable_cancel_after_llm: true,
+            }
+        ));
+
+        let local_host = InlineEffectHost::default();
+        let local_scoped = local_host
+            .scoped(ExecutionScope::turn("local-session", "local-turn"))
+            .expect("local scoped controller");
+        assert!(
+            matches!(
+                local_host
+                    .turn_control_binding(&local_scoped)
+                    .await
+                    .expect("local binding"),
+                crate::TurnControlBinding::HostOwned {
+                    resolver: _,
+                    peek: _,
+                }
+            ),
+            "a local inline host must construct HostOwned turn control"
         );
     }
 

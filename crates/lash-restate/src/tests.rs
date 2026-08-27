@@ -9139,22 +9139,81 @@ struct RestateParentEndFaultController {
     state: Arc<RestateParentEndFaultState>,
 }
 
+#[async_trait::async_trait]
 impl AwaitEventResolver for RestateParentEndFaultController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.replay_ownership()
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.journal_addressing()
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
     }
 
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
     }
 }
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for RestateParentEndFaultController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+        self.inner.runtime_effect_failure_disposition(code).await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        self.inner.turn_control_participation().await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -11586,7 +11645,7 @@ struct RecordedProcessRun {
     wake_target_session_id: Option<String>,
     tool_effect_id: Option<String>,
     execution_scope_id: String,
-    controller_replay_ownership: lash_core::EffectReplayOwnership,
+    turn_control_participation: lash_core::TurnControlParticipation,
 }
 
 #[derive(Default)]
@@ -11605,6 +11664,11 @@ impl RestateProcessRunner for RecordingRunner {
         _handover: Option<lash_core::SegmentHandover>,
         _cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        let turn_control_participation = scoped_effect_controller
+            .controller()
+            .turn_control_participation()
+            .await
+            .map_err(PluginError::Runtime)?;
         self.ran.lock_recover().push(RecordedProcessRun {
             process_id: registration.id.clone(),
             wake_target_session_id: registration.wake_session_id.clone(),
@@ -11612,7 +11676,7 @@ impl RestateProcessRunner for RecordingRunner {
                 .causal_invocation
                 .and_then(|invocation| invocation.effect_id().map(str::to_string)),
             execution_scope_id: scoped_effect_controller.scope_id().to_string(),
-            controller_replay_ownership: scoped_effect_controller.controller().replay_ownership(),
+            turn_control_participation,
         });
         Ok(process_success(serde_json::json!({"ok": true})).into())
     }
@@ -12885,7 +12949,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
             wake_target_session_id: Some("wake-smoke".to_string()),
             tool_effect_id: Some("tool-smoke".to_string()),
             execution_scope_id: "task-smoke".to_string(),
-            controller_replay_ownership: lash_core::EffectReplayOwnership::Controller,
+            turn_control_participation: lash_core::TurnControlParticipation::DurableJournaled,
         }]
     );
 
@@ -14641,7 +14705,7 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
             wake_target_session_id: Some("wake-session".to_string()),
             tool_effect_id: Some("tool-effect".to_string()),
             execution_scope_id: "task-workflow".to_string(),
-            controller_replay_ownership: lash_core::EffectReplayOwnership::Runtime,
+            turn_control_participation: lash_core::TurnControlParticipation::Local,
         }]
     );
     assert_eq!(

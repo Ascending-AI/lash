@@ -545,17 +545,29 @@ async fn runtime_owned_cancel_uses_ingress_identity() -> anyhow::Result<()> {
 struct SeededOutsideProtocolOutcome;
 
 #[async_trait]
-impl lash::runtime::AwaitEventResolver for SeededOutsideProtocolOutcome {
-    fn replay_ownership(&self) -> lash::EffectReplayOwnership {
-        lash::EffectReplayOwnership::Controller
-    }
+impl lash::runtime::AwaitEventResolver for SeededOutsideProtocolOutcome {}
 
-    fn journal_addressing(&self) -> lash::durability::EffectJournalAddressing {
-        lash::durability::EffectJournalAddressing::KeyAddressed
-    }
-}
-
+#[async_trait]
 impl lash::durability::EffectHost for SeededOutsideProtocolOutcome {
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash::runtime::ToolIntentOutcomeSink,
+        _identity: &lash::tools::ToolIntentIdentity,
+        _intent: lash::tools::ToolIntent,
+    ) -> Result<lash::runtime::ToolIntentPreparation, lash::runtime::RuntimeError> {
+        Ok(lash::runtime::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash::runtime::ToolIntentOutcomeSink,
+        identity: &lash::tools::ToolIntentIdentity,
+        submitted: lash::tools::ToolIntent,
+        outcome: lash::tools::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash::runtime::RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: lash::runtime::ExecutionScope,
@@ -566,6 +578,19 @@ impl lash::durability::EffectHost for SeededOutsideProtocolOutcome {
 
 #[async_trait]
 impl lash::runtime::RuntimeEffectController for SeededOutsideProtocolOutcome {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash::runtime::RuntimeErrorCode,
+    ) -> Result<lash::runtime::RuntimeEffectFailureDisposition, lash::runtime::RuntimeError> {
+        Ok(lash::runtime::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash::runtime::TurnControlParticipation, lash::runtime::RuntimeError> {
+        Ok(lash::runtime::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         _envelope: lash::runtime::RuntimeEffectEnvelope,

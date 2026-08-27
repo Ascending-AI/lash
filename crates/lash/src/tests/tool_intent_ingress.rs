@@ -308,21 +308,45 @@ struct KeyJournalController {
     recorded: std::sync::Mutex<std::collections::HashMap<String, lash_core::RuntimeEffectOutcome>>,
 }
 
+#[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for KeyJournalController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> std::result::Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        self.inner
+            .await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 }
 
+#[async_trait::async_trait]
 impl lash_core::EffectHost for KeyJournalController {
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> std::result::Result<(), lash_core::RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: lash_core::ExecutionScope,
@@ -333,6 +357,20 @@ impl lash_core::EffectHost for KeyJournalController {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for KeyJournalController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -384,17 +422,29 @@ struct MockEffectAdmission {
     envelope_hash: String,
 }
 
-impl lash_core::AwaitEventResolver for AdmissionCrashController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
+impl lash_core::AwaitEventResolver for AdmissionCrashController {}
 
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-}
-
+#[async_trait::async_trait]
 impl lash_core::EffectHost for AdmissionCrashController {
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> std::result::Result<(), lash_core::RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: lash_core::ExecutionScope,
@@ -405,6 +455,20 @@ impl lash_core::EffectHost for AdmissionCrashController {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for AdmissionCrashController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,

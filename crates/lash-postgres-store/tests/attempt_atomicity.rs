@@ -67,14 +67,15 @@ struct CrashingEffectHost {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for CrashingEffectHost {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.journal_addressing()
-    }
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
     async fn await_event_key(
         &self,
@@ -120,6 +121,34 @@ impl lash_core::AwaitEventResolver for CrashingEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for CrashingEffectHost {
+    async fn turn_control_binding<'a>(
+        &'a self,
+        scoped: &'a lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::TurnControlBinding<'a>, lash_core::RuntimeError> {
+        self.inner.turn_control_binding(scoped).await
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        intent: lash_core::ToolIntent,
+    ) -> Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        self.inner.prepare_tool_intent(sink, identity, intent).await
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .record_tool_intent_outcome(sink, identity, submitted, outcome)
+            .await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,
@@ -169,16 +198,16 @@ struct ScopedControllerAdapter(lash_core::ScopedEffectController<'static>);
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.0.controller().replay_ownership()
-    }
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.0.controller().journal_addressing()
-    }
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
         self.0
             .controller()
-            .allows_process_lifetime_completion_keys()
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
     async fn await_event_key(
         &self,
@@ -239,6 +268,20 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
     fn supports_concurrent_effects(&self) -> bool {
         self.0.controller().supports_concurrent_effects()
     }
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+        self.0
+            .controller()
+            .runtime_effect_failure_disposition(code)
+            .await
+    }
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        self.0.controller().turn_control_participation().await
+    }
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -253,16 +296,15 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for CrossingController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.journal_addressing()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 
     async fn await_event_key(
@@ -316,6 +358,19 @@ impl lash_core::AwaitEventResolver for CrossingController {
 impl lash_core::RuntimeEffectController for CrossingController {
     fn supports_concurrent_effects(&self) -> bool {
         !self.force_serial && self.inner.supports_concurrent_effects()
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+        self.inner.runtime_effect_failure_disposition(code).await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        self.inner.turn_control_participation().await
     }
 
     async fn execute_effect(

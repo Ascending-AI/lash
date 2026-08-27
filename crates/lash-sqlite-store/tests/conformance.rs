@@ -1594,24 +1594,35 @@ async fn sqlite_effect_host_and_controller_reject_non_file_backed_path_spellings
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn sqlite_completion_key_permission_tracks_backing_not_replay_ownership() {
-    let memory =
-        SqliteRuntimeEffectController::memory(durable_turn_scope("memory-session", "memory-turn"))
+async fn sqlite_completion_key_preparation_tracks_backing() {
+    let memory_scope = durable_turn_scope("memory-session", "memory-turn");
+    let memory = SqliteRuntimeEffectController::memory(memory_scope.clone())
+        .await
+        .expect("testing-only memory controller");
+    assert!(matches!(
+        memory
+            .prepare_completion_key(
+                &memory_scope,
+                lash_core::AwaitEventWaitIdentity::tool_completion("memory-call"),
+                true,
+            )
             .await
-            .expect("testing-only memory controller");
-    assert_eq!(
-        memory.replay_ownership(),
-        lash_core::EffectReplayOwnership::Controller
-    );
-    assert!(!memory.allows_process_lifetime_completion_keys());
+            .expect("memory preparation"),
+        lash_core::CompletionKeyPreparation::Unsupported
+    ));
 
-    let (_file_dir, file) =
-        open_ephemeral_effect_controller(durable_turn_scope("file-session", "file-turn")).await;
-    assert_eq!(
-        file.replay_ownership(),
-        lash_core::EffectReplayOwnership::Controller
-    );
-    assert!(file.allows_process_lifetime_completion_keys());
+    let file_scope = durable_turn_scope("file-session", "file-turn");
+    let (_file_dir, file) = open_ephemeral_effect_controller(file_scope.clone()).await;
+    assert!(matches!(
+        file.prepare_completion_key(
+            &file_scope,
+            lash_core::AwaitEventWaitIdentity::tool_completion("file-call"),
+            true,
+        )
+        .await
+        .expect("file preparation"),
+        lash_core::CompletionKeyPreparation::Issued(_)
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -573,33 +573,6 @@ pub mod sansio {
     };
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-/// Which layer owns replay of runtime effects.
-///
-/// This is a mechanical property of an effect controller, not an end-to-end
-/// durability claim. Controller-owned replay means a controller journals or
-/// otherwise replays completed effects; runtime-owned execution means Lash
-/// invokes the local effect path directly on each turn attempt.
-pub enum EffectReplayOwnership {
-    #[default]
-    Runtime,
-    Controller,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-/// How an effect controller addresses entries in its durable journal.
-///
-/// This capability is intentionally separate from [`EffectReplayOwnership`]:
-/// both key-addressed and ordinal-addressed controllers own replay, but only an
-/// ordinal-addressed recorded body can shift later commands when it emits a
-/// nested command. Runtime-owned controllers have no durable effect journal.
-pub enum EffectJournalAddressing {
-    #[default]
-    Runtime,
-    KeyAddressed,
-    OrdinalAddressed,
-}
-
 // Re-exports
 pub use attachments::{
     AttachmentGcFence, AttachmentReclamationPolicy, AttachmentRootSet, AttachmentStore,
@@ -1028,8 +1001,8 @@ pub use runtime::drive_with_event_pump;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AssistantResponseHookEvents, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef, CheckpointClaimSet,
-    ChildDrainOutcome, Clock, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
-    EffectGroupDrain, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    ChildDrainOutcome, Clock, CompletionKeyPreparation, DeliveryPolicy, DrainMode, DrainModePolicy,
+    DrainedChild, EffectGroupDrain, EffectGroupHandle, EffectGroupMembership, EffectHost,
     EffectJournalRetirement, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
     GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
@@ -1061,16 +1034,18 @@ pub use runtime::{
     QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
     QueuedWorkSubstrate, RecoveryContract, Resolution, ResolveOutcome, RuntimeCheckpointComponents,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
-    RuntimeSessionState, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCursor,
-    SessionCursorError, SessionDrainOutcome, SessionId, SessionListFilter, SessionObservationEvent,
-    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRelationKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, SessionSummary, SessionWorkTarget, TokenLedgerEntry, ToolAttemptLaunch,
-    ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnEvent,
+    RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
+    RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState, ScopedEffectController,
+    SegmentHandover, SegmentProgress, SessionCursor, SessionCursorError, SessionDrainOutcome,
+    SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
+    SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    SessionWorkTarget, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
+    TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelOriginHint,
+    TurnCancelRequestRecord, TurnContext, TurnControlBinding, TurnControlParticipation, TurnEvent,
     TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
     TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
     TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,

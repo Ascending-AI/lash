@@ -4,14 +4,16 @@ use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectGroupHandle,
-    EffectHost, EffectJournalRetirement, ExecutionScope, GroupSettlement,
-    InlineRuntimeEffectController, LoserPolicy, Resolution, ResolveOutcome,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
-    SegmentProgress,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    CompletionKeyPreparation, EffectGroupHandle, EffectHost, EffectJournalRetirement,
+    ExecutionScope, GroupSettlement, InlineRuntimeEffectController, LoserPolicy, Resolution,
+    ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlBinding,
+    TurnControlParticipation,
 };
 use crate::RuntimeError;
+use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControllerFacadeOps;
 
 /// In-process deployment effect host.
 #[derive(Clone)]
@@ -47,19 +49,27 @@ impl Default for InlineEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for InlineEffectHost {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        self.controller.replay_ownership()
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        self.controller.journal_addressing()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.controller.allows_process_lifetime_completion_keys()
-            || self
-                .allow_process_lifetime_completion_keys
-                .load(std::sync::atomic::Ordering::Relaxed)
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(CompletionKeyPreparation::NotNeeded);
+        }
+        if self
+            .allow_process_lifetime_completion_keys
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return self
+                .await_event_key(scope, wait)
+                .await
+                .map(CompletionKeyPreparation::Issued);
+        }
+        self.controller
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 
     async fn await_event_key(
@@ -128,6 +138,22 @@ impl EffectHost for InlineEffectHost {
         )?))
     }
 
+    async fn turn_control_binding<'a>(
+        &'a self,
+        scoped: &'a ScopedEffectController<'_>,
+    ) -> Result<TurnControlBinding<'a>, RuntimeError> {
+        match scoped.controller().turn_control_participation().await? {
+            TurnControlParticipation::Local => Ok(TurnControlBinding::HostOwned {
+                resolver: self,
+                peek: self.scoped(scoped.execution_scope().clone())?,
+            }),
+            TurnControlParticipation::DurableJournaled => Ok(TurnControlBinding::RunScoped {
+                resolver: scoped.controller(),
+                durable_cancel_after_llm: true,
+            }),
+        }
+    }
+
     async fn retire_effect_journal(
         &self,
         _retirement: EffectJournalRetirement,
@@ -144,6 +170,19 @@ impl RuntimeEffectController for InlineEffectHost {
 
     fn supports_concurrent_effects(&self) -> bool {
         self.controller.supports_concurrent_effects()
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: crate::RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        self.controller
+            .runtime_effect_failure_disposition(code)
+            .await
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        self.controller.turn_control_participation().await
     }
 
     async fn execute_effect(

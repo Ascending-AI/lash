@@ -890,23 +890,22 @@ impl<'run> ToolContext<'run> {
             )
         })?;
         let scoped = self.effect_controller.scoped();
-        if !scoped
+        let preparation = scoped
             .controller()
-            .allows_process_lifetime_completion_keys()
-        {
-            return Err(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
-                "completion keys require an effect controller with process-loss-safe await-event routing; single-process deployments may explicitly opt in with InlineEffectHost::allow_process_lifetime_completion_keys()",
-            ));
-        }
-        let key = scoped
-            .controller()
-            .await_event_key(
+            .prepare_completion_key(
                 scoped.execution_scope(),
                 crate::AwaitEventWaitIdentity::tool_completion(tool_call_id),
+                true,
             )
             .await?;
-        self.completion.store(key)
+        match preparation {
+            crate::CompletionKeyPreparation::Issued(key) => self.completion.store(key),
+            crate::CompletionKeyPreparation::Unsupported
+            | crate::CompletionKeyPreparation::NotNeeded => Err(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
+                "completion keys require an effect controller with process-loss-safe await-event routing; single-process deployments may explicitly opt in with InlineEffectHost::allow_process_lifetime_completion_keys()",
+            )),
+        }
     }
 
     pub(crate) fn take_completion_key(&self) -> Option<crate::AwaitEventKey> {
@@ -1462,16 +1461,25 @@ pub trait ToolProvider: Send + Sync + 'static {
 mod tests {
     use super::*;
 
-    struct ControllerOwnedWithoutCompletionKeyCapability;
+    struct DurableControllerWithoutCompletionKeySupport;
 
-    impl crate::AwaitEventResolver for ControllerOwnedWithoutCompletionKeyCapability {
-        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-            crate::EffectReplayOwnership::Controller
-        }
-    }
+    impl crate::AwaitEventResolver for DurableControllerWithoutCompletionKeySupport {}
 
     #[async_trait::async_trait]
-    impl crate::RuntimeEffectController for ControllerOwnedWithoutCompletionKeyCapability {
+    impl crate::RuntimeEffectController for DurableControllerWithoutCompletionKeySupport {
+        async fn runtime_effect_failure_disposition(
+            &self,
+            _code: crate::RuntimeErrorCode,
+        ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+            Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
+        }
+
+        async fn turn_control_participation(
+            &self,
+        ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+            Ok(crate::TurnControlParticipation::DurableJournaled)
+        }
+
         async fn execute_effect(
             &self,
             _envelope: crate::RuntimeEffectEnvelope,
@@ -1563,7 +1571,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn controller_replay_ownership_does_not_bypass_completion_key_capability() {
+    async fn durable_controller_does_not_bypass_completion_key_preparation() {
         let prepared = PreparedToolCall::from_parts(
             "call-controller-risk",
             "tool:demo_tool",
@@ -1579,7 +1587,7 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                ControllerOwnedWithoutCompletionKeyCapability,
+                DurableControllerWithoutCompletionKeySupport,
             )),
             Arc::new(crate::SessionAttachmentStore::in_memory()),
             crate::DirectCompletionClient::unavailable(

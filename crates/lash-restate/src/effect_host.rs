@@ -9,11 +9,12 @@
 use std::sync::Arc;
 
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode, ScopedEffectController,
-    facade_support::RuntimeAwaitEventOptions,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
+    EffectHost, ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeError, RuntimeErrorCode, ScopedEffectController, ToolIntentOutcomeSink,
+    ToolIntentPreparation, TurnControlParticipation, facade_support::RuntimeAwaitEventOptions,
 };
 
 use crate::durable_wait::{
@@ -50,16 +51,18 @@ impl RestateEffectHost {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateEffectHost {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::OrdinalAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -128,6 +131,25 @@ impl EffectHost for RestateEffectHost {
             self.controller.clone(),
             scope,
         )?))
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> Result<ToolIntentPreparation, RuntimeError> {
+        Ok(ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
     }
 
     async fn retire_effect_journal(
@@ -262,16 +284,18 @@ struct RestateEffectHostController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateEffectHostController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::OrdinalAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -349,6 +373,17 @@ impl AwaitEventResolver for RestateEffectHostController {
 impl RuntimeEffectController for RestateEffectHostController {
     fn supports_concurrent_effects(&self) -> bool {
         false
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        Ok(TurnControlParticipation::DurableJournaled)
     }
 
     async fn execute_effect(

@@ -1,9 +1,9 @@
 //! The in-memory reference host for the durable effect-group contract, and the
 //! inline controller it hangs off (FIG-1416, ADR 0065).
 //!
-//! `InlineRuntimeEffectController` stores no journal entries: its
-//! `replay_ownership` is `Runtime`, lash re-executes the local path on every
-//! attempt, and its only other state is an in-memory await-event registry. So
+//! `InlineRuntimeEffectController` stores no journal entries: lash re-executes
+//! the local path on every attempt, and its only other state is an in-memory
+//! await-event registry. So
 //! this tier cannot and does not provide cross-process settlement durability —
 //! the SQL stores own that half. What it *is* is the conformance definition of
 //! the contract's **observable semantics**: wake behaviour, settlement order by
@@ -49,8 +49,8 @@ use super::super::group::{
 };
 use super::super::group_drain::GroupExecutors;
 use super::control::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
-    ResolveOutcome, RuntimeEffectController,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
+    ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
 };
 use super::{
     RuntimeAwaitEventOptions, RuntimeEffectControllerError, RuntimeEffectLocalExecutor, task_panic,
@@ -77,7 +77,7 @@ pub struct InlineRuntimeEffectController {
     /// session store: a group host is an implementation *of* the effect-host
     /// contract, and the inline tier's contract is in-memory.
     groups: Arc<InlineEffectGroups>,
-    allow_process_lifetime_completion_keys: bool,
+    process_lifetime_completion_keys_enabled: bool,
 }
 
 impl Default for InlineRuntimeEffectController {
@@ -85,15 +85,28 @@ impl Default for InlineRuntimeEffectController {
         Self {
             await_events: Arc::new(AwaitEventRegistry::new()),
             groups: Arc::new(InlineEffectGroups::default()),
-            allow_process_lifetime_completion_keys: false,
+            process_lifetime_completion_keys_enabled: false,
         }
     }
 }
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for InlineRuntimeEffectController {
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.allow_process_lifetime_completion_keys
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(CompletionKeyPreparation::NotNeeded);
+        }
+        if !self.process_lifetime_completion_keys_enabled {
+            return Ok(CompletionKeyPreparation::Unsupported);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -207,10 +220,9 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
     /// a registered controller is a different fact and keeps its own typed
     /// routing refusal.
     ///
-    /// The flag is not a durability claim and must not be read as one — that
-    /// stays `replay_ownership`. What it asserts is that a group opened here runs
-    /// its children durably *for the life of the runtime* and reports settlement
-    /// order as a fact rather than re-racing it.
+    /// The flag is not a durability claim. It asserts that a group opened here
+    /// runs its children durably *for the life of the runtime* and reports
+    /// settlement order as a fact rather than re-racing it.
     fn supports_effect_groups(&self) -> bool {
         self.groups.executors.get().is_some()
     }
@@ -271,7 +283,7 @@ impl InlineRuntimeEffectController {
     /// Opt into externally routable keys that remain valid only while this
     /// controller's process and owned registry remain alive.
     pub fn allow_process_lifetime_completion_keys(mut self) -> Self {
-        self.allow_process_lifetime_completion_keys = true;
+        self.process_lifetime_completion_keys_enabled = true;
         self
     }
     /// Register the process and its initial observer edges into the durable registry.

@@ -27,7 +27,10 @@ async fn controller_owned_replay_mismatch_reaches_host_with_structured_summary()
         .await
         .expect_err("controller-owned replay mismatch must abort to the host");
 
-    assert!(error.code.is_replay_mismatch());
+    assert!(
+        error.code.is_replay_mismatch(),
+        "controller-owned replay mismatch must retain its typed boundary code"
+    );
     assert_eq!(
         error.summary,
         Some(RuntimeEffectReplayMismatchReport {
