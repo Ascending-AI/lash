@@ -75,8 +75,18 @@ pub(crate) fn terminal_completion_workflow_key(
     (segment_ordinal > 0).then(|| process_id.to_string())
 }
 
-pub(crate) fn retryable_registry_error(error: PluginError) -> HandlerError {
-    HandlerError::from(error)
+/// Converts Lash failures at the Restate process-handler boundary without
+/// inheriting the SDK's blanket retry policy for arbitrary Rust errors.
+///
+/// Lash's runtime classification is the authority: explicitly retryable
+/// runtime errors request redelivery, while every other plugin/runtime failure
+/// terminates the invocation so deterministic failures cannot loop forever.
+pub(crate) fn handler_error_from_plugin(error: PluginError) -> HandlerError {
+    if matches!(&error, PluginError::Runtime(error) if error.is_retryable()) {
+        HandlerError::from(error)
+    } else {
+        HandlerError::from(TerminalError::from_error(error))
+    }
 }
 
 pub(crate) fn boundary_must_be_declined(record: Option<&ProcessRecord>) -> bool {

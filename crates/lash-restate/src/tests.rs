@@ -18,10 +18,10 @@ use crate::durable_wait::{
     validate_durable_wait_index_epoch,
 };
 use crate::process::{
-    boundary_must_be_declined, missing_segment_is_superseded, process_segment_workflow_key,
-    restate_process_terminal_await_key, restate_process_terminal_output,
-    restate_process_terminal_resolution, retryable_registry_error, segment_execution_authority,
-    terminal_completion_workflow_key, workflow_key_authority,
+    boundary_must_be_declined, handler_error_from_plugin, missing_segment_is_superseded,
+    process_segment_workflow_key, restate_process_terminal_await_key,
+    restate_process_terminal_output, restate_process_terminal_resolution,
+    segment_execution_authority, terminal_completion_workflow_key, workflow_key_authority,
 };
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
@@ -12090,7 +12090,7 @@ async fn exhausted_cancel_confirmation_is_a_retryable_handler_error() {
         "unexpected handler error: {error:?}"
     );
     assert!(
-        rendered.contains("cancellation confirmation failed after 6 attempts"),
+        rendered.contains("simulated transient cancel registry read failure"),
         "unexpected handler error: {error:?}"
     );
 }
@@ -12601,14 +12601,32 @@ fn cancel_terminal_from_successor_routes_to_root_await_workflow_key() {
 }
 
 #[test]
-fn boundary_registry_io_errors_are_retryable_handler_failures() {
-    let error = retryable_registry_error(lash_core::PluginError::Session(
-        "transient registry outage".to_string(),
+fn runtime_handler_error_classification_keeps_lane_busy_retryable() {
+    let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
+        lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::SessionExecutionLaneBusy,
+            "child session execution lane is busy",
+        ),
     ));
     let debug = format!("{error:?}");
     assert!(
         debug.contains("Retryable"),
-        "registry I/O must ask Restate to retry: {debug}"
+        "lane contention must ask Restate to retry: {debug}"
+    );
+}
+
+#[test]
+fn runtime_handler_error_classification_makes_terminal_runtime_error_terminal() {
+    let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
+        lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::StoreCommitNodeBudgetExceeded,
+            "turn exceeded its store node budget",
+        ),
+    ));
+    let debug = format!("{error:?}");
+    assert!(
+        debug.contains("Terminal"),
+        "terminal runtime errors must stop Restate redelivery: {debug}"
     );
 }
 

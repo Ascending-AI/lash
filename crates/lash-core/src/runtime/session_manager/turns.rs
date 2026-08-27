@@ -491,14 +491,14 @@ async fn run_managed_session_turn(
                     .unwrap_or(scoped_effect_controller.scope_id()),
             ),
         )
-        .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+        .map_err(crate::PluginError::Runtime)?;
     let result = runtime_guard
         .stream_turn_with_agent_frames(
             input,
             crate::runtime::TurnOptions::new(cancel, scoped_effect_controller).with_events(&sink),
         )
         .await
-        .map_err(|err| crate::PluginError::Session(err.to_string()))
+        .map_err(crate::PluginError::Runtime)
         .and_then(|run| {
             run.into_final_turn().ok_or_else(|| {
                 crate::PluginError::Session("agent frame run completed without a turn".to_string())

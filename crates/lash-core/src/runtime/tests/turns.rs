@@ -8967,6 +8967,89 @@ async fn session_manager_can_run_child_session_turn() {
 }
 
 #[tokio::test]
+async fn session_manager_preserves_runtime_error_from_child_session_turn() {
+    let factory = RecordingSessionStoreFactory::default();
+    let host = test_host_config().with_session_store_factory(Arc::new(factory.clone()));
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host,
+    )
+    .await;
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    let handle = lifecycle
+        .create_session(
+            crate::SessionCreateRequest::root(
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("busy-child")
+            .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork),
+        )
+        .await
+        .expect("child session");
+    let store = factory
+        .stores()
+        .into_iter()
+        .find(|store| {
+            store
+                .session_meta
+                .lock_recover()
+                .as_ref()
+                .is_some_and(|meta| meta.session_id == handle.session_id)
+        })
+        .expect("child session store");
+    let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        &handle.session_id,
+        &lease_owner("other-child-runtime"),
+        "session-manager-runtime-error-boundary-executor",
+        60_000,
+    )
+    .await
+    .expect("claim child session execution lease")
+    .acquired()
+    .expect("child session execution lease");
+    let turn_id = "busy-child-turn";
+    let controller = crate::ScopedEffectController::shared(
+        Arc::new(crate::InlineRuntimeEffectController::default()),
+        crate::ExecutionScope::turn(&handle.session_id, turn_id),
+    )
+    .expect("child turn controller");
+
+    let error = lifecycle
+        .start_turn(
+            crate::SessionTurnRequest::new(
+                &handle.session_id,
+                turn_id,
+                TurnInput::text("preserve the runtime error"),
+                controller,
+            )
+            .expect("child turn request"),
+        )
+        .await
+        .expect_err("the held child session lane must refuse the turn");
+
+    assert!(
+        matches!(
+            error,
+            crate::PluginError::Runtime(ref runtime_error)
+                if runtime_error.code == crate::RuntimeErrorCode::SessionExecutionLaneBusy
+        ),
+        "managed turn boundary must preserve the typed runtime error, got {error:?}"
+    );
+    crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
+        store.as_ref(),
+        &held_lease.completion(),
+    )
+    .await
+    .expect("release child session execution lease");
+}
+
+#[tokio::test]
 async fn session_manager_persists_child_sessions_in_separate_store() {
     let factory = RecordingSessionStoreFactory::default();
     let host = test_host_config().with_session_store_factory(Arc::new(factory.clone()));
