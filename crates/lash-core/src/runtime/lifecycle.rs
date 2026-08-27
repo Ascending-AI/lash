@@ -362,7 +362,7 @@ impl LashRuntime {
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> Result<Self, SessionError> {
         bind_state_to_store_with_trace(
-            &host.embedded.core,
+            &host.embedded().core,
             services.store().as_ref(),
             &mut state,
             crate::SessionRelation::Root,
@@ -380,7 +380,7 @@ impl LashRuntime {
     }
 
     /// Assemble a runtime from already-resolved parts: the single place that maps
-    /// `(store, process_registry)` to the right host/services constructor.
+    /// `(store, work)` to the right host/services constructor.
     ///
     /// Every construction path — the live open (`from_environment`), the worker
     /// rebuild (`EmbeddedRuntimeBuilder::build`), and child-session
@@ -392,7 +392,7 @@ impl LashRuntime {
         embedded_host: EmbeddedRuntimeHost,
         plugin_session: Arc<crate::PluginSession>,
         persistence: RuntimePersistenceBindings,
-        process_registry: Option<Arc<dyn ProcessRegistry>>,
+        work: super::host::RuntimeWork,
         session: RuntimeSessionAssembly,
     ) -> Result<Self, SessionError> {
         let RuntimeSessionAssembly {
@@ -412,16 +412,16 @@ impl LashRuntime {
         {
             return Err(error);
         }
-        let runtime = match (store, process_registry) {
-            (Some(store), Some(registry)) => {
-                let host = ProcessRuntimeHost::new(embedded_host, registry);
+        let host = super::host::RuntimeHost::from_embedded_with_work(embedded_host, work);
+        let runtime = match store {
+            Some(store) => {
                 let mut services = PersistentRuntimeServices::new(plugin_session, store);
                 if let Some(manifest_store) = attachment_manifest_store {
                     services = services.with_attachment_manifest_store(manifest_store);
                 }
                 Self::from_host_state(
                     policy,
-                    host.into(),
+                    host,
                     services.into_runtime_services(),
                     state,
                     runtime_lease_owner.clone(),
@@ -429,43 +429,15 @@ impl LashRuntime {
                 )
                 .await?
             }
-            (Some(store), None) => {
-                let mut services = PersistentRuntimeServices::new(plugin_session, store);
-                if let Some(manifest_store) = attachment_manifest_store {
-                    services = services.with_attachment_manifest_store(manifest_store);
-                }
-                Self::from_host_state(
-                    policy,
-                    embedded_host.into(),
-                    services.into_runtime_services(),
-                    state,
-                    runtime_lease_owner.clone(),
-                    runtime_lease_executor_id.clone(),
-                )
-                .await?
-            }
-            (None, Some(registry)) => {
-                let host = ProcessRuntimeHost::new(embedded_host, registry);
+            None => {
                 let services = RuntimeServices::new(plugin_session);
                 Self::from_host_state(
                     policy,
-                    host.into(),
+                    host,
                     services,
                     state,
                     runtime_lease_owner.clone(),
                     runtime_lease_executor_id.clone(),
-                )
-                .await?
-            }
-            (None, None) => {
-                let services = RuntimeServices::new(plugin_session);
-                Self::from_host_state(
-                    policy,
-                    embedded_host.into(),
-                    services,
-                    state,
-                    runtime_lease_owner,
-                    runtime_lease_executor_id,
                 )
                 .await?
             }
@@ -573,20 +545,15 @@ impl LashRuntime {
         if let Some(store) = env.trigger_store.as_ref() {
             embedded = embedded.with_trigger_store(Arc::clone(store));
         }
-        let mut runtime = Self::assemble_runtime(
+        Self::assemble_runtime(
             policy,
             embedded,
             plugin_session,
             RuntimePersistenceBindings::new(store),
-            env.process_registry.as_ref().cloned(),
+            env.work.clone(),
             RuntimeSessionAssembly::resumed(state, runtime_lease_owner, runtime_lease_executor_id),
         )
-        .await?;
-        // Thread the host-owned work drivers onto this session's host so
-        // process starts and queued turns can drive ready work directly.
-        runtime.host.process_work_driver = env.process_work_driver.clone();
-        runtime.host.queued_work_driver = env.queued_work_driver.clone();
-        Ok(runtime)
+        .await
     }
 
     pub(super) async fn persist_materialized_protocol_config(

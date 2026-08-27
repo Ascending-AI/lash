@@ -388,8 +388,8 @@ finish (await handle)?
         Duration::from_secs(10),
         harness
             .state
-            .process_work_driver
-            .await_terminal(&process_id),
+            .core
+            .processes().await_output(&process_id),
     )
     .await
     .expect("Stop-over-process must terminate the awaited process")
@@ -938,14 +938,14 @@ finish (await handle)?
     .await;
     let immediately_after_delete = harness
         .state
-        .process_work_driver
-        .process_registry()
-        .get_process(&process_id)
+        .process_observer
+        .clone()
+        .process(&process_id)
         .await
         .expect("read process immediately after session revocation")
         .expect("session revocation keeps its process record");
     assert!(
-        !immediately_after_delete.is_terminal(),
+        !immediately_after_delete.terminal,
         "session revocation must leave the independently sleeping process live"
     );
     let immediate_events = harness
@@ -982,8 +982,8 @@ finish (await handle)?
         Duration::from_secs(45),
         harness
             .state
-            .process_work_driver
-            .await_terminal(&process_id),
+            .core
+            .processes().await_output(&process_id),
     )
     .await
     .expect("revoked session must not stop the independent process")
@@ -1150,8 +1150,8 @@ finish "started lifecycle gates"
         Duration::from_secs(20),
         harness
             .state
-            .process_work_driver
-            .await_terminal(&cancellable_id),
+            .core
+            .processes().await_output(&cancellable_id),
     )
     .await
     .expect("cancelled process terminal timeout")
@@ -1170,8 +1170,8 @@ finish "started lifecycle gates"
         Duration::from_secs(20),
         harness
             .state
-            .process_work_driver
-            .await_terminal(&survivor_id),
+            .core
+            .processes().await_output(&survivor_id),
     )
     .await
     .expect("surviving process terminal timeout")

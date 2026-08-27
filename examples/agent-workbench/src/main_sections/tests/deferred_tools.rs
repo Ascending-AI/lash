@@ -47,7 +47,7 @@ fn deferred_tools_test_core(
             WorkbenchPluginFactory::new("").with_deferred_tools(deferred),
         ))
         .trigger_store(trigger_store)
-        .disable_queued_work_driver()
+        .without_queued_work()
         .advanced()
         .runtime_host_config(lash::durability::RuntimeHostConfig::new(
             Arc::new(lash::durability::InlineEffectHost::default()),

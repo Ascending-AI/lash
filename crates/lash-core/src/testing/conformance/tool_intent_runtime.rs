@@ -174,7 +174,10 @@ pub async fn public_signal_intent_wakes_parked_process(
                 .collect(),
         )
         .with_store(Arc::new(crate::InMemorySessionStore::new()))
-        .with_process_registry(Arc::clone(&registry))
+        .with_process_work(crate::testing::process_work_wiring_for_registry(
+            Arc::clone(&registry),
+        ))
+        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
         .build(),
     )
     .await

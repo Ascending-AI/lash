@@ -9,7 +9,6 @@ use super::events::ProcessAwaitOutput;
 use super::model::{
     ProcessExecutionContext, ProcessExecutionEnvSpec, ProcessIdentity, ProcessRegistration,
 };
-use super::registry::ProcessRegistry;
 
 /// Opaque engine-owned state carried between in-process execution segments.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -183,12 +182,11 @@ type RuntimeContextBuilder<'run> = Box<
 #[derive(Clone)]
 pub struct ProcessEngineProcessContext {
     process_id: String,
-    registry: Arc<dyn ProcessRegistry>,
+    process_work: crate::ProcessWorkWiring,
     execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-    awaiter: super::awaiter::ProcessAwaiter,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-    queued_work_driver: Option<crate::QueuedWorkDriver>,
+    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: Arc<dyn crate::Clock>,
 }
@@ -197,37 +195,39 @@ impl ProcessEngineProcessContext {
     #[allow(clippy::too_many_arguments)]
     fn new(
         process_id: String,
-        registry: Arc<dyn ProcessRegistry>,
+        process_work: crate::ProcessWorkWiring,
         execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-        awaiter: super::awaiter::ProcessAwaiter,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-        queued_work_driver: Option<crate::QueuedWorkDriver>,
+        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         Self {
             process_id,
-            registry,
+            process_work,
             execution_write_authority,
-            awaiter,
             store,
             session_store_factory,
-            queued_work_driver,
+            queued_work,
             process_wake_delivery_policy,
             clock,
         }
     }
 
     pub async fn record(&self) -> Result<Option<super::model::ProcessRecord>, crate::PluginError> {
-        self.registry.get_process(&self.process_id).await
+        self.process_work
+            .registry()
+            .get_process(&self.process_id)
+            .await
     }
 
     pub async fn events_after(
         &self,
         after_sequence: u64,
     ) -> Result<Vec<super::events::ProcessEvent>, crate::PluginError> {
-        self.registry
+        self.process_work
+            .registry()
             .events_after(&self.process_id, after_sequence)
             .await
     }
@@ -237,16 +237,17 @@ impl ProcessEngineProcessContext {
         request: super::events::ProcessEventAppendRequest,
     ) -> Result<super::events::ProcessEvent, crate::PluginError> {
         let result = self
-            .registry
+            .process_work
+            .registry()
             .append_event_with_authority(&self.process_id, request, &self.execution_write_authority)
             .await?;
         crate::tool_provider::process_events::enqueue_wake_delivery(
-            Arc::clone(&self.registry),
+            Arc::clone(self.process_work.registry()),
             self.store.clone(),
             self.session_store_factory.as_ref(),
             result.wake_delivery,
             None,
-            self.queued_work_driver.as_ref(),
+            Arc::clone(&self.queued_work),
             self.process_wake_delivery_policy,
             Arc::clone(&self.clock),
         )
@@ -258,7 +259,8 @@ impl ProcessEngineProcessContext {
         &self,
         wait: super::model::WaitState,
     ) -> Result<super::model::ProcessRecord, crate::PluginError> {
-        self.registry
+        self.process_work
+            .registry()
             .set_process_wait_with_authority(
                 &self.process_id,
                 wait,
@@ -268,7 +270,8 @@ impl ProcessEngineProcessContext {
     }
 
     pub async fn clear_wait(&self) -> Result<super::model::ProcessRecord, crate::PluginError> {
-        self.registry
+        self.process_work
+            .registry()
             .clear_process_wait_with_authority(&self.process_id, &self.execution_write_authority)
             .await
     }
@@ -277,7 +280,17 @@ impl ProcessEngineProcessContext {
         &self,
         process_id: &str,
     ) -> Result<ProcessAwaitOutput, crate::PluginError> {
-        self.awaiter.await_terminal(process_id).await
+        loop {
+            match self
+                .process_work
+                .port()
+                .await_process_terminal(process_id)
+                .await?
+            {
+                crate::ProcessTerminalWait::Terminal(output) => return Ok(output),
+                crate::ProcessTerminalWait::Reattach => continue,
+            }
+        }
     }
 }
 
@@ -289,7 +302,7 @@ pub struct ProcessEngineRunContext<'run> {
     plugins: Arc<crate::PluginSession>,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-    queued_work_driver: Option<crate::QueuedWorkDriver>,
+    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     process_registry_available: bool,
     cancellation: CancellationToken,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
@@ -303,13 +316,12 @@ impl<'run> ProcessEngineRunContext<'run> {
     pub(crate) fn new(
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
-        registry: Arc<dyn ProcessRegistry>,
-        process_awaiter: super::awaiter::ProcessAwaiter,
+        process_work: crate::ProcessWorkWiring,
         session_id: String,
         plugins: Arc<crate::PluginSession>,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-        queued_work_driver: Option<crate::QueuedWorkDriver>,
+        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
         process_registry_available: bool,
@@ -325,12 +337,11 @@ impl<'run> ProcessEngineRunContext<'run> {
             .expect("process worker installs execution write authority");
         let processes = ProcessEngineProcessContext::new(
             registration.id.clone(),
-            registry,
+            process_work,
             execution_write_authority,
-            process_awaiter,
             store.clone(),
             session_store_factory.clone(),
-            queued_work_driver.clone(),
+            Arc::clone(&queued_work),
             process_wake_delivery_policy,
             clock,
         );
@@ -342,7 +353,7 @@ impl<'run> ProcessEngineRunContext<'run> {
             plugins,
             store,
             session_store_factory,
-            queued_work_driver,
+            queued_work,
             process_registry_available,
             cancellation,
             turn_phase_probe,
@@ -393,10 +404,9 @@ impl<'run> ProcessEngineRunContext<'run> {
         self.session_store_factory.clone()
     }
 
-    /// Exposes queued work driver to protocol and process-engine implementors while running a
-    /// durable process. Returns `None` when no queued work driver is present.
-    pub fn queued_work_driver(&self) -> Option<crate::QueuedWorkDriver> {
-        self.queued_work_driver.clone()
+    /// Exposes the required queued-work port to process-engine implementors.
+    pub fn queued_work(&self) -> Arc<dyn crate::QueuedWorkSubstrate> {
+        Arc::clone(&self.queued_work)
     }
 
     /// Exposes process registry available to protocol and process-engine implementors while running

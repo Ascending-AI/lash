@@ -6,8 +6,9 @@ use super::process::{
     ProcessRegistry,
 };
 use super::{
-    EffectHost, InlineEffectHost, ProcessWorkDriver, QueuedWorkDriver, SessionStoreFactory,
-    TerminationPolicy,
+    DurableProcessWorker, EffectHost, InlineEffectHost, NativeProcessWork, NativeQueuedWork,
+    NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkRunHandle,
+    QueuedWorkSubstrate, SessionStoreFactory, TerminationPolicy,
 };
 
 /// Default registry-wide admission cap for concurrently running managed child
@@ -256,30 +257,122 @@ impl EmbeddedRuntimeHost {
 /// Host shape for runtimes that support background plugin work.
 #[derive(Clone)]
 pub struct ProcessRuntimeHost {
-    pub embedded: EmbeddedRuntimeHost,
-    pub process_registry: Arc<dyn ProcessRegistry>,
-    pub process_work_driver: Option<ProcessWorkDriver>,
-    pub queued_work_driver: Option<QueuedWorkDriver>,
+    embedded: EmbeddedRuntimeHost,
+    wiring: ProcessWorkWiring,
+    queued_work: Arc<dyn QueuedWorkSubstrate>,
 }
 
 impl ProcessRuntimeHost {
-    pub fn new(embedded: EmbeddedRuntimeHost, process_registry: Arc<dyn ProcessRegistry>) -> Self {
+    pub(crate) fn embedded(&self) -> &EmbeddedRuntimeHost {
+        &self.embedded
+    }
+    /// Construct a host using both first-party work ports.
+    pub fn native(
+        embedded: EmbeddedRuntimeHost,
+        registry: Arc<dyn ProcessRegistry>,
+        queued_run_handle: Arc<dyn QueuedWorkRunHandle>,
+        worker: DurableProcessWorker,
+    ) -> Self {
+        let (registry, hub) = super::watch_process_registry(registry);
+        let process_work = Arc::new(NativeProcessWork::new(
+            Arc::clone(&registry),
+            hub.clone(),
+            worker,
+        ));
+        Self::with_ports(
+            embedded,
+            ProcessWorkWiring::new(registry, hub, process_work),
+            Arc::new(NativeQueuedWork::new(queued_run_handle)),
+        )
+    }
+
+    /// Construct a process-capable host from a registry/port wiring and a
+    /// required queued-work port.
+    pub fn with_ports(
+        embedded: EmbeddedRuntimeHost,
+        wiring: ProcessWorkWiring,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
+    ) -> Self {
         Self {
             embedded,
-            process_registry,
-            process_work_driver: None,
-            queued_work_driver: None,
+            wiring,
+            queued_work,
         }
     }
 
-    pub fn with_process_work_driver(mut self, driver: ProcessWorkDriver) -> Self {
-        self.process_work_driver = Some(driver);
-        self
+    /// Return the watched process registry installed on this host.
+    pub fn process_registry(&self) -> &Arc<dyn ProcessRegistry> {
+        self.wiring.registry()
     }
 
-    pub fn with_queued_work_driver(mut self, driver: QueuedWorkDriver) -> Self {
-        self.queued_work_driver = Some(driver);
-        self
+    /// Return the required queued-work port installed on this host.
+    pub fn queued_work(&self) -> &Arc<dyn QueuedWorkSubstrate> {
+        &self.queued_work
+    }
+
+    /// Return the process-work port bound to this host's registry.
+    pub fn process_work(&self) -> &Arc<dyn ProcessWorkSubstrate> {
+        self.wiring.port()
+    }
+}
+
+/// A runtime's exhaustive work wiring.
+#[derive(Clone)]
+pub(crate) enum RuntimeWork {
+    SessionsOnly {
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    },
+    Processes {
+        wiring: ProcessWorkWiring,
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    },
+}
+
+impl RuntimeWork {
+    pub(crate) fn sessions_only(queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+        Self::SessionsOnly { queued }
+    }
+
+    pub(crate) fn processes(
+        wiring: ProcessWorkWiring,
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    ) -> Self {
+        Self::Processes { wiring, queued }
+    }
+
+    pub(crate) fn queued_arc(&self) -> &Arc<dyn QueuedWorkSubstrate> {
+        match self {
+            Self::SessionsOnly { queued } | Self::Processes { queued, .. } => queued,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn process_ports(
+        &self,
+    ) -> Option<(&Arc<dyn ProcessRegistry>, &Arc<dyn ProcessWorkSubstrate>)> {
+        match self {
+            Self::SessionsOnly { .. } => None,
+            Self::Processes { wiring, .. } => Some((wiring.registry(), wiring.port())),
+        }
+    }
+
+    pub(crate) fn process_wiring(&self) -> Option<&ProcessWorkWiring> {
+        match self {
+            Self::SessionsOnly { .. } => None,
+            Self::Processes { wiring, .. } => Some(wiring),
+        }
+    }
+
+    pub(crate) fn with_queued(self, queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+        match self {
+            Self::SessionsOnly { .. } => Self::SessionsOnly { queued },
+            Self::Processes { wiring, .. } => Self::Processes { wiring, queued },
+        }
+    }
+
+    pub(crate) fn with_process_wiring(self, wiring: ProcessWorkWiring) -> Self {
+        let queued = Arc::clone(self.queued_arc());
+        Self::Processes { wiring, queued }
     }
 }
 
@@ -288,15 +381,34 @@ pub(crate) struct RuntimeHost {
     pub core: RuntimeHostConfig,
     pub session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
     pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
-    pub process_registry: Option<Arc<dyn ProcessRegistry>>,
-    /// Host-owned process work driver. Absent when no process registry is wired.
-    pub process_work_driver: Option<ProcessWorkDriver>,
-    /// Host-owned queued work driver. Absent when queued work is delegated to an
-    /// external host or no session store exists.
-    pub queued_work_driver: Option<QueuedWorkDriver>,
+    pub work: RuntimeWork,
 }
 
 impl RuntimeHost {
+    pub(crate) fn from_embedded_with_work(
+        embedded: EmbeddedRuntimeHost,
+        work: RuntimeWork,
+    ) -> Self {
+        Self {
+            core: embedded.core,
+            session_store_factory: embedded.session_store_factory,
+            trigger_store: embedded.trigger_store,
+            work,
+        }
+    }
+
+    pub(crate) fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
+        self.work.process_ports().map(|(registry, _)| registry)
+    }
+
+    pub(crate) fn process_work(&self) -> Option<&Arc<dyn ProcessWorkSubstrate>> {
+        self.work.process_ports().map(|(_, process)| process)
+    }
+
+    pub(crate) fn queued_work(&self) -> &Arc<dyn QueuedWorkSubstrate> {
+        self.work.queued_arc()
+    }
+
     pub(crate) fn resolve_session_policy(
         &self,
         session_id: &str,
@@ -335,14 +447,10 @@ impl RuntimeHost {
 
 impl From<EmbeddedRuntimeHost> for RuntimeHost {
     fn from(value: EmbeddedRuntimeHost) -> Self {
-        Self {
-            core: value.core,
-            session_store_factory: value.session_store_factory,
-            trigger_store: value.trigger_store,
-            process_registry: None,
-            process_work_driver: None,
-            queued_work_driver: None,
-        }
+        Self::from_embedded_with_work(
+            value,
+            RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
+        )
     }
 }
 
@@ -352,9 +460,7 @@ impl From<ProcessRuntimeHost> for RuntimeHost {
             core: value.embedded.core,
             session_store_factory: value.embedded.session_store_factory,
             trigger_store: value.embedded.trigger_store,
-            process_registry: Some(value.process_registry),
-            process_work_driver: value.process_work_driver,
-            queued_work_driver: value.queued_work_driver,
+            work: RuntimeWork::processes(value.wiring, value.queued_work),
         }
     }
 }

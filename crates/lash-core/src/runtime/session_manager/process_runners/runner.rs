@@ -25,7 +25,6 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 let (output, actions) = Box::pin(
                     self.run_process_tool_call(ProcessToolCallRun {
                         registration,
-                        registry: Arc::clone(&registry),
                         call: call.clone(),
                         parent_invocation: execution_context.causal_invocation,
                         execution_write_authority: execution_context
@@ -115,7 +114,7 @@ impl RuntimeSessionServices {
         &self,
         registration: crate::ProcessRegistration,
         execution_context: crate::ProcessExecutionContext,
-        registry: Arc<dyn crate::ProcessRegistry>,
+        _registry: Arc<dyn crate::ProcessRegistry>,
         scoped_effect_controller: crate::ScopedEffectController<'run>,
         cancellation: tokio_util::sync::CancellationToken,
         handover: Option<crate::SegmentHandover>,
@@ -124,15 +123,15 @@ impl RuntimeSessionServices {
         let plugins = Arc::clone(&self.current.plugins);
         let store = self.current.store.clone();
         let session_store_factory = self.current.host.session_store_factory.clone();
-        let queued_work_driver = self.current.host.queued_work_driver.clone();
-        let process_registry_available = self.current.host.process_registry.is_some();
-        let process_awaiter = self
+        let queued_work = Arc::clone(self.current.host.queued_work());
+        let process_registry_available = self.current.host.process_registry().is_some();
+        let process_work = self
             .current
             .host
-            .process_work_driver
-            .as_ref()
-            .map(crate::ProcessWorkDriver::awaiter)
-            .unwrap_or_else(|| crate::ProcessAwaiter::polling(Arc::clone(&registry)));
+            .work
+            .process_wiring()
+            .cloned()
+            .expect("process runner requires process-work wiring");
         let services = self.clone();
         let registration_for_runtime = registration.clone();
         let execution_context_for_runtime = execution_context.clone();
@@ -140,8 +139,7 @@ impl RuntimeSessionServices {
             .execution_write_authority
             .clone()
             .expect("process worker installs execution write authority");
-        let registry_for_runtime = Arc::clone(&registry);
-        let process_awaiter_for_runtime = process_awaiter.clone();
+        let process_work_for_runtime = process_work.clone();
         let cancellation_for_runtime = cancellation.clone();
         let controller_for_context = scoped_effect_controller.clone();
         let builder = Box::new(move |tool_catalog: Arc<crate::ToolCatalog>| {
@@ -153,11 +151,10 @@ impl RuntimeSessionServices {
             let dispatch = run_context.dispatch();
             let event_context = crate::RuntimeExecutionProcessEventContext {
                 execution_write_authority: execution_write_authority.clone(),
-                registry: Arc::clone(&registry_for_runtime),
-                awaiter: process_awaiter_for_runtime.clone(),
+                process_work: process_work_for_runtime.clone(),
                 store: services.current.store.clone(),
                 session_store_factory: services.current.host.session_store_factory.clone(),
-                queued_work_driver: services.current.host.queued_work_driver.clone(),
+                queued_work: Arc::clone(services.current.host.queued_work()),
                 process_wake_delivery_policy: services
                     .current
                     .host
@@ -180,7 +177,7 @@ impl RuntimeSessionServices {
             .with_process_execution(&registration_for_runtime, event_context)
             .with_cancellation_token(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
-            .with_process_work_driver(services.current.host.process_work_driver.clone());
+            .with_process_work(services.current.host.work.process_wiring().cloned());
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }
@@ -200,13 +197,12 @@ impl RuntimeSessionServices {
         crate::ProcessEngineRunContext::new(
             registration,
             execution_context,
-            registry,
-            process_awaiter,
+            process_work,
             session_id,
             plugins,
             store,
             session_store_factory,
-            queued_work_driver,
+            queued_work,
             self.current.host.core.control.process_wake_delivery_policy,
             Arc::clone(&self.current.host.core.clock),
             process_registry_available,

@@ -105,8 +105,8 @@ pub use process::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
     RestateCoreProcessRunner, RestateProcessAwaitRequest, RestateProcessCancelRequest,
     RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessDeployment,
-    RestateProcessIngressRunner, RestateProcessRunner, RestateProcessWorkflowInput,
-    RestateProcessWorkflowOutput, ServeLashProcessWorkflow,
+    RestateProcessIngressRunner, RestateProcessRunner, RestateProcessWork,
+    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, ServeLashProcessWorkflow,
 };
 pub use turn::{RestateTurnAttach, RestateTurnDeployment};
 

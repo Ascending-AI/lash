@@ -806,6 +806,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         )
         .await
         .expect("register Standard intent target");
+    let registry: Arc<dyn lash_core::ProcessRegistry> = registry;
     let requests = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let model_calls = Arc::new(AtomicUsize::new(0));
     let provider = lash_core::testing::TestProvider::builder()
@@ -864,6 +865,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             .expect("Standard scenario model"),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
+    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
     let mut runtime = lash_core::facade_support::LashRuntime::builder(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
@@ -875,7 +877,12 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     .with_provider_resolver(Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider.into_handle()),
     ))
-    .with_process_registry(registry)
+    .with_process_work(lash_core::ProcessWorkWiring::new(
+        Arc::clone(&registry),
+        hub,
+        Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+    ))
+    .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
     .build()
     .await
     .expect("build Standard intent runtime");

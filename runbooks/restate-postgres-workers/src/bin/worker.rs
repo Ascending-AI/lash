@@ -70,7 +70,7 @@ struct AppState {
     worker_id: String,
     storage: PostgresStorage,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    process_work_driver: lash::process::ProcessWorkDriver,
+    process_work_driver: lash::process::ProcessWorkWiring,
     restate_ingress_url: String,
     mock_provider_base_url: String,
     trace_dir: Option<PathBuf>,
@@ -78,7 +78,7 @@ struct AppState {
 }
 
 impl AppState {
-    async fn connect(process_work_driver: lash::process::ProcessWorkDriver) -> Result<Self> {
+    async fn connect(process_work_driver: lash::process::ProcessWorkWiring) -> Result<Self> {
         let worker_id = env("WORKER_INSTANCE_ID", "worker-local");
         let database_url = required_env("DATABASE_URL")?;
         let storage = PostgresStorage::connect(&database_url)
@@ -933,7 +933,7 @@ async fn async_main() -> Result<()> {
         registry,
         continuations,
     );
-    let process_work_driver = deployment.process_work_driver();
+    let process_work_driver = deployment.process_work();
     let state = AppState::connect(process_work_driver.clone()).await?;
     if state.fail_once {
         tracing::warn!(worker_id = %state.worker_id, "worker can exit once from crash_once tool");

@@ -1,5 +1,17 @@
 use super::*;
 
+async fn await_process_terminal(
+    process_work: &dyn crate::ProcessWorkSubstrate,
+    process_id: &str,
+) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
+    loop {
+        match process_work.await_process_terminal(process_id).await? {
+            crate::ProcessTerminalWait::Terminal(output) => return Ok(output),
+            crate::ProcessTerminalWait::Reattach => continue,
+        }
+    }
+}
+
 impl ProcessLocalExecution {
     pub async fn execute(
         self,
@@ -7,7 +19,7 @@ impl ProcessLocalExecution {
     ) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
         let Self {
             registry,
-            process_work_driver,
+            process_work,
             process_env_store,
             turn_cancellation,
             effect_controller,
@@ -34,9 +46,9 @@ impl ProcessLocalExecution {
                 let record =
                     InlineRuntimeEffectController::start_process(registry, registration, observers)
                         .await?;
-                if let Some(driver) = process_work_driver.as_ref() {
-                    let _ = driver.claim_and_run_pending("process_start").await?;
-                }
+                let _ = process_work
+                    .admit_pending_processes("process_start")
+                    .await?;
                 Ok(ProcessEffectOutcome::Start {
                     record: Box::new(record),
                 })
@@ -77,15 +89,7 @@ impl ProcessLocalExecution {
                 Ok(ProcessEffectOutcome::DeleteSession { report })
             }
             ProcessCommand::Await { process_id } => {
-                let await_terminal = || async {
-                    if let Some(driver) = process_work_driver.as_ref() {
-                        driver.await_terminal(&process_id).await
-                    } else {
-                        crate::ProcessAwaiter::polling(Arc::clone(&registry))
-                            .await_terminal(&process_id)
-                            .await
-                    }
-                };
+                let await_terminal = || await_process_terminal(process_work.as_ref(), &process_id);
                 let output = if let Some(turn_cancellation) = turn_cancellation {
                     tokio::select! {
                         biased;
@@ -254,6 +258,57 @@ impl ProcessLocalExecution {
 }
 
 #[cfg(test)]
+mod terminal_wait_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct ReattachOnce {
+        waits: AtomicUsize,
+        terminal: crate::ProcessAwaitOutput,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ProcessWorkSubstrate for ReattachOnce {
+        async fn admit_pending_processes(
+            &self,
+            _reason: &str,
+        ) -> Result<crate::ProcessAdmissionReport, crate::PluginError> {
+            unreachable!("terminal-wait witness does not admit work")
+        }
+
+        async fn await_process_terminal(
+            &self,
+            process_id: &str,
+        ) -> Result<crate::ProcessTerminalWait, crate::PluginError> {
+            assert_eq!(process_id, "reattach-process");
+            if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(crate::ProcessTerminalWait::Reattach)
+            } else {
+                Ok(crate::ProcessTerminalWait::Terminal(self.terminal.clone()))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn process_local_reattaches_once_then_returns_terminal_output() {
+        let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+            serde_json::json!({"done": true}),
+        ));
+        let port = ReattachOnce {
+            waits: AtomicUsize::new(0),
+            terminal: terminal.clone(),
+        };
+
+        let output = await_process_terminal(&port, "reattach-process")
+            .await
+            .expect("reattachment reaches terminal output");
+
+        assert_eq!(output, terminal);
+        assert_eq!(port.waits.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::TestProcessRegistryWriteExt as _;
@@ -323,7 +378,9 @@ mod tests {
                 ),
                 crate::RuntimeEffectLocalExecutor::processes(
                     Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
-                    None,
+                    Arc::new(crate::NativeProcessWork::for_registry(
+                        Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>,
+                    )),
                 )
                 .with_process_effect_controller(controller.clone()),
             )

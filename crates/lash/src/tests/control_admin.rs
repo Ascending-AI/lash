@@ -3,14 +3,22 @@ use super::*;
 struct NoopProcessRunHandle;
 
 #[async_trait]
-impl lash_core::facade_support::ProcessRunHandle for NoopProcessRunHandle {
-    async fn claim_and_run_pending(
+impl lash_core::ProcessWorkSubstrate for NoopProcessRunHandle {
+    async fn admit_pending_processes(
         &self,
+        _reason: &str,
     ) -> std::result::Result<
         lash_core::facade_support::ProcessAdmissionReport,
         lash_core::PluginError,
     > {
         Ok(lash_core::facade_support::ProcessAdmissionReport::default())
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &str,
+    ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
+        panic!("unexpected terminal wait for {process_id}")
     }
 }
 
@@ -246,7 +254,7 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-idempotency").open().await?;
 
@@ -281,7 +289,7 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queue-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
@@ -331,7 +339,7 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pending-input-facade-cancel").open().await?;
     let cursor = session.observe().current_observation().cursor;
@@ -477,6 +485,7 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-trigger").open().await?;
     let before = session.admin().state().persist_current().await?;
@@ -731,8 +740,10 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     );
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let driver = lash_core::facade_support::ProcessWorkDriver::new(
+    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    let wiring = lash_core::ProcessWorkWiring::new(
         Arc::clone(&registry),
+        hub,
         Arc::new(NoopProcessRunHandle),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -741,7 +752,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .process_work_driver(driver)
+        .process_work(wiring)
         .advanced()
         .runtime_host_config(runtime_host)
         .build(crate::testing::runtime_lease_owner())?;
@@ -890,15 +901,19 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
         let child_session_id = format!("managed-observer-child-{case}");
         let create_process_id = format!("managed-create-process-{case}");
         let registry = Arc::new(TestLocalProcessRegistry::default());
-        let driver = lash_core::facade_support::ProcessWorkDriver::new(
-            registry.clone(),
+        let process_registry = registry.clone() as Arc<dyn lash_core::ProcessRegistry>;
+        let (process_registry, hub) =
+            lash_core::facade_support::watch_process_registry(process_registry);
+        let wiring = lash_core::ProcessWorkWiring::new(
+            process_registry,
+            hub,
             Arc::new(NoopProcessRunHandle),
         );
         let mut builder =
             explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
                 .provider(mock_provider())
                 .model(mock_model_spec())
-                .process_work_driver(driver);
+                .process_work(wiring);
         if let Some(store_factory) = store_factory.clone() {
             builder = builder.store_factory(store_factory);
         }
@@ -990,7 +1005,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("direct-turn-acceptance").open().await?;
 

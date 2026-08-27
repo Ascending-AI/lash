@@ -196,16 +196,20 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
     );
     runtime_host.durability.attachment_store =
         Arc::new(crate::SessionAttachmentStore::ephemeral(attachment_backend));
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
+        let (registry, hub) =
+            crate::watch_process_registry(Arc::new(TestLocalProcessRegistry::default()));
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             factory,
-            Arc::new(TestLocalProcessRegistry::default()),
+            registry,
+            hub,
+            crate::WorkerProcessWork::SelfNative,
             local_owner("attachment-parent-worker", "host-a", "parent-start-a"),
         )
-        .with_session_policy(policy.clone()),
-    );
+        .with_session_policy(policy.clone())
+    });
 
     let runtime = Box::pin(worker.build_process_runtime(
         format!("process-env:{PROCESS_ID}"),
@@ -278,16 +282,20 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     )
     .await
     .expect("persist process env");
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
+        let (worker_registry, hub) =
+            crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             factory.clone() as Arc<dyn SessionStoreFactory>,
-            Arc::clone(&registry),
+            worker_registry,
+            hub,
+            crate::WorkerProcessWork::SelfNative,
             local_owner("attachment-worker", "host-a", "start-a"),
         )
-        .with_session_policy(policy),
-    );
+        .with_session_policy(policy)
+    });
     registry
         .register_process(
             ProcessRegistration::new(

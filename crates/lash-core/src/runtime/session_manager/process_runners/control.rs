@@ -20,7 +20,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         scope: &'scope crate::ProcessOpScope<'scope>,
         unavailable_message: &'static str,
     ) -> Result<Self, crate::PluginError> {
-        let Some(registry) = current.host.process_registry.as_ref() else {
+        let Some(registry) = current.host.process_registry() else {
             return Err(crate::PluginError::Session(unavailable_message.to_string()));
         };
         let effect_controller = scope.controller();
@@ -184,7 +184,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
                     self.current.host.session_store_factory.as_ref(),
                     wake_delivery.map(|delivery| *delivery),
                     None,
-                    self.current.host.queued_work_driver.as_ref(),
+                    Arc::clone(self.current.host.queued_work()),
                     self.current.host.core.control.process_wake_delivery_policy,
                     Arc::clone(&self.current.host.core.clock),
                 )
@@ -256,7 +256,11 @@ impl<'scope> ProcessCommandRunner<'scope> {
         };
         let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
-            self.current.host.process_work_driver.clone(),
+            self.current
+                .host
+                .process_work()
+                .cloned()
+                .expect("process service requires process-work wiring"),
         )
         .with_process_env_store(Arc::clone(
             &self.current.host.core.durability.process_env_store,
@@ -504,7 +508,7 @@ impl ProcessCapability {
                 crate::ProcessEngineValidationContext::new(
                     current.plugins.host(),
                     tool_catalog,
-                    current.host.process_registry.is_some(),
+                    current.host.process_registry().is_some(),
                 ),
                 payload,
                 Some(env_spec),
@@ -582,7 +586,7 @@ impl ProcessCapability {
         session_id: &str,
         process_id: &str,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let registry = current.host.process_registry.as_ref().ok_or_else(|| {
+        let registry = current.host.process_registry().ok_or_else(|| {
             crate::PluginError::Session(
                 "process registry is unavailable in this runtime".to_string(),
             )
@@ -645,7 +649,7 @@ impl ProcessCapability {
         session_id: &str,
         mode: crate::ProcessListMode,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        let registry = current.host.process_registry.as_ref().ok_or_else(|| {
+        let registry = current.host.process_registry().ok_or_else(|| {
             crate::PluginError::Session(
                 "process registry is unavailable in this runtime".to_string(),
             )
@@ -939,7 +943,7 @@ impl ProcessCapability {
         if process_ids.is_empty() {
             return Ok(());
         }
-        let registry = current.host.process_registry.as_ref().ok_or_else(|| {
+        let registry = current.host.process_registry().ok_or_else(|| {
             crate::PluginError::Session("process registry is unavailable in this runtime".into())
         })?;
         for process_id in process_ids {

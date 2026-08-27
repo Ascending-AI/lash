@@ -53,7 +53,7 @@
             .model(model.clone())
             .store_factory(Arc::clone(&first_store_factory))
             .process_registry(Arc::clone(&first_registry))
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build first workbench core");
         let first_session = first_core
@@ -213,7 +213,7 @@
             .model(model)
             .store_factory(Arc::clone(&resumed_store_factory))
             .process_registry(Arc::clone(&resumed_registry))
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build reconstructed workbench core");
         let resumed_session_ids = WorkbenchSessions::persistent(session_id_path)
@@ -230,7 +230,7 @@
             session_store_factory: Arc::clone(&resumed_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&resumed_registry)),
+            // Process work is resolved through the core.
             sessions: resumed_session_ids,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -241,7 +241,7 @@
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx: SessionEventRegistry::new(16),
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),

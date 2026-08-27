@@ -22,13 +22,14 @@ mod in_memory_store;
 mod io;
 mod lifecycle;
 mod logical_turn;
+mod native_substrate;
 mod observation;
 mod process;
 mod process_work_driver;
 mod process_worker;
-pub(crate) use process_worker::{
-    ensure_process_execution_permit, release_process_execution_permit_while,
-};
+pub(crate) use process_worker::ensure_process_execution_permit;
+#[doc(hidden)]
+pub use process_worker::release_process_execution_permit_while;
 mod queued_drain_policy;
 mod queued_work_driver;
 #[doc(hidden)]
@@ -176,6 +177,10 @@ pub use host::{
 pub use in_memory_store::RawSessionExecutionLeaseRow;
 pub use in_memory_store::{InMemorySessionStore, InMemorySessionStoreFactory};
 use io::normalize_input_items;
+pub use native_substrate::{
+    NativeProcessWork, NativeQueuedWork, NoQueuedWork, ProcessTerminalWait, ProcessWorkSubstrate,
+    ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget,
+};
 pub use observation::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
@@ -234,7 +239,7 @@ pub use process_worker::{
     DEFAULT_PROCESS_EXECUTION_CONCURRENCY, DurableProcessWorker, DurableProcessWorkerConfig,
     ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport, ProcessDrainDeferred,
     ProcessDrainReport, ProcessExecutionConcurrencyError, ProcessRecoveryAttemptOutcome,
-    ProcessRecoveryOperation, ProcessWorkerFault,
+    ProcessRecoveryOperation, ProcessWorkerFault, WorkerProcessWork,
 };
 pub use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,

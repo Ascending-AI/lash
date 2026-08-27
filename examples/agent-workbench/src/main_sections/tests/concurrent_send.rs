@@ -183,7 +183,7 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         provider,
         in_memory_trigger_store(),
         store_factory.clone(),
-        Some(inert_queued_work_driver()),
+        Some(inert_queued_work_port()),
     )
     .await;
     let session_id = state.current_session_id();
@@ -336,7 +336,7 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         provider,
         in_memory_trigger_store(),
         store_factory.clone(),
-        Some(inert_queued_work_driver()),
+        Some(inert_queued_work_port()),
     )
     .await;
     let session_id = state.current_session_id();
@@ -627,7 +627,7 @@ async fn queued_send_test_state(
         provider,
         in_memory_trigger_store(),
         store_factory,
-        Some(inert_queued_work_driver()),
+        Some(inert_queued_work_port()),
     )
     .await
 }

@@ -193,7 +193,7 @@ fn standard_core_with_attachment_policy(
         .model(model())
         .tools(tools)
         .trace_sink(trace)
-        .disable_queued_work_driver()
+        .without_queued_work()
         .advanced()
         .runtime_host_config(
             lash_core::facade_support::RuntimeHostConfig::in_memory(
@@ -302,7 +302,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .model(model())
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
@@ -770,7 +770,7 @@ finish { baton: baton }
         .provider(provider)
         .model(model())
         .trace_sink(trace.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",

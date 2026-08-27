@@ -3673,6 +3673,32 @@ async fn command_only_queued_work_drain_completes_without_turn() {
     );
 }
 
+#[tokio::test]
+async fn no_queued_work_submit_defers_without_refreshing_resident_state() {
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+    let full_loads_before = store.load_session_count();
+    let head_reads_before = store.load_session_head_meta_count();
+
+    let receipt = runtime
+        .submit_session_command(
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "deferred queued lane".to_string(),
+            },
+            "deferred-queued-command",
+        )
+        .await
+        .expect("NoQueuedWork leaves the durable command pending");
+
+    assert_eq!(store.load_session_count(), full_loads_before);
+    assert_eq!(store.load_session_head_meta_count(), head_reads_before);
+    let pending = crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        .await
+        .expect("inspect deferred durable command");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].batch_id, receipt.batch_id);
+}
+
 // Boundary: these process-wake and active-checkpoint steering tests stay in
 // `turns.rs` because they verify the full `LashRuntime` scheduler, provider
 // prompt contents, cancellation path, and selected queued-work APIs. Runtime
@@ -3717,10 +3743,9 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
     let queued_input = enqueue_idle_turn_input(store.as_ref(), "root", "queued user input").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -3809,10 +3834,9 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
     let queued_input = enqueue_idle_turn_input(store.as_ref(), "root", "still pending user").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -3934,10 +3958,9 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         enqueue_idle_turn_input(store.as_ref(), "root", "cancel with wake pending").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -4119,10 +4142,9 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
     // active-turn checkpoint.
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -5867,10 +5889,9 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     let process_caused_by = crate::CausalRef::SessionNode {
         session_id: "root".to_string(),
@@ -7854,10 +7875,9 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
     enqueue_idle_turn_input(store.as_ref(), "root", "input held when the lease is lost").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -8225,10 +8245,9 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     let process_caused_by = crate::CausalRef::SessionNode {
         session_id: "root".to_string(),
@@ -8432,10 +8451,9 @@ async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_histor
 
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     registry
         .register_process(
             crate::ProcessRegistration::new(
@@ -8535,10 +8553,9 @@ async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_default() {
     );
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     registry
         .register_process(
             crate::ProcessRegistration::new(
@@ -8636,10 +8653,9 @@ async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
 
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     registry
         .register_process(
             crate::ProcessRegistration::new(

@@ -9,7 +9,7 @@ pub(crate) async fn enqueue_wake_delivery(
     session_store_factory: Option<&std::sync::Arc<dyn crate::SessionStoreFactory>>,
     wake_delivery: Option<crate::ProcessWakeDelivery>,
     trace_host: Option<&dyn crate::plugin::SessionGraphService>,
-    queued_work_driver: Option<&crate::QueuedWorkDriver>,
+    queued_work: std::sync::Arc<dyn crate::QueuedWorkSubstrate>,
     process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: std::sync::Arc<dyn crate::Clock>,
 ) -> Result<(), PluginError> {
@@ -25,7 +25,7 @@ pub(crate) async fn enqueue_wake_delivery(
     if let Err(error) = crate::WakeDeliveryDriver::drive_pending_once_with_delivery_policy(
         registry,
         std::sync::Arc::clone(factory),
-        queued_work_driver.cloned(),
+        queued_work,
         clock,
         process_wake_delivery_policy,
         32,
@@ -98,7 +98,8 @@ impl ToolProcessEventClient {
             ));
         };
         process
-            .awaiter
+            .process_work
+            .event_awaiter()
             .await_event(&process.process_id, event_type, after_sequence)
             .await
     }
@@ -134,7 +135,8 @@ impl ToolProcessEventClient {
             ));
         };
         let result = process
-            .registry
+            .process_work
+            .registry()
             .append_event_with_authority(
                 &process.process_id,
                 request,
@@ -142,12 +144,12 @@ impl ToolProcessEventClient {
             )
             .await?;
         enqueue_wake_delivery(
-            std::sync::Arc::clone(&process.registry),
+            std::sync::Arc::clone(process.process_work.registry()),
             process.store.clone(),
             process.session_store_factory.as_ref(),
             result.wake_delivery,
             Some(process.session_graph.as_ref()),
-            process.queued_work_driver.as_ref(),
+            std::sync::Arc::clone(&process.queued_work),
             process.process_wake_delivery_policy,
             std::sync::Arc::clone(&process.clock),
         )

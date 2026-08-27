@@ -158,8 +158,12 @@ impl EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
         command: crate::ProcessCommand,
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
-        let mut local_executor =
-            crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None);
+        let mut local_executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&self.registry),
+            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                &self.registry,
+            ))),
+        );
         if let Some(turn_cancellation) = scope.turn_cancellation.clone() {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
         }

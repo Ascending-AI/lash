@@ -3130,7 +3130,7 @@ async fn wait_for_queued_work(
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
     let deployment =
         RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
-    let process_work_driver = deployment.process_work_driver();
+    let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-queue-watch".to_string(),
         storage: storage.clone(),
@@ -3200,7 +3200,7 @@ async fn emit_button_event(
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
     let deployment =
         RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
-    let process_work_driver = deployment.process_work_driver();
+    let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner".to_string(),
         storage: storage.clone(),
@@ -3822,7 +3822,7 @@ async fn assert_reopened_session_agrees(
         lash_restate_postgres_workers_e2e::process_continuations_from_storage(storage);
     let deployment =
         RestateProcessDeployment::new(ingress_url.to_string(), registry, continuations);
-    let process_work_driver = deployment.process_work_driver();
+    let process_work_driver = deployment.process_work();
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
         worker_id: "runner-reopen".to_string(),
         storage: storage.clone(),

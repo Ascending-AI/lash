@@ -529,11 +529,10 @@ impl RuntimeExecutionContext<'_> {
             tool_context = tool_context.process_events(
                 self.process_id().unwrap(),
                 process_events.execution_write_authority.clone(),
-                std::sync::Arc::clone(&process_events.registry),
-                process_events.awaiter.clone(),
+                process_events.process_work.clone(),
                 process_events.store.clone(),
                 process_events.session_store_factory.clone(),
-                process_events.queued_work_driver.clone(),
+                std::sync::Arc::clone(&process_events.queued_work),
                 process_events.process_wake_delivery_policy,
                 std::sync::Arc::clone(&process_events.clock),
             );

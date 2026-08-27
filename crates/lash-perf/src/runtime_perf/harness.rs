@@ -1107,7 +1107,7 @@ trait RuntimePerfCoreBuilderExt {
 impl RuntimePerfCoreBuilderExt for lash::LashCoreBuilder {
     fn with_manual_queue_drain(self, scenario: RuntimePerfScenario) -> Self {
         if scenario.is_high_traffic() || scenario.is_queued_work_contention() {
-            self.disable_queued_work_driver()
+            self.without_queued_work()
         } else {
             self
         }

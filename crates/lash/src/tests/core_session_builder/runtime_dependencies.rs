@@ -107,20 +107,26 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
     let registry = lash_sqlite_store::SqliteProcessRegistry::memory()
         .await
         .expect("open SQLite process registry with its default clock");
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(
-        clock.clone(),
-    )) as Arc<dyn lash_core::SessionStoreFactory>;
+    let store_factory =
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(clock.clone()))
+            as Arc<dyn lash_core::SessionStoreFactory>;
     let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .model(
             lash_core::ModelSpec::builder("clock-wiring-model")
                 .context_window_tokens(4_096)
                 .build()
-            .expect("valid test model"),
+                .expect("valid test model"),
         )
         .store_factory(store_factory)
         .process_registry(Arc::new(registry))
         .advanced()
-        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(lash_core::CommitBudget::bounded(1024 * 1024, 512), lash_core::QueuedWorkBatchingConfig::new(1)).with_clock(clock))
+        .runtime_host_config(
+            lash_core::facade_support::RuntimeHostConfig::in_memory(
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
+            )
+            .with_clock(clock),
+        )
         .build(crate::testing::runtime_lease_owner())
         .expect("build core with SQLite process registry");
     let registry = core.process_registry().expect("built process registry");
@@ -173,11 +179,10 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
 }
 
 #[tokio::test]
-async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_configs(
-) -> Result<()> {
+async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_configs()
+-> Result<()> {
     const NOW_MS: u64 = 4_200_000;
-    let clock: Arc<dyn lash_core::Clock> =
-        Arc::new(lash_core::testing::TestClock::new(NOW_MS));
+    let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .clock(Arc::clone(&clock))
         .store_factory(Arc::new(
@@ -188,7 +193,7 @@ async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_
 
     let inline_trigger_store = {
         let config = core
-            .work_driver
+            .substrate_slot
             .process_worker_config()
             .expect("inline worker config must be assembled at build");
         Arc::clone(&config.trigger_store)
@@ -212,8 +217,12 @@ async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_
 #[tokio::test]
 async fn builder_requires_explicit_process_env_store_at_build() {
     let result = peer_coherence_builder()
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
-        .attachment_store(Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()))
+        .effect_host(Arc::new(
+            lash_core::facade_support::InlineEffectHost::default(),
+        ))
+        .attachment_store(Arc::new(
+            lash_core::facade_support::InMemoryAttachmentStore::new(),
+        ))
         .build(crate::testing::runtime_lease_owner());
     let err = expect_build_error(
         result,
@@ -238,7 +247,9 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
         .expect("open durable registry"),
     );
     peer_coherence_builder()
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
+        .effect_host(Arc::new(
+            lash_core::facade_support::InlineEffectHost::default(),
+        ))
         .store_factory(durable_session_store_factory(dir.path()))
         .attachment_store(durable_attachment_store(dir.path()))
         .process_env_store(durable_process_env_store(dir.path()).await)
@@ -263,7 +274,9 @@ async fn durable_process_worker_config_uses_child_store_factory_without_root() -
     );
     let child_factory = durable_session_store_factory(dir.path());
     let core = peer_coherence_builder()
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
+        .effect_host(Arc::new(
+            lash_core::facade_support::InlineEffectHost::default(),
+        ))
         .child_store_factory(Arc::clone(&child_factory))
         .attachment_store(durable_attachment_store(dir.path()))
         .process_env_store(durable_process_env_store(dir.path()).await)
@@ -276,13 +289,15 @@ async fn durable_process_worker_config_uses_child_store_factory_without_root() -
 }
 
 #[tokio::test]
-async fn durable_process_worker_config_matches_inline_child_factory_when_both_are_set(
-) -> Result<()> {
+async fn durable_process_worker_config_matches_inline_child_factory_when_both_are_set() -> Result<()>
+{
     let dir = tempfile::tempdir().expect("tempdir");
     let root_factory = durable_session_store_factory(&dir.path().join("root"));
     let child_factory = durable_session_store_factory(&dir.path().join("child"));
     let core = peer_coherence_builder()
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::default()))
+        .effect_host(Arc::new(
+            lash_core::facade_support::InlineEffectHost::default(),
+        ))
         .store_factory(root_factory)
         .child_store_factory(Arc::clone(&child_factory))
         .attachment_store(durable_attachment_store(dir.path()))
@@ -292,7 +307,7 @@ async fn durable_process_worker_config_matches_inline_child_factory_when_both_ar
         .build(crate::testing::runtime_lease_owner())?;
 
     let inline_config = core
-        .work_driver
+        .substrate_slot
         .process_worker_config()
         .expect("inline process worker config must be assembled at build");
     let public_config = core.durable_process_worker_config()?;
@@ -316,7 +331,9 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
     // An all-in-memory build succeeds, including the explicit session store
     // factory that backs process execution.
     explicit_ephemeral_facets(peer_coherence_builder())
-        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner())?;
     Ok(())
@@ -325,14 +342,22 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
 struct NoopProcessRunHandle;
 
 #[async_trait]
-impl lash_core::facade_support::ProcessRunHandle for NoopProcessRunHandle {
-    async fn claim_and_run_pending(
+impl lash_core::ProcessWorkSubstrate for NoopProcessRunHandle {
+    async fn admit_pending_processes(
         &self,
+        _reason: &str,
     ) -> std::result::Result<
         lash_core::facade_support::ProcessAdmissionReport,
         lash_core::PluginError,
     > {
         Ok(lash_core::facade_support::ProcessAdmissionReport::default())
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &str,
+    ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
+        panic!("unexpected terminal wait for {process_id}")
     }
 }
 
@@ -341,11 +366,15 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
 {
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let driver =
-        lash_core::facade_support::ProcessWorkDriver::new(Arc::clone(&registry), Arc::new(NoopProcessRunHandle));
-    let driver_registry = driver.process_registry();
+    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    let driver_registry = Arc::clone(&registry);
+    let wiring = lash_core::ProcessWorkWiring::new(
+        Arc::clone(&registry),
+        hub,
+        Arc::new(NoopProcessRunHandle),
+    );
     let core = explicit_ephemeral_facets(peer_coherence_builder())
-        .process_work_driver(driver)
+        .process_work(wiring)
         .build(crate::testing::runtime_lease_owner())?;
 
     let configured = core
@@ -353,7 +382,57 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
         .expect("external driver configures the core registry");
     assert!(Arc::ptr_eq(&configured, &driver_registry));
     assert!(core.processes().observer().is_ok());
-    assert!(core.work_driver.drivers().await.process.is_some());
+    assert!(core.substrate_slot.ports().await.process.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn external_process_port_composes_native_queued_port_and_refreshes_after_ran() -> Result<()> {
+    let registry =
+        Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
+    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    let wiring = lash_core::ProcessWorkWiring::new(
+        Arc::clone(&registry),
+        hub,
+        Arc::new(NoopProcessRunHandle),
+    );
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_work(wiring)
+        .build(crate::testing::runtime_lease_owner())?;
+
+    let session = core.session("external-process-native-queue").open().await?;
+    let cursor_before = session
+        .observe()
+        .current_observation()
+        .cursor
+        .as_str()
+        .to_string();
+    session
+        .commands()
+        .refresh_tool_catalog("native queue regression guard", "native-queue-refresh")
+        .await?;
+    let cursor_after = session
+        .observe()
+        .current_observation()
+        .cursor
+        .as_str()
+        .to_string();
+
+    let ports = core.substrate_slot.ports().await;
+    let outcome = ports
+        .queued
+        .drain_session_work(
+            lash_core::SessionWorkTarget::Any,
+            "figments-regression-guard",
+        )
+        .await?;
+
+    assert_eq!(outcome, lash_core::SessionDrainOutcome::Ran);
+    assert_ne!(cursor_after, cursor_before);
+    assert!(ports.process.is_some());
     Ok(())
 }
 
@@ -372,7 +451,9 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
@@ -381,7 +462,7 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
         .build(crate::testing::runtime_lease_owner())?;
     core.session("main").open().await?;
     assert!(
-        core.work_driver.drivers().await.process.is_some(),
+        core.substrate_slot.ports().await.process.is_some(),
         "the default inline process driver must resolve when a registry + store factory are wired"
     );
     Ok(())
@@ -391,14 +472,16 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
 async fn durable_process_worker_config_uses_core_process_registry() -> Result<()> {
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let trigger_store =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()) as Arc<dyn lash_core::TriggerStore>;
+    let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default())
+        as Arc<dyn lash_core::TriggerStore>;
     let core_owner = lash_core::LeaseOwnerIdentity::opaque(
         "durable-worker-facade-owner",
         "durable-worker-facade-boot",
     );
     let core = explicit_ephemeral_facets(peer_coherence_builder())
-        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .trigger_store(Arc::clone(&trigger_store))
         .process_registry(Arc::clone(&registry))
         .build(core_owner)?;
@@ -452,7 +535,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_request = lash_core::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+        pending_observer_intents: Vec::new(),
         session_id: "orphaned-fork-source".to_string(),
         relation: lash_core::SessionRelation::Root,
         policy: source_policy.clone(),
@@ -464,7 +547,9 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: source_request.session_id.clone(),
         policy: source_policy,
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     source_state.ensure_agent_frame_initialized();
     source
@@ -552,7 +637,9 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "fork-observer-source".to_string(),
         policy,
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     source_state.ensure_agent_frame_initialized();
     source_store
@@ -587,9 +674,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
                         when: Some(lash_core::ProcessValueSelector::Present(
                             "/wake_input".to_string(),
                         )),
-                        input: lash_core::ProcessValueSelector::Pointer(
-                            "/wake_input".to_string(),
-                        ),
+                        input: lash_core::ProcessValueSelector::Pointer("/wake_input".to_string()),
                     }),
                     ..lash_core::ProcessEventSemanticsSpec::default()
                 },
@@ -609,7 +694,10 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
 
     let fork_receipt = core.fork_at(&fork_node_id, "fork-observer-branch").await?;
     assert_eq!(fork_receipt.observed_processes.len(), 1);
-    assert_eq!(fork_receipt.observed_processes[0].process_id, "fork-visible-process");
+    assert_eq!(
+        fork_receipt.observed_processes[0].process_id,
+        "fork-visible-process"
+    );
     assert_eq!(
         fork_receipt.observed_processes[0].attribution,
         lash_core::test_support::SessionObserverIntentAttribution::ForkInherited
@@ -671,7 +759,8 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("load transient-failure fork metadata")
         .expect("transient-failure fork metadata exists");
-    assert!(transient_meta.pending_observer_intents.is_empty(),
+    assert!(
+        transient_meta.pending_observer_intents.is_empty(),
         "fork_at must consume transiently unavailable observer intents"
     );
 
@@ -680,16 +769,18 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("load published fork metadata")
         .expect("published fork metadata exists");
-    assert!(matches!(published_meta.relation, lash_core::SessionRelation::Fork { .. }));
-    assert!(published_meta.pending_observer_intents.is_empty(),
+    assert!(matches!(
+        published_meta.relation,
+        lash_core::SessionRelation::Fork { .. }
+    ));
+    assert!(
+        published_meta.pending_observer_intents.is_empty(),
         "successfully published observers must be consumed from the recovery intent"
     );
 
     let mut recovery_meta = published_meta;
     recovery_meta.pending_observer_intents.push(
-        lash_core::facade_support::SessionObserverIntent::fork_inherited(
-            "fork-visible-process",
-        ),
+        lash_core::facade_support::SessionObserverIntent::fork_inherited("fork-visible-process"),
     );
     registry
         .register_process(lash_core::ProcessRegistration::new(
@@ -721,9 +812,7 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("prune inherited process before recovery");
     recovery_meta.pending_observer_intents.push(
-        lash_core::facade_support::SessionObserverIntent::fork_inherited(
-            "fork-pruned-process",
-        ),
+        lash_core::facade_support::SessionObserverIntent::fork_inherited("fork-pruned-process"),
     );
     branch_store
         .save_session_meta(recovery_meta)
@@ -740,7 +829,9 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
     core.session("fork-observer-branch")
         .open_with_state(lash_core::RuntimeSessionState {
             session_id: "fork-observer-branch".to_string(),
-            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
         })
         .await?;
     assert_eq!(
@@ -757,7 +848,8 @@ async fn fork_observer_inheritance_is_recoverable_selective_and_wake_independent
         .await
         .expect("load recovered fork metadata")
         .expect("recovered fork metadata exists");
-    assert!(recovered_meta.pending_observer_intents.is_empty(),
+    assert!(
+        recovered_meta.pending_observer_intents.is_empty(),
         "recovery must consume the intent after idempotent publication"
     );
     registry
@@ -1061,7 +1153,8 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 }
 
 #[tokio::test]
-async fn attributed_session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()> {
+async fn attributed_session_observer_intents_settle_in_one_pass_before_open_returns() -> Result<()>
+{
     use lash_core::{ProcessRegistry as _, SessionStoreFactory as _};
 
     let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
@@ -1119,9 +1212,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
                 .await
                 .expect("simulate outer publication before a crash between layers");
             assert!(
-                !registry
-                    .is_observer(&session_id, &fork_process_id)
-                    .await?,
+                !registry.is_observer(&session_id, &fork_process_id).await?,
                 "the crash fixture must leave the inner fork layer unpublished"
             );
         }
@@ -1135,9 +1226,7 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
             "open must settle the outer session-create observer intent"
         );
         assert!(
-            registry
-                .is_observer(&session_id, &fork_process_id)
-                .await?,
+            registry.is_observer(&session_id, &fork_process_id).await?,
             "open must settle the inner fork observer intent"
         );
         let meta = store
@@ -1146,7 +1235,8 @@ async fn attributed_session_observer_intents_settle_in_one_pass_before_open_retu
             .expect("attributed session metadata");
         assert!(
             matches!(meta.relation, lash_core::SessionRelation::Fork { .. }),
-            "open must preserve the base fork relation, got {:?}", meta.relation
+            "open must preserve the base fork relation, got {:?}",
+            meta.relation
         );
         assert!(meta.pending_observer_intents.is_empty());
 
@@ -1198,16 +1288,15 @@ fn builder_rejects_invalid_queued_work_execution_concurrency() {
             .build(crate::testing::runtime_lease_owner()),
         "zero queued-work execution concurrency must be rejected",
     );
-    assert!(matches!(
-        err,
-        EmbedError::QueuedWorkExecutionConcurrency(_)
-    ));
+    assert!(matches!(err, EmbedError::QueuedWorkExecutionConcurrency(_)));
 }
 
 #[tokio::test]
 async fn durable_process_worker_config_requires_core_process_registry() {
     let core = explicit_ephemeral_facets(peer_coherence_builder())
-        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build(crate::testing::runtime_lease_owner())
         .expect("build core without process support");
 
@@ -1287,7 +1376,9 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     let mut source_state = lash_core::RuntimeSessionState {
         session_id: "generation-fork-source".to_string(),
         policy: source_policy,
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     source_state.ensure_agent_frame_initialized();
     source_store

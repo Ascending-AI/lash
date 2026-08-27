@@ -269,7 +269,7 @@ fn core() -> lash::Result<lash::LashCore> {
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .plugin(Arc::new(ContextPluginFactory))
         .build(crate::example_process_owner())
 }

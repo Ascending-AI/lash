@@ -1015,7 +1015,7 @@ async fn health(database_url: &str) -> Result<()> {
         Arc::clone(&registry),
         Arc::new(storage.session_store_factory_with_shared_process_registry())
             as Arc<dyn lash_core::SessionStoreFactory>,
-        None,
+        Arc::new(lash::runtime::NoQueuedWork::new()),
         Arc::new(lash_core::facade_support::SystemClock),
         32,
     )

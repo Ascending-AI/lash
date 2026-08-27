@@ -78,7 +78,7 @@ mod process_work_tests {
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: driver.clone(),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -89,7 +89,7 @@ mod process_work_tests {
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx,
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -275,7 +275,7 @@ mod process_work_tests {
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -286,7 +286,7 @@ mod process_work_tests {
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx: SessionEventRegistry::new(16),
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url,
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -950,7 +950,7 @@ mod process_work_tests {
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -961,7 +961,7 @@ mod process_work_tests {
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx: SessionEventRegistry::new(16),
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url,
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),

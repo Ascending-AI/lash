@@ -55,7 +55,7 @@ impl ManagedSessionCapability {
             ),
         };
         let observed_processes = crate::runtime::reconcile_session_process_observer_intents(
-            current.host.process_registry.as_deref(),
+            current.host.process_registry().map(Arc::as_ref),
             &plan.session_id,
             observer_intent_source,
         )

@@ -26,8 +26,12 @@ use lash_trace::{TraceContext, TraceLevel, TraceSink};
 
 #[cfg(test)]
 use super::InlineEffectHost;
+use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
-use super::{EffectHost, RuntimeHostConfig, TerminationPolicy};
+use super::{
+    EffectHost, NoQueuedWork, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeHostConfig,
+    TerminationPolicy,
+};
 
 /// Shared runtime infrastructure an embedder builds once and reuses
 /// across every `LashRuntime` it constructs.
@@ -42,7 +46,8 @@ pub struct RuntimeEnvironment {
     // `PluginSession` is built from it via `PluginHost::build_session`.
     pub plugin_host: Option<Arc<crate::PluginHost>>,
 
-    // Host-owned process lifecycle and local execution support.
+    // Host-owned process lifecycle support. When present, `work` is the
+    // corresponding `RuntimeWork::Processes` value before host construction.
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
 
     // Host-owned trigger subscription and trigger occurrence routing.
@@ -52,19 +57,24 @@ pub struct RuntimeEnvironment {
     // built with this environment.
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
 
-    // Host-owned process work driver. Threaded onto every `RuntimeHost` built
-    // from this environment (see `LashRuntime::from_environment`).
-    pub process_work_driver: Option<super::ProcessWorkDriver>,
-
-    // Host-owned queued work driver. Queue ingress sites call it directly so
-    // queued turn work, including process wakes, drains through the selected
-    // host without a core-owned poller.
-    pub queued_work_driver: Option<super::QueuedWorkDriver>,
+    pub(crate) work: RuntimeWork,
 
     pub core: RuntimeHostConfig,
 }
 
 impl RuntimeEnvironment {
+    #[doc(hidden)]
+    pub fn process_work(&self) -> Option<Arc<dyn super::ProcessWorkSubstrate>> {
+        self.work
+            .process_ports()
+            .map(|(_, process)| Arc::clone(process))
+    }
+
+    #[doc(hidden)]
+    pub fn queued_work(&self) -> Arc<dyn QueuedWorkSubstrate> {
+        Arc::clone(self.work.queued_arc())
+    }
+
     /// Construct an environment builder seeded with an in-memory host using
     /// `commit_budget`. A later
     /// [`with_runtime_host_config`](RuntimeEnvironmentBuilder::with_runtime_host_config)
@@ -98,6 +108,7 @@ impl ParkedSession {
 /// Fluent builder for `RuntimeEnvironment`.
 pub struct RuntimeEnvironmentBuilder {
     env: RuntimeEnvironment,
+    process_registry: Option<Arc<dyn ProcessRegistry>>,
 }
 
 impl RuntimeEnvironmentBuilder {
@@ -116,10 +127,10 @@ impl RuntimeEnvironmentBuilder {
                 process_registry: None,
                 trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
                 session_store_factory: None,
-                process_work_driver: None,
-                queued_work_driver: None,
+                work: RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
                 core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
             },
+            process_registry: None,
         }
     }
     pub fn with_plugin_host(mut self, host: Arc<crate::PluginHost>) -> Self {
@@ -128,7 +139,7 @@ impl RuntimeEnvironmentBuilder {
     }
 
     pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.env.process_registry = Some(process_registry);
+        self.process_registry = Some(process_registry);
         self
     }
 
@@ -147,13 +158,14 @@ impl RuntimeEnvironmentBuilder {
 
     /// Set the host's process work driver. Every `RuntimeHost` built from this
     /// environment carries it, so process starts can directly drive pending work.
-    pub fn with_process_work_driver(mut self, driver: super::ProcessWorkDriver) -> Self {
-        self.env.process_work_driver = Some(driver);
+    pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
+        self.env.process_registry = Some(Arc::clone(wiring.registry()));
+        self.env.work = self.env.work.with_process_wiring(wiring);
         self
     }
 
-    pub fn with_queued_work_driver(mut self, driver: super::QueuedWorkDriver) -> Self {
-        self.env.queued_work_driver = Some(driver);
+    pub fn with_queued_work(mut self, queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+        self.env.work = self.env.work.with_queued(queued);
         self
     }
 
@@ -243,7 +255,32 @@ impl RuntimeEnvironmentBuilder {
     }
 
     pub fn build(self) -> RuntimeEnvironment {
-        self.env
+        let mut env = self.env;
+        if env.process_registry.is_none() {
+            env.process_registry = self.process_registry;
+        }
+        env
+    }
+}
+
+impl RuntimeEnvironment {
+    #[doc(hidden)]
+    pub fn with_work_ports(
+        mut self,
+        process: Option<ProcessWorkWiring>,
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    ) -> Self {
+        self.work = match process {
+            Some(wiring) => {
+                self.process_registry = Some(Arc::clone(wiring.registry()));
+                RuntimeWork::processes(wiring, queued)
+            }
+            None => {
+                self.process_registry = None;
+                RuntimeWork::sessions_only(queued)
+            }
+        };
+        self
     }
 }
 

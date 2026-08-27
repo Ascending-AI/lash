@@ -7,9 +7,9 @@ use tokio_util::task::TaskTracker;
 
 use super::process_wake_batch_draft_with_delivery_policy;
 use crate::{
-    Clock, PluginError, ProcessRegistry, QueuedWorkDriver, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, WakeDeliveryClaimOutcome,
-    WakeDiscardReason,
+    Clock, PluginError, ProcessRegistry, QueuedWorkSubstrate, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionWorkTarget, StoreError,
+    WakeDeliveryClaimOutcome, WakeDiscardReason,
 };
 
 const DELIVERY_BATCH_SIZE: usize = 32;
@@ -60,7 +60,7 @@ pub struct WakeDeliveryDriver {
 struct WakeDeliveryDriverInner {
     registry: Arc<dyn ProcessRegistry>,
     session_store_factory: Arc<dyn SessionStoreFactory>,
-    queued_work_driver: Option<QueuedWorkDriver>,
+    queued_work: std::sync::Weak<dyn QueuedWorkSubstrate>,
     clock: Arc<dyn Clock>,
     delivery_policy: crate::DeliveryPolicy,
     notify: Notify,
@@ -83,7 +83,7 @@ impl WakeDeliveryDriver {
     pub fn new(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work_driver: Option<QueuedWorkDriver>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
     ) -> Self {
@@ -91,7 +91,7 @@ impl WakeDeliveryDriver {
             inner: Arc::new(WakeDeliveryDriverInner {
                 registry,
                 session_store_factory,
-                queued_work_driver,
+                queued_work: Arc::downgrade(&queued_work),
                 clock,
                 delivery_policy,
                 notify: Notify::new(),
@@ -130,10 +130,13 @@ impl WakeDeliveryDriver {
 
     /// Host/runbook lever: synchronously run one bounded delivery scan.
     pub async fn drive_pending(&self) -> Result<WakeDeliveryDriveReport, PluginError> {
+        let Some(queued_work) = self.inner.queued_work.upgrade() else {
+            return Ok(WakeDeliveryDriveReport::default());
+        };
         Self::drive_pending_once_with_delivery_policy(
             Arc::clone(&self.inner.registry),
             Arc::clone(&self.inner.session_store_factory),
-            self.inner.queued_work_driver.clone(),
+            queued_work,
             Arc::clone(&self.inner.clock),
             self.inner.delivery_policy,
             DELIVERY_BATCH_SIZE,
@@ -146,14 +149,14 @@ impl WakeDeliveryDriver {
     pub async fn drive_pending_once(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work_driver: Option<QueuedWorkDriver>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
         clock: Arc<dyn Clock>,
         limit: usize,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
         Self::drive_pending_once_with_delivery_policy(
             registry,
             session_store_factory,
-            queued_work_driver,
+            queued_work,
             clock,
             crate::DeliveryPolicy::EarliestSafeBoundary,
             limit,
@@ -165,7 +168,7 @@ impl WakeDeliveryDriver {
     pub async fn drive_pending_once_with_delivery_policy(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work_driver: Option<QueuedWorkDriver>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
         limit: usize,
@@ -286,9 +289,10 @@ impl WakeDeliveryDriver {
                     // Dispatch is best-effort and strictly post-commit. Do it
                     // before settling the outbox claim so Applied, ClaimLost,
                     // and terminal-mark failures all re-arm the durable row.
-                    if let Some(driver) = queued_work_driver.as_ref() {
-                        driver.notify_pending_work(Some(&target_session_id), "process_wake");
-                    }
+                    queued_work.notify_session_work(
+                        SessionWorkTarget::Session(target_session_id.clone()),
+                        "process_wake",
+                    );
                     if enqueue_outcome.process_wake_was_absorbed() {
                         tracing::info!(
                             delivery_id = %delivery.delivery_id,
@@ -500,10 +504,13 @@ impl WakeDeliveryDriver {
     async fn run_loop(inner: Arc<WakeDeliveryDriverInner>, shutdown: CancellationToken) {
         let mut poll = POLL_INITIAL;
         loop {
+            let Some(queued_work) = inner.queued_work.upgrade() else {
+                return;
+            };
             let report = match Self::drive_pending_once_with_delivery_policy(
                 Arc::clone(&inner.registry),
                 Arc::clone(&inner.session_store_factory),
-                inner.queued_work_driver.clone(),
+                queued_work,
                 Arc::clone(&inner.clock),
                 inner.delivery_policy,
                 DELIVERY_BATCH_SIZE,

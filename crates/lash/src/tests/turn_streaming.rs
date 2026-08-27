@@ -966,7 +966,7 @@ async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Resu
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -1182,7 +1182,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-turn-run").open().await?;
     session
@@ -1224,7 +1224,7 @@ async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<(
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-identified-queued-turn").open().await?;
     session
@@ -1292,7 +1292,7 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
         .provider(mock_provider())
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "queued-builder-turn-starts";
     let session = core.session(session_id).open().await?;
@@ -1403,7 +1403,7 @@ async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pre-cancelled-queued-turn").open().await?;
     session
@@ -1465,7 +1465,7 @@ async fn turn_started_identity_targets_cancellation_from_pull_stream() -> Result
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-started-cancel-target").open().await?;
     let expected_turn_id = "turn-started-cancel-target-id";
@@ -1517,7 +1517,7 @@ async fn queued_turn_rejects_drain_id_with_turn_id_at_dispatch() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("conflicting-queued-turn-scope-ids")
@@ -1564,7 +1564,7 @@ async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("empty-drain-reason").open().await?;
 
@@ -1628,7 +1628,7 @@ async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -> Result<()
         .store_factory(
             Arc::clone(&store_factory) as Arc<dyn crate::persistence::SessionStoreFactory>
         )
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("oversized-queued-row").open().await?;
     {
@@ -1686,7 +1686,7 @@ async fn a_busy_execution_lane_is_never_reported_as_an_exhausted_queue() -> Resu
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory)
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let holder = core.session("busy-lane-drain-reason").open().await?;
     // Both runtimes recover before either owns the lane. Once the first drain
@@ -1736,7 +1736,7 @@ async fn selected_queued_turn_refuses_partial_key_break_without_settling_rows() 
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-queued-turn-key-break-refusal";
     let session = core.session(session_id).open().await?;
@@ -1824,7 +1824,7 @@ async fn selected_queued_turn_redrives_an_interrupted_composition_exactly_or_not
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-interrupted-composition";
     let session = core.session(session_id).open().await?;
@@ -1958,7 +1958,7 @@ async fn selected_queued_turn_reports_claimed_now_and_already_satisfied_ids() ->
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-idempotent-outcome";
     let session = core.session(session_id).open().await?;
@@ -2031,7 +2031,7 @@ async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_busy_lane() -
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-duplicate-absent";
     let session = core.session(session_id).open().await?;
@@ -2097,7 +2097,7 @@ async fn selected_queued_turn_deduplicates_present_claimable_id() -> Result<()> 
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-duplicate-present";
     let session = core.session(session_id).open().await?;
@@ -2159,7 +2159,7 @@ async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> Result<()> 
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory)
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("selected-empty-noop").open().await?;
     session
@@ -2205,7 +2205,7 @@ async fn selected_queued_turn_validates_every_interrupted_composition_before_mut
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-two-interrupted-compositions";
     let session = core.session(session_id).open().await?;
@@ -2410,7 +2410,7 @@ async fn selected_queued_turn_redrive_ignores_successor_max_rows() -> Result<()>
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(2))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-redrive-over-row-limit";
     let session = core.session(session_id).open().await?;
@@ -2526,7 +2526,7 @@ async fn selected_queued_turn_reports_execution_lane_contention() -> Result<()> 
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-execution-lane-busy";
     let session = core.session(session_id).open().await?;
@@ -2597,7 +2597,7 @@ async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("idle-input-application").open().await?;
     let cursor = session.observe().current_remote_observation().cursor;
@@ -2685,7 +2685,7 @@ async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Res
                 },
             ),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-input-application-gap").open().await?;
     let stale_cursor = session.observe().current_remote_observation().cursor;
@@ -2739,7 +2739,7 @@ async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> R
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-explicit-effects").open().await?;
     session
@@ -5481,7 +5481,7 @@ async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core.session("cancel-queued-drain").open().await?;
@@ -5529,7 +5529,7 @@ async fn assert_session_turn_cancel_disposition(
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let stream = session
@@ -5686,7 +5686,7 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("active-steer-interrupt-cancel").open().await?;
     let active_turn_id = "active-steer-interrupt-turn";
@@ -5831,7 +5831,7 @@ async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("accepted-active-steer-interrupt")
@@ -5951,7 +5951,7 @@ fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-active-input-next-iteration")
@@ -6032,7 +6032,7 @@ async fn await_queued_work_batch_resolves_when_drained() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())
         .expect("core");
     let session = core.session("await-queued").open().await?;
@@ -7859,7 +7859,7 @@ async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_turn_inner()
         append_count: Arc::clone(&append_count),
         max_appends: 1,
     }))
-    .disable_queued_work_driver()
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
@@ -7918,7 +7918,7 @@ async fn probe_inprocess_continue_as_survives_post_commit_graph_append_inner() -
         append_count: Arc::clone(&append_count),
         max_appends: 1,
     }))
-    .disable_queued_work_driver()
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 
@@ -7969,7 +7969,7 @@ async fn durable_queued_continue_as_survives_post_commit_graph_append_inner() ->
         append_count: Arc::clone(&append_count),
         max_appends: 1,
     }))
-    .disable_queued_work_driver()
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
@@ -8070,7 +8070,7 @@ finish { established: control.total }"#,
     .provider(provider)
     .model(mock_model_spec())
     .store_factory(store_factory)
-    .disable_queued_work_driver()
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let established = session
@@ -8145,7 +8145,7 @@ fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Result<()> {
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-leaf-append-stale-rollback")
@@ -8296,7 +8296,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .store_factory(store_factory.clone())
     .tools(Arc::new(FrameStateDeferredTools))
     .plugin(Arc::new(StopAfterFrameSwitchCommitFactory))
-    .disable_queued_work_driver()
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
 
@@ -8400,7 +8400,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     )]))
     .model(mock_model_spec())
     .store_factory(sqlite_store_factory)
-    .disable_queued_work_driver()
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     let execution_state = reopened_session
@@ -8489,7 +8489,7 @@ async fn durable_queued_chained_continue_as_survives_nested_commit_handoff_inner
         append_count: Arc::clone(&append_count),
         max_appends: 2,
     }))
-    .disable_queued_work_driver()
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
@@ -8953,7 +8953,7 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
             .model(mock_model_spec())
             .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
             .store_factory(store_factory.clone())
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
@@ -9009,7 +9009,7 @@ async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_live_lane() 
             .model(mock_model_spec())
             .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
             .store_factory(store_factory.clone())
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(
@@ -9096,7 +9096,7 @@ async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reop
             .model(mock_model_spec())
             .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
             .store_factory(store_factory.clone())
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     first_session
@@ -9141,7 +9141,7 @@ async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained_after_reop
             .model(mock_model_spec())
             .clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
             .store_factory(store_factory.clone())
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     assert_eq!(

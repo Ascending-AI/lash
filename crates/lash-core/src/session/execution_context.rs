@@ -41,7 +41,7 @@ pub struct RuntimeExecutionContext<'run> {
     /// operations (e.g. signalling another process) that build their own
     /// `RuntimeEffectLocalExecutor::processes(..)` call can hand it along
     /// instead of falling back to hub-less backoff polling.
-    process_work_driver: Option<crate::ProcessWorkDriver>,
+    process_work: Option<crate::ProcessWorkWiring>,
     /// Process ids started by THIS execution context. Possession of a handle
     /// the run itself created is sufficient capability to await/cancel it —
     /// run-local children do not require session observer edges (the ephemeral
@@ -65,11 +65,10 @@ pub(crate) struct RuntimeProcessExecution {
 #[derive(Clone)]
 pub(crate) struct RuntimeExecutionProcessEventContext {
     pub execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    pub registry: Arc<dyn crate::ProcessRegistry>,
-    pub awaiter: crate::ProcessAwaiter,
+    pub process_work: crate::ProcessWorkWiring,
     pub store: Option<Arc<dyn crate::RuntimePersistence>>,
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-    pub queued_work_driver: Option<crate::QueuedWorkDriver>,
+    pub queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     pub process_wake_delivery_policy: crate::DeliveryPolicy,
     pub clock: Arc<dyn crate::Clock>,
 }
@@ -246,7 +245,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             tracing: None,
             code_block_graph_key: None,
             batch_parent_call_id: None,
-            process_work_driver: None,
+            process_work: None,
         }
     }
 
@@ -269,7 +268,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             tracing: self.tracing.clone(),
             code_block_graph_key: self.code_block_graph_key.clone(),
             batch_parent_call_id: self.batch_parent_call_id.clone(),
-            process_work_driver: self.process_work_driver.clone(),
+            process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
         })
@@ -475,11 +474,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub(crate) fn with_process_work_driver(
+    pub(crate) fn with_process_work(
         mut self,
-        process_work_driver: Option<crate::ProcessWorkDriver>,
+        process_work: Option<crate::ProcessWorkWiring>,
     ) -> Self {
-        self.process_work_driver = process_work_driver;
+        self.process_work = process_work;
         self
     }
 
@@ -614,7 +613,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             .as_ref()
             .ok_or_else(missing_process_execution_error)?;
         let result = context
-            .registry
+            .process_work
+            .registry()
             .append_event_with_authority(
                 &exec.process_id,
                 request,
@@ -622,12 +622,12 @@ impl<'run> RuntimeExecutionContext<'run> {
             )
             .await?;
         crate::tool_provider::process_events::enqueue_wake_delivery(
-            std::sync::Arc::clone(&context.registry),
+            std::sync::Arc::clone(context.process_work.registry()),
             context.store.clone(),
             context.session_store_factory.as_ref(),
             result.wake_delivery,
             Some(self.session_graph_service()),
-            context.queued_work_driver.as_ref(),
+            Arc::clone(&context.queued_work),
             context.process_wake_delivery_policy,
             Arc::clone(&context.clock),
         )
@@ -716,7 +716,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .process_execution
             .as_ref()
             .and_then(|exec| exec.event_context.as_ref())
-            .map(|context| Arc::clone(&context.registry))
+            .map(|context| Arc::clone(context.process_work.registry()))
             .ok_or_else(missing_process_execution_error)?;
         let event_type = crate::process_signal_event_type(signal_name)?;
         let replay_key = format!("process:{process_id}:signal.{signal_name}:{signal_id}");
@@ -762,7 +762,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         );
         let local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
-            self.process_work_driver.clone(),
+            self.process_work
+                .as_ref()
+                .map(|work| Arc::clone(work.port()))
+                .ok_or_else(|| {
+                    crate::RuntimeEffectControllerError::foreign(
+                        "process_work_unavailable",
+                        "process execution has no process-work port",
+                    )
+                })?,
         )
         .with_process_effect_controller(owned_controller);
         let outcome = if let Some(task_requests) = task_requests {

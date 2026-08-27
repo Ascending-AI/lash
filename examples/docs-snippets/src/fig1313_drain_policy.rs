@@ -52,7 +52,7 @@ fn core(
         .store_factory(store_factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(batching)
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "docs-drain-policy-worker",
             "docs-drain-policy-boot",

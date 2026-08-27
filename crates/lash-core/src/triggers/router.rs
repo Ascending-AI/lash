@@ -473,8 +473,6 @@ fn trigger_delivery_process_preimage(
     identity.finish()
 }
 
-const DELIVERY_REQUIRES_REGISTRY: &str = "trigger delivery requires a process registry";
-
 /// The refusal a recorded emission raises when one of its deliveries did not
 /// start. See [`TriggerRouter::emit_recorded`] for why this is an error rather
 /// than a `Failed` entry in an otherwise successful report.
@@ -487,20 +485,14 @@ fn unstarted_delivery(subscription_id: &str, reason: &str) -> PluginError {
 #[derive(Clone)]
 pub struct TriggerRouter {
     store: Arc<dyn TriggerStore>,
-    process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
-    process_work_driver: Option<crate::ProcessWorkDriver>,
+    process_work: crate::ProcessWorkWiring,
 }
 
 impl TriggerRouter {
-    pub fn new(
-        store: Arc<dyn TriggerStore>,
-        process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
-        process_work_driver: Option<crate::ProcessWorkDriver>,
-    ) -> Self {
+    pub fn new(store: Arc<dyn TriggerStore>, process_work: crate::ProcessWorkWiring) -> Self {
         Self {
             store,
-            process_registry,
-            process_work_driver,
+            process_work,
         }
     }
 
@@ -547,19 +539,10 @@ impl TriggerRouter {
         effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<TriggerEmitReport, PluginError> {
         let report = self.emit(request, effect_controller).await?;
-        let deliverable = self.process_registry.is_some();
         let mut deliveries = Vec::with_capacity(report.deliveries.len());
         for mut delivery in report.deliveries {
             delivery.outcome = match delivery.outcome {
-                TriggerDeliveryEmitOutcome::AlreadyReserved if deliverable => {
-                    TriggerDeliveryEmitOutcome::Started
-                }
-                TriggerDeliveryEmitOutcome::AlreadyReserved => {
-                    return Err(unstarted_delivery(
-                        &delivery.subscription_id,
-                        DELIVERY_REQUIRES_REGISTRY,
-                    ));
-                }
+                TriggerDeliveryEmitOutcome::AlreadyReserved => TriggerDeliveryEmitOutcome::Started,
                 TriggerDeliveryEmitOutcome::Failed { reason } => {
                     return Err(unstarted_delivery(&delivery.subscription_id, &reason));
                 }
@@ -579,25 +562,7 @@ impl TriggerRouter {
             occurrence,
             reservations,
         } = self.store.ingest_occurrence(request).await?;
-        let Some(process_registry) = self.process_registry.as_ref() else {
-            let deliveries = reservations
-                .iter()
-                .map(|reservation| {
-                    let outcome = match reservation.reservation_status {
-                        TriggerDeliveryReservationOutcome::Reserved => {
-                            TriggerDeliveryEmitOutcome::Failed {
-                                reason: DELIVERY_REQUIRES_REGISTRY.to_string(),
-                            }
-                        }
-                        TriggerDeliveryReservationOutcome::AlreadyReserved => {
-                            TriggerDeliveryEmitOutcome::AlreadyReserved
-                        }
-                    };
-                    reservation.emit_report(outcome)
-                })
-                .collect();
-            return Ok(TriggerEmitReport::new(occurrence.occurrence_id, deliveries));
-        };
+        let process_work = &self.process_work;
         let mut deliveries = Vec::new();
         let mut started_any = false;
         for reservation in reservations {
@@ -609,7 +574,7 @@ impl TriggerRouter {
             if let Err(err) = self
                 .start_delivery(
                     &reservation,
-                    Arc::clone(process_registry),
+                    Arc::clone(process_work.registry()),
                     effect_controller,
                 )
                 .await
@@ -628,8 +593,11 @@ impl TriggerRouter {
             };
             deliveries.push(reservation.emit_report(outcome));
         }
-        if started_any && let Some(driver) = self.process_work_driver.as_ref() {
-            let _ = driver.claim_and_run_pending("trigger_delivery").await?;
+        if started_any {
+            let _ = process_work
+                .port()
+                .admit_pending_processes("trigger_delivery")
+                .await?;
         }
         Ok(TriggerEmitReport::new(occurrence.occurrence_id, deliveries))
     }
@@ -725,7 +693,7 @@ impl TriggerRouter {
                 ),
                 crate::RuntimeEffectLocalExecutor::processes(
                     process_registry,
-                    self.process_work_driver.clone(),
+                    Arc::clone(self.process_work.port()),
                 ),
             )
             .await?;
@@ -1450,7 +1418,10 @@ mod tests {
             trigger_process_draft(&source_key, "started"),
         )
         .await;
-        let router = TriggerRouter::new(store, Some(Arc::clone(&registry)), None);
+        let router = TriggerRouter::new(
+            store,
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
+        );
         let controller = crate::InlineRuntimeEffectController::default();
 
         let report = router
@@ -1509,8 +1480,9 @@ mod tests {
         .await;
         let router = TriggerRouter::new(
             store,
-            Some(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>),
-            None,
+            crate::testing::process_work_wiring_for_registry(
+                Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>
+            ),
         );
 
         let report = router
@@ -1527,35 +1499,5 @@ mod tests {
                 .expect("read initial observer"),
             "the session that explicitly registered the trigger must observe its process"
         );
-    }
-
-    #[tokio::test]
-    async fn trigger_emit_report_records_failed_delivery_outcome() {
-        let store = Arc::new(InMemoryTriggerStore::default());
-        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
-        let subscription = register(
-            store.as_ref(),
-            "failed-register",
-            trigger_process_draft(&source_key, "failed"),
-        )
-        .await;
-        let router = TriggerRouter::new(store, None, None);
-        let controller = crate::InlineRuntimeEffectController::default();
-
-        let report = router
-            .emit(
-                button_occurrence(source_key, "button-blue-failed"),
-                &controller,
-            )
-            .await
-            .expect("emit trigger");
-        assert_eq!(report.deliveries.len(), 1);
-        let delivery = &report.deliveries[0];
-        assert_eq!(delivery.subscription_id, subscription.subscription_id);
-        assert!(matches!(
-            &delivery.outcome,
-            TriggerDeliveryEmitOutcome::Failed { reason }
-                if reason.contains("process registry")
-        ));
     }
 }

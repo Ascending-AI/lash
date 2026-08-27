@@ -372,7 +372,7 @@ fn attachment_usage_gate_core(
         .process_registry(process_registry)
         .attachment_store(attachment_store)
         .clock(clock)
-        .disable_queued_work_driver();
+        .without_queued_work();
     if let Some(trace_sink) = trace_sink {
         builder = builder.trace_sink(trace_sink).trace_level(TraceLevel::Extended);
     }
@@ -385,7 +385,7 @@ fn attachment_usage_gate_state(
     core: LashCore,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    process_registry: Arc<dyn lash::process::ProcessRegistry>,
+    _process_registry: Arc<dyn lash::process::ProcessRegistry>,
     sessions: WorkbenchSessions,
 ) -> AppState {
     let process_observer = core
@@ -399,7 +399,7 @@ fn attachment_usage_gate_state(
         session_store_factory: store_factory,
         trigger_store: in_memory_trigger_store(),
         process_observer,
-        process_work_driver: inert_process_work_driver(process_registry),
+        // Process work is resolved through the core.
         sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -410,7 +410,7 @@ fn attachment_usage_gate_state(
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),
-        queued_work_driver: inert_queued_work_driver(),
+        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),

@@ -32,20 +32,19 @@ impl RuntimeSessionServices {
     {
         let ProcessToolCallRun {
             registration,
-            registry,
             call,
             parent_invocation,
             execution_write_authority,
             scoped_effect_controller,
             cancellation,
         } = run;
-        let awaiter = self
+        let process_work = self
             .current
             .host
-            .process_work_driver
-            .as_ref()
-            .map(crate::ProcessWorkDriver::awaiter)
-            .unwrap_or_else(|| crate::ProcessAwaiter::polling(Arc::clone(&registry)));
+            .work
+            .process_wiring()
+            .cloned()
+            .expect("process tool execution requires process-work wiring");
         let await_parent_invocation = parent_invocation.clone();
         let await_cancellation = cancellation.clone();
         let run_context = ProcessRunContext::builder(self)
@@ -65,11 +64,10 @@ impl RuntimeSessionServices {
             .process_events(
                 registration.id.clone(),
                 execution_write_authority,
-                registry,
-                awaiter,
+                process_work,
                 self.current.store.clone(),
                 self.current.host.session_store_factory.clone(),
-                self.current.host.queued_work_driver.clone(),
+                Arc::clone(self.current.host.queued_work()),
                 self.current.host.core.control.process_wake_delivery_policy,
                 Arc::clone(&self.current.host.core.clock),
             )

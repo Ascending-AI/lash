@@ -66,12 +66,9 @@ impl CoreTriggerAdmin {
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::facade_support::TriggerEmitReport> {
         let store = self.store()?;
-        let drivers = self.core.work_driver.drivers().await;
-        let router = lash_core::facade_support::TriggerRouter::new(
-            store,
-            self.core.env.process_registry.clone(),
-            drivers.process,
-        );
+        let ports = self.core.substrate_slot.ports().await;
+        let process_work = ports.process.ok_or(EmbedError::MissingProcessRegistry)?;
+        let router = lash_core::facade_support::TriggerRouter::new(store, process_work);
         router
             .emit(request, scoped_effect_controller.controller())
             .await

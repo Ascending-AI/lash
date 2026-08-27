@@ -241,9 +241,8 @@ impl SessionBuilder {
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
         let effect_host = Arc::clone(&env.core.control.effect_host);
-        let drivers = self.core.work_driver.drivers().await;
-        env.process_work_driver = drivers.process.clone();
-        env.queued_work_driver = drivers.queued.clone();
+        let ports = self.core.substrate_slot.ports().await;
+        env = env.with_work_ports(ports.process.clone(), ports.queued_port());
         let mut runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
             policy,
@@ -260,10 +259,8 @@ impl SessionBuilder {
             &self.plugin_options,
             self.parent_session_id.is_none(),
         )?;
-        if drivers.drive_process_on_open
-            && let Some(driver) = drivers.process.as_ref()
-        {
-            let _ = driver.claim_and_run_pending("session_open").await?;
+        if let Some(process_work) = env.process_work() {
+            drive_process_on_open(ports.drive_process_on_open, process_work.as_ref()).await?;
         }
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
@@ -283,7 +280,7 @@ impl SessionBuilder {
             effect_host,
             parent_session_id: self.parent_session_id,
             active_plugins: self.active_plugins,
-            process_phase_probe_slot: self.core.work_driver.phase_probe_slot(),
+            process_phase_probe_slot: self.core.substrate_slot.phase_probe_slot(),
             turn_cancels: crate::turn::TurnCancelRegistry::default(),
         })
     }
@@ -322,6 +319,16 @@ impl SessionBuilder {
             .map(Some)
             .map_err(EmbedError::Store)
     }
+}
+
+async fn drive_process_on_open(
+    enabled: bool,
+    process_work: &dyn lash_core::ProcessWorkSubstrate,
+) -> std::result::Result<(), lash_core::PluginError> {
+    if enabled {
+        let _ = process_work.admit_pending_processes("session_open").await?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn load_state_from_store(
@@ -1408,6 +1415,45 @@ impl<'a> std::future::IntoFuture for EnqueueTurnBuilder<'a> {
 #[cfg(test)]
 mod reconcile_tests {
     use super::*;
+
+    struct CountingProcessWork(std::sync::atomic::AtomicUsize);
+
+    #[async_trait]
+    impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
+        async fn admit_pending_processes(
+            &self,
+            reason: &str,
+        ) -> std::result::Result<
+            lash_core::facade_support::ProcessAdmissionReport,
+            lash_core::PluginError,
+        > {
+            assert_eq!(reason, "session_open");
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(lash_core::facade_support::ProcessAdmissionReport::default())
+        }
+
+        async fn await_process_terminal(
+            &self,
+            process_id: &str,
+        ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
+            panic!("unexpected terminal wait for {process_id}")
+        }
+    }
+
+    #[tokio::test]
+    async fn drive_process_on_open_only_admits_for_the_native_policy() {
+        let process_work = CountingProcessWork(std::sync::atomic::AtomicUsize::new(0));
+
+        drive_process_on_open(false, &process_work)
+            .await
+            .expect("external process ports are not driven implicitly");
+        assert_eq!(process_work.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        drive_process_on_open(true, &process_work)
+            .await
+            .expect("native process ports are driven on session open");
+        assert_eq!(process_work.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 
     fn model(id: &str) -> lash_core::ModelSpec {
         lash_core::ModelSpec::builder(id)

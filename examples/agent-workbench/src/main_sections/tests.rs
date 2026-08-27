@@ -440,7 +440,7 @@ mod tests {
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -451,7 +451,7 @@ mod tests {
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx,
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -522,7 +522,7 @@ mod tests {
             session_store_factory: Arc::clone(&store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -533,7 +533,7 @@ mod tests {
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx,
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -600,7 +600,7 @@ finish "observed through live replay"
             .provider(provider)
             .model(model.clone())
             .store_factory(Arc::clone(&store_factory))
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build core");
         let session = core
@@ -795,7 +795,7 @@ finish "gap source"
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -806,7 +806,7 @@ finish "gap source"
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx,
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -1078,7 +1078,7 @@ finish initial
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -1089,7 +1089,7 @@ finish initial
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx: SessionEventRegistry::new(1024),
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -1281,7 +1281,7 @@ finish initial
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -1292,7 +1292,7 @@ finish initial
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx,
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url,
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -1447,7 +1447,7 @@ finish initial
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store: in_memory_trigger_store(),
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions: WorkbenchSessions::fresh(),
             messages: Arc::new(Mutex::new(vec![ChatMessage {
                 id: "message".to_string(),
@@ -1464,7 +1464,7 @@ finish initial
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx: SessionEventRegistry::new(1024),
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url,
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),
@@ -1886,14 +1886,14 @@ finish initial
                 restate_http.clone(),
             ),
         );
-        let queued_work_driver =
-            lash::runtime::QueuedWorkDriver::new(Arc::new(WorkbenchQueuedWorkSubmitter {
+        let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
                 sessions: sessions.clone(),
                 store_factory: Arc::clone(&core_store_factory),
                 restate_ingress_url: restate_ingress_url.clone(),
                 restate_http: restate_http.clone(),
                 active_turns: active_turns.clone(),
-            }));
+            });
+        let queued_work_driver = lash::runtime::QueuedWorkDriver::new(queued_run_handle.clone()); let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
@@ -1922,8 +1922,8 @@ finish initial
                 lash_llm_tools::LlmToolsPluginFactory::default(),
             ))
             .effect_host(turn_deployment.effect_host())
-            .process_work_driver(process_deployment.process_work_driver())
-            .queued_work_driver(queued_work_driver.clone())
+            .process_work(process_deployment.process_work())
+            .queued_work(queued_work_port)
             .lease_timings(lease_timings)
             .build(crate::test_core_owner())
             .expect("build core");
@@ -1945,7 +1945,7 @@ finish initial
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store,
             process_observer,
-            process_work_driver: process_deployment.process_work_driver(),
+            // Process work is resolved through the core.
             sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {

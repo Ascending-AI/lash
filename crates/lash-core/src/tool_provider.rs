@@ -411,12 +411,11 @@ impl ToolChildExecutionTraceHook {
 pub(crate) struct ToolProcessEventContext {
     process_id: String,
     execution_write_authority: crate::ProcessExecutionWriteAuthority,
-    registry: Arc<dyn crate::ProcessRegistry>,
-    awaiter: crate::ProcessAwaiter,
+    process_work: crate::ProcessWorkWiring,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     session_graph: Arc<dyn SessionGraphService>,
-    queued_work_driver: Option<crate::QueuedWorkDriver>,
+    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: Arc<dyn crate::Clock>,
 }
@@ -530,23 +529,21 @@ impl<'run> ToolContextBuilder<'run> {
         mut self,
         process_id: impl Into<String>,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        registry: Arc<dyn crate::ProcessRegistry>,
-        awaiter: crate::ProcessAwaiter,
+        process_work: crate::ProcessWorkWiring,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-        queued_work_driver: Option<crate::QueuedWorkDriver>,
+        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
         self.process_events = Some(ToolProcessEventContext {
             process_id: process_id.into(),
             execution_write_authority,
-            registry,
-            awaiter,
+            process_work,
             store,
             session_store_factory,
             session_graph: Arc::clone(&self.session_graph),
-            queued_work_driver,
+            queued_work,
             process_wake_delivery_policy,
             clock,
         });
@@ -938,16 +935,20 @@ impl<'run> ToolContext<'run> {
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
     ) -> Self {
         let process_id = process_id.into();
-        let awaiter = crate::ProcessAwaiter::polling(Arc::clone(&registry));
+        let (registry, hub) = crate::facade_support::watch_process_registry(registry);
+        let process_work = crate::ProcessWorkWiring::new(
+            Arc::clone(&registry),
+            hub,
+            Arc::new(crate::NativeProcessWork::for_registry(registry)),
+        );
         self.process_events = Some(ToolProcessEventContext {
             execution_write_authority,
             process_id,
-            registry,
-            awaiter,
+            process_work,
             store: None,
             session_store_factory: None,
             session_graph: Arc::new(crate::plugin::NoopSessionManager),
-            queued_work_driver: None,
+            queued_work: Arc::new(crate::NoQueuedWork::new()),
             process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
             clock: Arc::new(crate::SystemClock),
         });

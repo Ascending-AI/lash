@@ -25,6 +25,31 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn process_work_wiring_for_registry(
+    registry: Arc<dyn crate::ProcessRegistry>,
+) -> crate::ProcessWorkWiring {
+    let (registry, hub) = crate::facade_support::watch_process_registry(registry);
+    crate::ProcessWorkWiring::new(
+        Arc::clone(&registry),
+        hub,
+        Arc::new(crate::NativeProcessWork::for_registry(registry)),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn process_work_wiring_from_driver(
+    driver: crate::ProcessWorkDriver,
+) -> crate::ProcessWorkWiring {
+    let registry = driver.process_registry();
+    let hub = driver.change_hub();
+    crate::ProcessWorkWiring::new(
+        registry,
+        hub,
+        Arc::new(crate::NativeProcessWork::from_driver(driver)),
+    )
+}
+
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent};
 use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};
@@ -598,7 +623,7 @@ pub fn code_execution_context_with_trigger_store(
     trigger_store: Arc<dyn crate::TriggerStore>,
 ) -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new()
-        .trigger_router(Some(crate::TriggerRouter::new(trigger_store, None, None)))
+        .trigger_router(Some(test_trigger_router(trigger_store)))
         .build()
         .into_runtime()
 }
@@ -610,10 +635,16 @@ pub fn code_execution_context_with_trigger_store_and_effect_controller(
     effect_controller: Arc<dyn crate::RuntimeEffectController>,
 ) -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new()
-        .trigger_router(Some(crate::TriggerRouter::new(trigger_store, None, None)))
+        .trigger_router(Some(test_trigger_router(trigger_store)))
         .shared_effect_controller(effect_controller)
         .build()
         .into_runtime()
+}
+
+fn test_trigger_router(trigger_store: Arc<dyn crate::TriggerStore>) -> crate::TriggerRouter {
+    let registry: Arc<dyn crate::ProcessRegistry> =
+        Arc::new(crate::TestLocalProcessRegistry::default());
+    crate::TriggerRouter::new(trigger_store, process_work_wiring_for_registry(registry))
 }
 
 /// Builds the production-shaped `ToolContext` installed while a controller-owned
@@ -833,13 +864,17 @@ impl EffectBackedProcessService {
             scope.effect_controller.scoped().execution_scope().clone(),
         )
         .map_err(crate::RuntimeEffectControllerError::from)?;
-        let local_executor =
-            crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
-                .with_process_effect_controller(
-                    proxy
-                        .owned_controller()
-                        .expect("effect-task proxy owns its controller"),
-                );
+        let local_executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&self.registry),
+            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                &self.registry,
+            ))),
+        )
+        .with_process_effect_controller(
+            proxy
+                .owned_controller()
+                .expect("effect-task proxy owns its controller"),
+        );
         let outcome = crate::runtime::effect::drive_effect_controller_task(
             controller,
             crate::RuntimeEffectEnvelope::new(

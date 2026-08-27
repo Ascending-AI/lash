@@ -67,6 +67,8 @@ pub(super) fn lifecycle_worker(
     policy: lash_core::SessionPolicy,
     fault_sink: &RecordingWorkerFaultSink,
 ) -> lash_core::facade_support::DurableProcessWorker {
+    let (registry, process_change_hub) =
+        lash_core::facade_support::watch_process_registry(registry);
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(vec![Arc::new(
@@ -75,6 +77,8 @@ pub(super) fn lifecycle_worker(
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
+            process_change_hub,
+            lash_core::WorkerProcessWork::SelfNative,
             owner,
         )
         .with_session_policy(policy)

@@ -279,7 +279,10 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     )
     .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
     .with_runtime_host_config(core)
-    .with_process_registry(registry.clone())
+    .with_process_work(crate::testing::process_work_wiring_for_registry(
+        registry.clone(),
+    ))
+    .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
     .with_session_store_factory(factory.clone())
     .build();
     let runtime = LashRuntime::from_environment(
@@ -459,7 +462,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let report = crate::WakeDeliveryDriver::drive_pending_once(
         registry,
         factory,
-        None,
+        Arc::new(crate::NoQueuedWork),
         Arc::new(crate::SystemClock),
         32,
     )
@@ -488,7 +491,10 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     )
     .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
     .with_runtime_host_config(test_host_config().core)
-    .with_process_registry(registry.clone())
+    .with_process_work(crate::testing::process_work_wiring_for_registry(
+        registry.clone(),
+    ))
+    .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
     .build();
     let runtime = LashRuntime::from_environment(
         &env,
@@ -607,7 +613,10 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     )
     .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
     .with_runtime_host_config(test_host_config().core)
-    .with_process_registry(registry.clone())
+    .with_process_work(crate::testing::process_work_wiring_for_registry(
+        registry.clone(),
+    ))
+    .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
     .with_session_store_factory(factory.clone())
     .build();
     let runtime = LashRuntime::from_environment(
@@ -1424,7 +1433,10 @@ async fn payload_gated_engine_runtime(
     )
     .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
     .with_runtime_host_config(core)
-    .with_process_registry(registry.clone())
+    .with_process_work(crate::testing::process_work_wiring_for_registry(
+        registry.clone(),
+    ))
+    .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
     .build();
     let runtime = LashRuntime::from_environment(
         &env,

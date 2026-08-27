@@ -121,7 +121,7 @@ async fn run(mode: &str) -> Result<()> {
         .process_registry(Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>)
         .trigger_store(Arc::new(storage.trigger_store()))
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .lease_timings(lease_timings)
         .build(owner)
         .context("build frame-crash core")?;

@@ -194,6 +194,7 @@ fn inline_worker_with_trigger_store(
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
+    let (registry, hub) = crate::watch_process_registry(registry);
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
@@ -203,6 +204,8 @@ fn inline_worker_with_trigger_store(
             ),
             Arc::new(InlineSessionStoreFactory),
             registry,
+            hub,
+            crate::WorkerProcessWork::SelfNative,
             lease_owner,
         )
         .with_trigger_store(trigger_store),
@@ -223,6 +226,9 @@ fn reentrant_worker_with_trigger_store(
         Arc::clone(&registry),
         Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
     );
+    let driver_registry = driver.process_registry();
+    let driver_hub = driver.change_hub();
+    let process_work = crate::testing::process_work_wiring_from_driver(driver);
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
@@ -231,12 +237,12 @@ fn reentrant_worker_with_trigger_store(
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(InlineSessionStoreFactory),
-            driver.process_registry(),
+            driver_registry,
+            driver_hub,
+            crate::WorkerProcessWork::External(process_work),
             lease_owner,
         )
-        .with_trigger_store(trigger_store)
-        .with_change_hub(driver.change_hub())
-        .with_process_work_driver(driver),
+        .with_trigger_store(trigger_store),
     );
     run_handle
         .worker
@@ -1042,20 +1048,21 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         "nested-process-wait-tool",
         crate::PluginSpec::new().with_orchestrating_tool(NestedProcessWaitTool::orchestrating()),
     )));
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
+        let process_work = crate::testing::process_work_wiring_from_driver(driver.clone());
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(plugin_factories)),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
             Arc::clone(&registry),
+            driver.change_hub(),
+            crate::WorkerProcessWork::External(process_work),
             local_owner("session-turn-worker", "host-a", "session-turn-start"),
         )
         .with_session_policy(policy.clone())
         .with_process_execution_concurrency(1)
         .expect("valid test process execution concurrency")
-        .with_change_hub(driver.change_hub())
-        .with_process_work_driver(driver),
-    );
+    });
     run_handle
         .worker
         .set(worker)
@@ -1129,16 +1136,20 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     )
     .await
     .expect("persist process env");
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
+        let (worker_registry, hub) =
+            crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             Arc::new(SegmentBoundarySessionStoreFactory),
-            Arc::clone(&registry),
+            worker_registry,
+            hub,
+            crate::WorkerProcessWork::SelfNative,
             local_owner("segment-worker", "host-a", "start-a"),
         )
-        .with_session_policy(policy),
-    );
+        .with_session_policy(policy)
+    });
     registry
         .register_process(
             ProcessRegistration::new(
@@ -1319,12 +1330,16 @@ async fn snapshot_recovery_fixture(
         .await
         .expect("post-reserve mutation command")
         .expect("post-reserve mutation");
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
+        let (worker_registry, hub) =
+            crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
-            Arc::clone(&registry),
+            worker_registry,
+            hub,
+            crate::WorkerProcessWork::SelfNative,
             local_owner(
                 "snapshot-recovery-worker",
                 "host-a",
@@ -1332,8 +1347,8 @@ async fn snapshot_recovery_fixture(
             ),
         )
         .with_session_policy(policy)
-        .with_trigger_store(Arc::clone(&trigger_store)),
-    );
+        .with_trigger_store(Arc::clone(&trigger_store))
+    });
     (registry, trigger_store, delivery, payloads, worker)
 }
 

@@ -514,7 +514,12 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         crate::QueuedWorkBatchingConfig::new(1),
     ))
     .with_session_store_factory(Arc::new(child_factory.clone()));
-    let host = crate::ProcessRuntimeHost::new(embedded, registry);
+    let registry: Arc<dyn crate::ProcessRegistry> = registry;
+    let host = crate::ProcessRuntimeHost::with_ports(
+        embedded,
+        crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
+        Arc::new(crate::NoQueuedWork::new()),
+    );
     let mut runtime = LashRuntime::from_persistent_background_state(
         standard_test_policy(),
         host,

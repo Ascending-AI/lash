@@ -70,8 +70,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
 
     let router = crate::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
-        Some(Arc::clone(&registry)),
-        None,
+        crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
     );
     let controller = ControllerOwnedTriggerEmitter::default();
     let occurrence = || {

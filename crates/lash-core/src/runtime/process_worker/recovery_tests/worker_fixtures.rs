@@ -175,18 +175,20 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     )
     .await
     .expect("persist process env");
+    let driver_hub = driver.change_hub();
+    let process_work = crate::testing::process_work_wiring_from_driver(driver);
     let mut config = DurableProcessWorkerConfig::new(
         Arc::new(PluginHost::new(Vec::new())),
         runtime_host,
         Arc::new(TestSessionStoreFactory),
         Arc::clone(&registry),
+        driver_hub,
+        crate::WorkerProcessWork::External(process_work),
         local_owner("engine-worker", "host-a", "engine-start"),
     )
     .with_session_policy(policy)
     .with_process_execution_concurrency(concurrency)
-    .expect("valid test process execution concurrency")
-    .with_change_hub(driver.change_hub())
-    .with_process_work_driver(driver);
+    .expect("valid test process execution concurrency");
     if let Some(supplier) = supplier {
         config = config.with_worker_slot_supplier(supplier);
     }

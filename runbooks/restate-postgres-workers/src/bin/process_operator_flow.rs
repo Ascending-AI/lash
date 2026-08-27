@@ -140,6 +140,8 @@ fn process_worker(
     lease_owner: LeaseOwnerIdentity,
     fault_sink: &RecordingWorkerFaultSink,
 ) -> lash::durability::DurableProcessWorker {
+    let (registry, process_change_hub) =
+        lash_core::facade_support::watch_process_registry(registry);
     let config = lash::durability::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
         lash::durability::RuntimeHostConfig::in_memory(
@@ -148,6 +150,8 @@ fn process_worker(
         ),
         Arc::new(storage.session_store_factory_with_shared_process_registry()),
         registry,
+        process_change_hub,
+        lash::durability::WorkerProcessWork::SelfNative,
         lease_owner,
     )
     .with_trigger_store(Arc::new(storage.trigger_store()))

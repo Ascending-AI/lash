@@ -176,7 +176,7 @@ pub type ProcessOutcomeObserver = Arc<dyn Fn(&ProcessEffectOutcome) + Send + Syn
 
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
-    pub process_work_driver: Option<crate::ProcessWorkDriver>,
+    pub process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
@@ -498,17 +498,17 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Binds process registry and optional work-driver services for effect-host implementors
+    /// Binds process registry and required process-work services for effect-host implementors
     /// executing process effects inline.
     pub fn processes(
         registry: Arc<dyn ProcessRegistry>,
-        process_work_driver: Option<crate::ProcessWorkDriver>,
+        process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     ) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
                 ProcessLocalExecution {
                     registry,
-                    process_work_driver,
+                    process_work,
                     process_env_store: None,
                     turn_cancellation: None,
                     effect_controller: None,

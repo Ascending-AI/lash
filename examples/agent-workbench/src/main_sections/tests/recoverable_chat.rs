@@ -76,7 +76,7 @@ async fn recoverable_chat_test_state_with_dependencies(
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    queued_work_driver: Option<lash::runtime::QueuedWorkDriver>,
+    queued_work_driver: Option<Arc<dyn lash::runtime::QueuedWorkSubstrate>>,
 ) -> AppState {
     recoverable_chat_test_state_with_dependencies_and_context(
         data_dir,
@@ -97,7 +97,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    queued_work_driver: Option<lash::runtime::QueuedWorkDriver>,
+    queued_work_driver: Option<Arc<dyn lash::runtime::QueuedWorkSubstrate>>,
     context_window_tokens: usize,
 ) -> AppState {
     let process_registry = Arc::new(
@@ -121,7 +121,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         .process_registry(Arc::clone(&process_registry))
         .trigger_store(Arc::clone(&trigger_store));
     if let Some(queued_work_driver) = queued_work_driver {
-        core_builder = core_builder.queued_work_driver(queued_work_driver);
+        core_builder = core_builder.queued_work(queued_work_driver);
     }
     let core = core_builder
         .build(crate::test_core_owner())
@@ -137,7 +137,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         session_store_factory: Arc::clone(&store_factory),
         trigger_store,
         process_observer,
-        process_work_driver: inert_process_work_driver(process_registry),
+        // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -148,7 +148,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(channel_capacity),
-        queued_work_driver: inert_queued_work_driver(),
+        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -490,7 +490,7 @@ fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
         let retiring_run_handle =
             Arc::new(RetiringQueuedWorkRunHandle::new(Arc::clone(&store_factory)));
         let queued_work_driver =
-            lash::runtime::QueuedWorkDriver::new(retiring_run_handle.clone());
+            Arc::new(lash::runtime::NativeQueuedWork::new(retiring_run_handle.clone()));
         let provider = lash::testing::TestProvider::builder()
             .kind("retired-session-tool-refresh-close-test")
             .complete(|_| async {

@@ -34,7 +34,7 @@ pub struct RuntimeObservation {
     pub process_read_service: Option<Arc<dyn crate::plugin::ProcessReadService>>,
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
     pub queue_store: Option<Arc<dyn crate::RuntimePersistence>>,
-    pub queued_work_driver: Option<super::QueuedWorkDriver>,
+    pub queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
 }
 
 impl RuntimeObservation {
@@ -113,12 +113,12 @@ impl RuntimeObservation {
             plugin_session,
             session_read_service,
             process_read_service,
-            process_registry: runtime.host.process_registry.clone(),
+            process_registry: runtime.host.process_registry().cloned(),
             queue_store: runtime
                 .session
                 .as_ref()
                 .and_then(|session| session.history_store()),
-            queued_work_driver: runtime.host.queued_work_driver.clone(),
+            queued_work: Arc::clone(runtime.host.queued_work()),
         }
     }
 
@@ -584,7 +584,7 @@ impl RuntimeHandle {
         super::session_api::enqueue_turn_input_to_store(
             observation.session_id.as_ref().to_string(),
             store,
-            observation.queued_work_driver.clone(),
+            Arc::clone(&observation.queued_work),
             input,
             ingress,
             source_key,

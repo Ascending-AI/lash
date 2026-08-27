@@ -20,7 +20,6 @@ struct AppState {
     session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     process_observer: lash::process::ProcessWorkObserver,
-    process_work_driver: lash::process::ProcessWorkDriver,
     sessions: WorkbenchSessions,
     messages: Arc<Mutex<Vec<ChatMessage>>>,
     selected_model: Arc<Mutex<ModelSelection>>,
@@ -1390,8 +1389,15 @@ impl lash::runtime::QueuedWorkRunHandle for NoopQueuedWorkRunHandle {
 }
 
 #[cfg(test)]
-fn inert_queued_work_driver() -> lash::runtime::QueuedWorkDriver {
+fn inert_queued_work() -> lash::runtime::QueuedWorkDriver {
     lash::runtime::QueuedWorkDriver::new(Arc::new(NoopQueuedWorkRunHandle))
+}
+
+#[cfg(test)]
+fn inert_queued_work_port() -> Arc<dyn lash::runtime::QueuedWorkSubstrate> {
+    Arc::new(lash::runtime::NativeQueuedWork::new(Arc::new(
+        NoopQueuedWorkRunHandle,
+    )))
 }
 
 #[cfg(test)]
@@ -1407,14 +1413,8 @@ impl lash::process::ProcessRunHandle for NoopProcessRunHandle {
     }
 }
 
-/// A driver that reads the registry directly (no external run handle) — enough
-/// for tests that build state but do not drive process execution.
-#[cfg(test)]
-fn inert_process_work_driver(
-    registry: Arc<dyn lash::process::ProcessRegistry>,
-) -> lash::process::ProcessWorkDriver {
-    lash::process::ProcessWorkDriver::new(registry, Arc::new(NoopProcessRunHandle))
-}
+// Process work is now resolved through LashCore's substrate port.
+// The AppState no longer mirrors that driver as a second source of truth.
 
 #[derive(Debug, Serialize)]
 struct WorkItem {

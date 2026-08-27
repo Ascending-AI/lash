@@ -1097,7 +1097,7 @@ async fn cancel_work(
 /// outcome and the authoritative event log.
 ///
 /// This is the host-facing "wait for the work item" flow. It routes through
-/// [`ProcessWorkDriver::await_terminal`](lash::process::ProcessWorkDriver::await_terminal)
+/// the configured process-work port
 /// (ADR 0016) — the Restate ingress attach, never a store poll loop — and bounds
 /// the wait with `tokio::time::timeout` so a still-running or unknown-to-this-pod
 /// process cannot pin the request. On terminal it reconciles from `events_after`
@@ -1110,7 +1110,7 @@ async fn await_work(
     const AWAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
     let outcome = match tokio::time::timeout(
         AWAIT_TIMEOUT,
-        lash::process::ProcessWorkDriver::await_terminal(&state.process_work_driver, &process_id),
+        state.core.processes().await_output(&process_id),
     )
     .await
     {
@@ -1124,9 +1124,9 @@ async fn await_work(
         }
     };
     let events: Vec<WorkAwaitEvent> = state
-        .process_work_driver
-        .process_registry()
-        .events_after(&process_id, 0)
+        .core
+        .processes()
+        .events(&process_id, 0)
         .await
         // Audited: process-event reads use the global registry and have no session tombstone contract.
         .map_err(AppError::internal)?

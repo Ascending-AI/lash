@@ -14,6 +14,15 @@
 //! terminals byte-for-byte without re-executing either body.
 
 use std::sync::Arc;
+
+fn registry_local_executor(
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+) -> lash_core::RuntimeEffectLocalExecutor<'static> {
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    )));
+    lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
+}
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -551,6 +560,7 @@ async fn public_signal_runtime(
     let policy = public_runtime_policy();
     let store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -568,7 +578,12 @@ async fn public_signal_runtime(
                 .collect(),
         )
         .with_store(store)
-        .with_process_registry(registry)
+        .with_process_work(lash_core::ProcessWorkWiring::new(
+            Arc::clone(&registry),
+            hub,
+            Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+        ))
+        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
         .build(),
     )
     .await
@@ -839,6 +854,7 @@ async fn fig1293_runtime(
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
 ) -> lash_core::facade_support::LashRuntime {
+    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
     let factories = fig1293_factories();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -856,11 +872,20 @@ async fn fig1293_runtime(
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&registry),
+            hub.clone(),
+            lash_core::WorkerProcessWork::SelfNative,
             lash_core::testing::runtime_lease_owner(),
         ),
     );
-    let process_work_driver =
-        lash_core::facade_support::ProcessWorkDriver::inline(Arc::clone(&registry), worker);
+    let process_work = lash_core::ProcessWorkWiring::new(
+        Arc::clone(&registry),
+        hub.clone(),
+        Arc::new(lash_core::NativeProcessWork::new(
+            Arc::clone(&registry),
+            hub,
+            worker,
+        )),
+    );
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -873,8 +898,7 @@ async fn fig1293_runtime(
         .with_runtime_host(host)
         .with_plugin_factories(factories)
         .with_store(store)
-        .with_process_registry(registry)
-        .with_process_work_driver(process_work_driver)
+        .with_process_work(process_work)
         .build(),
     )
     .await
@@ -2036,10 +2060,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         .expect("scope first PostgreSQL intent host");
     let first = first_scoped
         .controller()
-        .execute_effect(
-            envelope.clone(),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
-        )
+        .execute_effect(envelope.clone(), registry_local_executor(registry.clone()))
         .await
         .expect("execute recorded intent command");
     registry
@@ -2076,10 +2097,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         .controller()
         .execute_effect(
             envelope,
-            RuntimeEffectLocalExecutor::processes(
-                Arc::new(second_storage.process_registry()),
-                None,
-            ),
+            registry_local_executor(Arc::new(second_storage.process_registry())),
         )
         .await
         .expect("replay recorded intent command after live mutation");

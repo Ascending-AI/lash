@@ -16,12 +16,12 @@ use lash_core::{
     AbandonEvidence, AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope,
     PluginError, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionContext,
     ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    RecoveryContract, Resolution, RuntimeError, ScopedEffectController,
-    facade_support::DurableProcessWorker, facade_support::ProcessAdmissionDeferred,
-    facade_support::ProcessAdmissionReport, facade_support::ProcessAttach,
-    facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptOutcome,
-    facade_support::ProcessRecoveryOperation, facade_support::ProcessRunHandle,
-    facade_support::ProcessWorkDriver, facade_support::ProcessWorkerFault,
+    ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, RecoveryContract, Resolution,
+    RuntimeError, ScopedEffectController, facade_support::DurableProcessWorker,
+    facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionReport,
+    facade_support::ProcessAttach, facade_support::ProcessEventSink,
+    facade_support::ProcessRecoveryAttemptOutcome, facade_support::ProcessRecoveryOperation,
+    facade_support::ProcessRunHandle, facade_support::ProcessWorkerFault,
     facade_support::watch_process_registry_with_sink,
 };
 use restate_sdk::context::ContextPromises;
@@ -626,6 +626,24 @@ impl ProcessAttach for RestateProcessIngressRunner {
         if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
             return Ok(output.clone());
         }
+        match self.await_terminal_wait(process_id).await? {
+            ProcessTerminalWait::Terminal(output) => Ok(output),
+            ProcessTerminalWait::Reattach => Err(PluginError::Session(format!(
+                "bounded Restate attachment for process `{process_id}` elapsed; reattach through ProcessWorkSubstrate"
+            ))),
+        }
+    }
+}
+
+impl RestateProcessIngressRunner {
+    pub(crate) async fn await_terminal_wait(
+        &self,
+        process_id: &str,
+    ) -> Result<ProcessTerminalWait, PluginError> {
+        let record = self.registry.get_process(process_id).await?;
+        if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
+            return Ok(ProcessTerminalWait::Terminal(output.clone()));
+        }
         self.ingress
             .call_workflow_json::<_, ProcessAwaitOutput>(
                 "LashProcessWorkflow",
@@ -636,40 +654,74 @@ impl ProcessAttach for RestateProcessIngressRunner {
                 },
             )
             .await
-            .map_err(|err| {
+            .map(ProcessTerminalWait::Terminal)
+            .or_else(|err| {
                 if err.is_timeout() {
-                    PluginError::ProcessAttachCeilingElapsed {
-                        process_id: process_id.to_string(),
-                    }
+                    Ok(ProcessTerminalWait::Reattach)
                 } else if err.is_service_unregistered() {
                     // A shared handler, so the 404 has two readings and this
                     // client cannot tell them apart: nothing binds the service,
                     // or nothing is left of this process's invocation.
-                    RestateEffectError::BackgroundScheduler(
+                    Err(RestateEffectError::BackgroundScheduler(
                         crate::ingress::unresolvable_call_target_message(
                             "LashProcessWorkflow",
                             "await_terminal",
                             &err,
                         ),
                     )
-                    .into_plugin_error()
+                    .into_plugin_error())
                 } else {
-                    RestateEffectError::BackgroundScheduler(format!(
+                    Err(RestateEffectError::BackgroundScheduler(format!(
                         "ingress await for process `{process_id}` failed: {err}"
                     ))
-                    .into_plugin_error()
+                    .into_plugin_error())
                 }
             })
     }
 }
 
+/// Restate-backed process-work deployment port.
+#[derive(Clone)]
+pub struct RestateProcessWork {
+    ingress: Arc<RestateProcessIngressRunner>,
+}
+
+impl RestateProcessWork {
+    fn new(ingress: Arc<RestateProcessIngressRunner>) -> Self {
+        Self { ingress }
+    }
+}
+
+#[async_trait::async_trait]
+impl ProcessWorkSubstrate for RestateProcessWork {
+    async fn admit_pending_processes(
+        &self,
+        _reason: &str,
+    ) -> Result<ProcessAdmissionReport, PluginError> {
+        self.ingress.claim_and_run_pending().await
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &str,
+    ) -> Result<ProcessTerminalWait, PluginError> {
+        lash_core::facade_support::release_process_execution_permit_while(
+            self.ingress.await_terminal_wait(process_id),
+        )
+        .await
+    }
+}
+
 /// Bundled Restate process deployment wiring for a Lash core.
 ///
-/// Construct this once per deployment, pass [`process_work_driver`](Self::process_work_driver)
-/// into `LashCoreBuilder::process_work_driver`, and bind
+/// Construct this once per deployment, pass [`process_work`](Self::process_work)
+/// into `LashCoreBuilder::process_work`, and bind
 /// [`workflow`](Self::workflow) on the Restate endpoint.
 pub struct RestateProcessDeployment {
-    driver: ProcessWorkDriver,
+    #[cfg(test)]
+    process_work: Arc<RestateProcessWork>,
+    wiring: ProcessWorkWiring,
+    registry: Arc<dyn ProcessRegistry>,
     ingress: RestateIngressClient,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
 }
@@ -706,18 +758,31 @@ impl RestateProcessDeployment {
             )
             .with_event_sink(fault_sink),
         );
-        let run_handle: Arc<dyn ProcessRunHandle> = ingress_runner.clone();
-        let attach: Arc<dyn ProcessAttach> = ingress_runner;
-        let driver = ProcessWorkDriver::from_watched(registry, hub, run_handle).with_attach(attach);
+        let process_work = Arc::new(RestateProcessWork::new(ingress_runner));
+        let port: Arc<dyn ProcessWorkSubstrate> = process_work.clone();
+        let wiring = ProcessWorkWiring::new(Arc::clone(&registry), hub, port);
         Self {
-            driver,
+            #[cfg(test)]
+            process_work,
+            wiring,
+            registry,
             ingress: RestateIngressClient::new(connection),
             continuations,
         }
     }
 
-    pub fn process_work_driver(&self) -> ProcessWorkDriver {
-        self.driver.clone()
+    pub fn process_work(&self) -> ProcessWorkWiring {
+        self.wiring.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_registry(&self) -> Arc<dyn ProcessRegistry> {
+        Arc::clone(&self.registry)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_process_work(&self) -> Arc<RestateProcessWork> {
+        Arc::clone(&self.process_work)
     }
 
     pub fn workflow(
@@ -728,7 +793,7 @@ impl RestateProcessDeployment {
         let trace_context = worker.config().runtime_host.tracing.trace_context.clone();
         let workflow = LashProcessWorkflowImpl::new(
             Arc::new(RestateCoreProcessRunner::new(worker)),
-            self.driver.process_registry(),
+            Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
             self.ingress.clone(),
         );

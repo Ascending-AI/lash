@@ -2383,8 +2383,7 @@ async fn attempt_context_provider_realizes_every_v1_intent_through_the_coordinat
     context.trigger_router = Some(crate::TriggerRouter::new(
         Arc::new(crate::facade_support::InMemoryTriggerStore::default())
             as Arc<dyn crate::TriggerStore>,
-        Some(registry),
-        None,
+        crate::testing::process_work_wiring_for_registry(registry),
     ));
 
     let prepared = crate::PreparedToolCall::from_parts(

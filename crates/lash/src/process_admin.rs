@@ -14,6 +14,18 @@ use crate::support::*;
 use lash_core::facade_support::ScopedEffectControllerFacadeOps;
 use lash_sansio::sync::MutexExt;
 
+async fn await_process_terminal(
+    process_work: &dyn lash_core::ProcessWorkSubstrate,
+    process_id: &str,
+) -> std::result::Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
+    loop {
+        match process_work.await_process_terminal(process_id).await? {
+            lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
+            lash_core::ProcessTerminalWait::Reattach => continue,
+        }
+    }
+}
+
 struct SurveyedTriggerStore<'a> {
     inner: &'a dyn lash_core::TriggerStore,
     retention_candidates: std::sync::Mutex<Vec<lash_core::TriggerDeliveryRetentionCandidate>>,
@@ -271,6 +283,14 @@ impl Processes {
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEffectOutcome> {
         let registry = self.registry()?;
+        let ports = self.core.substrate_slot.ports().await;
+        let process_work = self
+            .core
+            .env
+            .clone()
+            .with_work_ports(ports.process.clone(), ports.queued_port())
+            .process_work()
+            .ok_or(EmbedError::MissingProcessRegistry)?;
         let invocation = Self::process_invocation(&command);
         let outcome = scoped_effect_controller
             .execute_process_effect(
@@ -278,10 +298,7 @@ impl Processes {
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
-                lash_core::RuntimeEffectLocalExecutor::processes(
-                    registry,
-                    self.core.env.process_work_driver.clone(),
-                ),
+                lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work),
             )
             .await
             .map_err(|err| EmbedError::Plugin(lash_core::PluginError::Session(err.to_string())))?;
@@ -330,9 +347,18 @@ impl Processes {
                 "process start returned the wrong outcome".to_string(),
             )));
         };
-        if let Some(driver) = self.core.work_driver.drivers().await.process {
-            let _ = driver.claim_and_run_pending("admin_process_start").await?;
-        }
+        let ports = self.core.substrate_slot.ports().await;
+        let resolved = self
+            .core
+            .env
+            .clone()
+            .with_work_ports(ports.process.clone(), ports.queued_port());
+        let process_work = resolved
+            .process_work()
+            .ok_or(EmbedError::MissingProcessRegistry)?;
+        let _ = process_work
+            .admit_pending_processes("admin_process_start")
+            .await?;
         Ok(*record)
     }
 
@@ -400,13 +426,16 @@ impl Processes {
 
     /// Waits for the identified process to produce terminal output.
     pub async fn await_output(&self, process_id: &str) -> Result<lash_core::ProcessAwaitOutput> {
-        if let Some(driver) = self.core.env.process_work_driver.as_ref() {
-            return driver.await_terminal(process_id).await.map_err(Into::into);
-        }
-        lash_core::facade_support::ProcessAwaiter::polling(self.registry()?)
-            .await_terminal(process_id)
-            .await
-            .map_err(Into::into)
+        let ports = self.core.substrate_slot.ports().await;
+        let resolved = self
+            .core
+            .env
+            .clone()
+            .with_work_ports(ports.process.clone(), ports.queued_port());
+        let process_work = resolved
+            .process_work()
+            .ok_or(EmbedError::MissingProcessRegistry)?;
+        Ok(await_process_terminal(process_work.as_ref(), process_id).await?)
     }
 
     /// Requests cancellation of the identified process.
@@ -753,13 +782,8 @@ impl Processes {
     pub async fn drive_wake_deliveries(
         &self,
     ) -> Result<lash_core::facade_support::WakeDeliveryDriveReport> {
-        let drivers = self.core.work_driver.drivers().await;
-        let Some(driver) = drivers._wake else {
-            return Err(EmbedError::Plugin(lash_core::PluginError::Session(
-                "wake delivery driver is unavailable in this runtime".to_string(),
-            )));
-        };
-        driver.drive_pending().await.map_err(Into::into)
+        let ports = self.core.substrate_slot.ports().await;
+        ports.queued.drive_wake().await.map_err(Into::into)
     }
 
     /// Record a durable, non-terminal **Abandon Request** on a process (ADR
@@ -799,4 +823,60 @@ pub(crate) fn now_epoch_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod terminal_wait_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct ReattachOnce {
+        waits: AtomicUsize,
+        terminal: lash_core::ProcessAwaitOutput,
+    }
+
+    #[async_trait]
+    impl lash_core::ProcessWorkSubstrate for ReattachOnce {
+        async fn admit_pending_processes(
+            &self,
+            _reason: &str,
+        ) -> std::result::Result<
+            lash_core::facade_support::ProcessAdmissionReport,
+            lash_core::PluginError,
+        > {
+            unreachable!("terminal-wait witness does not admit work")
+        }
+
+        async fn await_process_terminal(
+            &self,
+            process_id: &str,
+        ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
+            assert_eq!(process_id, "admin-reattach-process");
+            if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(lash_core::ProcessTerminalWait::Reattach)
+            } else {
+                Ok(lash_core::ProcessTerminalWait::Terminal(
+                    self.terminal.clone(),
+                ))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn process_admin_reattaches_once_then_returns_terminal_output() {
+        let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
+            lash_core::ToolCallOutput::success(serde_json::json!({"done": true})),
+        );
+        let port = ReattachOnce {
+            waits: AtomicUsize::new(0),
+            terminal: terminal.clone(),
+        };
+
+        let output = await_process_terminal(&port, "admin-reattach-process")
+            .await
+            .expect("reattachment reaches terminal output");
+
+        assert_eq!(output, terminal);
+        assert_eq!(port.waits.load(Ordering::SeqCst), 2);
+    }
 }

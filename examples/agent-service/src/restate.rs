@@ -417,7 +417,7 @@ mod restate_tests {
         });
         harness
             .process_deployment
-            .process_work_driver()
+            .process_work()
             .claim_and_run_pending("agent_service_e2e_startup")
             .await
             .expect("drive startup recovery");
@@ -596,7 +596,7 @@ finish "done via Restate E2E"
             .process_env_store(process_env_store)
             .trigger_store(trigger_store)
             .effect_host(turn_deployment.effect_host())
-            .process_work_driver(process_deployment.process_work_driver())
+            .process_work(process_deployment.process_work())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test",
                 "test",

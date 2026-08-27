@@ -25,6 +25,7 @@ use crate::process::{
 };
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
+use lash_core::ProcessWorkSubstrate as _;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
 use lash_core::{
@@ -76,6 +77,24 @@ use endpoint_protocol::{
     restate_error_message, restate_message_types, restate_output_failure_message,
     restate_output_json,
 };
+
+fn registry_local_executor(
+    registry: Arc<dyn ProcessRegistry>,
+) -> RuntimeEffectLocalExecutor<'static> {
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    )));
+    RuntimeEffectLocalExecutor::processes(registry, process_work)
+}
+
+fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::ProcessWorkWiring {
+    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    lash_core::ProcessWorkWiring::new(
+        Arc::clone(&registry),
+        hub,
+        Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+    )
+}
 
 fn process_success(value: serde_json::Value) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(value))
@@ -2018,8 +2037,7 @@ async fn fig806_reserved_trigger_redrive_replays_the_process_start_prefix() {
     let registry = process_registry();
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
-        Some(Arc::clone(&registry)),
-        None,
+        registry_process_wiring(Arc::clone(&registry)),
     );
     let endpoint = Endpoint::builder()
         .bind(Fig806TriggerRedriveImpl { router }.serve())
@@ -2164,8 +2182,7 @@ async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order(
     let registry = process_registry();
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
-        Some(Arc::clone(&registry)),
-        None,
+        registry_process_wiring(Arc::clone(&registry)),
     );
     let endpoint = Endpoint::builder()
         .bind(Fig806TriggerRedriveImpl { router }.serve())
@@ -2268,8 +2285,7 @@ async fn fig811_independent_client_retry_reports_duplicate_without_a_second_proc
     let registry = process_registry();
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
-        Some(Arc::clone(&registry)),
-        None,
+        registry_process_wiring(Arc::clone(&registry)),
     );
     let endpoint = Endpoint::builder()
         .bind(Fig806TriggerRedriveImpl { router }.serve())
@@ -2818,13 +2834,12 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
                     process_id: input.process_id,
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
-                .with_process_turn_cancellation(
-                    lash_core::facade_support::ProcessTurnCancellation::new(
-                        cancellation.clone(),
-                        durable_turn_scope("session", "turn"),
-                    ),
+            registry_local_executor(Arc::clone(&self.registry)).with_process_turn_cancellation(
+                lash_core::facade_support::ProcessTurnCancellation::new(
+                    cancellation.clone(),
+                    durable_turn_scope("session", "turn"),
                 ),
+            ),
         );
         let outcome = if input.cancel_on_suspend_wake {
             CancelOnWakeFuture {
@@ -5020,7 +5035,7 @@ async fn fig1767_journal_entry_byte_sequence_equality() {
     controller
         .execute_effect(
             process_envelope.clone(),
-            RuntimeEffectLocalExecutor::processes(process_registry(), None),
+            registry_local_executor(process_registry()),
         )
         .await
         .expect("process command effect execution");
@@ -5164,7 +5179,7 @@ async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     )
     .execute_effect(
         process_envelope.clone(),
-        RuntimeEffectLocalExecutor::processes(process_registry(), None),
+        registry_local_executor(process_registry()),
     )
     .await
     .expect_err("process command over budget must give up");
@@ -5195,8 +5210,7 @@ async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     )
     .execute_effect(
         process_envelope,
-        RuntimeEffectLocalExecutor::processes(replay_registry, None)
-            .with_process_outcome_observer(process_observer),
+        registry_local_executor(replay_registry).with_process_outcome_observer(process_observer),
     )
     .await
     .expect_err("replayed give-up verdict must return poisoned error");
@@ -8764,9 +8778,9 @@ async fn restate_enqueue_never_errors_after_commit() {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
-        .queued_work_driver(lash_core::facade_support::QueuedWorkDriver::new(
+        .queued_work(Arc::new(lash_core::NativeQueuedWork::new(
             queued_work.clone(),
-        ))
+        )))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "lash-restate-fig430-test",
             "lash-restate-fig430-test-boot",
@@ -9210,7 +9224,15 @@ async fn replay_test_runtime_with_plugins_and_registry(
     .with_plugin_factories(plugin_factories)
     .with_store(store);
     if let Some(process_registry) = process_registry {
-        builder = builder.with_process_registry(process_registry);
+        let (process_registry, hub) =
+            lash_core::facade_support::watch_process_registry(process_registry);
+        builder = builder
+            .with_process_work(lash_core::ProcessWorkWiring::new(
+                Arc::clone(&process_registry),
+                hub,
+                Arc::new(lash_core::NativeProcessWork::for_registry(process_registry)),
+            ))
+            .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()));
     }
     Box::pin(builder.build())
         .await
@@ -9384,6 +9406,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
     let process_registry = process_registry();
     fig1293_seed_control_target(&process_registry, session_id).await;
     let plugin_factories = fig1293_migrated_tool_factories();
+    let (worker_registry, worker_hub) =
+        lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     context.install_process_worker(DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -9391,7 +9415,9 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&process_registry),
+            worker_registry,
+            worker_hub,
+            lash_core::WorkerProcessWork::SelfNative,
             lash_core::testing::runtime_lease_owner(),
         ),
     ));
@@ -9770,6 +9796,8 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
     let context = Arc::new(ReplayableRecordingContext::default());
     context.defer_process_workflows();
     let process_registry = process_registry();
+    let (worker_registry, worker_hub) =
+        lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     context.install_process_worker(DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -9777,7 +9805,9 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&process_registry),
+            worker_registry,
+            worker_hub,
+            lash_core::WorkerProcessWork::SelfNative,
             lash_core::testing::runtime_lease_owner(),
         ),
     ));
@@ -10562,6 +10592,8 @@ finish (await handle)?
         )
         .await
         .expect("register the recorded-intent signal target");
+    let (worker_registry, worker_hub) =
+        lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     let process_worker =
         DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -10569,7 +10601,9 @@ finish (await handle)?
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&process_registry),
+            worker_registry,
+            worker_hub,
+            lash_core::WorkerProcessWork::SelfNative,
             lash_core::testing::runtime_lease_owner(),
         ));
     context.install_process_worker(process_worker);
@@ -10841,7 +10875,7 @@ async fn restate_controller_schedules_process_workflow_without_running_executor(
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("start");
@@ -10932,12 +10966,9 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
     };
     let terminal = process_success(serde_json::json!({ "done": true }));
 
-    host.execute_effect(
-        start(),
-        RuntimeEffectLocalExecutor::processes(registry.clone(), None),
-    )
-    .await
-    .expect("first start");
+    host.execute_effect(start(), registry_local_executor(registry.clone()))
+        .await
+        .expect("first start");
     registry
         .complete_process(
             process_id,
@@ -10947,30 +10978,21 @@ async fn restate_controller_replays_process_start_await_command_sequence() {
         .await
         .expect("complete child process");
     context.resolve_process_terminal(process_id, &terminal);
-    host.execute_effect(
-        await_terminal(),
-        RuntimeEffectLocalExecutor::processes(registry.clone(), None),
-    )
-    .await
-    .expect("first await");
+    host.execute_effect(await_terminal(), registry_local_executor(registry.clone()))
+        .await
+        .expect("first await");
 
     // Simulates Restate replay of the same parent handler after a later
     // suspension resumes. The already persisted registry record has an
     // external_ref at this point, but the handler must still issue the same
     // Restate send before the await call so the journal command sequence stays
     // send -> call -> ... on every replay.
-    host.execute_effect(
-        start(),
-        RuntimeEffectLocalExecutor::processes(registry.clone(), None),
-    )
-    .await
-    .expect("replay start");
-    host.execute_effect(
-        await_terminal(),
-        RuntimeEffectLocalExecutor::processes(registry.clone(), None),
-    )
-    .await
-    .expect("replay await");
+    host.execute_effect(start(), registry_local_executor(registry.clone()))
+        .await
+        .expect("replay start");
+    host.execute_effect(await_terminal(), registry_local_executor(registry.clone()))
+        .await
+        .expect("replay await");
 
     assert_eq!(
         context.process_command_log.lock_recover().as_slice(),
@@ -11019,7 +11041,7 @@ async fn restate_controller_start_emits_send_when_external_ref_already_exists() 
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         ),
-        RuntimeEffectLocalExecutor::processes(registry, None),
+        registry_local_executor(registry),
     )
     .await
     .expect("start with existing external ref");
@@ -11047,7 +11069,7 @@ async fn run_parent_shaped_start_await_suspend_flow(
                 execution_context: Box::new(ProcessExecutionContext::default()),
             }),
         ),
-        RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+        registry_local_executor(registry.clone()),
     )
     .await
     .expect("parent flow start child");
@@ -11059,7 +11081,7 @@ async fn run_parent_shaped_start_await_suspend_flow(
                 process_id: process_id.to_string(),
             }),
         ),
-        RuntimeEffectLocalExecutor::processes(registry, None),
+        registry_local_executor(registry),
     )
     .await
     .expect("parent flow await child");
@@ -11166,7 +11188,7 @@ async fn restate_controller_schedules_lashlang_process_with_serializable_input()
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("start");
@@ -11251,7 +11273,7 @@ async fn restate_controller_lists_and_transfers_observers_through_process_effect
                     mode: lash_core::ProcessListMode::Live,
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("list");
@@ -11274,7 +11296,7 @@ async fn restate_controller_lists_and_transfers_observers_through_process_effect
                     process_ids: vec!["task-list".to_string()],
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("transfer");
@@ -11343,7 +11365,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
                     process_id: "task-await-signal".to_string(),
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("await");
@@ -11382,7 +11404,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
                     .with_replay_key("signal:notify"),
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("signal");
@@ -11428,7 +11450,7 @@ async fn restate_controller_awaits_and_signals_through_process_effects() {
                     .with_replay_key("signal:notify-2"),
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("second signal");
@@ -11472,7 +11494,7 @@ async fn restate_controller_cancel_requests_call_workflow_cancel() {
                     replay: None,
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry, None),
+            registry_local_executor(registry),
         )
         .await
         .expect("cancel");
@@ -12680,7 +12702,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
                     execution_context: Box::new(execution_context),
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+            registry_local_executor(registry.clone()),
         )
         .await
         .expect("start through endpoint smoke");
@@ -12742,7 +12764,7 @@ async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_process() {
                     replay: None,
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(registry, None),
+            registry_local_executor(registry),
         )
         .await
         .expect("cancel through endpoint smoke");
@@ -12927,6 +12949,8 @@ fn recovery_worker_with_plugins(
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
+    let (registry, process_change_hub) =
+        lash_core::facade_support::watch_process_registry(registry);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecoveryProcessTool);
     let mut plugins = vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
@@ -12956,6 +12980,8 @@ fn recovery_worker_with_plugins(
             runtime_host,
             store_factory,
             registry,
+            process_change_hub,
+            lash_core::WorkerProcessWork::SelfNative,
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy()),
@@ -13071,6 +13097,8 @@ fn process_parent_worker(
     plugin: Arc<dyn lash_core::facade_support::PluginFactory>,
     probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
 ) -> DurableProcessWorker {
+    let (registry, process_change_hub) =
+        lash_core::facade_support::watch_process_registry(registry);
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         RECOVERY_PROCESS_ENV_STORE.clone();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
@@ -13094,6 +13122,8 @@ fn process_parent_worker(
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             registry,
+            process_change_hub,
+            lash_core::WorkerProcessWork::SelfNative,
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy())
@@ -13626,7 +13656,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                     execution_context: Box::new(ProcessExecutionContext::default()),
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(Arc::clone(&registry_a), None),
+            registry_local_executor(Arc::clone(&registry_a)),
         )
         .await
         .expect("schedule and run process through Restate endpoint");
@@ -13705,7 +13735,7 @@ async fn sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_can
                     replay: None,
                 }),
             ),
-            RuntimeEffectLocalExecutor::processes(Arc::clone(&registry_b), None),
+            registry_local_executor(Arc::clone(&registry_b)),
         )
         .await
         .expect("cancel through reopened process workflow");
@@ -14384,13 +14414,11 @@ async fn process_deployment_driver_and_workflow_share_registry() {
         Arc::clone(&registry),
         continuation_store(),
     );
-    let driver = deployment.process_work_driver();
-    let driver_registry = driver.process_registry();
+    let driver_registry = deployment.test_registry();
+    let process_work = deployment.process_work();
 
-    assert!(Arc::ptr_eq(&driver.process_registry(), &driver_registry));
-
-    let worker = DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    let worker =
+        DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::empty()),
             lash_core::facade_support::RuntimeHostConfig::in_memory(
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -14398,10 +14426,10 @@ async fn process_deployment_driver_and_workflow_share_registry() {
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             Arc::clone(&driver_registry),
+            lash_core::facade_support::ProcessChangeHub::new(),
+            lash_core::WorkerProcessWork::External(process_work),
             lash_core::testing::runtime_lease_owner(),
-        )
-        .with_change_hub(driver.change_hub()),
-    );
+        ));
     let service = deployment.workflow(worker).serve();
     let discovery = discover_service(&service);
     let endpoint = Endpoint::builder().bind(service).build();
@@ -16047,18 +16075,14 @@ async fn restate_process_attach_preserves_re_attach_signal_on_ceiling() {
         continuation_store(),
     );
 
-    let error = runner
-        .await_terminal("process-1")
+    let wait = runner
+        .await_terminal_wait("process-1")
         .await
-        .expect_err("attach ceiling must be typed for host re-attachment");
+        .expect("attach ceiling must request host re-attachment");
     black_hole.abort();
     let _ = black_hole.await;
 
-    assert!(matches!(
-        error,
-        PluginError::ProcessAttachCeilingElapsed { ref process_id }
-            if process_id == "process-1"
-    ));
+    assert_eq!(wait, lash_core::ProcessTerminalWait::Reattach);
 }
 
 #[tokio::test]
@@ -16138,20 +16162,22 @@ async fn restate_attach_before_run_resolves_with_delayed_workflow_output() {
     let registry = process_registry();
     let deployment =
         RestateProcessDeployment::new(base_url, Arc::clone(&registry), continuation_store());
-    let driver = deployment.process_work_driver();
+    let driver = deployment.test_process_work();
     // A non-terminal process routes await_terminal through the ingress attach
     // rather than the registry short-circuit.
-    driver
-        .process_registry()
+    registry
         .register_process(external_registration("process-1"))
         .await
         .expect("register non-terminal process");
 
     let started = std::time::Instant::now();
     let output = driver
-        .await_terminal("process-1")
+        .await_process_terminal("process-1")
         .await
         .expect("attach await resolves with the eventual output");
+    let lash_core::ProcessTerminalWait::Terminal(output) = output else {
+        panic!("delayed successful attach unexpectedly requested re-attachment")
+    };
     let elapsed = started.elapsed();
     server.await.expect("capture server");
 
@@ -16185,15 +16211,13 @@ async fn restate_driver_short_circuits_terminal_without_ingress_call() {
     let registry = process_registry();
     let deployment =
         RestateProcessDeployment::new(base_url, Arc::clone(&registry), continuation_store());
-    let driver = deployment.process_work_driver();
+    let driver = deployment.test_process_work();
     let output = process_success(serde_json::json!("already-terminal"));
-    driver
-        .process_registry()
+    registry
         .register_process(external_registration("process-1"))
         .await
         .expect("register");
-    driver
-        .process_registry()
+    registry
         .complete_process(
             "process-1",
             output.clone(),
@@ -16203,9 +16227,12 @@ async fn restate_driver_short_circuits_terminal_without_ingress_call() {
         .expect("complete");
 
     let resolved = driver
-        .await_terminal("process-1")
+        .await_process_terminal("process-1")
         .await
         .expect("terminal short-circuit resolves without ingress");
+    let lash_core::ProcessTerminalWait::Terminal(resolved) = resolved else {
+        panic!("terminal registry row unexpectedly requested re-attachment")
+    };
     server.await.expect("capture server");
 
     assert_eq!(resolved, output);
@@ -16273,7 +16300,7 @@ async fn restate_deployment_sink_funnel_feeds_appended_events() {
         continuation_store(),
         Some(Arc::new(sink.clone())),
     );
-    let registry = deployment.process_work_driver().process_registry();
+    let registry = deployment.test_registry();
     registry
         .register_process(
             external_registration("sink-funnel").with_extra_event_types([

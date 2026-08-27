@@ -30,10 +30,18 @@ pub struct EmbeddedRuntimeBuilder {
 /// Cold builder-only bindings live off the async build frame. Keeping this
 /// optional host wiring together avoids growing every `build` caller's future
 /// as new inline drivers are added.
-#[derive(Default)]
 struct EmbeddedRuntimeDriverBindings {
-    process: Option<crate::ProcessWorkDriver>,
-    queued: Option<crate::QueuedWorkDriver>,
+    process: Option<crate::ProcessWorkWiring>,
+    queued: Arc<dyn crate::QueuedWorkSubstrate>,
+}
+
+impl Default for EmbeddedRuntimeDriverBindings {
+    fn default() -> Self {
+        Self {
+            process: None,
+            queued: Arc::new(crate::NoQueuedWork::new()),
+        }
+    }
 }
 
 impl EmbeddedRuntimeBuilder {
@@ -202,13 +210,14 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_process_work_driver(mut self, driver: crate::ProcessWorkDriver) -> Self {
-        self.drivers.process = Some(driver);
+    pub fn with_process_work(mut self, wiring: crate::ProcessWorkWiring) -> Self {
+        self.process_registry = Some(Arc::clone(wiring.registry()));
+        self.drivers.process = Some(wiring);
         self
     }
 
-    pub fn with_queued_work_driver(mut self, driver: crate::QueuedWorkDriver) -> Self {
-        self.drivers.queued = Some(driver);
+    pub fn with_queued_work(mut self, queued: Arc<dyn crate::QueuedWorkSubstrate>) -> Self {
+        self.drivers.queued = queued;
         self
     }
 
@@ -349,22 +358,37 @@ impl EmbeddedRuntimeBuilder {
         };
         // `assemble_runtime` owns the (store, registry) wiring + residency so the
         // worker rebuild cannot drift from the live open path.
-        let mut runtime = LashRuntime::assemble_runtime(
+        let work = match (self.process_registry, self.drivers.process) {
+            (Some(_), None) => {
+                return Err(SessionError::Protocol(
+                    "process registry requires a process-work port".to_string(),
+                ));
+            }
+            (Some(_), Some(wiring)) => {
+                super::host::RuntimeWork::processes(wiring, Arc::clone(&self.drivers.queued))
+            }
+            (None, Some(_)) => {
+                return Err(SessionError::Protocol(
+                    "process-work port requires a process registry".to_string(),
+                ));
+            }
+            (None, None) => {
+                super::host::RuntimeWork::sessions_only(Arc::clone(&self.drivers.queued))
+            }
+        };
+        LashRuntime::assemble_runtime(
             state.policy.clone(),
             embedded_host,
             plugins,
             persistence,
-            self.process_registry,
+            work,
             super::lifecycle::RuntimeSessionAssembly::new(
                 state,
                 crate::SessionRelation::Root,
                 self.runtime_lease_owner,
             ),
         )
-        .await?;
-        runtime.host.process_work_driver = self.drivers.process;
-        runtime.host.queued_work_driver = self.drivers.queued;
-        Ok(runtime)
+        .await
     }
 }
 

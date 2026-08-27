@@ -1063,22 +1063,19 @@ async fn run_seed_probe_inner(
         .with_extensions(extensions)
         .build_session("root")
         .expect("plugin session");
-    let host = ProcessRuntimeHost::new(
-        lash_core::facade_support::EmbeddedRuntimeHost::new({
-            let mut config = RuntimeHostConfig::in_memory(
-                lash_core::CommitBudget::bounded(1024 * 1024, 512),
-                lash_core::QueuedWorkBatchingConfig::new(1),
-            );
-            config.providers.provider_resolver = Arc::new(
-                lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
-            );
-            config = config
-                .with_process_env_store(process_env_store.clone())
-                .with_process_engine(process_engine.clone());
-            config
-        }),
-        Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>,
-    );
+    let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new({
+        let mut config = RuntimeHostConfig::in_memory(
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        );
+        config.providers.provider_resolver = Arc::new(
+            lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
+        );
+        config = config
+            .with_process_env_store(process_env_store.clone())
+            .with_process_engine(process_engine.clone());
+        config
+    });
     let policy = SessionPolicy {
         provider_id: provider.kind().to_string(),
         model: model_spec("seed-probe-model", None, 64_000),
@@ -1092,6 +1089,9 @@ async fn run_seed_probe_inner(
     // nested case here (`handle = start spawn_child` then `await handle`) because
     // the worker runs each process on its own task, so the parent's await never
     // parks the runner away from the child.
+    let worker_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
+    let (worker_registry, process_change_hub) =
+        lash_core::facade_support::watch_process_registry(worker_registry);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
@@ -1109,16 +1109,24 @@ async fn run_seed_probe_inner(
                 config
             },
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>,
+            Arc::clone(&worker_registry),
+            process_change_hub.clone(),
+            lash_core::WorkerProcessWork::SelfNative,
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(policy.clone()),
     );
-    let process_driver = lash_core::facade_support::ProcessWorkDriver::inline(
-        Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>,
-        worker,
+    let process_port: Arc<dyn lash_core::ProcessWorkSubstrate> =
+        Arc::new(lash_core::NativeProcessWork::new(
+            Arc::clone(&worker_registry),
+            process_change_hub.clone(),
+            worker,
+        ));
+    let host = ProcessRuntimeHost::with_ports(
+        embedded,
+        lash_core::ProcessWorkWiring::new(worker_registry, process_change_hub, process_port),
+        Arc::new(lash_core::NoQueuedWork::new()),
     );
-    let host = host.with_process_work_driver(process_driver);
     let mut runtime = LashRuntime::from_background_state(
         policy.clone(),
         host,

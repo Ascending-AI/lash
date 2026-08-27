@@ -212,15 +212,16 @@ async fn async_main() -> AnyhowResult<()> {
     );
     // Retained so a host-facing "wait for the work item" flow can route through
     // `ProcessWorkDriver::await_terminal` (see the `/api/work/{id}/await` route).
-    let process_work_driver = process_deployment.process_work_driver();
-    let queued_work_driver =
-        lash::runtime::QueuedWorkDriver::new(Arc::new(WorkbenchQueuedWorkSubmitter {
+    let process_work_driver = process_deployment.process_work();
+    let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
             sessions: sessions.clone(),
             store_factory: Arc::clone(&core_store_factory),
             restate_ingress_url: restate_ingress_url.clone(),
             restate_http: restate_http.clone(),
             active_turns: active_turns.clone(),
-        }));
+        });
+    let queued_work_driver = lash::runtime::QueuedWorkDriver::new(queued_run_handle.clone());
+    let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
 
     let turn_deployment = lash_restate::RestateTurnDeployment::new(
         lash_restate::RestateConnection::with_client(
@@ -286,12 +287,12 @@ async fn async_main() -> AnyhowResult<()> {
                 approvals.clone(),
             );
         })
-        .process_work_driver(process_work_driver.clone())
+        .process_work(process_work_driver.clone())
         // The driver already carries this sink for appended events; the core
         // needs it too, because the durable process worker it configures
         // reports its faults there and nowhere else.
         .process_event_sink(Arc::clone(&process_event_sink))
-        .queued_work_driver(queued_work_driver.clone())
+        .queued_work(queued_work_port)
         .advanced()
         .runtime_host_config(runtime_host_config)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -315,7 +316,6 @@ async fn async_main() -> AnyhowResult<()> {
         session_store_factory: Arc::clone(&core_store_factory),
         trigger_store,
         process_observer,
-        process_work_driver,
         sessions,
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_model: Arc::new(Mutex::new(ModelSelection {

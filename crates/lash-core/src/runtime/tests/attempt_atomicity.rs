@@ -281,8 +281,7 @@ fn tool_context_with_provider<'run>(
         processes,
         trigger_router: Some(crate::TriggerRouter::new(
             Arc::clone(&fixtures.trigger_store) as Arc<dyn crate::TriggerStore>,
-            Some(Arc::clone(&fixtures.registry)),
-            None,
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
         )),
         effect_controller,
         direct_completions,
@@ -314,11 +313,10 @@ fn tool_context_with_provider<'run>(
         .process_events(
             LIVE_PROCESS,
             crate::ProcessExecutionWriteAuthority::lease(fixtures.lease.clone()),
-            Arc::clone(&fixtures.registry),
-            crate::ProcessAwaiter::polling(Arc::clone(&fixtures.registry)),
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
             None,
             None,
-            None,
+            Arc::new(crate::NoQueuedWork::new()),
             crate::DeliveryPolicy::EarliestSafeBoundary,
             Arc::new(crate::SystemClock),
         )
@@ -581,7 +579,12 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
-        crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&fixtures.registry), None),
+        crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&fixtures.registry),
+            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                &fixtures.registry,
+            ))),
+        ),
     )
     .await
     .expect("cancel outside an attempt");
@@ -626,7 +629,10 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                     ),
                     crate::RuntimeEffectCommand::process(command),
                 ),
-                crate::RuntimeEffectLocalExecutor::processes(registry, None),
+                crate::RuntimeEffectLocalExecutor::processes(
+                    Arc::clone(&registry),
+                    Arc::new(crate::NativeProcessWork::for_registry(registry)),
+                ),
             )
             .await?;
             Ok(crate::RuntimeEffectOutcome::ToolAttempt {
@@ -859,7 +865,10 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             attributed,
             crate::RuntimeEffectCommand::process(command.clone()),
         ),
-        crate::RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+        crate::RuntimeEffectLocalExecutor::processes(
+            registry.clone(),
+            Arc::new(crate::NativeProcessWork::for_registry(registry.clone())),
+        ),
     )
     .await
     .expect("unprefixed command executes");
@@ -879,7 +888,10 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
-        crate::RuntimeEffectLocalExecutor::processes(registry, None),
+        crate::RuntimeEffectLocalExecutor::processes(
+            registry.clone(),
+            Arc::new(crate::NativeProcessWork::for_registry(registry)),
+        ),
     )
     .await
     .expect("unattributed command executes");

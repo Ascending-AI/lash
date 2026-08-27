@@ -728,7 +728,10 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
                 session_id: "deleted".to_string(),
             }),
         ),
-        crate::RuntimeEffectLocalExecutor::processes(registry_dyn, None),
+        crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry_dyn),
+            Arc::new(crate::NativeProcessWork::for_registry(registry_dyn)),
+        ),
     )
     .await
     .expect("delete session process command");

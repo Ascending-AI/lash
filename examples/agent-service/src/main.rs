@@ -341,11 +341,11 @@ async fn async_main() -> anyhow_like::Result<()> {
                             .expect("turn deployment configured for Restate")
                             .effect_host(),
                     )
-                    .process_work_driver(
+                    .process_work(
                         process_deployment
                             .as_ref()
                             .expect("process deployment configured for Restate")
-                            .process_work_driver(),
+                            .process_work(),
                     )
                     .build(session_owner.clone())
                     .map_err(|err| err.to_string())?
@@ -432,7 +432,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                 .await;
         });
         process_deployment
-            .process_work_driver()
+            .process_work()
             .claim_and_run_pending("agent_service_startup")
             .await
             .map_err(|err| err.to_string())?;

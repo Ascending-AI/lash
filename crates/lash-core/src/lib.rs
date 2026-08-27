@@ -453,6 +453,8 @@ pub mod facade_support {
     pub use crate::runtime::refuse_unhonored_group_membership;
     #[doc(hidden)]
     pub use crate::runtime::registry_transitions;
+    #[doc(hidden)]
+    pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::system_time_from_epoch_ms;
     pub use crate::runtime::terminal_append_request;
@@ -1037,11 +1039,12 @@ pub use runtime::{
     GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LoserPolicy, ObserverInheritance, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCommand,
+    LoserPolicy, NativeProcessWork, NativeQueuedWork, NoQueuedWork, ObserverInheritance,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
+    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessAwaitOutput,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCommand,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
     ProcessEffectOutcome, ProcessEngine, ProcessEngineRunContext, ProcessEngineValidationContext,
     ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
@@ -1054,29 +1057,30 @@ pub use runtime::{
     ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
     ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec,
-    ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy,
-    QueuedWorkKind, RecoveryContract, Resolution, ResolveOutcome, RuntimeCheckpointComponents,
+    ProcessTerminalWait, ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery,
+    ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor,
+    ProcessWorklistPage, ProjectionWatermark, PromptUsage, ProtocolSessionExtension,
+    ProtocolSessionExtensionHandle, ProtocolTurnExtension, ProtocolTurnExtensionHandle,
+    QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+    QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
+    QueuedWorkSubstrate, RecoveryContract, Resolution, ResolveOutcome, RuntimeCheckpointComponents,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
     RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
     RuntimeSessionState, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCursor,
-    SessionCursorError, SessionId, SessionListFilter, SessionObservationEvent,
+    SessionCursorError, SessionDrainOutcome, SessionId, SessionListFilter, SessionObservationEvent,
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
     SessionRelationKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, SessionSummary, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
-    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition,
+    SessionStoreFactory, SessionSummary, SessionWorkTarget, TokenLedgerEntry, ToolAttemptLaunch,
+    ToolCallLaunch, TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition,
     TurnCancelInputOutcome, TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnEvent,
     TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
     TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
     TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    WakeDiscardReason, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

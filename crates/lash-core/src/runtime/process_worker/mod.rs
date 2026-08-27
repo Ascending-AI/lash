@@ -18,12 +18,11 @@ mod recovery;
 mod registration;
 mod worklist;
 
+#[doc(hidden)]
+pub use permit::release_process_execution_permit_while;
 #[cfg(test)]
 use permit::{PROCESS_EXECUTION_PERMIT, ProcessExecutionPermit};
-pub(crate) use permit::{
-    ensure_process_execution_permit, inherit_process_execution_permit,
-    release_process_execution_permit_while,
-};
+pub(crate) use permit::{ensure_process_execution_permit, inherit_process_execution_permit};
 pub(super) use permit::{scope_process_execution_permit, scope_queued_work_execution_permit};
 
 use self::recovery::ProcessRecoveryOutcome;
@@ -40,7 +39,7 @@ use super::worker_capacity::{
     DefaultWorkerSlotSupplier, ObservedWorkerSlotSupplier, WorkerCapacityMetrics,
     WorkerSlotSupplier as _,
 };
-use super::{EmbeddedRuntimeBuilder, ProcessWorkDriver, QueuedWorkDriver, RuntimeHostConfig};
+use super::{EmbeddedRuntimeBuilder, RuntimeHostConfig};
 use crate::InMemorySessionStore;
 use crate::{
     AbandonEvidence, AbandonWriter, LashRuntime, PluginError, PluginFactory, PluginHost,
@@ -84,6 +83,15 @@ pub struct ProcessExecutionConcurrencyError {
     concurrency: usize,
 }
 
+/// Who executes this worker's nested process work.
+#[derive(Clone)]
+pub enum WorkerProcessWork {
+    /// Compose native process work over this worker.
+    SelfNative,
+    /// Use an externally composed process-work port.
+    External(crate::ProcessWorkWiring),
+}
+
 /// Deployment-local configuration for rebuilding durable process executions.
 ///
 /// Process rows intentionally carry only portable process input and provenance.
@@ -96,7 +104,7 @@ pub struct DurableProcessWorkerConfig {
     pub session_policy: crate::SessionPolicy,
     pub session_store_factory: Arc<dyn SessionStoreFactory>,
     pub process_registry: Arc<dyn ProcessRegistry>,
-    pub process_change_hub: Option<crate::ProcessChangeHub>,
+    process_change_hub: crate::ProcessChangeHub,
     /// Host-facing sink this worker reports [`ProcessWorkerFault`]s on.
     ///
     /// Wire the same sink the registry decorator was built with: a drive
@@ -104,8 +112,8 @@ pub struct DurableProcessWorkerConfig {
     /// afterwards have no other honest way back to the host.
     pub process_event_sink: Option<Arc<dyn crate::ProcessEventSink>>,
     pub trigger_store: Arc<dyn crate::TriggerStore>,
-    pub process_work_driver: Option<ProcessWorkDriver>,
-    pub queued_work_driver: Option<QueuedWorkDriver>,
+    process_work: WorkerProcessWork,
+    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     #[doc(hidden)]
     pub turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot,
     /// Maximum processes this worker executes inline at once. A run holds its
@@ -136,6 +144,8 @@ impl DurableProcessWorkerConfig {
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
         process_registry: Arc<dyn ProcessRegistry>,
+        process_change_hub: crate::ProcessChangeHub,
+        process_work: WorkerProcessWork,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         let clock = Arc::clone(&runtime_host.clock);
@@ -145,11 +155,11 @@ impl DurableProcessWorkerConfig {
             session_policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             session_store_factory,
             process_registry,
-            process_change_hub: None,
+            process_change_hub,
             process_event_sink: None,
             trigger_store: Arc::new(crate::InMemoryTriggerStore::with_clock(clock)),
-            process_work_driver: None,
-            queued_work_driver: None,
+            process_work,
+            queued_work: Arc::new(crate::NoQueuedWork::new()),
             turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot::default(),
             process_execution_concurrency: ProcessExecutionConcurrency::DEFAULT,
             worker_slot_supplier: None,
@@ -193,24 +203,14 @@ impl DurableProcessWorkerConfig {
         self
     }
 
-    pub fn with_process_work_driver(mut self, driver: ProcessWorkDriver) -> Self {
-        self.process_work_driver = Some(driver);
-        self
-    }
-
-    pub fn with_change_hub(mut self, hub: crate::ProcessChangeHub) -> Self {
-        self.process_change_hub = Some(hub);
-        self
-    }
-
     /// Report this worker's [`ProcessWorkerFault`]s to `sink`.
     pub fn with_process_event_sink(mut self, sink: Arc<dyn crate::ProcessEventSink>) -> Self {
         self.process_event_sink = Some(sink);
         self
     }
 
-    pub fn with_queued_work_driver(mut self, driver: QueuedWorkDriver) -> Self {
-        self.queued_work_driver = Some(driver);
+    pub fn with_queued_work(mut self, queued_work: Arc<dyn crate::QueuedWorkSubstrate>) -> Self {
+        self.queued_work = queued_work;
         self
     }
 
@@ -228,6 +228,8 @@ impl DurableProcessWorkerConfig {
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
         process_registry: Arc<dyn ProcessRegistry>,
+        process_change_hub: crate::ProcessChangeHub,
+        process_work: WorkerProcessWork,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::new(
@@ -235,6 +237,8 @@ impl DurableProcessWorkerConfig {
             runtime_host,
             session_store_factory,
             process_registry,
+            process_change_hub,
+            process_work,
             lease_owner,
         )
     }
@@ -244,6 +248,8 @@ impl DurableProcessWorkerConfig {
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
         process_registry: Arc<dyn ProcessRegistry>,
+        process_change_hub: crate::ProcessChangeHub,
+        process_work: WorkerProcessWork,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::from_plugin_factories(
@@ -251,6 +257,8 @@ impl DurableProcessWorkerConfig {
             runtime_host,
             session_store_factory,
             process_registry,
+            process_change_hub,
+            process_work,
             lease_owner,
         )
     }
@@ -470,6 +478,26 @@ impl DurableProcessWorker {
 
     pub fn config(&self) -> &DurableProcessWorkerConfig {
         &self.config
+    }
+
+    fn process_wiring(&self) -> crate::ProcessWorkWiring {
+        match &self.config.process_work {
+            WorkerProcessWork::SelfNative => {
+                let registry = Arc::clone(&self.config.process_registry);
+                let port: Arc<dyn crate::ProcessWorkSubstrate> =
+                    Arc::new(crate::NativeProcessWork::new(
+                        Arc::clone(&registry),
+                        self.config.process_change_hub.clone(),
+                        self.clone(),
+                    ));
+                crate::ProcessWorkWiring::new(
+                    registry,
+                    self.config.process_change_hub.clone(),
+                    port,
+                )
+            }
+            WorkerProcessWork::External(wiring) => wiring.clone(),
+        }
     }
 
     /// Run exactly one engine segment. Durable substrates use this method so a
@@ -842,11 +870,9 @@ impl DurableProcessWorker {
             .await?
             .into_iter()
             .collect::<BTreeSet<_>>();
-        let router = crate::TriggerRouter::new(
-            Arc::clone(&self.config.trigger_store),
-            Some(Arc::clone(&self.config.process_registry)),
-            self.config.process_work_driver.clone(),
-        );
+        let process_work = self.process_wiring();
+        let router =
+            crate::TriggerRouter::new(Arc::clone(&self.config.trigger_store), process_work.clone());
         let mut started_any = false;
         for delivery in candidates {
             if missing_process_ids.contains(&delivery.process_id) {
@@ -885,10 +911,11 @@ impl DurableProcessWorker {
                 }
             }
         }
-        if started_any && let Some(driver) = self.config.process_work_driver.as_ref() {
+        if started_any {
             return Ok(Some(
-                driver
-                    .claim_and_run_pending("trigger_delivery_reconcile")
+                process_work
+                    .port()
+                    .admit_pending_processes("trigger_delivery_reconcile")
                     .await?,
             ));
         }
@@ -1292,20 +1319,12 @@ impl DurableProcessWorker {
         };
         let cancellation = CancellationToken::new();
         let cancel_watcher = {
-            let awaiter = self
-                .config
-                .process_change_hub
-                .clone()
-                .map(|hub| {
-                    crate::ProcessAwaiter::new(Arc::clone(&self.config.process_registry), hub)
-                })
-                .unwrap_or_else(|| {
-                    crate::ProcessAwaiter::polling(Arc::clone(&self.config.process_registry))
-                });
+            let process_work = self.process_wiring();
             let process_id = process_id.clone();
             let cancellation = cancellation.clone();
             crate::task::spawn(async move {
-                match awaiter
+                match process_work
+                    .event_awaiter()
                     .await_event(&process_id, "process.cancel_requested", 0)
                     .await
                 {
@@ -1492,18 +1511,8 @@ impl DurableProcessWorker {
         // a parent-bound factory's runtime state. Attachment intents still use
         // the factory store so their process owner remains durable.
         let store = Arc::new(InMemorySessionStore::default());
-        let process_work_driver = self.config.process_work_driver.clone().unwrap_or_else(|| {
-            if let Some(hub) = self.config.process_change_hub.clone() {
-                ProcessWorkDriver::from_watched(
-                    Arc::clone(&self.config.process_registry),
-                    hub,
-                    Arc::new(crate::InlineProcessRunHandle::new(self.clone())),
-                )
-            } else {
-                ProcessWorkDriver::inline(Arc::clone(&self.config.process_registry), self.clone())
-            }
-        });
-        let mut builder = EmbeddedRuntimeBuilder::new(
+        let process_work = self.process_wiring();
+        let builder = EmbeddedRuntimeBuilder::new(
             self.config.runtime_host.durability.commit_budget,
             self.config
                 .runtime_host
@@ -1520,12 +1529,10 @@ impl DurableProcessWorker {
         .with_session_store_factory(Arc::clone(&self.config.session_store_factory))
         .with_trigger_store(Arc::clone(&self.config.trigger_store))
         .with_process_registry(Arc::clone(&self.config.process_registry))
-        .with_process_work_driver(process_work_driver)
+        .with_process_work(process_work)
         .with_attachment_manifest_store(attachment_manifest_store)
-        .with_store(store);
-        if let Some(driver) = self.config.queued_work_driver.clone() {
-            builder = builder.with_queued_work_driver(driver);
-        }
+        .with_store(store)
+        .with_queued_work(Arc::clone(&self.config.queued_work));
         Box::pin(builder.build()).await.map_err(|err| {
             PluginError::Session(format!(
                 "failed to build process worker runtime for {source_label}: {err}"

@@ -43,7 +43,7 @@
             .plugin(Arc::new(WorkbenchPluginFactory::new("")))
             .process_registry(Arc::clone(&process_registry))
             .trigger_store(trigger_store.clone())
-            .disable_queued_work_driver()
+            .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build core");
         let session = core
@@ -188,7 +188,7 @@
             session_store_factory: Arc::clone(&core_store_factory),
             trigger_store,
             process_observer,
-            process_work_driver: inert_process_work_driver(Arc::clone(&process_registry)),
+            // Process work is resolved through the core.
             sessions,
             messages: Arc::new(Mutex::new(Vec::new())),
             selected_model: Arc::new(Mutex::new(ModelSelection {
@@ -199,7 +199,7 @@
             trace_sink: None,
             lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
             event_tx: SessionEventRegistry::new(1024),
-            queued_work_driver: inert_queued_work_driver(),
+            queued_work_driver: inert_queued_work(),
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
             restate_admin_url: "http://127.0.0.1:9070".to_string(),
             restate_http: reqwest::Client::new(),

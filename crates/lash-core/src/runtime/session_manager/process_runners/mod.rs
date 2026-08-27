@@ -46,7 +46,6 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContex
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallRun<'run> {
     registration: crate::ProcessRegistration,
-    registry: Arc<dyn crate::ProcessRegistry>,
     call: crate::PreparedToolCall,
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_write_authority: crate::ProcessExecutionWriteAuthority,

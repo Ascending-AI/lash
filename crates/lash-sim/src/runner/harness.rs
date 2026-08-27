@@ -48,7 +48,7 @@ pub(super) fn runtime_core_for_scripts(
         .provider(provider_handle)
         .model(model);
     if disable_inline_queued_work_driver {
-        builder = builder.disable_queued_work_driver();
+        builder = builder.without_queued_work();
     }
     let core = builder
         .build(crate::sim_process_owner())
