@@ -613,8 +613,18 @@ impl QueuedLaneGuard {
 /// One attempt at the durable lane a queued drain must own, plus the facts a
 /// bounded wait needs. Opaque: no store type, no lease timings, no guard
 /// internals cross the seam.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct QueuedLaneHolder(crate::store::SessionExecutionLease);
+
+/// Prints only the [`QueuedLaneHolder::describe`] facts. The inner store row
+/// carries the lease token, which must never reach logs or panic messages.
+impl std::fmt::Debug for QueuedLaneHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueuedLaneHolder")
+            .field(&self.describe())
+            .finish()
+    }
+}
 
 impl QueuedLaneHolder {
     pub(crate) fn new(holder: crate::store::SessionExecutionLease) -> Self {
@@ -1709,6 +1719,49 @@ mod tests {
             error.code,
             RuntimeErrorCode::RuntimeEffectControllerTaskClosed
         );
+    }
+
+    #[tokio::test]
+    async fn dropped_queued_lane_response_returns_a_typed_error() {
+        let controller = TestResolver;
+        let (scoped, mut requests) = EffectTaskController::scoped(
+            &controller,
+            ExecutionScope::queue_drain("queued-lane-test", "dropped-response"),
+        )
+        .expect("queued-lane task proxy");
+
+        let acquire = scoped.controller().acquire_queued_lane(
+            Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Busy(
+                queued_lane_holder(7_400),
+            )])),
+            CancellationToken::new(),
+        );
+        let accept_then_drop = async {
+            match requests.recv().await.expect("queued-lane task request") {
+                EffectControllerTaskRequest::AcquireQueuedLane { response, .. } => drop(response),
+                _ => panic!("expected a queued-lane request"),
+            }
+        };
+        let (result, ()) = tokio::join!(acquire, accept_then_drop);
+
+        let Err(error) = result else {
+            panic!("a dropped queued-lane response must return a typed error")
+        };
+        assert_eq!(
+            error.code,
+            RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+        );
+    }
+
+    #[test]
+    fn queued_lane_holder_debug_redacts_the_lease_token() {
+        let holder = queued_lane_holder(9_000);
+        let rendered = format!("{holder:?}");
+        assert!(
+            !rendered.contains("holder-token"),
+            "Debug output must not leak the lease token: {rendered}"
+        );
+        assert!(rendered.contains("holder-executor"));
     }
 
     #[test]
