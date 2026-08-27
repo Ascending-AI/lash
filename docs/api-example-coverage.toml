@@ -75888,6 +75888,22 @@ usage = "crates/lash-protocol-rlm/src/tool_catalog.rs:472#tools: manifests,"
 reason = "Only test code consumes this item anywhere in the workspace, so it lives behind the `testing` feature. `facade_support` membership means some crate's shipped code needs the item; a test importing it is not that claim (FIG-1223 PR 2)."
 
 [[api]]
+symbol = "lash_core::facade_support::run_head_advancing_commit_attempt"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/contention.rs:734#lash_core::facade_support::run_head_advancing_commit_attempt("
+
+[[api]]
+symbol = "lash_core::facade_support::bounded_multiplicative_jitter"
+kind = "function"
+availability = "default+all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/contention.rs:790#let delay = lash_core::facade_support::bounded_multiplicative_jitter("
+
+[[api]]
 symbol = "lash::tools::ToolRegistryFacadeOps"
 kind = "trait"
 availability = "default+all-features"

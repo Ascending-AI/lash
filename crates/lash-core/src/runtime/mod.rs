@@ -3,6 +3,9 @@ mod assembly;
 mod builder;
 pub(crate) mod causal;
 mod clock;
+mod commit_admission;
+#[doc(hidden)]
+pub use commit_admission::run_head_advancing_commit_attempt;
 mod config_ops;
 pub use config_ops::{ApplyConfigPatch, SessionConfigPatch};
 pub(crate) mod effect;
@@ -28,6 +31,8 @@ pub(crate) use process_worker::{
 };
 mod queued_drain_policy;
 mod queued_work_driver;
+#[doc(hidden)]
+pub use queued_work_driver::bounded_multiplicative_jitter;
 pub mod scenario_contracts;
 mod session_api;
 mod session_catalog;
