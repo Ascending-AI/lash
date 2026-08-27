@@ -602,11 +602,39 @@ class Journey:
             expect(page.locator("#stream .msg.is-bot")).to_have_count(before_dom_bot_rows)
         self.gate("05-killed", "dom", "both pages observe the mention and no reply while bot is down", all(any("FIG1341-KILL-MID-TURN" in r["text"] for r in self.dom_rows(p)) and len([r for r in self.dom_rows(p) if r["bot"]]) == before_dom_bot_rows for p in self.pages.values()), "05-killed-*.png")
         self.gate("05-killed", "platform", "platform remains healthy with the triggering message and no bot reply", self.http_json(f"{self.base}/healthz")["service"] == "slack-clone-platform" and sum(r["bot_id"] is not None for r in self.platform_rows()) == before_platform_bot_rows, "05-killed-four-layers.json")
-        killed_ledger = next(r for r in self.ledger_rows() if r["event_id"] == self.kill_event)
-        pending = [r for r in self.session_snapshot()["pending"] if r["input_id"] == accepted["input_id"]]
+        def killed_admission() -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+            killed_ledger = next(
+                (r for r in self.ledger_rows() if r["event_id"] == self.kill_event),
+                None,
+            )
+            pending = [
+                r
+                for r in self.session_snapshot()["pending"]
+                if r["input_id"] == accepted["input_id"]
+            ]
+            if (
+                killed_ledger is not None
+                and killed_ledger["stage"] == "accepted"
+                and len(pending) == 1
+                and pending[0]["claim_owner_incarnation_id"]
+            ):
+                return killed_ledger, pending
+            return None
+
+        try:
+            killed_ledger, pending = self.poll(
+                "killed admission durability", killed_admission, timeout=15
+            )
+        except AssertionError as error:
+            if not str(error).startswith(
+                "timed out polling killed admission durability;"
+            ):
+                raise
+            print(error, file=sys.stderr)
+            killed_ledger, pending = {}, []
         self.kill_claim_owner = pending[0]["claim_owner_incarnation_id"] if pending else ""
         self.kill_lease_generation = pending[0]["claim_session_lease_generation"] if pending else 0
-        self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger["stage"] == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"], "05-killed-four-layers.json")
+        self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"], "05-killed-four-layers.json")
         self.gate("05-killed", "trace", "interrupted turn emitted no turn_completed", len(self.turn_traces()) == before_turns, "05-killed-four-layers.json")
         self.screenshot("05-killed")
         self.write_extract("05-killed")
