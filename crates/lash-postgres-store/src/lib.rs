@@ -71,10 +71,20 @@ use lash_core::{
     TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
 };
 use sha2::{Digest, Sha256};
+use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
-use sqlx::{Executor, Row};
+use sqlx::{Acquire, Executor, Postgres, Row};
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
+
+async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Postgres>, StoreError> {
+    #[cfg(feature = "perf-witness")]
+    let started_at = std::time::Instant::now();
+    let connection = pool.acquire().await.map_err(store_sqlx_error)?;
+    #[cfg(feature = "perf-witness")]
+    lash_core::perf_witness::record_pool_checkout_wait(started_at.elapsed());
+    Ok(connection)
+}
 // Bumped to 9: ADR 0020 process-row `change_seq` now uses a transactional
 // clock row instead of a sequence. The schema is a reject-and-recreate
 // boundary; pre-9 databases are rejected at open rather than migrated.

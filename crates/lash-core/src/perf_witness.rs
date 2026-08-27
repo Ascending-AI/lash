@@ -4,6 +4,8 @@
 //! module and every call site out unless `perf-witness` is explicitly enabled.
 
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::time::Duration;
 
 const INACTIVE: u8 = 0;
 const INSTALLING: u8 = 1;
@@ -14,14 +16,19 @@ static HASH_PASSES: AtomicU64 = AtomicU64::new(0);
 static HASHED_BYTES: AtomicU64 = AtomicU64::new(0);
 static BODY_COPY_PASSES: AtomicU64 = AtomicU64::new(0);
 static COPIED_BYTES: AtomicU64 = AtomicU64::new(0);
+// Pool-wait sample serialization is acceptable here because this recorder is
+// compiled in only for the explicitly enabled performance-witness feature.
+static POOL_CHECKOUT_WAIT_NANOS: LazyLock<Mutex<Vec<u64>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 
 /// One point-in-time view of the runtime work observed by the active witness.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Snapshot {
     pub hash_passes: u64,
     pub hashed_bytes: u64,
     pub body_copy_passes: u64,
     pub copied_bytes: u64,
+    pub pool_checkout_wait_nanos: Vec<u64>,
 }
 
 /// Exclusive process-global runtime-work witness.
@@ -51,6 +58,7 @@ impl Collector {
         HASHED_BYTES.store(0, Ordering::Relaxed);
         BODY_COPY_PASSES.store(0, Ordering::Relaxed);
         COPIED_BYTES.store(0, Ordering::Relaxed);
+        lock_pool_checkout_waits().clear();
         COLLECTOR_STATE.store(ACTIVE, Ordering::Release);
         Ok(Self { _private: () })
     }
@@ -62,6 +70,7 @@ impl Collector {
             hashed_bytes: HASHED_BYTES.load(Ordering::Relaxed),
             body_copy_passes: BODY_COPY_PASSES.load(Ordering::Relaxed),
             copied_bytes: COPIED_BYTES.load(Ordering::Relaxed),
+            pool_checkout_wait_nanos: lock_pool_checkout_waits().clone(),
         }
     }
 }
@@ -90,4 +99,32 @@ pub fn record_body_copy(bytes: usize) {
     }
     BODY_COPY_PASSES.fetch_add(1, Ordering::Relaxed);
     COPIED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
+}
+
+/// Record one wait for a pooled persistence connection.
+#[inline]
+pub fn record_pool_checkout_wait(elapsed: Duration) {
+    if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
+        return;
+    }
+    lock_pool_checkout_waits().push(elapsed.as_nanos().min(u128::from(u64::MAX)) as u64);
+}
+
+fn lock_pool_checkout_waits() -> MutexGuard<'static, Vec<u64>> {
+    POOL_CHECKOUT_WAIT_NANOS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collector_records_pool_checkout_wait_samples() {
+        let collector = Collector::install().expect("install performance witness");
+        record_pool_checkout_wait(Duration::from_nanos(37));
+
+        assert_eq!(collector.snapshot().pool_checkout_wait_nanos, vec![37]);
+    }
 }

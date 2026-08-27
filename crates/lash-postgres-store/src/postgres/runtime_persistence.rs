@@ -418,7 +418,8 @@ async fn read_session_state_version_tx(
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let version = read_session_state_version_tx(&mut tx, &self.session_id, false).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(version)
@@ -428,7 +429,8 @@ impl SessionCommitStore for PostgresSessionStore {
         &self,
         lease: &SessionExecutionLeaseAuthority,
     ) -> Result<lash_core::store::SessionStateAdmission, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
         let version = read_session_state_version_tx(&mut tx, &lease.session_id, true).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -443,7 +445,8 @@ impl SessionCommitStore for PostgresSessionStore {
         &self,
         version: u32,
     ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         sqlx::query(
             "UPDATE lash_session_meta SET session_state_version = $2 WHERE session_id = $1",
         )
@@ -469,7 +472,8 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
         let session_id = &self.session_id;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .execute(&mut *tx)
             .await
@@ -504,7 +508,8 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
         self.read_session_state_version().await?;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let meta = load_session_head_meta_tx(&mut tx, &self.session_id, false).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(meta)
@@ -512,7 +517,8 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
         let session_id = &self.session_id;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             .execute(&mut *tx)
             .await
@@ -666,7 +672,8 @@ impl SessionCommitStore for PostgresSessionStore {
         let commit = planner.commit();
         self.bind_session_id(&commit.session_id)?;
         let now = self.clock.timestamp_ms();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // A head row does not exist during the first commit, so row locking
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
@@ -1202,7 +1209,8 @@ impl SessionCommitStore for PostgresSessionStore {
             pending_observer_intents: Vec::new(),
         };
         let created_at_ms = self.clock.timestamp_ms();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         let inserted = crate::session_meta::write_session_meta_tx(
             &mut tx,
@@ -1222,7 +1230,8 @@ impl SessionCommitStore for PostgresSessionStore {
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
         self.bind_session_id(&meta.session_id)?;
         let created_at_ms = self.clock.timestamp_ms();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &meta.session_id).await?;
         crate::session_meta::write_session_meta_tx(
             &mut tx,
@@ -1425,7 +1434,8 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let lease_token = claim_nonce.as_str();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         lock_session_execution_lease_tx(&mut tx, session_id).await?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
@@ -1541,7 +1551,8 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         fence: &SessionExecutionLeaseAuthority,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLease, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // Keep claim and renewal on one explicit per-session lock order. The
         // row read below was already `FOR UPDATE`, so this is a hardening pin
         // and an auditable lock-ordering rule, not a repair for a reachable
@@ -1638,7 +1649,8 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         &self,
         completion: &SessionExecutionLeaseAuthority,
     ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         if !release_session_execution_lease_tx(&mut tx, completion).await? {
             let current = load_session_execution_lease_tx(&mut tx, &completion.session_id).await?;
             lash_core::store_backend_support::trace_session_execution_lease_refusal(
@@ -1691,7 +1703,8 @@ impl QueuedWorkStore for PostgresSessionStore {
         batch
             .validate_process_wake_source()
             .map_err(StoreError::Backend)?;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued = enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -1705,7 +1718,8 @@ impl QueuedWorkStore for PostgresSessionStore {
         batch
             .validate_process_wake_source()
             .map_err(StoreError::Backend)?;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued =
             enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
@@ -1719,7 +1733,8 @@ impl QueuedWorkStore for PostgresSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
     ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
         // The fence is validated live, so its fencing token is the
         // currently-live session-lease generation; claims pin it and are
@@ -1833,7 +1848,8 @@ impl QueuedWorkStore for PostgresSessionStore {
                 QueuedWorkClaimRefusal::ZeroLimit,
             ));
         }
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
         let generation = session_execution_lease.fencing_token;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
@@ -1974,7 +1990,8 @@ impl QueuedWorkStore for PostgresSessionStore {
         #[cfg(test)]
         self.checkpoint_write_transaction_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
         let input = claim_pending_turn_inputs_postgres_tx(
             &mut tx,
@@ -2031,7 +2048,8 @@ impl QueuedWorkStore for PostgresSessionStore {
                 Vec::new(),
             ));
         }
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
         let generation = session_execution_lease.fencing_token;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
@@ -2293,6 +2311,7 @@ impl QueuedWorkStore for PostgresSessionStore {
     }
 
     async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query(
             "UPDATE lash_queued_work_batches
              SET claim_id = $4,
@@ -2307,7 +2326,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
         .bind(lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim))
-        .execute(&self.pool)
+        .execute(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
         Ok(())
@@ -2320,6 +2339,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         if claims.is_empty() {
             return Ok(());
         }
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut query = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "UPDATE lash_queued_work_batches AS batch
              SET claim_id = abandoned.restore_claim_id,
@@ -2346,7 +2366,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         );
         query
             .build()
-            .execute(&self.pool)
+            .execute(&mut *connection)
             .await
             .map_err(store_sqlx_error)?;
         Ok(())
@@ -2357,7 +2377,8 @@ impl QueuedWorkStore for PostgresSessionStore {
         session_id: &str,
         batch_id: &str,
     ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let row = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
@@ -2405,6 +2426,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let marker = lash_core::store_backend_support::session_command_batch_completion_key(
             session_id, batch_id,
         )?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query_scalar(
             "SELECT EXISTS (
                 SELECT 1 FROM lash_runtime_turn_commits
@@ -2413,13 +2435,14 @@ impl QueuedWorkStore for PostgresSessionStore {
         )
         .bind(session_id)
         .bind(marker)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *connection)
         .await
         .map_err(store_sqlx_error)
     }
 
     async fn list_queued_work(&self, session_id: &str) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
@@ -2445,7 +2468,8 @@ impl QueuedWorkStore for PostgresSessionStore {
         &self,
         session_id: &str,
     ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let (command_at, command_seq, input_at, input_seq): (
             Option<i64>,
@@ -2517,7 +2541,8 @@ impl QueuedWorkStore for PostgresSessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
@@ -2558,7 +2583,8 @@ impl TurnInputStore for PostgresSessionStore {
     ) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
         let session_id = &request.address.session_id;
         let turn_id = &request.address.turn_id;
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         sqlx::query(
             "INSERT INTO lash_turn_cancel_requests (
@@ -2595,7 +2621,8 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
         draft: lash_core::PendingTurnInputDraft,
     ) -> Result<lash_core::PendingTurnInput, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
         let now = self.clock.timestamp_ms();
         let enqueue_seq: i64 = sqlx::query_scalar(
@@ -2695,7 +2722,8 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<lash_core::PendingTurnInput>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let rows = sqlx::query(
             "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
@@ -2735,13 +2763,14 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
         session_id: &str,
     ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
         let rows = sqlx::query(
             "SELECT turn_id, result_json
              FROM lash_runtime_turn_commits
              WHERE session_id = $1",
         )
         .bind(session_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
         let mut commits = Vec::with_capacity(rows.len());
@@ -2768,7 +2797,8 @@ impl TurnInputStore for PostgresSessionStore {
         session_id: &str,
         targets: &[lash_core::PendingTurnInputCancelTarget],
     ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let targets = targets.to_vec();
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let mut results = Vec::with_capacity(targets.len());
@@ -2791,7 +2821,8 @@ impl TurnInputStore for PostgresSessionStore {
         session_id: &str,
         anchor: &lash_core::PendingTurnInputCancelTarget,
     ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let anchor = anchor.clone();
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let Some(anchor_row) =
@@ -2877,6 +2908,7 @@ impl TurnInputStore for PostgresSessionStore {
             }
             lash_core::TurnInputClaimMode::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
         };
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query(
             "UPDATE lash_pending_turn_inputs
              SET state = CASE
@@ -2896,7 +2928,7 @@ impl TurnInputStore for PostgresSessionStore {
         .bind(&claim.lease_token)
         .bind(lash_core::TurnInputState::Accepted.as_str())
         .bind(restored_state.as_str())
-        .execute(&self.pool)
+        .execute(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
         Ok(())
@@ -2916,7 +2948,8 @@ impl TurnInputStore for PostgresSessionStore {
         // partitions run in ONE transaction: a batch abandon is one caller
         // giving up one set of rows, and a failure between two statements would
         // leave half the batch claimed by a claim id the caller has dropped.
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         for (mode_state, restored_state) in [
             (
                 lash_core::TurnInputState::PendingActive,
@@ -2982,7 +3015,8 @@ impl TurnInputStore for PostgresSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         scope: lash_core::OrphanedTurnInputScope<'_>,
     ) -> Result<lash_core::TurnCancelInputOutcome, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // Re-validated inside this transaction, not upstream: the lane can be
         // displaced between an upstream check and this write, and a
         // stale-generation repair would clear the new holder's claim columns.
@@ -3111,7 +3145,8 @@ impl StoreMaintenance for PostgresSessionStore {
 
 impl PostgresSessionStore {
     async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // Serialize against concurrent checkpoint-blob writers. Every commit
         // INSERTs its new manifest into `lash_blobs` (holding a ROW EXCLUSIVE
         // lock) inside the same transaction that repoints `lash_sessions`, so an
@@ -3228,6 +3263,7 @@ async fn checkpoint_work_pending_postgres(
     if max_inputs == 0 && max_batches == 0 {
         return Ok(false);
     }
+    let mut connection = acquire_runtime_connection(pool).await?;
     let head_candidate =
         postgres_queued_work_head_candidate_cte(QueuedWorkClaimBoundary::ActiveTurnCheckpoint);
     let admitted_min_boundary = lash_core::store_backend_support::admitted_min_boundary_sql(
@@ -3265,7 +3301,7 @@ async fn checkpoint_work_pending_postgres(
         .bind(turn_id)
         .bind(max_inputs as i64)
         .bind(max_batches as i64)
-        .fetch_one(pool)
+        .fetch_one(&mut *connection)
         .await
         .map_err(store_sqlx_error)
 }
@@ -3450,6 +3486,7 @@ async fn load_turn_cancel_request_pg(
     session_id: &str,
     turn_id: &str,
 ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+    let mut connection = acquire_runtime_connection(pool).await?;
     let row: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
         "SELECT request_id, origin, reason, disposition
          FROM lash_turn_cancel_requests
@@ -3457,7 +3494,7 @@ async fn load_turn_cancel_request_pg(
     )
     .bind(session_id)
     .bind(turn_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
     let Some((request_id, origin, reason, disposition)) = row else {
@@ -3478,7 +3515,7 @@ async fn load_turn_cancel_request_pg(
     )
     .bind(session_id)
     .bind(turn_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
     turn_cancel_record_from_rows(
@@ -3876,7 +3913,8 @@ async fn claim_pending_turn_inputs_postgres(
     if max_inputs == 0 {
         return Ok(None);
     }
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut connection = acquire_runtime_connection(pool).await?;
+    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
     ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(&mut tx).await?;
@@ -4039,6 +4077,7 @@ pub(crate) async fn read_session_execution_lease_unlocked(
     pool: &PgPool,
     session_id: &str,
 ) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
+    let mut connection = acquire_runtime_connection(pool).await?;
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
                 lease_claimed_at_ms, lease_expires_at_ms,
@@ -4048,7 +4087,7 @@ pub(crate) async fn read_session_execution_lease_unlocked(
          WHERE session_id = $1",
     )
     .bind(session_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *connection)
     .await
     .map_err(store_sqlx_error)?;
     row.map(session_execution_lease_row_from_columns)

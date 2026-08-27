@@ -191,7 +191,8 @@ pub(crate) async fn load_session_meta(
     pool: &PgPool,
     selected_session_id: Option<&str>,
 ) -> Result<Option<SessionMeta>, StoreError> {
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut connection = acquire_runtime_connection(pool).await?;
+    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
     let row = if let Some(session_id) = selected_session_id {
         sqlx::query(&format!(
             "SELECT {SELECT_COLUMNS} FROM lash_session_meta WHERE session_id = $1 FOR SHARE"

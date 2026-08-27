@@ -75,6 +75,7 @@ pub(crate) struct RuntimePerfStoreMetrics {
     operations: Mutex<BTreeMap<String, RuntimePerfStoreOperationMeasurement>>,
     commits: Mutex<Vec<RuntimePerfCommitMeasurement>>,
     timings: Mutex<BTreeMap<String, RuntimePerfStoreTiming>>,
+    pool_checkout_wait_nanos: Mutex<Vec<u64>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -184,6 +185,18 @@ impl RuntimePerfStoreMetrics {
                         .collect(),
                 )
             })
+            .collect()
+    }
+
+    pub(crate) fn record_pool_checkout_waits(&self, samples: Vec<u64>) {
+        self.pool_checkout_wait_nanos.lock_recover().extend(samples);
+    }
+
+    pub(crate) fn pool_checkout_wait_samples_ms(&self) -> Vec<f64> {
+        self.pool_checkout_wait_nanos
+            .lock_recover()
+            .iter()
+            .map(|nanos| *nanos as f64 / 1_000_000.0)
             .collect()
     }
 
