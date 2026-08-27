@@ -2083,6 +2083,7 @@ where
         "arbitrary/versioned".to_string(),
         crate::HydratedCheckpointComponent::Changed {
             encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION + 1,
+            body_ref: crate::store::BlobRef::for_content(b"unsupported"),
             body: b"unsupported".to_vec(),
         },
     );

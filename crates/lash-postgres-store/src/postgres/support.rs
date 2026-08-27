@@ -503,22 +503,29 @@ pub(crate) async fn put_checkpoint_tx(
                     record_kind: "HydratedSessionCheckpoint",
                     message: format!("manifest projection lost component `{key}`"),
                 })?;
-        if let Some(body) = component.body() {
-            let stored_ref = BlobRef::for_content(body);
-            #[cfg(feature = "perf-witness")]
-            lash_core::perf_witness::record_hash_pass(body.len());
-            lash_core::store::ensure_checkpoint_component_hash_agreement(
-                key,
-                &stored_ref,
-                &descriptor.blob_ref,
-            )?;
-            supplied_blobs.entry(stored_ref.0).or_insert_with(|| {
-                let copied = body.to_vec();
+        let (stored_ref, body) = match component {
+            HydratedCheckpointComponent::Changed { body_ref, body, .. } => {
+                (body_ref.clone(), body.as_slice())
+            }
+            HydratedCheckpointComponent::Hydrated { body, .. } => {
+                let stored_ref = BlobRef::for_content(body);
                 #[cfg(feature = "perf-witness")]
-                lash_core::perf_witness::record_body_copy(body.len());
-                copied
-            });
-        }
+                lash_core::perf_witness::record_hash_pass(body.len());
+                (stored_ref, body.as_slice())
+            }
+            HydratedCheckpointComponent::Unchanged { .. } => continue,
+        };
+        lash_core::store::ensure_checkpoint_component_hash_agreement(
+            key,
+            &stored_ref,
+            &descriptor.blob_ref,
+        )?;
+        supplied_blobs.entry(stored_ref.0).or_insert_with(|| {
+            let copied = body.to_vec();
+            #[cfg(feature = "perf-witness")]
+            lash_core::perf_witness::record_body_copy(body.len());
+            copied
+        });
     }
     put_checkpoint_blobs_tx(tx, &supplied_blobs).await?;
     lock_checkpoint_blobs_tx(tx, &acquisition_order).await?;

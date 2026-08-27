@@ -78,10 +78,13 @@ pub struct CheckpointComponentDescriptor {
 /// entries while loading one. The containing map is authoritative and
 /// complete: a key omitted from it is deleted from the new checkpoint rather
 /// than inherited from the previous root.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum HydratedCheckpointComponent {
     Changed {
         encoding_version: u32,
+        /// Content address derived when the changed body entered the commit plan.
+        #[serde(skip_serializing)]
+        body_ref: BlobRef,
         #[serde(with = "serde_bytes")]
         body: Vec<u8>,
     },
@@ -95,6 +98,45 @@ pub enum HydratedCheckpointComponent {
     },
 }
 
+impl<'de> serde::Deserialize<'de> for HydratedCheckpointComponent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        enum SerializedHydratedCheckpointComponent {
+            Changed {
+                encoding_version: u32,
+                #[serde(with = "serde_bytes")]
+                body: Vec<u8>,
+            },
+            Unchanged {
+                descriptor: CheckpointComponentDescriptor,
+            },
+            Hydrated {
+                descriptor: CheckpointComponentDescriptor,
+                #[serde(with = "serde_bytes")]
+                body: Vec<u8>,
+            },
+        }
+
+        match <SerializedHydratedCheckpointComponent as serde::Deserialize>::deserialize(
+            deserializer,
+        )? {
+            SerializedHydratedCheckpointComponent::Changed {
+                encoding_version,
+                body,
+            } => Ok(Self::changed_with_encoding_version(body, encoding_version)),
+            SerializedHydratedCheckpointComponent::Unchanged { descriptor } => {
+                Ok(Self::Unchanged { descriptor })
+            }
+            SerializedHydratedCheckpointComponent::Hydrated { descriptor, body } => {
+                Ok(Self::Hydrated { descriptor, body })
+            }
+        }
+    }
+}
+
 impl HydratedCheckpointComponent {
     /// Marks logical component bytes as changed and in need of durable storage.
     ///
@@ -102,10 +144,20 @@ impl HydratedCheckpointComponent {
     /// must persist `body` under its content-derived [`BlobRef`] before
     /// publishing the checkpoint root. This constructor records the component
     /// encoding implemented by the current Lash build; callers must not use it
-    /// to smuggle bytes encoded for a different version.
+    /// to smuggle bytes encoded for a different version. The content address is
+    /// retained beside the body so every later commit projection can reuse the
+    /// same digest.
     pub fn changed(body: Vec<u8>) -> Self {
+        Self::changed_with_encoding_version(body, CHECKPOINT_COMPONENT_ENCODING_VERSION)
+    }
+
+    fn changed_with_encoding_version(body: Vec<u8>, encoding_version: u32) -> Self {
+        let body_ref = BlobRef::for_content(&body);
+        #[cfg(feature = "perf-witness")]
+        crate::perf_witness::record_hash_pass(body.len());
         Self::Changed {
-            encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION,
+            encoding_version,
+            body_ref,
             body,
         }
     }
@@ -198,16 +250,12 @@ impl HydratedCheckpointComponent {
         match self {
             Self::Changed {
                 encoding_version,
-                body,
-            } => {
-                let blob_ref = BlobRef::for_content(body);
-                #[cfg(feature = "perf-witness")]
-                crate::perf_witness::record_hash_pass(body.len());
-                Ok(CheckpointComponentDescriptor {
-                    blob_ref,
-                    encoding_version: *encoding_version,
-                })
-            }
+                body_ref,
+                ..
+            } => Ok(CheckpointComponentDescriptor {
+                blob_ref: body_ref.clone(),
+                encoding_version: *encoding_version,
+            }),
             Self::Unchanged { descriptor } => Ok(descriptor.clone()),
             Self::Hydrated { descriptor, body } => {
                 let actual_ref = BlobRef::for_content(body);
@@ -226,6 +274,7 @@ impl HydratedCheckpointComponent {
             }
         }
     }
+
 }
 
 pub fn ensure_checkpoint_component_encoding_version(
@@ -391,6 +440,7 @@ mod checkpoint_tests {
                 key.to_string(),
                 HydratedCheckpointComponent::Changed {
                     encoding_version: CHECKPOINT_COMPONENT_ENCODING_VERSION + 1,
+                    body_ref: BlobRef::for_content(b"owner-defined"),
                     body: b"owner-defined".to_vec(),
                 },
             )]
