@@ -17,6 +17,47 @@ use crate::{
     ToolFailureClass, ToolManifest, ToolRetryPolicy, ToolValue,
 };
 
+/// Reserved BLAKE3 domains used by workspace hash owners. Entries are
+/// append-only so a retired domain cannot be silently reused.
+const BLAKE3_DOMAINS: &[&str] = &[
+    "lash-append-request/v2",
+    "lash-attachment/v2",
+    "lash-blob/v2",
+    "lash-composition-tool/v2",
+    "lash-derived-trigger-subscription/v2",
+    "lash-draft-node/v3",
+    "lash-frame-node/v3",
+    "lash-google-upload-credential-scope/v2",
+    "lash-history-node/v3",
+    "lash-intent/v2",
+    "lash-lashlang-content/v2",
+    "lash-lashlang-execution-site/v2",
+    "lash-lashlang-program/v2",
+    "lash-model-facing-composition/v2",
+    "lash-openai-responses-request/v2",
+    "lash-plugin-snapshot-revision/v2",
+    "lash-process-env/v4",
+    "lash-process-lease/v2",
+    "lash-queued-work-batch/v2",
+    "lash-queued-work-claim-lease/v2",
+    "lash-rlm-execution-state-leaf/v2",
+    "lash-rlm-stall-reply/v2",
+    "lash-runtime-effect-envelope/v2",
+    "lash-runtime-usage-payload/v2",
+    "lash-session-append-draft-fallback/v2",
+    "lash-stable-identity/v2",
+    "lash-tool-catalog-authority/v2",
+    "lash-tool-intent-payload/v2",
+    "lash-tool-output-spill/v2",
+    "lash-tool-schema-cache/v2",
+    "lash-turn-input/v2",
+    "lash-workflow-edge/v2",
+    "lash-workflow-node/v2",
+    "lash-workflow-source/v2",
+    "lash.agent-frame-key/v2",
+    "lashlang-process-start/v2",
+];
+
 /// BLAKE3 hasher initialized with Lash's mandatory length-prefixed domain tag.
 ///
 /// This is an internal cross-crate seam. Durable identity owners still own the
@@ -26,6 +67,10 @@ pub struct Blake3DomainHasher(blake3::Hasher);
 
 impl Blake3DomainHasher {
     pub fn new(domain: &str) -> Self {
+        debug_assert!(
+            BLAKE3_DOMAINS.contains(&domain),
+            "BLAKE3 domain `{domain}` is missing from BLAKE3_DOMAINS"
+        );
         let mut hasher = blake3::Hasher::new();
         hasher.update(&(domain.len() as u64).to_be_bytes());
         hasher.update(domain.as_bytes());
@@ -331,5 +376,89 @@ pub trait ModelToolReturnPartCoreSupport {
 impl ModelToolReturnPartCoreSupport for ModelToolReturnPart {
     fn text(text: impl Into<String>) -> Self {
         ModelToolReturnPart::text(text)
+    }
+}
+
+#[cfg(test)]
+mod blake3_domain_tests {
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    use super::BLAKE3_DOMAINS;
+
+    fn rust_sources_below(root: &Path) -> Vec<PathBuf> {
+        fn visit(directory: &Path, sources: &mut Vec<PathBuf>) {
+            let mut entries = std::fs::read_dir(directory)
+                .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+                .map(|entry| entry.expect("read workspace source entry").path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    visit(&path, sources);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    sources.push(path);
+                }
+            }
+        }
+
+        let mut sources = Vec::new();
+        visit(root, &mut sources);
+        sources
+    }
+
+    fn domain_literals(source: &str) -> BTreeSet<String> {
+        let constructors = [
+            ("Blake3DomainHasher", "::new("),
+            ("blake3_domain_hash", "("),
+            ("blake3_domain_hash_hex", "("),
+            ("blake3_hex", "("),
+            ("domain_hash", "("),
+            ("hex_digest", "("),
+        ];
+        let mut domains = BTreeSet::new();
+        for (name, suffix) in constructors {
+            let needle = format!("{name}{suffix}");
+            let mut remaining = source;
+            while let Some(offset) = remaining.find(&needle) {
+                remaining = &remaining[offset + needle.len()..];
+                let argument = remaining.trim_start();
+                let Some(literal) = argument.strip_prefix('"') else {
+                    continue;
+                };
+                let Some((domain, _)) = literal.split_once('"') else {
+                    continue;
+                };
+                domains.insert(domain.to_string());
+            }
+        }
+        domains
+    }
+
+    #[test]
+    fn blake3_domains_are_unique_and_match_workspace_usage() {
+        let registered = BLAKE3_DOMAINS
+            .iter()
+            .map(|domain| (*domain).to_string())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            registered.len(),
+            BLAKE3_DOMAINS.len(),
+            "BLAKE3 domains are permanently reserved and must be unique"
+        );
+
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let used = rust_sources_below(&workspace_root.join("crates"))
+            .into_iter()
+            .flat_map(|path| {
+                let source = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                domain_literals(&source)
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            used, registered,
+            "BLAKE3_DOMAINS must exactly match BLAKE3 domain literals used in workspace Rust sources"
+        );
     }
 }

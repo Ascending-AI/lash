@@ -983,6 +983,8 @@ fn prepare_versioned_schema<'connection>(
         tx.pragma_update(None, "user_version", schema_version)?;
         return Ok(tx);
     }
+    // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
+    // unreachable for production opens now that SCHEMA_VERSION is 45.
     if database_kind == "session" && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(schema)?;

@@ -35,7 +35,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_bytes = { workspace = true }
 rmp-serde = { workspace = true }
-sha2 = { workspace = true }
 thiserror = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 tokio = { workspace = true, features = ["rt", "sync"] }

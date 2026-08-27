@@ -94,6 +94,7 @@ let core = builder.build(owner)?;</code></pre>
           <li>Postgres component version <span data-format-version="POSTGRES_SCHEMA_VERSION">64</span></li>
         </ul>
         <p>The current durable formats use versioned, domain-tagged BLAKE3 content addresses and semantic identities. SQLite durable-core <span data-format-version="SQLITE_SCHEMA_VERSION">45</span>, process-registry <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">25</span>, effect <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">14</span>, trigger <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">7</span>, and Postgres component <span data-format-version="POSTGRES_SCHEMA_VERSION">64</span> are hard cutovers with no SHA-256 compatibility read or migration arm; pre-cutover stores are rejected at open.</p>
+        <p>Legacy <code>sha256/</code> attachment and content roots are not reclaimed after the cutover; recreating the store with a fresh root, as already required, or removing those roots manually reclaims their bytes.</p>
         <ul>
           <li>Process-registry version <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">25</span> carries the BLAKE3 identity cutover and atomic process-parent teardown.</li>
           <li>Effect version <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">14</span> carries the BLAKE3 identity cutover alongside merged exec observations, versioned tool-intent carriers, typed execution outcomes, the durable effect-group journal, and parts-authoritative LLM responses.</li>

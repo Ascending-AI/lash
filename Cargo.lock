@@ -2112,7 +2112,6 @@ dependencies = [
  "lash-internal-trace",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -2245,7 +2244,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
  "syn 2.0.118",
  "thiserror 2.0.18",
  "tokio",
@@ -2431,7 +2429,6 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -2451,7 +2448,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tokio-rusqlite",
@@ -2657,7 +2653,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
  "sqlx",
  "tempfile",
  "thiserror 2.0.18",

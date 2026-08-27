@@ -25,7 +25,6 @@ jsonschema = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 schemars = { workspace = true }
-sha2 = { workspace = true }
 
 [dev-dependencies]
 proptest = "1"
