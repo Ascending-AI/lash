@@ -103,6 +103,7 @@ pub(super) struct WakeDeliveryDriverSetup {
 }
 
 pub(super) struct NativeSubstrateSetup {
+    pub(super) config: NativeSubstrateConfig,
     pub(super) process: ProcessPortSetup,
     pub(super) queued: QueuedPortSetup,
     pub(super) wake: Option<WakeDeliveryDriverSetup>,
@@ -227,14 +228,19 @@ impl NativeSubstrateSlot {
                     } => {
                         let run_handle =
                             Arc::new(InlineQueuedWorkRunHandle::new(Arc::clone(config)));
+                        let work_cadence = self.setup.config.work_cadence.clone();
                         Arc::new(match slot_supplier {
-                            Some(slot_supplier) => NativeQueuedWork::with_worker_slot_supplier(
-                                run_handle,
-                                Arc::clone(slot_supplier),
-                            ),
-                            None => NativeQueuedWork::with_execution_concurrency(
+                            Some(slot_supplier) => {
+                                facade_support::native_queued_work_with_worker_slot_supplier_and_work_cadence(
+                                    run_handle,
+                                    Arc::clone(slot_supplier),
+                                    work_cadence,
+                                )
+                            }
+                            None => facade_support::native_queued_work_with_execution_concurrency_and_work_cadence(
                                 run_handle,
                                 *execution_concurrency,
+                                work_cadence,
                             )
                             .expect("queued-work concurrency was validated at build"),
                         })
@@ -259,12 +265,13 @@ impl NativeSubstrateSlot {
                 let queued = Arc::new(ResolvedQueuedWork::new(queued_port));
                 if let Some(setup) = self.setup.wake.as_ref() {
                     let queued_for_wake: Arc<dyn QueuedWorkSubstrate> = queued.clone();
-                    let wake = facade_support::WakeDeliveryDriver::new(
+                    let wake = facade_support::wake_delivery_driver_with_work_cadence(
                         Arc::clone(&setup.registry),
                         Arc::clone(&setup.factory),
                         queued_for_wake,
                         Arc::clone(&setup.clock),
                         setup.delivery_policy,
+                        self.setup.config.work_cadence.clone(),
                     );
                     queued.install_wake(wake);
                 }

@@ -180,14 +180,15 @@ use io::normalize_input_items;
 #[cfg(any(test, feature = "testing"))]
 pub use native_substrate::QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS;
 pub use native_substrate::{
-    DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QUEUED_WORK_SLOW_WAKE_THRESHOLD,
-    QueuedWorkExecutionConcurrencyError, QueuedWorkRunError, QueuedWorkRunErrorClass,
-    QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest, QueuedWorkSlowWake,
-    QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
+    DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, QueuedWorkExecutionConcurrencyError,
+    QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress,
+    QueuedWorkRunRequest, QueuedWorkSlowWake, QueuedWorkWakeContended, QueuedWorkWakeFailure,
+    QueuedWorkWakeOutcome,
 };
 pub use native_substrate::{
-    NativeProcessWork, NativeQueuedWork, NoQueuedWork, ProcessTerminalWait, ProcessWorkSubstrate,
-    ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget,
+    NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig, NoQueuedWork, ProcessTerminalWait,
+    ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome,
+    SessionWorkTarget, WorkCadencePolicy, WorkerSweepPolicy,
 };
 pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{

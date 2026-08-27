@@ -51,9 +51,6 @@ use crate::{
 /// Default maximum number of processes one [`DurableProcessWorker`] executes
 /// inline at once.
 pub const DEFAULT_PROCESS_EXECUTION_CONCURRENCY: usize = 64;
-const MAX_INTAKE_PAGE: usize = 256;
-const WORKLIST_FETCH_ATTEMPTS: usize = 3;
-const WORKLIST_FETCH_RETRY_BASE: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// Validated per-worker inline process execution concurrency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +108,7 @@ pub struct DurableProcessWorkerConfig {
     /// afterwards have no other honest way back to the host.
     pub process_event_sink: Option<Arc<dyn crate::ProcessEventSink>>,
     pub trigger_store: Arc<dyn crate::TriggerStore>,
+    pub native_substrate: crate::NativeSubstrateConfig,
     process_work: WorkerProcessWork,
     queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     #[doc(hidden)]
@@ -154,6 +152,7 @@ impl DurableProcessWorkerConfig {
             session_store_factory,
             process_event_sink: None,
             trigger_store: Arc::new(crate::InMemoryTriggerStore::with_clock(clock)),
+            native_substrate: crate::NativeSubstrateConfig::default(),
             process_work,
             queued_work,
             turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot::default(),
@@ -685,7 +684,7 @@ impl DurableProcessWorker {
             self.execution_scheduler
                 .slots
                 .available_slots(super::WorkerSlotKind::Process)
-                .clamp(1, MAX_INTAKE_PAGE),
+                .clamp(1, self.config.native_substrate.worker_sweep.intake_page),
         )
         .expect("the clamped intake page bound is non-zero");
         let (fetch_initial_page, should_start_dispatcher) = {

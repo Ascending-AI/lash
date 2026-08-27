@@ -4,6 +4,58 @@ fn injected_worklist_error(label: &str) -> PluginError {
     PluginError::Session(format!("injected worklist failure: {label}"))
 }
 
+fn default_fetch_attempts() -> usize {
+    crate::WorkerSweepPolicy::default().fetch_attempts
+}
+
+#[tokio::test]
+async fn worker_sweep_policy_limits_worklist_fetch_attempts() {
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let native_substrate = crate::NativeSubstrateConfig {
+        worker_sweep: crate::WorkerSweepPolicy {
+            fetch_attempts: 1,
+            ..crate::WorkerSweepPolicy::default()
+        },
+        ..crate::NativeSubstrateConfig::default()
+    };
+    let (worker, _, _, _, test_registry) = worker_with_engine_registry_timings_supplier_and_sink(
+        1,
+        Arc::new(GatedSuccessEngine {
+            started: Arc::new(AtomicUsize::new(0)),
+            started_changed: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Semaphore::new(1)),
+        }),
+        run_handle,
+        None,
+        None,
+        None,
+        native_substrate,
+    )
+    .await;
+    test_registry
+        .set_worklist_page_errors_for_testing(
+            0,
+            (0..default_fetch_attempts())
+                .map(|_| injected_worklist_error("configured retry limit"))
+                .collect(),
+        )
+        .await;
+
+    let result = worker
+        .fetch_worklist_page_with_retry(
+            std::num::NonZeroUsize::new(1).expect("literal is non-zero"),
+            None,
+        )
+        .await;
+
+    assert!(result.is_err(), "the one configured attempt fails");
+    assert_eq!(
+        test_registry.worklist_page_reads_for_testing().await.len(),
+        1,
+        "fetch_attempts=1 must stop after the first failed read"
+    );
+}
+
 struct ReserveFutureDrop(Arc<AtomicBool>);
 
 impl Drop for ReserveFutureDrop {
@@ -118,7 +170,7 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
     test_registry
         .set_worklist_page_errors_for_testing(
             1,
-            (0..WORKLIST_FETCH_ATTEMPTS)
+            (0..default_fetch_attempts())
                 .map(|_| injected_worklist_error("continuation"))
                 .collect(),
         )
@@ -130,7 +182,7 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
         .expect("initial worklist page succeeds");
     tokio::time::timeout(Duration::from_secs(2), async {
         while test_registry.worklist_page_reads_for_testing().await.len()
-            < 1 + WORKLIST_FETCH_ATTEMPTS
+            < 1 + default_fetch_attempts()
         {
             tokio::task::yield_now().await;
         }
@@ -184,7 +236,7 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
     test_registry
         .set_worklist_page_errors_for_testing(
             1,
-            (0..WORKLIST_FETCH_ATTEMPTS)
+            (0..default_fetch_attempts())
                 .map(|_| injected_worklist_error("in-flight retry"))
                 .collect(),
         )
@@ -197,7 +249,7 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
     retry_started.notified().await;
     tokio::time::timeout(Duration::from_secs(2), async {
         while test_registry.worklist_page_reads_for_testing().await.len()
-            < 1 + WORKLIST_FETCH_ATTEMPTS
+            < 1 + default_fetch_attempts()
         {
             tokio::task::yield_now().await;
         }

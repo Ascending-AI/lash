@@ -1,5 +1,13 @@
 use super::*;
 
+fn default_wake_attempts() -> u32 {
+    WorkCadencePolicy::default().max_transient_attempts
+}
+
+fn default_retry_max() -> Duration {
+    WorkCadencePolicy::default().retry_max
+}
+
 struct ContentionThenFailureRunHandle {
     passes: AtomicUsize,
     transient_attempts: AtomicUsize,
@@ -27,7 +35,7 @@ impl QueuedWorkRunHandle for ContentionThenFailureRunHandle {
         _reason: &str,
     ) -> Result<QueuedWorkRunProgress, QueuedWorkRunError> {
         let pass = self.passes.fetch_add(1, Ordering::SeqCst);
-        if pass < WAKE_MAX_ATTEMPTS as usize {
+        if pass < default_wake_attempts() as usize {
             return Ok(QueuedWorkRunProgress::Blocked);
         }
         self.transient_attempts.fetch_add(1, Ordering::SeqCst);
@@ -47,14 +55,14 @@ async fn contention_preserves_the_full_transient_error_attempt_budget() {
         NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
     driver.notify_pending_work(Some("session-contended-then-failing"), "queued_turn_input");
-    for _ in 0..(WAKE_MAX_ATTEMPTS * 3) {
+    for _ in 0..(default_wake_attempts() * 3) {
         tokio::task::yield_now().await;
-        tokio::time::advance(WAKE_RETRY_MAX).await;
+        tokio::time::advance(default_retry_max()).await;
     }
 
     assert_eq!(
         handle.transient_attempts.load(Ordering::SeqCst),
-        WAKE_MAX_ATTEMPTS as usize,
+        default_wake_attempts() as usize,
         "contention must not consume any transient-error attempts"
     );
 }
@@ -100,32 +108,32 @@ async fn unknown_claimability_transient_errors_exhaust_then_notification_rearms(
         NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
     driver.notify_pending_work(Some("session-unknown-failing"), "first_enqueue");
-    for _ in 0..(WAKE_MAX_ATTEMPTS * 2) {
+    for _ in 0..(default_wake_attempts() * 2) {
         tokio::task::yield_now().await;
-        tokio::time::advance(WAKE_RETRY_MAX).await;
+        tokio::time::advance(default_retry_max()).await;
     }
     assert_eq!(
         handle.attempts.load(Ordering::SeqCst),
-        WAKE_MAX_ATTEMPTS as usize,
+        default_wake_attempts() as usize,
         "one unknown-claimability notification receives one bounded transient ladder"
     );
 
-    tokio::time::advance(WAKE_RETRY_MAX * 4).await;
+    tokio::time::advance(default_retry_max() * 4).await;
     tokio::task::yield_now().await;
     assert_eq!(
         handle.attempts.load(Ordering::SeqCst),
-        WAKE_MAX_ATTEMPTS as usize,
+        default_wake_attempts() as usize,
         "exhausted unknown-claimability demand must remain idle"
     );
 
     driver.notify_pending_work(Some("session-unknown-failing"), "second_enqueue");
-    for _ in 0..(WAKE_MAX_ATTEMPTS * 2) {
+    for _ in 0..(default_wake_attempts() * 2) {
         tokio::task::yield_now().await;
-        tokio::time::advance(WAKE_RETRY_MAX).await;
+        tokio::time::advance(default_retry_max()).await;
     }
     assert_eq!(
         handle.attempts.load(Ordering::SeqCst),
-        (WAKE_MAX_ATTEMPTS * 2) as usize,
+        (default_wake_attempts() * 2) as usize,
         "a later notification must re-arm one fresh bounded transient ladder"
     );
 }
@@ -147,7 +155,7 @@ async fn indefinite_contention_emits_repeating_typed_heartbeats() {
         driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
         for _ in 0..6 {
             tokio::task::yield_now().await;
-            tokio::time::advance(WAKE_RETRY_MAX).await;
+            tokio::time::advance(default_retry_max()).await;
         }
     })
     .await;

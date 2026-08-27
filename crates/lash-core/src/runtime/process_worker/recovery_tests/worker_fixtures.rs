@@ -110,6 +110,7 @@ pub(super) async fn worker_with_engine_and_fault_sink(
             None,
             None,
             Some(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>),
+            crate::NativeSubstrateConfig::default(),
         )
         .await;
     (worker, registry, run_handle, env_ref, test_registry, sink)
@@ -135,10 +136,12 @@ pub(super) async fn worker_with_engine_registry_timings_and_supplier(
         lease_timings,
         supplier,
         None,
+        crate::NativeSubstrateConfig::default(),
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     concurrency: usize,
     engine: Arc<dyn crate::ProcessEngine>,
@@ -146,6 +149,7 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     lease_timings: Option<crate::LeaseTimings>,
     supplier: Option<Arc<dyn crate::WorkerSlotSupplier>>,
     sink: Option<Arc<dyn crate::ProcessEventSink>>,
+    native_substrate: crate::NativeSubstrateConfig,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
@@ -183,6 +187,7 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     .with_session_policy(policy)
     .with_process_execution_concurrency(concurrency)
     .expect("valid test process execution concurrency");
+    config.native_substrate = native_substrate;
     if let Some(supplier) = supplier {
         config = config.with_worker_slot_supplier(supplier);
     }

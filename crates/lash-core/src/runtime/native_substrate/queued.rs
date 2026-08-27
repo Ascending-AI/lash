@@ -1,4 +1,5 @@
 use std::sync::Arc;
+#[cfg(test)]
 use std::time::Duration;
 
 use tokio::sync::Semaphore;
@@ -8,7 +9,7 @@ use tokio_util::task::TaskTracker;
 use crate::PluginError;
 use crate::runtime::{WorkerSlotKind, WorkerSlotSupplier};
 
-use super::{QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget};
+use super::{QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget, WorkCadencePolicy};
 
 mod scheduler;
 mod task;
@@ -58,7 +59,7 @@ pub(crate) struct NativeQueuedWorkInner {
     pub(super) shutdown: CancellationToken,
     pub(super) wake_tasks: TaskTracker,
     pub(super) scheduler: Arc<QueuedWorkExecutionScheduler>,
-    pub(super) slow_wake_threshold: Duration,
+    pub(super) work_cadence: WorkCadencePolicy,
 }
 
 pub(crate) struct NativeQueuedWorkLifetime {
@@ -81,11 +82,11 @@ impl NativeQueuedWork {
     }
 
     pub fn new(run_handle: Arc<dyn QueuedWorkRunHandle>) -> Self {
-        Self::from_parts(
+        Self::from_parts_with_work_cadence(
             run_handle,
             CancellationToken::new(),
             None,
-            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+            WorkCadencePolicy::default(),
         )
     }
 
@@ -98,11 +99,23 @@ impl NativeQueuedWork {
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         concurrency: usize,
     ) -> Result<Self, QueuedWorkExecutionConcurrencyError> {
-        Ok(Self::from_parts(
+        Self::with_execution_concurrency_and_work_cadence(
+            run_handle,
+            concurrency,
+            WorkCadencePolicy::default(),
+        )
+    }
+
+    pub(crate) fn with_execution_concurrency_and_work_cadence(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        concurrency: usize,
+        work_cadence: WorkCadencePolicy,
+    ) -> Result<Self, QueuedWorkExecutionConcurrencyError> {
+        Ok(Self::from_parts_with_work_cadence(
             run_handle,
             CancellationToken::new(),
             Some(QueuedWorkExecutionConcurrency::new(concurrency)?),
-            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+            work_cadence,
         ))
     }
 
@@ -112,22 +125,48 @@ impl NativeQueuedWork {
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         supplier: Arc<dyn WorkerSlotSupplier>,
     ) -> Self {
+        Self::with_worker_slot_supplier_and_work_cadence(
+            run_handle,
+            supplier,
+            WorkCadencePolicy::default(),
+        )
+    }
+
+    pub(crate) fn with_worker_slot_supplier_and_work_cadence(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        supplier: Arc<dyn WorkerSlotSupplier>,
+        work_cadence: WorkCadencePolicy,
+    ) -> Self {
         Self::from_parts_with_supplier(
             run_handle,
             CancellationToken::new(),
             None,
             Some(supplier),
-            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+            work_cadence,
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn from_parts(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         shutdown: CancellationToken,
         concurrency: Option<QueuedWorkExecutionConcurrency>,
         slow_wake_threshold: Duration,
     ) -> Self {
-        Self::from_parts_with_supplier(run_handle, shutdown, concurrency, None, slow_wake_threshold)
+        let work_cadence = WorkCadencePolicy {
+            slow_wake_threshold,
+            ..WorkCadencePolicy::default()
+        };
+        Self::from_parts_with_work_cadence(run_handle, shutdown, concurrency, work_cadence)
+    }
+
+    pub(crate) fn from_parts_with_work_cadence(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        shutdown: CancellationToken,
+        concurrency: Option<QueuedWorkExecutionConcurrency>,
+        work_cadence: WorkCadencePolicy,
+    ) -> Self {
+        Self::from_parts_with_supplier(run_handle, shutdown, concurrency, None, work_cadence)
     }
 
     pub(crate) fn from_parts_with_supplier(
@@ -135,7 +174,7 @@ impl NativeQueuedWork {
         shutdown: CancellationToken,
         concurrency: Option<QueuedWorkExecutionConcurrency>,
         supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-        slow_wake_threshold: Duration,
+        work_cadence: WorkCadencePolicy,
     ) -> Self {
         let shutdown = shutdown.child_token();
         let wake_tasks = TaskTracker::new();
@@ -151,7 +190,7 @@ impl NativeQueuedWork {
                     (None, Some(concurrency)) => QueuedWorkExecutionScheduler::inline(concurrency),
                     (None, None) => QueuedWorkExecutionScheduler::unbounded(),
                 }),
-                slow_wake_threshold,
+                work_cadence,
             }),
             _lifetime: Arc::new(NativeQueuedWorkLifetime {
                 shutdown,

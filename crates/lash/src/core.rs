@@ -744,6 +744,7 @@ impl LashCore {
             queued_work,
             self.process_event_sink.clone(),
             lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
+            self.substrate_slot.setup.config.clone(),
         )
     }
 }
@@ -760,6 +761,7 @@ struct InlineProcessWorkerSetup {
     process_work: WorkerProcessWork,
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
+    native_substrate: NativeSubstrateConfig,
 }
 
 impl InlineProcessWorkerSetup {
@@ -779,6 +781,7 @@ impl InlineProcessWorkerSetup {
             queued_work,
             self.process_event_sink.clone(),
             self.turn_phase_probe_slot.clone(),
+            self.native_substrate.clone(),
         )
     }
 }
@@ -796,6 +799,7 @@ fn worker_config(
     queued_work: Arc<dyn QueuedWorkSubstrate>,
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
+    native_substrate: NativeSubstrateConfig,
 ) -> Result<DurableProcessWorkerConfig> {
     let Some(store_factory) = env.session_store_factory.as_ref() else {
         return Err(EmbedError::MissingProcessWorkerStoreFactory);
@@ -813,6 +817,7 @@ fn worker_config(
     .with_session_policy(policy)
     .with_turn_phase_probe_slot(turn_phase_probe_slot)
     .with_process_execution_concurrency(process_execution_concurrency)?;
+    config.native_substrate = native_substrate;
     if let Some(worker_slot_supplier) = worker_slot_supplier {
         config = config.with_worker_slot_supplier(worker_slot_supplier);
     }
@@ -845,6 +850,7 @@ pub struct LashCoreBuilder {
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
+    native_substrate: NativeSubstrateConfig,
     trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
     // Benign core overrides applied on top of the resolved core.
     prompt: Option<PromptLayer>,
@@ -890,6 +896,7 @@ impl LashCoreBuilder {
             commit_budget: None,
             queued_work_batching: None,
             process_wake_delivery_policy: None,
+            native_substrate: NativeSubstrateConfig::default(),
             trigger_store: None,
             prompt: None,
             trace_sink: None,
@@ -995,6 +1002,12 @@ impl LashCoreBuilder {
     /// Select when process wakes may enter an active target session.
     pub fn process_wake_delivery_policy(mut self, policy: lash_core::DeliveryPolicy) -> Self {
         self.process_wake_delivery_policy = Some(policy);
+        self
+    }
+
+    /// Configure pacing for Lash's native process and queued-work scheduler loops.
+    pub fn native_substrate_config(mut self, config: NativeSubstrateConfig) -> Self {
+        self.native_substrate = config;
         self
     }
 
@@ -1131,6 +1144,7 @@ impl LashCoreBuilder {
             .unwrap_or(facade_support::DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY);
         NativeQueuedWork::validate_execution_concurrency(queued_work_execution_concurrency)?;
         let worker_slot_supplier = self.worker_slot_supplier.clone();
+        let native_substrate = self.native_substrate.clone();
         let protocol_factory = self.protocol_factory.clone();
         if protocol_factory.is_none() && self.plugin_host.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
@@ -1247,6 +1261,7 @@ impl LashCoreBuilder {
             worker_slot_supplier.clone(),
             session_execution_owner.clone(),
             process_event_sink.clone(),
+            native_substrate.clone(),
         )?;
         let queued_port = Self::resolve_queued_work(
             &self.queued_work_source,
@@ -1264,6 +1279,7 @@ impl LashCoreBuilder {
             queued_work_execution_concurrency,
         )?;
         let substrate = NativeSubstrateSetup {
+            config: native_substrate,
             process: process_port,
             queued: queued_port,
             wake: process_registry
@@ -1321,6 +1337,7 @@ impl LashCoreBuilder {
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
         process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
+        native_substrate: NativeSubstrateConfig,
     ) -> Result<ProcessPortSetup> {
         let watched = match process_work_source {
             ProcessWorkSource::None => return Ok(ProcessPortSetup::None),
@@ -1349,6 +1366,7 @@ impl LashCoreBuilder {
             // Admission-only drive faults otherwise have no path to the host.
             process_event_sink,
             turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
+            native_substrate,
         });
         // Validate the same worker assembly eagerly. The live inline worker is
         // constructed lazily once the outer queued-work dispatcher exists.

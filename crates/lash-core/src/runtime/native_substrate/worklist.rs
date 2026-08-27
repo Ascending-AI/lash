@@ -78,8 +78,10 @@ impl DurableProcessWorker {
         if available == 0 && state.active != 0 {
             return None;
         }
-        let limit = std::num::NonZeroUsize::new(available.clamp(1, MAX_INTAKE_PAGE))
-            .expect("the clamped intake page bound is non-zero");
+        let limit = std::num::NonZeroUsize::new(
+            available.clamp(1, self.config.native_substrate.worker_sweep.intake_page),
+        )
+        .expect("the clamped intake page bound is non-zero");
         let ProcessWorklistScan::Ready(continuation) = &state.worklist_scan else {
             return None;
         };
@@ -93,8 +95,9 @@ impl DurableProcessWorker {
         limit: std::num::NonZeroUsize,
         continuation: Option<crate::ProcessWorklistCursor>,
     ) -> Result<crate::ProcessWorklistPage, PluginError> {
-        let mut retry_after = WORKLIST_FETCH_RETRY_BASE;
-        for attempt in 1..=WORKLIST_FETCH_ATTEMPTS {
+        let policy = &self.config.native_substrate.worker_sweep;
+        let mut retry_after = policy.fetch_retry_base;
+        for attempt in 1..=policy.fetch_attempts {
             match self
                 .config
                 .process_registry()
@@ -102,7 +105,7 @@ impl DurableProcessWorker {
                 .await
             {
                 Ok(page) => return Ok(page),
-                Err(error) if attempt == WORKLIST_FETCH_ATTEMPTS => return Err(error),
+                Err(error) if attempt == policy.fetch_attempts => return Err(error),
                 Err(error) => {
                     tracing::warn!(
                         error = %error,

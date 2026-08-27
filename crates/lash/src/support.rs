@@ -7,9 +7,9 @@ pub(crate) use lash_core::runtime::{
     EffectHost, RuntimeEffectController, RuntimeSessionState, ScopedEffectController,
 };
 pub(crate) use lash_core::{
-    LiveReplayStore, MessageRole, NativeProcessWork, NativeQueuedWork, NoQueuedWork,
-    ProcessExecutionEnvStore, ProcessHandleView, ProcessWorkSubstrate, ProcessWorkWiring,
-    QueuedWorkSubstrate, SessionListFilter, SessionPolicy, SessionRelation,
+    LiveReplayStore, MessageRole, NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig,
+    NoQueuedWork, ProcessExecutionEnvStore, ProcessHandleView, ProcessWorkSubstrate,
+    ProcessWorkWiring, QueuedWorkSubstrate, SessionListFilter, SessionPolicy, SessionRelation,
     SessionStoreCreateRequest, SessionSummary, SessionWorkTarget, WorkerProcessWork,
     facade_support::DurableProcessWorker, facade_support::DurableProcessWorkerConfig,
     facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,

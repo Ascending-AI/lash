@@ -369,7 +369,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
     pub use crate::runtime::ProcessWorkerFault;
-    pub use crate::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD;
     pub use crate::runtime::QueuedDrainCandidate;
     pub use crate::runtime::QueuedDrainPolicy;
     pub use crate::runtime::QueuedDrainRequest;
@@ -543,6 +542,52 @@ pub mod facade_support {
     pub use lash_trace::TraceSink;
     pub use lash_trace::TraceSinkError;
     pub use schemars::JsonSchema;
+
+    /// Construct the facade's native queued-work driver with explicit cadence.
+    pub fn native_queued_work_with_execution_concurrency_and_work_cadence(
+        run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
+        concurrency: usize,
+        work_cadence: crate::runtime::WorkCadencePolicy,
+    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::QueuedWorkExecutionConcurrencyError>
+    {
+        crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
+            run_handle,
+            concurrency,
+            work_cadence,
+        )
+    }
+
+    /// Construct the facade's supplied-slot native queued-work driver.
+    pub fn native_queued_work_with_worker_slot_supplier_and_work_cadence(
+        run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
+        supplier: std::sync::Arc<dyn crate::runtime::WorkerSlotSupplier>,
+        work_cadence: crate::runtime::WorkCadencePolicy,
+    ) -> crate::runtime::NativeQueuedWork {
+        crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
+            run_handle,
+            supplier,
+            work_cadence,
+        )
+    }
+
+    /// Construct the facade's autonomous wake-delivery driver with explicit cadence.
+    pub fn wake_delivery_driver_with_work_cadence(
+        registry: std::sync::Arc<dyn crate::runtime::ProcessRegistry>,
+        session_store_factory: std::sync::Arc<dyn crate::runtime::SessionStoreFactory>,
+        queued_work: std::sync::Arc<dyn crate::runtime::QueuedWorkSubstrate>,
+        clock: std::sync::Arc<dyn crate::runtime::Clock>,
+        delivery_policy: crate::runtime::DeliveryPolicy,
+        work_cadence: crate::runtime::WorkCadencePolicy,
+    ) -> crate::runtime::WakeDeliveryDriver {
+        crate::runtime::WakeDeliveryDriver::with_work_cadence(
+            registry,
+            session_store_factory,
+            queued_work,
+            clock,
+            delivery_policy,
+            work_cadence,
+        )
+    }
 }
 
 pub(crate) use facade_support::*;
@@ -1007,12 +1052,12 @@ pub use runtime::{
     GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LoserPolicy, NativeProcessWork, NativeQueuedWork, NoQueuedWork, ObserverInheritance,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, PendingTurnInput,
-    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessAwaitOutput,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCommand,
+    LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig, NoQueuedWork,
+    ObserverInheritance, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
+    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
+    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
+    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCommand,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
     ProcessEffectOutcome, ProcessEngine, ProcessEngineRunContext, ProcessEngineValidationContext,
     ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
@@ -1051,8 +1096,8 @@ pub use runtime::{
     TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier,
+    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

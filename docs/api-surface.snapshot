@@ -196,6 +196,7 @@ lash::LashCoreBuilder::generation
 lash::LashCoreBuilder::lease_timings
 lash::LashCoreBuilder::live_replay_store
 lash::LashCoreBuilder::model
+lash::LashCoreBuilder::native_substrate_config
 lash::LashCoreBuilder::no_progress_budget
 lash::LashCoreBuilder::plugin
 lash::LashCoreBuilder::plugins
@@ -1258,6 +1259,7 @@ lash::durability::DurableProcessWorkerConfig
 lash::durability::DurableProcessWorkerConfig::from_plugin_factories
 lash::durability::DurableProcessWorkerConfig::from_plugin_stack
 lash::durability::DurableProcessWorkerConfig::lease_owner
+lash::durability::DurableProcessWorkerConfig::native_substrate
 lash::durability::DurableProcessWorkerConfig::new
 lash::durability::DurableProcessWorkerConfig::plugin_host
 lash::durability::DurableProcessWorkerConfig::process_event_sink
@@ -3967,6 +3969,7 @@ lash::prelude::LashCoreBuilder::generation
 lash::prelude::LashCoreBuilder::lease_timings
 lash::prelude::LashCoreBuilder::live_replay_store
 lash::prelude::LashCoreBuilder::model
+lash::prelude::LashCoreBuilder::native_substrate_config
 lash::prelude::LashCoreBuilder::no_progress_budget
 lash::prelude::LashCoreBuilder::plugin
 lash::prelude::LashCoreBuilder::plugins
@@ -7343,6 +7346,9 @@ lash::runtime::NativeQueuedWork::new
 lash::runtime::NativeQueuedWork::validate_execution_concurrency
 lash::runtime::NativeQueuedWork::with_execution_concurrency
 lash::runtime::NativeQueuedWork::with_worker_slot_supplier
+lash::runtime::NativeSubstrateConfig
+lash::runtime::NativeSubstrateConfig::work_cadence
+lash::runtime::NativeSubstrateConfig::worker_sweep
 lash::runtime::NoQueuedWork
 lash::runtime::NoQueuedWork::new
 lash::runtime::NoopEventSink
@@ -7429,7 +7435,6 @@ lash::runtime::ProtocolTurnOptions::from_payload
 lash::runtime::ProtocolTurnOptions::is_empty
 lash::runtime::ProtocolTurnOptions::payload
 lash::runtime::ProtocolTurnOptions::typed
-lash::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD
 lash::runtime::QueuedLaneAcquisition
 lash::runtime::QueuedLaneAcquisition::Acquired
 lash::runtime::QueuedLaneAcquisition::Acquired::0
@@ -8053,6 +8058,20 @@ lash::runtime::TurnControlBinding::RunScoped::resolver
 lash::runtime::TurnControlParticipation
 lash::runtime::TurnControlParticipation::DurableJournaled
 lash::runtime::TurnControlParticipation::Local
+lash::runtime::WorkCadencePolicy
+lash::runtime::WorkCadencePolicy::delivery_batch
+lash::runtime::WorkCadencePolicy::delivery_retry_initial
+lash::runtime::WorkCadencePolicy::delivery_retry_max
+lash::runtime::WorkCadencePolicy::max_transient_attempts
+lash::runtime::WorkCadencePolicy::poll_initial
+lash::runtime::WorkCadencePolicy::poll_max
+lash::runtime::WorkCadencePolicy::retry_initial
+lash::runtime::WorkCadencePolicy::retry_max
+lash::runtime::WorkCadencePolicy::slow_wake_threshold
+lash::runtime::WorkerSweepPolicy
+lash::runtime::WorkerSweepPolicy::fetch_attempts
+lash::runtime::WorkerSweepPolicy::fetch_retry_base
+lash::runtime::WorkerSweepPolicy::intake_page
 lash::runtime::render_turn_causes_prompt
 lash::scenario_contracts::AGENT_SCENARIO_CONTRACTS
 lash::sync::LockResultExt

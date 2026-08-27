@@ -555,8 +555,19 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         "durable-worker-facade-owner",
         "durable-worker-facade-boot",
     );
+    let native_substrate = lash_core::NativeSubstrateConfig {
+        worker_sweep: lash_core::WorkerSweepPolicy {
+            intake_page: 17,
+            ..lash_core::WorkerSweepPolicy::default()
+        },
+        work_cadence: lash_core::WorkCadencePolicy {
+            delivery_batch: 1,
+            ..lash_core::WorkCadencePolicy::default()
+        },
+    };
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .with_native_queued_work()
+        .native_substrate_config(native_substrate)
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -580,6 +591,8 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         config.process_execution_concurrency(),
         lash_core::facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY
     );
+    assert_eq!(config.native_substrate.worker_sweep.intake_page, 17);
+    assert_eq!(config.native_substrate.work_cadence.delivery_batch, 1);
     Ok(())
 }
 

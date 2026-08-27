@@ -3,10 +3,6 @@ use std::time::Duration;
 
 use crate::PluginError;
 
-pub(super) const WAKE_RETRY_INITIAL: Duration = Duration::from_millis(25);
-pub(super) const WAKE_RETRY_MAX: Duration = Duration::from_secs(1);
-pub(super) const WAKE_MAX_ATTEMPTS: u32 = 8;
-
 static RETRY_JITTER_SEQUENCE: AtomicU64 = AtomicU64::new(0x9e37_79b9_7f4a_7c15);
 
 /// Apply 80-120% multiplicative jitter inside an explicit retry envelope.
@@ -33,16 +29,13 @@ pub fn bounded_multiplicative_jitter(
     Duration::from_nanos(bounded_nanos.min(u64::MAX.into()) as u64)
 }
 
-pub(super) fn jittered_wake_retry(base: Duration) -> Duration {
-    bounded_multiplicative_jitter(base, WAKE_RETRY_INITIAL, WAKE_RETRY_MAX)
-}
-
 #[cfg(test)]
 mod jitter_tests {
     use super::*;
 
     #[test]
     fn retry_jitter_stays_inside_the_production_envelope() {
+        let policy = WorkCadencePolicy::DEFAULT;
         for base in [
             Duration::from_millis(25),
             Duration::from_millis(100),
@@ -50,10 +43,11 @@ mod jitter_tests {
             Duration::from_secs(1),
         ] {
             for _ in 0..128 {
-                let delay = jittered_wake_retry(base);
-                assert!(delay >= WAKE_RETRY_INITIAL);
-                assert!(delay <= WAKE_RETRY_MAX);
-                if base < WAKE_RETRY_MAX {
+                let delay =
+                    bounded_multiplicative_jitter(base, policy.retry_initial, policy.retry_max);
+                assert!(delay >= policy.retry_initial);
+                assert!(delay <= policy.retry_max);
+                if base < policy.retry_max {
                     assert!(delay >= base.mul_f64(0.8));
                     assert!(delay <= base.mul_f64(1.2));
                 }
@@ -61,15 +55,17 @@ mod jitter_tests {
         }
     }
 }
-
 #[cfg(any(test, feature = "testing"))]
-pub const QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS: usize = WAKE_MAX_ATTEMPTS as usize;
+use crate::WorkCadencePolicy;
+
+/// Compatibility view of the default policy's transient-attempt budget.
+/// Runtime loops read their configured [`WorkCadencePolicy`] instead.
+#[cfg(any(test, feature = "testing"))]
+pub const QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS: usize =
+    WorkCadencePolicy::DEFAULT.max_transient_attempts as usize;
 
 /// Default maximum number of queued-work wake executions admitted at once.
 pub const DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY: usize = 64;
-
-/// Elapsed time after which an unfinished queued-work wake emits warning telemetry.
-pub const QUEUED_WORK_SLOW_WAKE_THRESHOLD: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub struct QueuedWorkRunRequest {
