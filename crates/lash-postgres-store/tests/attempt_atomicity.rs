@@ -930,7 +930,8 @@ async fn fig1293_runtime(
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ),
-    );
+    )
+    .expect("valid test native substrate config");
     let process_work = lash_core::ProcessWorkWiring::new(
         watched.clone(),
         Arc::new(lash_core::NativeProcessWork::new(&watched, worker)),

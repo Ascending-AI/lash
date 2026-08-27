@@ -1280,6 +1280,7 @@ fn recovery_process_worker(
             owner,
         ),
     )
+    .expect("valid test native substrate config")
 }
 
 fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration {

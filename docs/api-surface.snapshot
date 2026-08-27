@@ -8074,6 +8074,7 @@ lash::runtime::WorkCadencePolicy::poll_max
 lash::runtime::WorkCadencePolicy::retry_initial
 lash::runtime::WorkCadencePolicy::retry_max
 lash::runtime::WorkCadencePolicy::slow_wake_threshold
+lash::runtime::WorkCadencePolicy::validate
 lash::runtime::WorkerSweepPolicy
 lash::runtime::WorkerSweepPolicy::fetch_attempts
 lash::runtime::WorkerSweepPolicy::fetch_retry_base

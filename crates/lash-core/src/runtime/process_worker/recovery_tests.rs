@@ -244,6 +244,7 @@ fn inline_worker_with_trigger_store(
         )
         .with_trigger_store(trigger_store),
     )
+    .expect("valid test native substrate config")
 }
 
 /// A worker whose trigger-delivery reconcile can re-enter the work driver: the
@@ -271,7 +272,8 @@ fn reentrant_worker_with_trigger_store(
             lease_owner,
         )
         .with_trigger_store(trigger_store),
-    );
+    )
+    .expect("valid test native substrate config");
     run_handle
         .worker
         .set(worker.clone())
@@ -1085,7 +1087,8 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         .with_session_policy(policy.clone())
         .with_process_execution_concurrency(1)
         .expect("valid test process execution concurrency")
-    });
+    })
+    .expect("valid test native substrate config");
     run_handle
         .worker
         .set(worker)
@@ -1171,7 +1174,8 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
             local_owner("segment-worker", "host-a", "start-a"),
         )
         .with_session_policy(policy)
-    });
+    })
+    .expect("valid test native substrate config");
     registry
         .register_process(
             ProcessRegistration::new(
@@ -1369,7 +1373,8 @@ async fn snapshot_recovery_fixture(
         )
         .with_session_policy(policy)
         .with_trigger_store(Arc::clone(&trigger_store))
-    });
+    })
+    .expect("valid test native substrate config");
     (registry, trigger_store, delivery, payloads, worker)
 }
 

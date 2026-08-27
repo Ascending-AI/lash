@@ -155,6 +155,7 @@ fn process_worker(
     .with_trigger_store(Arc::new(storage.trigger_store()))
     .with_process_event_sink(Arc::new(fault_sink.clone()));
     lash::durability::DurableProcessWorker::new(config)
+        .expect("runbook worker uses valid native substrate defaults")
 }
 
 fn process_json(record: &ProcessRecord) -> Value {

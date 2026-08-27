@@ -18,34 +18,7 @@ impl NativeSubstrateConfig {
             "worker_sweep.fetch_retry_base",
             self.worker_sweep.fetch_retry_base,
         )?;
-        validate_non_zero_duration(
-            "work_cadence.retry_initial",
-            self.work_cadence.retry_initial,
-        )?;
-        validate_non_zero_duration("work_cadence.retry_max", self.work_cadence.retry_max)?;
-        validate_initial_not_greater_than_max(
-            "work_cadence.retry_initial",
-            self.work_cadence.retry_initial,
-            "work_cadence.retry_max",
-            self.work_cadence.retry_max,
-        )?;
-        validate_non_zero_duration("work_cadence.poll_initial", self.work_cadence.poll_initial)?;
-        validate_non_zero_duration("work_cadence.poll_max", self.work_cadence.poll_max)?;
-        validate_initial_not_greater_than_max(
-            "work_cadence.poll_initial",
-            self.work_cadence.poll_initial,
-            "work_cadence.poll_max",
-            self.work_cadence.poll_max,
-        )?;
-        validate_millisecond_duration(
-            "work_cadence.delivery_retry_initial",
-            self.work_cadence.delivery_retry_initial,
-        )?;
-        validate_millisecond_duration(
-            "work_cadence.delivery_retry_max",
-            self.work_cadence.delivery_retry_max,
-        )?;
-        Ok(())
+        self.work_cadence.validate()
     }
 }
 
@@ -97,6 +70,33 @@ impl WorkCadencePolicy {
         delivery_retry_initial: Duration::from_millis(50),
         delivery_retry_max: Duration::from_secs(5 * 60),
     };
+
+    /// Reject durations that would busy-spin a queued-work or wake-delivery
+    /// scheduler loop or violate its advertised maximum delay.
+    pub fn validate(&self) -> Result<(), NativeSubstrateConfigError> {
+        validate_non_zero_duration("work_cadence.retry_initial", self.retry_initial)?;
+        validate_non_zero_duration("work_cadence.retry_max", self.retry_max)?;
+        validate_initial_not_greater_than_max(
+            "work_cadence.retry_initial",
+            self.retry_initial,
+            "work_cadence.retry_max",
+            self.retry_max,
+        )?;
+        validate_non_zero_duration("work_cadence.poll_initial", self.poll_initial)?;
+        validate_non_zero_duration("work_cadence.poll_max", self.poll_max)?;
+        validate_initial_not_greater_than_max(
+            "work_cadence.poll_initial",
+            self.poll_initial,
+            "work_cadence.poll_max",
+            self.poll_max,
+        )?;
+        validate_millisecond_duration(
+            "work_cadence.delivery_retry_initial",
+            self.delivery_retry_initial,
+        )?;
+        validate_millisecond_duration("work_cadence.delivery_retry_max", self.delivery_retry_max)?;
+        Ok(())
+    }
 }
 
 impl Default for WorkCadencePolicy {

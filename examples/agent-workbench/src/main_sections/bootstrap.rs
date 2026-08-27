@@ -303,7 +303,8 @@ async fn async_main() -> AnyhowResult<()> {
     let process_worker = lash::durability::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .context("build Restate process worker config")?,
-    );
+    )
+    .context("validate Restate process worker config")?;
     let process_observer = core
         .processes()
         .observer()

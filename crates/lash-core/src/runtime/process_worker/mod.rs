@@ -435,7 +435,10 @@ enum RecoverFailure {
 }
 
 impl DurableProcessWorker {
-    pub fn new(config: DurableProcessWorkerConfig) -> Self {
+    pub fn new(
+        config: DurableProcessWorkerConfig,
+    ) -> Result<Self, crate::NativeSubstrateConfigError> {
+        config.native_substrate.validate()?;
         let execution_scheduler = Arc::new(ProcessExecutionScheduler::new(
             config.process_execution_concurrency,
             config.worker_slot_supplier.clone(),
@@ -443,14 +446,17 @@ impl DurableProcessWorker {
         let lifetime = Arc::new(ProcessWorkerLifetime {
             shutdown: execution_scheduler.shutdown.clone(),
         });
-        Self {
+        Ok(Self {
             config: Arc::new(config),
             execution_scheduler,
             lifetime: Some(lifetime),
-        }
+        })
     }
 
-    pub fn from_shared_config(config: Arc<DurableProcessWorkerConfig>) -> Self {
+    pub fn from_shared_config(
+        config: Arc<DurableProcessWorkerConfig>,
+    ) -> Result<Self, crate::NativeSubstrateConfigError> {
+        config.native_substrate.validate()?;
         let execution_scheduler = Arc::new(ProcessExecutionScheduler::new(
             config.process_execution_concurrency,
             config.worker_slot_supplier.clone(),
@@ -458,11 +464,11 @@ impl DurableProcessWorker {
         let lifetime = Arc::new(ProcessWorkerLifetime {
             shutdown: execution_scheduler.shutdown.clone(),
         });
-        Self {
+        Ok(Self {
             config,
             execution_scheduler,
             lifetime: Some(lifetime),
-        }
+        })
     }
 
     fn detached_for_task(&self) -> Self {

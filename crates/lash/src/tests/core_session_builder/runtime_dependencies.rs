@@ -1441,6 +1441,72 @@ fn builder_rejects_incoherent_native_pacing_durations() {
 }
 
 #[test]
+fn durable_process_worker_rejects_incoherent_native_pacing_directly() {
+    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(registry)
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build core with process support");
+    let mut config = core
+        .durable_process_worker_config()
+        .expect("build durable process-worker config");
+    config.native_substrate.worker_sweep.fetch_retry_base = std::time::Duration::ZERO;
+
+    let Err(error) = lash_core::facade_support::DurableProcessWorker::new(config) else {
+        panic!("direct worker construction must reject zero-delay pacing");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("worker_sweep.fetch_retry_base"),
+        "error must identify the rejected worker pacing field: {error}"
+    );
+}
+
+struct RejectedCadenceRunHandle;
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::QueuedWorkRunHandle for RejectedCadenceRunHandle {
+    async fn run_queued_work(
+        &self,
+        _request: lash_core::facade_support::QueuedWorkRunRequest,
+    ) -> std::result::Result<(), lash_core::facade_support::QueuedWorkRunError> {
+        unreachable!("invalid cadence must be rejected before the driver can run")
+    }
+}
+
+#[test]
+fn explicit_cadence_constructor_rejects_zero_poll_delay_directly() {
+    let work_cadence = lash_core::WorkCadencePolicy {
+        poll_initial: std::time::Duration::ZERO,
+        ..lash_core::WorkCadencePolicy::default()
+    };
+
+    let Err(error) =
+        lash_core::facade_support::native_queued_work_with_execution_concurrency_and_work_cadence(
+            Arc::new(RejectedCadenceRunHandle),
+            1,
+            work_cadence,
+        )
+    else {
+        panic!("explicit-cadence construction must reject zero-delay polling");
+    };
+    let lash_core::facade_support::NativeQueuedWorkConfigError::NativeSubstrateConfig(source) =
+        error
+    else {
+        panic!("zero-delay polling must preserve its typed pacing cause: {error}");
+    };
+    assert!(
+        source.to_string().contains("work_cadence.poll_initial"),
+        "error must identify the rejected poll field: {source}"
+    );
+}
+
+#[test]
 fn builder_allows_harmless_native_pacing_boundaries() {
     let mut config = lash_core::NativeSubstrateConfig::default();
     config.worker_sweep.intake_page = std::num::NonZeroUsize::MIN;

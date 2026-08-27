@@ -2325,7 +2325,8 @@ mod tests {
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy.clone()),
-        );
+        )
+        .expect("valid test native substrate config");
         let processes: Arc<dyn lash_core::ProcessService> =
             Arc::new(TypeScriptSignalProcessService {
                 registry: registry.clone(),
@@ -2466,7 +2467,8 @@ mod tests {
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy.clone()),
-        );
+        )
+        .expect("valid test native substrate config");
         let processes: Arc<dyn lash_core::ProcessService> =
             Arc::new(TypeScriptSignalProcessService {
                 registry: registry.clone(),

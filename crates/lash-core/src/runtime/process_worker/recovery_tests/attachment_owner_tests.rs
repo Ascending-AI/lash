@@ -207,7 +207,8 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
             local_owner("attachment-parent-worker", "host-a", "parent-start-a"),
         )
         .with_session_policy(policy.clone())
-    });
+    })
+    .expect("valid test native substrate config");
 
     let runtime = Box::pin(worker.build_process_runtime(
         format!("process-env:{PROCESS_ID}"),
@@ -292,7 +293,8 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             local_owner("attachment-worker", "host-a", "start-a"),
         )
         .with_session_policy(policy)
-    });
+    })
+    .expect("valid test native substrate config");
     registry
         .register_process(
             ProcessRegistration::new(

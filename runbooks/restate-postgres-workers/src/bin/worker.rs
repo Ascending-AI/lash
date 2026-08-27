@@ -987,7 +987,7 @@ async fn async_main() -> Result<()> {
     }
 
     let core = state.build_core()?;
-    let process_worker = DurableProcessWorker::new(core.durable_process_worker_config()?);
+    let process_worker = DurableProcessWorker::new(core.durable_process_worker_config()?)?;
     let process_workflow = deployment
         .workflow(process_worker)
         .with_segment_effect_budget_selector(|registration| match &*registration.input {

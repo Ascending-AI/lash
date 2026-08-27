@@ -186,10 +186,10 @@ pub use native_substrate::{
     QueuedWorkWakeOutcome,
 };
 pub use native_substrate::{
-    NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError,
-    NoQueuedWork, ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring,
-    QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget, WorkCadencePolicy,
-    WorkerSweepPolicy,
+    NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError, NativeSubstrateConfig,
+    NativeSubstrateConfigError, NoQueuedWork, ProcessTerminalWait, ProcessWorkSubstrate,
+    ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget,
+    WorkCadencePolicy, WorkerSweepPolicy,
 };
 pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{

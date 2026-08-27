@@ -1956,7 +1956,8 @@ finish initial
         let process_worker = lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config()
                 .expect("build process worker config"),
-        );
+        )
+        .expect("valid test native substrate config");
         let process_observer = core
             .processes()
             .observer()

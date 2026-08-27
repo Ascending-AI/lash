@@ -82,6 +82,7 @@ pub(super) fn lifecycle_worker(
         .with_session_policy(policy)
         .with_process_event_sink(Arc::new(fault_sink.clone())),
     )
+    .expect("simulation worker uses valid native substrate defaults")
 }
 
 pub(super) async fn register_lifecycle_row(

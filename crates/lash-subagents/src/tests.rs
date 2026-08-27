@@ -1113,7 +1113,8 @@ async fn run_seed_probe_inner(
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(policy.clone()),
-    );
+    )
+    .expect("valid test native substrate config");
     let process_port: Arc<dyn lash_core::ProcessWorkSubstrate> =
         Arc::new(lash_core::NativeProcessWork::new(&watched, worker));
     let host = ProcessRuntimeHost::with_ports(

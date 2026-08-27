@@ -337,6 +337,7 @@ pub mod facade_support {
     pub use crate::runtime::InlineRuntimeEffectController;
     pub use crate::runtime::LashRuntime;
     pub use crate::runtime::LiveReplayGap;
+    pub use crate::runtime::NativeQueuedWorkConfigError;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
@@ -548,12 +549,14 @@ pub mod facade_support {
         run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
         concurrency: usize,
         work_cadence: crate::runtime::WorkCadencePolicy,
-    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::QueuedWorkExecutionConcurrencyError>
-    {
-        crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
-            run_handle,
-            concurrency,
-            work_cadence,
+    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeQueuedWorkConfigError> {
+        work_cadence.validate()?;
+        Ok(
+            crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
+                run_handle,
+                concurrency,
+                work_cadence,
+            )?,
         )
     }
 
@@ -562,11 +565,14 @@ pub mod facade_support {
         run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
         supplier: std::sync::Arc<dyn crate::runtime::WorkerSlotSupplier>,
         work_cadence: crate::runtime::WorkCadencePolicy,
-    ) -> crate::runtime::NativeQueuedWork {
-        crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
-            run_handle,
-            supplier,
-            work_cadence,
+    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeSubstrateConfigError> {
+        work_cadence.validate()?;
+        Ok(
+            crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
+                run_handle,
+                supplier,
+                work_cadence,
+            ),
         )
     }
 
@@ -578,15 +584,17 @@ pub mod facade_support {
         clock: std::sync::Arc<dyn crate::runtime::Clock>,
         delivery_policy: crate::runtime::DeliveryPolicy,
         work_cadence: crate::runtime::WorkCadencePolicy,
-    ) -> crate::runtime::WakeDeliveryDriver {
-        crate::runtime::WakeDeliveryDriver::with_work_cadence(
+    ) -> Result<crate::runtime::WakeDeliveryDriver, crate::runtime::NativeSubstrateConfigError>
+    {
+        work_cadence.validate()?;
+        Ok(crate::runtime::WakeDeliveryDriver::with_work_cadence(
             registry,
             session_store_factory,
             queued_work,
             clock,
             delivery_policy,
             work_cadence,
-        )
+        ))
     }
 }
 
@@ -1052,8 +1060,8 @@ pub use runtime::{
     GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
     LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig,
-    NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance,
+    LoserPolicy, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
+    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,

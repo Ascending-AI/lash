@@ -609,7 +609,8 @@ finish "done via Restate E2E"
         let process_worker = lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config_with_plugins([demo_factory])
                 .expect("process worker config"),
-        );
+        )
+        .expect("valid test native substrate config");
         let state = AppStateData::from_shared_db(
             core,
             turn_deployment.turn_work_driver(),

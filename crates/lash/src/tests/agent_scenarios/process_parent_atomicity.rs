@@ -496,6 +496,7 @@ fn process_worker(
         )
         .with_session_policy(lash_core::testing::mock_session_policy()),
     )
+    .expect("valid test native substrate config")
 }
 
 async fn reset(storage: &PostgresStorage) {

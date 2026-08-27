@@ -236,6 +236,7 @@ impl NativeSubstrateSlot {
                                     Arc::clone(slot_supplier),
                                     work_cadence,
                                 )
+                                .expect("native work cadence was validated at build")
                             }
                             None => facade_support::native_queued_work_with_execution_concurrency_and_work_cadence(
                                 run_handle,
@@ -256,7 +257,8 @@ impl NativeSubstrateSlot {
                             .build(Arc::clone(&queued_port))
                             .expect("inline process-worker assembly was validated at build");
                         let watched = watched.clone();
-                        let worker = DurableProcessWorker::new(config);
+                        let worker = DurableProcessWorker::new(config)
+                            .expect("native substrate config was validated at build");
                         let port: Arc<dyn ProcessWorkSubstrate> =
                             Arc::new(NativeProcessWork::new(&watched, worker));
                         (Some(ProcessWorkWiring::new(watched, port)), true)
@@ -272,7 +274,8 @@ impl NativeSubstrateSlot {
                         Arc::clone(&setup.clock),
                         setup.delivery_policy,
                         self.setup.config.work_cadence.clone(),
-                    );
+                    )
+                    .expect("native work cadence was validated at build");
                     queued.install_wake(wake);
                 }
                 ResolvedPorts {

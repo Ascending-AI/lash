@@ -9537,8 +9537,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
     fig1293_seed_control_target(&process_registry, session_id).await;
     let plugin_factories = fig1293_migrated_tool_factories();
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
-    context.install_process_worker(DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    context.install_process_worker(
+        DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 plugin_factories.clone(),
             )),
@@ -9547,8 +9547,9 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
             lash_core::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
-        ),
-    ));
+        ))
+        .expect("valid test native substrate config"),
+    );
 
     let mut first = replay_test_runtime_with_plugins_and_registry(
         session_id,
@@ -9925,8 +9926,8 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
     context.defer_process_workflows();
     let process_registry = process_registry();
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
-    context.install_process_worker(DurableProcessWorker::new(
-        lash_core::facade_support::DurableProcessWorkerConfig::new(
+    context.install_process_worker(
+        DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
                 plugin_factories.clone(),
             )),
@@ -9935,8 +9936,9 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             lash_core::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
-        ),
-    ));
+        ))
+        .expect("valid test native substrate config"),
+    );
 
     let mut first = replay_test_runtime_with_plugins_and_registry(
         session_id,
@@ -10729,7 +10731,8 @@ finish (await handle)?
             lash_core::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
-        ));
+        ))
+        .expect("valid test native substrate config");
     context.install_process_worker(process_worker);
     let signal_wait_controller =
         Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
@@ -13183,6 +13186,7 @@ fn recovery_worker_with_plugins(
         )
         .with_session_policy(recovery_session_policy()),
     )
+    .expect("valid test native substrate config")
 }
 
 struct ProcessParentIntentTool {
@@ -13324,6 +13328,7 @@ fn process_parent_worker(
         .with_session_policy(recovery_session_policy())
         .with_turn_phase_probe_slot(probe_slot),
     )
+    .expect("valid test native substrate config")
 }
 
 async fn process_parent_lashlang_registration(
@@ -14619,7 +14624,8 @@ async fn process_deployment_driver_and_workflow_share_registry() {
             lash_core::WorkerProcessWork::External(process_work),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
-        ));
+        ))
+        .expect("valid test native substrate config");
     let service = deployment.workflow(worker).serve();
     let discovery = discover_service(&service);
     let endpoint = Endpoint::builder().bind(service).build();

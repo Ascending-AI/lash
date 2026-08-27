@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::PluginError;
-use crate::runtime::{WorkerSlotKind, WorkerSlotSupplier};
+use crate::runtime::{NativeSubstrateConfigError, WorkerSlotKind, WorkerSlotSupplier};
 
 use super::{QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget, WorkCadencePolicy};
 
@@ -46,6 +46,18 @@ impl QueuedWorkExecutionConcurrency {
 )]
 pub struct QueuedWorkExecutionConcurrencyError {
     concurrency: usize,
+}
+
+/// Invalid configuration supplied to an explicit-cadence native queued-work
+/// constructor.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum NativeQueuedWorkConfigError {
+    /// The requested inline execution bound is outside Tokio's semaphore range.
+    #[error("invalid queued-work execution configuration: {0}")]
+    ExecutionConcurrency(#[from] QueuedWorkExecutionConcurrencyError),
+    /// The requested scheduler cadence would create an incoherent native loop.
+    #[error("invalid native substrate configuration: {0}")]
+    NativeSubstrateConfig(#[from] NativeSubstrateConfigError),
 }
 
 #[derive(Clone)]

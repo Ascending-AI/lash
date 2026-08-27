@@ -371,10 +371,13 @@ async fn async_main() -> anyhow_like::Result<()> {
         let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
             db: Arc::clone(&shared_db),
         });
-        Some(DurableProcessWorker::new(
-            core.durable_process_worker_config_with_plugins([demo_factory])
-                .map_err(|err| err.to_string())?,
-        ))
+        Some(
+            DurableProcessWorker::new(
+                core.durable_process_worker_config_with_plugins([demo_factory])
+                    .map_err(|err| err.to_string())?,
+            )
+            .map_err(|err| err.to_string())?,
+        )
     } else {
         None
     };

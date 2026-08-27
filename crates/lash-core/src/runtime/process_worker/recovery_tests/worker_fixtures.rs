@@ -194,7 +194,7 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     if let Some(sink) = sink {
         config = config.with_process_event_sink(sink);
     }
-    let worker = DurableProcessWorker::new(config);
+    let worker = DurableProcessWorker::new(config).expect("valid test native substrate config");
     run_handle
         .worker
         .set(worker.clone())
