@@ -7,7 +7,7 @@ const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 4;
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
 const TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION: u8 = 1;
-const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 2;
+const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 3;
 
 pub(super) fn trigger_definition_family_version(draft: &TriggerSubscriptionDraft) -> u8 {
     match &draft.target {
@@ -862,7 +862,7 @@ mod tests {
         );
         assert_eq!(
             derived_trigger_subscription_key("worker\0name", "source:λ", "key\0route"),
-            "derived/v2/f9b518e6618a176e06da638a59e4ac54f252fe7899f9b64ca5474c37902c0fd9"
+            "derived/v3/5737eff4c14bed2a7dc7e7eb4a68c5b9968dd56a4aac8cffcfb9e0f64436d443"
         );
     }
 

@@ -3,6 +3,7 @@
 use crate::core_support::Blake3DomainHasher;
 
 const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
+const FRAME_KEY_VERSION: u8 = 2;
 
 /// A non-empty, deterministically derived key that Lash turns into a durable
 /// agent-frame identity.
@@ -57,7 +58,7 @@ impl FrameKey {
 
     fn derive<'a>(source_tag: u8, parts: impl IntoIterator<Item = &'a str>) -> Self {
         let mut digest = Blake3DomainHasher::new("lash.agent-frame-key/v2");
-        digest.update([source_tag]);
+        digest.update([FRAME_KEY_VERSION, source_tag]);
         for part in parts {
             digest.update((part.len() as u64).to_be_bytes());
             digest.update(part.as_bytes());
@@ -119,7 +120,7 @@ mod tests {
         );
         assert_eq!(
             first.as_str(),
-            "frame-key/v2/1ba6865b190e459df195c74ceb3df72dc0a1048f32af96b75dfee21b97a44ab1"
+            "frame-key/v2/4041d7061912b8be622d35c5c1cb10b2fe684e40395e2dd8c750c6feda56e58e"
         );
         assert_ne!(
             first,
@@ -154,15 +155,15 @@ mod tests {
 
         assert_eq!(
             first.as_str(),
-            "frame-key/v2/ae916bf196d2905330ef5485b64bc610ee21a43aea9d029a6e0afbb8d1179e1c"
+            "frame-key/v2/fe671c9a9b3ab71d456f809a0be6d1f9dbe3306aeda6af2881a30f836cba62b5"
         );
         assert_eq!(
             second.as_str(),
-            "frame-key/v2/a401a116fec4bd631bde8a7846d24ebe8e7c02af860a08fd159071914f692553"
+            "frame-key/v2/f14a7e6f82be497296c03890ec01dea6133116800a43cd5b30e691cc1a132413"
         );
         assert_eq!(
             reused.as_str(),
-            "frame-key/v2/ae916bf196d2905330ef5485b64bc610ee21a43aea9d029a6e0afbb8d1179e1c"
+            "frame-key/v2/fe671c9a9b3ab71d456f809a0be6d1f9dbe3306aeda6af2881a30f836cba62b5"
         );
     }
 
