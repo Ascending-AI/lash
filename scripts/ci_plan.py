@@ -63,6 +63,11 @@ UNGATED_JOBS = {
     "restate-postgres-workers-summary",
 }
 
+WORKERS_E2E_JOBS = {
+    "restate-postgres-workers",
+    "restate-postgres-workers-summary",
+}
+
 
 class PlanError(ValueError):
     """Raised when a path set cannot be classified exactly."""
@@ -180,7 +185,9 @@ def classify(changes: list[tuple[str, str]]) -> dict[str, str]:
 
 
 def evaluate_conclusion(
-    needs: Mapping[str, Mapping[str, object]], event_name: str = ""
+    needs: Mapping[str, Mapping[str, object]],
+    event_name: str = "",
+    ref: str = "",
 ) -> list[str]:
     expected_jobs = UNGATED_JOBS | set(GATED_JOBS)
     problems: list[str] = []
@@ -217,6 +224,12 @@ def evaluate_conclusion(
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
+        if job in WORKERS_E2E_JOBS and event_name == "push" and ref != "refs/heads/main":
+            if result != "skipped":
+                problems.append(
+                    f"workers E2E job {job} ended with {result!r} on a non-main push, expected skipped"
+                )
+            continue
         if job in FULL_PROFILE_JOBS and event_name != "workflow_dispatch":
             if result != "skipped":
                 problems.append(
@@ -303,7 +316,11 @@ def main() -> int:
     except (KeyError, json.JSONDecodeError) as error:
         print(f"Invalid needs JSON: {error}", file=sys.stderr)
         return 1
-    problems = evaluate_conclusion(needs, os.environ.get("GITHUB_EVENT_NAME", ""))
+    problems = evaluate_conclusion(
+        needs,
+        os.environ.get("GITHUB_EVENT_NAME", ""),
+        os.environ.get("GITHUB_REF", ""),
+    )
     print(json.dumps(needs, indent=2, sort_keys=True))
     if problems:
         print("CI conclusion rejected:", file=sys.stderr)
