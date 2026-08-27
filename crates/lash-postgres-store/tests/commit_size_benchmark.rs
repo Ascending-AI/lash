@@ -243,7 +243,7 @@ fn sqlite_seed_attachment_intents(database_path: &std::path::Path, commit: &Runt
                 .execute(params![
                     attachment_id.as_str(),
                     commit.session_id,
-                    format!("lash-attachment://sha256/{attachment_id}"),
+                    format!("lash-attachment://blake3/{attachment_id}"),
                     turn_id,
                 ])
                 .expect("insert SQLite benchmark attachment intent");
@@ -272,7 +272,7 @@ async fn postgres_seed_attachment_intents(pool: &sqlx::PgPool, commit: &RuntimeC
     query.push_values(adopted_attachment_ids(commit), |mut row, attachment_id| {
         row.push_bind(attachment_id.to_string())
             .push_bind(&commit.session_id)
-            .push_bind(format!("lash-attachment://sha256/{attachment_id}"))
+            .push_bind(format!("lash-attachment://blake3/{attachment_id}"))
             .push_bind(1_i64)
             .push_bind(None::<i64>)
             .push_bind("turn")

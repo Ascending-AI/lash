@@ -267,8 +267,8 @@ impl ProcessExecutionEnvSpec {
 
 fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvRef {
     ProcessExecutionEnvRef::new(format!(
-        "process-env:v3:sha256:{}",
-        crate::stable_hash::sha256_hex(bytes)
+        "process-env:v4:blake3:{}",
+        crate::stable_hash::blake3_hex("lash-process-env/v4", bytes)
     ))
 }
 

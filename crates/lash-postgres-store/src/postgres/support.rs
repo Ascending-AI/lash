@@ -472,7 +472,7 @@ pub(crate) async fn put_checkpoint_tx(
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
     let manifest = checkpoint.manifest()?;
     let bytes = encode_msgpack(&manifest, "checkpoint root")?;
-    let checkpoint_ref = BlobRef(format!("{:x}", Sha256::digest(&bytes)));
+    let checkpoint_ref = BlobRef::for_content(&bytes);
 
     // Global PostgreSQL checkpoint lock order:
     // 1. session-history advisory locks, ascending by session id;
@@ -504,7 +504,7 @@ pub(crate) async fn put_checkpoint_tx(
                     message: format!("manifest projection lost component `{key}`"),
                 })?;
         if let Some(body) = component.body() {
-            let stored_ref = BlobRef(format!("{:x}", Sha256::digest(body)));
+            let stored_ref = BlobRef::for_content(body);
             #[cfg(feature = "perf-witness")]
             lash_core::perf_witness::record_hash_pass(body.len());
             lash_core::store::ensure_checkpoint_component_hash_agreement(

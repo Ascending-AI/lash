@@ -1,12 +1,12 @@
 {
   "scenario": "scalar-lashlang-tool-attempt",
-  "recorded_at_git_sha": "0951ff1c683581a28851a6385e243dca463a9266",
+  "recorded_at_git_sha": "43b68a105c057077e43025550a5300b034ee1c81",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt": {
       "envelope": {
         "json": "{\"invocation\":{\"scope\":{\"session_id\":\"session\",\"turn_id\":\"turn\",\"turn_index\":1,\"protocol_iteration\":0},\"subject\":{\"type\":\"effect\",\"effect_id\":\"scalar-lashlang-tool-attempt\",\"kind\":\"tool_attempt\"},\"replay\":{\"key\":\"session:turn:1:0:tool_attempt:scalar-lashlang-tool-attempt\"}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"replay-scalar-call\",\"tool_id\":\"tool:replay_scalar_counter\",\"tool_name\":\"replay_scalar_counter\",\"args\":{\"call\":\"replay-scalar-call\"}},\"attempt\":1,\"max_attempts\":1}}",
-        "hash": "95c5fd70c1fb720fada454325ea511d46c69c55b18851b9842c25742ba44e94e"
+        "hash": "1e3f260f22cc1b01e3e6c8c495b5a3aca98351b099adcd2a8712d821dab19742"
       },
       "outcome": {
         "Ok": {
@@ -23,7 +23,10 @@
                 "outcome": {
                   "status": "success",
                   "payload": {
-                    "call": "replay-scalar-call"
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "call": "replay-scalar-call"
+                    }
                   }
                 }
               },

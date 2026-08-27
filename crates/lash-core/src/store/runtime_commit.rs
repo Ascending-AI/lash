@@ -50,7 +50,10 @@ fn usage_payload_identity_bytes(entry: &crate::TokenLedgerEntry) -> Vec<u8> {
 }
 
 fn usage_payload_identity_hash(entry: &crate::TokenLedgerEntry) -> String {
-    crate::stable_hash::sha256_hex(&usage_payload_identity_bytes(entry))
+    crate::stable_hash::blake3_hex(
+        "lash-runtime-usage-payload/v2",
+        &usage_payload_identity_bytes(entry),
+    )
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -253,7 +256,7 @@ impl RuntimeCommit {
 /// until a commit containing the row has a confirmed outcome. Stores enforce
 /// uniqueness per session over all four fields.
 ///
-/// `payload_hash` is lowercase hexadecimal SHA-256 of Lash's hand-written,
+/// `payload_hash` is lowercase hexadecimal BLAKE3 of Lash's hand-written,
 /// domain-prefixed, length-framed projection of [`crate::TokenLedgerEntry`] and
 /// its nested [`crate::TokenUsage`]. Binding both version and content makes
 /// reuse of an operation ordinal for a different row a distinct durable
@@ -273,7 +276,7 @@ pub struct RuntimeUsageDeltaIdentity {
     pub entry_ordinal: u64,
     /// Version of the hand-written payload projection used by `payload_hash`.
     pub payload_encoding_version: u32,
-    /// SHA-256 of the entry's versioned canonical projection, encoded as 64
+    /// BLAKE3 of the entry's versioned canonical projection, encoded as 64
     /// lowercase hexadecimal characters.
     pub payload_hash: String,
 }

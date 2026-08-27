@@ -1831,7 +1831,7 @@ fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
 
 fn process_definition_identity(process_name: &str) -> serde_json::Value {
     serde_json::json!({
-        "module_ref": "lashlang:v1:sha256:module",
+        "module_ref": "lashlang:v2:blake3:module",
         "host_requirements_ref": "lashlang-host-requirements:v1:sha256:host",
         "process_ref": {
             "component": "process-component",
@@ -1877,7 +1877,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
     lash_core::TriggerSubscriptionDraft {
         subscription_key: "button-watcher".to_string(),
         env_ref: lash_core::ProcessExecutionEnvRef::new(
-            "process-env:v3:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "process-env:v4:blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ),
         wake_target: Some(lash_core::SessionScope::new("session-a")),
         name: Some("button watcher".to_string()),
@@ -1896,7 +1896,7 @@ fn trigger_subscription_draft() -> lash_core::TriggerSubscriptionDraft {
 fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
     let draft = trigger_subscription_draft();
     lash_core::TriggerSubscriptionRecord {
-        subscription_id: "trigger-subscription:v2:sha256:test".to_string(),
+        subscription_id: "trigger-subscription:v2:blake3:test".to_string(),
         owner_scope: lash_core::TriggerOwnerScope::session("session-a"),
         subscription_key: draft.subscription_key,
         incarnation: "incarnation-a".to_string(),

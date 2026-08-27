@@ -849,12 +849,12 @@ fn turn_completed_outcome_pins_the_closed_variant_vocabulary() {
         (
             TraceTurnOutcome::AgentFrameSwitch {
                 frame_switch: lash_trace::TraceAgentFrameSwitch {
-                    frame_key: "frame-key/v1/example".to_string(),
+                    frame_key: "frame-key/v2/example".to_string(),
                 },
             },
             json!({
                 "status": "agent_frame_switch",
-                "frame_switch": { "frame_key": "frame-key/v1/example" },
+                "frame_switch": { "frame_key": "frame-key/v2/example" },
             }),
         ),
         (
@@ -945,7 +945,7 @@ fn done_reason_tag_reproduces_the_pre_v8_reason_spellings() {
             // v7 reported a frame switch as done_reason="agent_frame_switch".
             TraceTurnOutcome::AgentFrameSwitch {
                 frame_switch: lash_trace::TraceAgentFrameSwitch {
-                    frame_key: "frame-key/v1/example".to_string(),
+                    frame_key: "frame-key/v2/example".to_string(),
                 },
             },
             "agent_frame_switch",
@@ -996,7 +996,7 @@ fn cancelled_turn_outcome_is_not_a_failure() {
         !TraceEvent::TurnCompleted {
             outcome: TraceTurnOutcome::AgentFrameSwitch {
                 frame_switch: lash_trace::TraceAgentFrameSwitch {
-                    frame_key: "frame-key/v1/example".to_string(),
+                    frame_key: "frame-key/v2/example".to_string(),
                 },
             },
         }

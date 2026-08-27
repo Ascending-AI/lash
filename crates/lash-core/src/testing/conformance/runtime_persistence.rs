@@ -1904,7 +1904,7 @@ where
     let changed_before = first.manifest.components["arbitrary/changed"].clone();
     assert_eq!(
         unchanged_descriptor.blob_ref.as_str(),
-        crate::stable_hash::sha256_hex(b"stable-body")
+        crate::BlobRef::for_content(b"stable-body").0
     );
 
     drop(open);
@@ -8854,7 +8854,7 @@ async fn attachment_manifest_reference_tracking_and_gc_root_set(
     let intent = |id: &AttachmentId, at: u64| AttachmentIntent {
         attachment_id: id.clone(),
         session_id: "root".to_string(),
-        canonical_uri: format!("lash-attachment://sha256/{id}"),
+        canonical_uri: format!("lash-attachment://blake3/{id}"),
         intent_at_epoch_ms: at,
         owner_kind: None,
         owner_id: None,

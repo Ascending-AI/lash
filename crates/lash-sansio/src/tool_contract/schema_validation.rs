@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::core_support::Blake3DomainHasher;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use crate::tool_contract::ToolContract;
 
@@ -99,7 +99,7 @@ fn compiled_schema_cache() -> &'static Mutex<CompiledSchemaCache> {
 
 fn schema_content_fingerprint(schema: &Value) -> Result<([u8; 32], usize), String> {
     struct DigestWriter<'a> {
-        digest: &'a mut Sha256,
+        digest: &'a mut Blake3DomainHasher,
         bytes_written: usize,
     }
 
@@ -115,7 +115,7 @@ fn schema_content_fingerprint(schema: &Value) -> Result<([u8; 32], usize), Strin
         }
     }
 
-    let mut digest = Sha256::new();
+    let mut digest = Blake3DomainHasher::new("lash-tool-schema-cache/v2");
     let serialized_bytes = {
         let mut writer = DigestWriter {
             digest: &mut digest,
@@ -124,7 +124,7 @@ fn schema_content_fingerprint(schema: &Value) -> Result<([u8; 32], usize), Strin
         serde_json::to_writer(&mut writer, schema).map_err(|error| error.to_string())?;
         writer.bytes_written
     };
-    Ok((digest.finalize().into(), serialized_bytes))
+    Ok((digest.finalize(), serialized_bytes))
 }
 
 fn compiled_schema(schema: &Value) -> Result<Arc<jsonschema::JSONSchema>, String> {

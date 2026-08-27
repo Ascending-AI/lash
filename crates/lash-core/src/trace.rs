@@ -12,7 +12,7 @@ use crate::llm::types::{
 };
 use crate::session_model::TokenUsage;
 use crate::{ToolCallOutcome, ToolCallOutput};
-use sha2::{Digest as _, Sha256};
+use lash_sansio::core_support::Blake3DomainHasher;
 
 #[cfg(test)]
 thread_local! {
@@ -342,9 +342,9 @@ fn trace_tool_spec(tool: &LlmToolSpec) -> TraceToolSpec {
     }
 }
 
-struct Sha256Writer(Sha256);
+struct CompositionHashWriter(Blake3DomainHasher);
 
-impl std::io::Write for Sha256Writer {
+impl std::io::Write for CompositionHashWriter {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.0.update(bytes);
         Ok(bytes.len())
@@ -358,16 +358,15 @@ impl std::io::Write for Sha256Writer {
 pub(crate) fn composition_tool_fingerprint(tool: &LlmToolSpec) -> [u8; 32] {
     #[cfg(test)]
     COMPOSITION_SCHEMA_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
-    let mut writer = Sha256Writer(Sha256::new());
+    let mut writer = CompositionHashWriter(Blake3DomainHasher::new("lash-composition-tool/v2"));
     serde_json::to_writer(&mut writer, tool)
         .expect("model-facing tool contract serialization is infallible");
-    writer.0.finalize().into()
+    writer.0.finalize()
 }
 
 pub(crate) fn trace_composition_key(req: &LlmRequest, tool_fingerprints: &[[u8; 32]]) -> [u8; 32] {
     debug_assert_eq!(req.tools.len(), tool_fingerprints.len());
-    let mut hash = Sha256::new();
-    hash.update(b"lash:model-facing-composition:v1\0");
+    let mut hash = Blake3DomainHasher::new("lash-model-facing-composition/v2");
     if let Some(message) = req
         .messages
         .first()
@@ -384,7 +383,7 @@ pub(crate) fn trace_composition_key(req: &LlmRequest, tool_fingerprints: &[[u8; 
     for fingerprint in tool_fingerprints {
         hash.update(fingerprint);
     }
-    hash.finalize().into()
+    hash.finalize()
 }
 
 pub(crate) struct CompositionTraceSnapshot {

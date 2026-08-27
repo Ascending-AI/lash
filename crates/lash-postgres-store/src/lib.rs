@@ -70,7 +70,6 @@ use lash_core::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
     TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
 };
-use sha2::{Digest, Sha256};
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 use sqlx::{Acquire, Executor, Postgres, Row};
@@ -237,7 +236,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 63 replaces the observer-intent relation wrapper, depth counter, and
 // split pending tables with one attributed pending-intent table. Component-62
 // stores are folded forward in place.
-const SCHEMA_VERSION: i32 = 63;
+// Version 64 switches content and semantic identities to domain-tagged BLAKE3.
+// Existing stores are rejected rather than reinterpreting SHA-256 rows.
+const SCHEMA_VERSION: i32 = 64;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

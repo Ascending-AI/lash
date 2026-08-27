@@ -318,7 +318,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
             lash_core::AttachmentIntent {
                 attachment_id: attachment_id.clone(),
                 session_id: "sess-1".to_string(),
-                canonical_uri: format!("lash-attachment://sha256/{attachment_id}"),
+                canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
                 intent_at_epoch_ms: 1_000,
                 owner_kind: None,
                 owner_id: None,
@@ -391,7 +391,7 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
         lash_core::AttachmentIntent {
             attachment_id: attachment.id.clone(),
             session_id: request.session_id.clone(),
-            canonical_uri: format!("lash-attachment://sha256/{}", attachment.id),
+            canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
             intent_at_epoch_ms: 1,
             owner_kind: None,
             owner_id: None,

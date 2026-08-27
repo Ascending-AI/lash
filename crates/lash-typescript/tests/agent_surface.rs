@@ -139,7 +139,7 @@ fn production_link_cache_preserves_typescript_artifact_identity() {
             .linked_module()
             .module_ref
             .as_str()
-            .starts_with("lashlang:v1:sha256:")
+            .starts_with("lashlang:v2:blake3:")
     );
 }
 

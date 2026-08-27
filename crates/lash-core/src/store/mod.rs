@@ -171,6 +171,11 @@ pub fn validate_session_id(session_id: &str) -> Result<(), StoreError> {
 pub struct BlobRef(pub String);
 
 impl BlobRef {
+    /// Derives the current versioned BLAKE3 content address for a blob body.
+    pub fn for_content(content: &[u8]) -> Self {
+        Self(crate::stable_hash::blake3_hex("lash-blob/v2", content))
+    }
+
     /// Exposes the opaque durable blob reference to store implementors for backend round-tripping
     /// without imposing path or URL semantics.
     pub fn as_str(&self) -> &str {

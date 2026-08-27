@@ -712,10 +712,10 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
             .await;
     assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
     let literal_ids = [
-        "tool-intent:v1:sha256:d637b38a6e29a2fdba6263273a49fe3cfc55b37ec8196c90a14293e46911cfde",
-        "tool-intent:v1:sha256:7dd01aae6fbd504ff82c32241f5070a31c25ff685469d12ff2c7b179bcc88a50",
-        "tool-intent:v1:sha256:96b311b993750b668dc3d87b7b2697d132ce6fe8f2b5f102c7f20f089220d64a",
-        "tool-intent:v1:sha256:d4e5390c7ffdc00fde49a69219a623f95c49146c8865ac27c20b10aa713325bc",
+        "tool-intent:v1:blake3:fa76f136a996c94029681d3115e19813ddd90a1fb98fdf39782fb1fb2d28a11a",
+        "tool-intent:v1:blake3:485de7468d8439a7bc2386d6a65ce394f005f6104640e8352f97520f45932d7b",
+        "tool-intent:v1:blake3:761b8f28e9b59f5ed0a9894d5aa51652ad7d63b91efcc62004dc88d3f2d7148a",
+        "tool-intent:v1:blake3:0e1b74123e6d826a319823f97cdbe1647f0918d454a9fdec817c2e55685ac5ad",
     ];
     let actual_ids = outcomes
         .iter()

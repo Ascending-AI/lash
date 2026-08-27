@@ -856,7 +856,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         move || lash_core::AttachmentIntent {
             attachment_id: attachment_id.clone(),
             session_id: session_id.clone(),
-            canonical_uri: format!("lash-attachment://sha256/{attachment_id}"),
+            canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
             intent_at_epoch_ms: 1,
             owner_kind: None,
             owner_id: None,
@@ -991,7 +991,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
         lash_core::AttachmentIntent {
             attachment_id: attachment.id.clone(),
             session_id: request.session_id.clone(),
-            canonical_uri: format!("lash-attachment://sha256/{}", attachment.id),
+            canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
             intent_at_epoch_ms: 1,
             owner_kind: None,
             owner_id: None,

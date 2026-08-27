@@ -115,7 +115,10 @@ impl ToolIntentSubmissionRecord {
         intent: ToolIntent,
     ) -> Result<Self, serde_json::Error> {
         let kind = intent.kind();
-        let payload_hash = crate::stable_hash::sha256_hex(&serde_json::to_vec(&intent)?);
+        let payload_hash = crate::stable_hash::blake3_hex(
+            "lash-tool-intent-payload/v2",
+            &serde_json::to_vec(&intent)?,
+        );
         Ok(Self {
             identity,
             kind,
@@ -336,7 +339,7 @@ mod tests {
                 execution_scope_id: "turn-7".to_string(),
                 tool_call_id: "call-3".to_string(),
                 intent_index: 2,
-                replay_key: "tool-intent:v1:sha256:8cd893b79abe66a4a894753ab43053964c7bc4253a841916235b90aeedf50719".to_string(),
+                replay_key: "tool-intent:v1:blake3:b757ef3f41338e84374dcdf4a72819c12c1804ce0ab5bd3f717a8a0df2a51cf6".to_string(),
             }
         );
     }

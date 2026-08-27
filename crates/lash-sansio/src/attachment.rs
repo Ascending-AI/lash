@@ -26,7 +26,7 @@ impl std::error::Error for InvalidAttachmentId {}
 
 /// Maximum attachment-id length.
 ///
-/// Content ids minted by Lash are 64-byte lowercase SHA-256 hex strings. The
+/// Content ids minted by Lash are 64-byte lowercase BLAKE3 hex strings. The
 /// larger bound leaves room for compatible caller-defined ids while keeping
 /// file names comfortably below common per-component limits after a staging
 /// suffix is appended.

@@ -16,7 +16,6 @@ use lash_trace::{
     TraceRuntimeSubject, TraceSink,
 };
 use lashlang::{ExecutionHost, ExecutionHostError};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -47,7 +46,7 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// the duplicate persisted-envelope copy. A segment parked by another version
 /// is refused rather than decoded (ADR 0055). Re-exported by the facade's
 /// `formats` manifest so a host can read it before wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 4;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 5;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -119,7 +118,10 @@ pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
         &input.process_name,
     ))
     .expect("lashlang program identity should serialize");
-    format!("sha256:{:x}", Sha256::digest(identity))
+    format!(
+        "blake3:{}",
+        lash_sansio::core_support::blake3_domain_hash_hex("lash-lashlang-program/v2", identity,)
+    )
 }
 
 fn validate_lashlang_program_hash(

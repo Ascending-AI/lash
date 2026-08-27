@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentMeta, AttachmentRef};
-use sha2::{Digest, Sha256};
 
 use crate::store::{
     AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
@@ -976,10 +975,10 @@ async fn reclamation_fence_backoff(attempt: u32) {
 }
 
 pub fn content_id(bytes: &[u8]) -> AttachmentId {
-    // A SHA-256 hex digest is 64 lowercase hex characters — statically within
+    // A BLAKE3 hex digest is 64 lowercase hex characters — statically within
     // every attachment-id rule, so this cannot fail.
-    AttachmentId::parse(format!("{:x}", Sha256::digest(bytes)))
-        .expect("sha-256 hex digest is a valid attachment id")
+    AttachmentId::parse(crate::stable_hash::blake3_hex("lash-attachment/v2", bytes))
+        .expect("BLAKE3 hex digest is a valid attachment id")
 }
 
 /// The concrete, session-bound facade over a flat [`AttachmentStore`] backend —
@@ -1276,7 +1275,7 @@ impl AttachmentManifest for NoopAttachmentManifest {
 }
 
 fn attachment_uri(attachment_id: &AttachmentId) -> String {
-    format!("lash-attachment://sha256/{attachment_id}")
+    format!("lash-attachment://blake3/{attachment_id}")
 }
 
 fn now_epoch_ms() -> u64 {

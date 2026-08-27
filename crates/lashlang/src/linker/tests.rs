@@ -340,7 +340,7 @@ mod tests {
             linked
                 .module_ref
                 .as_str()
-                .starts_with("lashlang:v1:sha256:")
+                .starts_with("lashlang:v2:blake3:")
         );
     }
 

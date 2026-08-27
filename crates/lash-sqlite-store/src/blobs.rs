@@ -11,9 +11,9 @@
 
 use super::*;
 
-/// Hex SHA-256 content address that keys every row in the `blobs` table.
+/// Versioned BLAKE3 content address that keys every row in the `blobs` table.
 fn blob_content_hash(content: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(content))
+    BlobRef::for_content(content).0
 }
 
 impl Store {

@@ -139,7 +139,7 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
         "execution_scope_id=intent-ingress-observability-turn",
         "tool_call_id=observable",
         "intent_index=0",
-        "replay_key=tool-intent:v1:sha256:",
+        "replay_key=tool-intent:v1:blake3:",
         "decision=\"admitted\"",
         "decision=\"refused\"",
         "refusal_kind=\"duplicate_identity\"",

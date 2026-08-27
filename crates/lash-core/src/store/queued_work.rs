@@ -9,8 +9,6 @@
 //! implementation, exercised against every backend by the shared
 //! `runtime_persistence` conformance suite.
 
-use sha2::{Digest, Sha256};
-
 use super::LeaseOwnerIdentity;
 use crate::{
     DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimBoundary,
@@ -917,15 +915,13 @@ impl WorkClaimLease {
             claim_fencing_token,
         )?;
         let claim_id = derive_claim_id(dialect, enqueue_seq, fencing_token);
-        let lease_token = format!(
-            "{:x}",
-            Sha256::digest(
-                format!(
-                    "{}:{}:{}:{}:{}",
-                    session_id, owner.owner_id, owner.incarnation_id, claim_id, now_epoch_ms
-                )
-                .as_bytes(),
+        let lease_token = crate::stable_hash::blake3_hex(
+            "lash-queued-work-claim-lease/v2",
+            format!(
+                "{}:{}:{}:{}:{}",
+                session_id, owner.owner_id, owner.incarnation_id, claim_id, now_epoch_ms
             )
+            .as_bytes(),
         );
         Ok(Self {
             claim_id,
@@ -950,7 +946,10 @@ pub fn derive_batch_id(
     if let Some(nonce) = nonce {
         seed.push_str(&format!(":{nonce}"));
     }
-    format!("qwb:{:x}", Sha256::digest(seed.as_bytes()))
+    format!(
+        "qwb:{}",
+        crate::stable_hash::blake3_hex("lash-queued-work-batch/v2", seed.as_bytes())
+    )
 }
 
 #[cfg(test)]

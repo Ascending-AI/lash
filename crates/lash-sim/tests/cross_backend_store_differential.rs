@@ -1510,7 +1510,7 @@ impl BackendRunner {
                 self.store().record_intent(AttachmentIntent {
                     attachment_id: differential_attachment_id(),
                     session_id: self.session_id.clone(),
-                    canonical_uri: "lash-attachment://sha256/differential-attachment".to_string(),
+                    canonical_uri: "lash-attachment://blake3/differential-attachment".to_string(),
                     intent_at_epoch_ms: 1_000,
                     owner_kind: Some(AttachmentOwnerKind::Turn),
                     owner_id: Some(operation),

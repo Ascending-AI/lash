@@ -1,5 +1,3 @@
-use sha2::{Digest, Sha256};
-
 use super::ContentHash;
 
 #[derive(Default)]
@@ -37,16 +35,9 @@ impl HashWriter {
     }
 
     pub(super) fn finish(self) -> ContentHash {
-        ContentHash::new(hex_digest(&Sha256::digest(self.bytes)))
+        ContentHash::new(lash_sansio::core_support::blake3_domain_hash_hex(
+            "lash-lashlang-content/v2",
+            self.bytes,
+        ))
     }
-}
-
-fn hex_digest(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
 }

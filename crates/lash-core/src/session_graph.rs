@@ -110,8 +110,8 @@ pub(crate) mod facade_ops {
 fn draft_node_id(namespace: &str, ordinal: u64) -> String {
     let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
     format!(
-        "draft-node/v2/{}",
-        crate::stable_hash::sha256_hex(preimage.as_bytes())
+        "draft-node/v3/{}",
+        crate::stable_hash::blake3_hex("lash-draft-node/v3", preimage.as_bytes())
     )
 }
 
@@ -128,8 +128,8 @@ pub fn frame_node_id(session_id: &str, frame_key: &str) -> crate::FrameNodeId {
         frame_key.len()
     );
     crate::FrameNodeId::new(format!(
-        "frame-node/v2/{}",
-        crate::stable_hash::sha256_hex(preimage.as_bytes())
+        "frame-node/v3/{}",
+        crate::stable_hash::blake3_hex("lash-frame-node/v3", preimage.as_bytes())
     ))
 }
 

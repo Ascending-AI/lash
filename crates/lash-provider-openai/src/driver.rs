@@ -129,9 +129,7 @@ fn build_request_body(
 }
 
 fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
-    use sha2::Digest as _;
-
-    sha2::Sha256::digest(body).into()
+    lash_sansio::core_support::blake3_domain_hash("lash-openai-responses-request/v2", body)
 }
 
 pub(crate) fn responses_request_fingerprint(

@@ -657,7 +657,7 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     ));
 }
 
-/// Fixed-byte authority for the version-14 root encoding (ADR 0056).
+/// Fixed-byte authority for the version-15 root encoding (ADR 0056).
 ///
 /// Encoding both sides of a comparison with the currently linked encoder
 /// cannot see the drift that matters: a dependency bump or serializer change
@@ -668,14 +668,14 @@ fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// persisted shape changed: decide on a version bump, then update the
 /// golden, never the reverse.
 #[test]
-fn version_14_root_encodes_to_golden_bytes() {
+fn version_15_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "84a776657273696f6e0ea6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282",
+        "84a776657273696f6e0fa6656e67696e65a86c6173686c616e67a7676c6f62616c7382ad696e6c696e655f7363616c617282",
         "a46b696e64a6696e6c696e65a4626f6479c43e82a776657273696f6e07a7676c6f62616c739182a46e616d65a576616c7565",
         "a576616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6cb06c65616665645f636f6d706f7369746582a4",
-        "6b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f7368613235362f653133366335",
-        "3033396230303164613166306261356265353865363866313163616136343562303938636431356334346361383034663531",
-        "3764623065383662b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657986aa73657373696f6e5f69",
+        "6b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c616b65332f653233376136",
+        "6232376637663439353936616562343139363238363461656363303436633466626662323664336439316239333161313430",
+        "3262636665363937b464656665727265645f7265736f6c7574696f6e7382a86c696e6b5f6b657986aa73657373696f6e5f69",
         "64ae73657373696f6e2d676f6c64656ea77475726e5f6964a67475726e2d37aa7475726e5f696e64657803b270726f746f63",
         "6f6c5f697465726174696f6e02a96566666563745f6964a86566666563742d39aa7265706c61795f6b6579a87265706c6179",
         "2d31ab7265736f6c7574696f6e7382a97765622e666574636884a46b696e64a87265736f6c766564aa646566696e6974696f",
@@ -748,7 +748,7 @@ fn version_14_root_encodes_to_golden_bytes() {
         .collect::<String>();
     assert_eq!(
         hex, GOLDEN,
-        "the version-14 root encoding changed; decide on a version bump before updating the golden"
+        "the version-15 root encoding changed; decide on a version bump before updating the golden"
     );
 
     let decoded: RlmSnapshotRoot =
@@ -757,7 +757,7 @@ fn version_14_root_encodes_to_golden_bytes() {
     assert_eq!(
         root_leaf_keys(&decoded),
         [
-            "execution_state/sha256/e136c5039b001da1f0ba5be58e68f11caa645b098cd15c44ca804f517db0e86b"
+            "execution_state/blake3/e237a6b27f7f49596aeb41962864aecc046c4fbfb26d3d91b931a1402bcfe697"
                 .to_string(),
         ]
         .into_iter()
@@ -905,7 +905,7 @@ fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
 fn resolving_an_absent_leaf_is_a_typed_missing_leaf_rejection() {
     let state = lash_core::plugin::HydratedExecutionState::default();
 
-    let error = resolve_leaf(&state, "kept", "execution_state/sha256/absent")
+    let error = resolve_leaf(&state, "kept", "execution_state/blake3/absent")
         .expect_err("an absent leaf must not resolve");
 
     assert!(matches!(
@@ -913,7 +913,7 @@ fn resolving_an_absent_leaf_is_a_typed_missing_leaf_rejection() {
         RlmSnapshotError::MissingLeaf {
             logical_key,
             component,
-        } if logical_key == "kept" && component == "execution_state/sha256/absent"
+        } if logical_key == "kept" && component == "execution_state/blake3/absent"
     ));
 }
 

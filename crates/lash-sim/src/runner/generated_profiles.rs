@@ -1158,21 +1158,25 @@ impl CheckpointStateCanonicalizer {
 
 fn canonicalize_embedded_hashes(aliases: &mut BTreeMap<String, String>, raw: &str) -> String {
     let mut canonical = raw.to_string();
-    let mut search_from = 0usize;
-    while let Some(relative) = canonical[search_from..].find("sha256:") {
-        let hash_start = search_from + relative + "sha256:".len();
-        let hash_end = hash_start + 64;
-        let Some(hash) = canonical.get(hash_start..hash_end) else {
-            break;
-        };
-        if !hash.chars().all(|character| character.is_ascii_hexdigit()) {
-            search_from = hash_start;
-            continue;
+    for algorithm in ["sha256", "blake3"] {
+        let marker = format!("{algorithm}:");
+        let mut search_from = 0usize;
+        while let Some(relative) = canonical[search_from..].find(&marker) {
+            let hash_start = search_from + relative + marker.len();
+            let hash_end = hash_start + 64;
+            let Some(hash) = canonical.get(hash_start..hash_end) else {
+                break;
+            };
+            if !hash.chars().all(|character| character.is_ascii_hexdigit()) {
+                search_from = hash_start;
+                continue;
+            }
+            let hash = hash.to_string();
+            let alias_key = format!("{algorithm}:{hash}");
+            let alias = canonical_alias(aliases, &alias_key, algorithm);
+            canonical.replace_range(hash_start..hash_end, &alias);
+            search_from = hash_start + alias.len();
         }
-        let hash = hash.to_string();
-        let alias = canonical_alias(aliases, &hash, "sha256");
-        canonical.replace_range(hash_start..hash_end, &alias);
-        search_from = hash_start + alias.len();
     }
     canonical
 }
@@ -1423,6 +1427,21 @@ mod seed_tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[test]
+    fn determinism_projection_canonicalizes_blake3_identity_entropy() {
+        let first = canonicalize_embedded_hashes(
+            &mut BTreeMap::new(),
+            &format!("process:lashlang:v2:blake3:{}", "a".repeat(64)),
+        );
+        let rerun = canonicalize_embedded_hashes(
+            &mut BTreeMap::new(),
+            &format!("process:lashlang:v2:blake3:{}", "b".repeat(64)),
+        );
+
+        assert_eq!(first, rerun);
+        assert_eq!(first, "process:lashlang:v2:blake3:<blake3-001>");
+    }
 
     #[test]
     fn salted_seed_runs_explore_disjoint_seed_sets_and_reproduce_by_index() {

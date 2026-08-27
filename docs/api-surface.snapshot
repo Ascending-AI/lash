@@ -1783,6 +1783,7 @@ lash::persistence::AttachmentWriteFence::ReclamationInFlight
 lash::persistence::BlobRef
 lash::persistence::BlobRef::0
 lash::persistence::BlobRef::as_str
+lash::persistence::BlobRef::for_content
 lash::persistence::CURRENT_SESSION_STATE_VERSION
 lash::persistence::CheckpointComponentDescriptor
 lash::persistence::CheckpointComponentDescriptor::blob_ref

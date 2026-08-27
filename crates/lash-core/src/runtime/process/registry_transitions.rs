@@ -22,8 +22,6 @@
 //! or spuriously expire a lease across hosts. Both hand the instant they trust
 //! to the same table.
 
-use sha2::{Digest, Sha256};
-
 use crate::plugin::PluginError;
 use crate::store::session_execution_lease::LeaseOwnerIdentity;
 
@@ -279,7 +277,7 @@ pub fn next_process_lease_fencing_token(retained: u64) -> Result<u64, PluginErro
 /// Mint the lease a successful claim acquires.
 ///
 /// The `lease_token` is a durable value and this preimage is its contract:
-/// `sha256("{process_id}:{owner_id}:{incarnation_id}:{claimed_at}:{fencing_token}")`,
+/// `blake3("{process_id}:{owner_id}:{incarnation_id}:{claimed_at}:{fencing_token}")`,
 /// rendered lower-case hex. A token is minted exactly once at claim time and
 /// only ever compared afterwards — no backend re-derives it — so single-homing
 /// the mint here (rather than beside each `INSERT`) is about one definition of
@@ -299,15 +297,13 @@ pub fn acquired_process_lease(
         schema_version: PROCESS_LEASE_SCHEMA_VERSION,
         process_id: process_id.to_string(),
         owner: owner.clone(),
-        lease_token: format!(
-            "{:x}",
-            Sha256::digest(
-                format!(
-                    "{process_id}:{}:{}:{now_ms}:{fencing_token}",
-                    owner.owner_id, owner.incarnation_id
-                )
-                .as_bytes()
+        lease_token: crate::stable_hash::blake3_hex(
+            "lash-process-lease/v2",
+            format!(
+                "{process_id}:{}:{}:{now_ms}:{fencing_token}",
+                owner.owner_id, owner.incarnation_id
             )
+            .as_bytes(),
         ),
         fencing_token,
         claimed_at_epoch_ms: now_ms,
@@ -962,11 +958,11 @@ mod tests {
             1_700_000_000_000,
             30_000,
         );
-        // sha256("process-a:owner-a:incarnation-a:1700000000000:5"). Durable
+        // blake3("process-a:owner-a:incarnation-a:1700000000000:5"). Durable
         // value: changing this literal changes every backend's lease identity.
         assert_eq!(
             minted.lease_token,
-            "9f4707d653c3ba3578026558af3108694967b2583443ebbac5b80d86c2c626e3"
+            "c5ee3efb2c743bf08844f73bb3eee1635350b9c6443421a62c5a83e4dc354acc"
         );
         assert_eq!(minted.process_id, "process-a");
         assert_eq!(minted.fencing_token, 5);

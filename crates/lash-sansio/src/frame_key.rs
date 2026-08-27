@@ -1,10 +1,8 @@
 //! Deterministic key material for opening an agent frame.
 
-use sha2::{Digest, Sha256};
+use crate::core_support::Blake3DomainHasher;
 
-const FRAME_KEY_PREFIX: &str = "frame-key/v1/";
-const FRAME_KEY_NAMESPACE: &[u8] = b"lash.agent-frame-key";
-const FRAME_KEY_VERSION: u8 = 1;
+const FRAME_KEY_PREFIX: &str = "frame-key/v2/";
 
 /// A non-empty, deterministically derived key that Lash turns into a durable
 /// agent-frame identity.
@@ -58,15 +56,13 @@ impl FrameKey {
     }
 
     fn derive<'a>(source_tag: u8, parts: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut digest = Sha256::new();
-        digest.update((FRAME_KEY_NAMESPACE.len() as u64).to_be_bytes());
-        digest.update(FRAME_KEY_NAMESPACE);
-        digest.update([FRAME_KEY_VERSION, source_tag]);
+        let mut digest = Blake3DomainHasher::new("lash.agent-frame-key/v2");
+        digest.update([source_tag]);
         for part in parts {
             digest.update((part.len() as u64).to_be_bytes());
             digest.update(part.as_bytes());
         }
-        Self(format!("{FRAME_KEY_PREFIX}{:x}", digest.finalize()))
+        Self(format!("{FRAME_KEY_PREFIX}{}", digest.finalize_hex()))
     }
 
     fn is_derived(value: &str) -> bool {
@@ -123,7 +119,7 @@ mod tests {
         );
         assert_eq!(
             first.as_str(),
-            "frame-key/v1/db9b047271a6c848bfd0dc999650830db8e4d77c7fb59647b6932d735af580ce"
+            "frame-key/v2/1ba6865b190e459df195c74ceb3df72dc0a1048f32af96b75dfee21b97a44ab1"
         );
         assert_ne!(
             first,
@@ -158,15 +154,15 @@ mod tests {
 
         assert_eq!(
             first.as_str(),
-            "frame-key/v1/9e829bdb41a166346de53fb889e2fe9431bb780f82da1b3641b5d40b2d237636"
+            "frame-key/v2/ae916bf196d2905330ef5485b64bc610ee21a43aea9d029a6e0afbb8d1179e1c"
         );
         assert_eq!(
             second.as_str(),
-            "frame-key/v1/f57a44b8290e2661a739b9441f8fb8444771405ee60f00c5e26ee76ae4213ae8"
+            "frame-key/v2/a401a116fec4bd631bde8a7846d24ebe8e7c02af860a08fd159071914f692553"
         );
         assert_eq!(
             reused.as_str(),
-            "frame-key/v1/9e829bdb41a166346de53fb889e2fe9431bb780f82da1b3641b5d40b2d237636"
+            "frame-key/v2/ae916bf196d2905330ef5485b64bc610ee21a43aea9d029a6e0afbb8d1179e1c"
         );
     }
 

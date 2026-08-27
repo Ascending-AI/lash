@@ -17,6 +17,46 @@ use crate::{
     ToolFailureClass, ToolManifest, ToolRetryPolicy, ToolValue,
 };
 
+/// BLAKE3 hasher initialized with Lash's mandatory length-prefixed domain tag.
+///
+/// This is an internal cross-crate seam. Durable identity owners still own the
+/// bytes written after the tag and must version their domain when that format
+/// changes.
+pub struct Blake3DomainHasher(blake3::Hasher);
+
+impl Blake3DomainHasher {
+    pub fn new(domain: &str) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&(domain.len() as u64).to_be_bytes());
+        hasher.update(domain.as_bytes());
+        Self(hasher)
+    }
+
+    pub fn update(&mut self, bytes: impl AsRef<[u8]>) {
+        self.0.update(bytes.as_ref());
+    }
+
+    pub fn finalize(self) -> [u8; 32] {
+        self.0.finalize().into()
+    }
+
+    pub fn finalize_hex(self) -> String {
+        self.0.finalize().to_hex().to_string()
+    }
+}
+
+pub fn blake3_domain_hash(domain: &str, bytes: impl AsRef<[u8]>) -> [u8; 32] {
+    let mut hasher = Blake3DomainHasher::new(domain);
+    hasher.update(bytes);
+    hasher.finalize()
+}
+
+pub fn blake3_domain_hash_hex(domain: &str, bytes: impl AsRef<[u8]>) -> String {
+    let mut hasher = Blake3DomainHasher::new(domain);
+    hasher.update(bytes);
+    hasher.finalize_hex()
+}
+
 pub trait AttachmentIdCoreSupport {
     fn as_str(&self) -> &str;
 }

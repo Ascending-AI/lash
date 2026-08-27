@@ -1,15 +1,12 @@
 use super::*;
 
 #[test]
-fn immediate_predecessor_has_the_attributed_intent_forward_migration() {
-    let migration = SCHEMA_MIGRATIONS
-        .iter()
-        .find(|migration| migration.from == SCHEMA_VERSION - 1)
-        .expect("the forward migration must be visible to the version-bump E2E");
-    assert!(!migration.statements.is_empty());
-    assert_eq!(
-        migration.introduced_relations,
-        &["lash_session_meta_pending_observer_intents"],
+fn immediate_predecessor_is_a_recreate_boundary_at_the_blake3_cutover() {
+    assert!(
+        SCHEMA_MIGRATIONS
+            .iter()
+            .all(|migration| migration.from != SCHEMA_VERSION - 1),
+        "component 63 must not migrate SHA-256 identities into component 64"
     );
 }
 

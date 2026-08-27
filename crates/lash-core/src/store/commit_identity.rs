@@ -667,15 +667,9 @@ pub(super) fn append_request_identity_hash(
     requested_ancestor_node_id: Option<&str>,
     nodes: &[crate::SessionAppendNode],
 ) -> Result<String, StoreError> {
-    use sha2::Digest;
-
-    Ok(format!(
-        "{:x}",
-        sha2::Sha256::digest(append_request_identity_bytes(
-            operation,
-            requested_ancestor_node_id,
-            nodes,
-        )?)
+    Ok(crate::stable_hash::blake3_hex(
+        "lash-append-request/v2",
+        &append_request_identity_bytes(operation, requested_ancestor_node_id, nodes)?,
     ))
 }
 
@@ -1357,7 +1351,7 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
                     blob_ref: component.body().map_or_else(
                         || component.blob_ref().cloned(),
                         |body| {
-                            let blob_ref = BlobRef(crate::stable_hash::sha256_hex(body));
+                            let blob_ref = BlobRef::for_content(body);
                             #[cfg(feature = "perf-witness")]
                             crate::perf_witness::record_hash_pass(body.len());
                             Some(blob_ref)
@@ -1494,18 +1488,29 @@ pub(super) fn turn_commit_hash(commit: &RuntimeCommit) -> Result<String, StoreEr
             "failed to serialize runtime turn commit hash: {err}"
         ))
     })?;
-    Ok(domain_hash("lash-intent/v1", &[encoded.as_bytes()]))
+    Ok(domain_hash("lash-intent/v2", &[encoded.as_bytes()]))
 }
 
 fn domain_hash(domain: &str, components: &[&[u8]]) -> String {
-    use sha2::Digest;
-
-    let mut hasher = sha2::Sha256::new();
-    for component in std::iter::once(domain.as_bytes()).chain(components.iter().copied()) {
+    let mut hasher = lash_sansio::core_support::Blake3DomainHasher::new(domain);
+    for component in components {
         hasher.update((component.len() as u64).to_be_bytes());
         hasher.update(component);
     }
-    format!("{:x}", hasher.finalize())
+    hasher.finalize_hex()
+}
+
+#[cfg(test)]
+mod blake3_vector_tests {
+    use super::domain_hash;
+
+    #[test]
+    fn commit_identity_v2_blake3_vector_is_pinned() {
+        assert_eq!(
+            domain_hash("lash-intent/v2", &[b"lash-commit-vector"]),
+            "120001d338cb60a97d39d2f223d690a8f7548bf8e42beb0a3d7c03a36b477443"
+        );
+    }
 }
 
 pub fn derive_history_node_id(
@@ -1524,7 +1529,7 @@ pub fn derive_history_node_id(
     Ok(format!(
         "n_{}",
         domain_hash(
-            "lash-history-node/v2",
+            "lash-history-node/v3",
             &[
                 session_id.as_bytes(),
                 operation.as_bytes(),

@@ -48,7 +48,7 @@ impl FileAttachmentStore {
     }
 
     fn content_root(&self) -> PathBuf {
-        self.root.join("sha256")
+        self.root.join("blake3")
     }
 
     fn path_for_id(&self, id: GuardedAttachmentId<'_>) -> PathBuf {
@@ -426,7 +426,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let store = FileAttachmentStore::new(temp.path());
         let reference = store.put(vec![4, 5, 6], meta()).await.expect("put");
-        let content_root = temp.path().join("sha256");
+        let content_root = temp.path().join("blake3");
         let stray_dir = content_root.join("zz");
         fs::create_dir_all(&stray_dir).expect("mkdir stray prefix");
         // A name no `put` could have produced: over the id length bound.

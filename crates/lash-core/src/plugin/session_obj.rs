@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use sha2::{Digest, Sha256};
+use lash_sansio::core_support::Blake3DomainHasher;
 
 use super::*;
 
@@ -668,7 +668,7 @@ impl PluginSession {
     }
 
     pub fn snapshot_revision_fingerprint(&self) -> u64 {
-        let mut hasher = Sha256::new();
+        let mut hasher = Blake3DomainHasher::new("lash-plugin-snapshot-revision/v2");
         for plugin in &self.plugins {
             hasher.update(plugin.id().as_bytes());
             hasher.update([0]);

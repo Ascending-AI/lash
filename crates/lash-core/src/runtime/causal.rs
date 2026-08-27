@@ -477,7 +477,7 @@ mod tests {
                     session_id: "ab".to_string(),
                     turn_id: "c".to_string(),
                 },
-                "direct-discriminator:v2:sha256:851eac6c6173fdebd77d789659a58b29a6e35512e9bcf7b6b96e8ebacf96c454",
+                "direct-discriminator:v2:blake3:990084fc9028c4cdec32cdc3182e323cdc03bf1fef212862fbd9442d60a69d42",
             ),
             (
                 CausalRef::Effect {
@@ -485,27 +485,27 @@ mod tests {
                     turn_id: None,
                     effect_id: "e".to_string(),
                 },
-                "direct-discriminator:v2:sha256:aa4d02db8dbf7c09b9f8a08abc189e7712fbe0000c9074e63b604f9c0c3d73f2",
+                "direct-discriminator:v2:blake3:3f43a9b312aa3b7f98045904632bd4daf3aada4430019b4427616f600b6f0857",
             ),
             (
                 CausalRef::ToolCall {
                     session_id: "s".to_string(),
                     call_id: "c".to_string(),
                 },
-                "direct-discriminator:v2:sha256:cdaa72d6a6500d57406c77e2549323fdf9a2b33aad66cc3a1132ef4232401356",
+                "direct-discriminator:v2:blake3:e54157dc19ee5d6d23ca76d9e7eb671f67422b83fd18519a279c1adf1f949202",
             ),
             (
                 CausalRef::Process {
                     process_id: "p".to_string(),
                 },
-                "direct-discriminator:v2:sha256:1dce606bf52fe4cc76b31dbfcbd7a66a479be616aa05e2172e8187bd18c853a1",
+                "direct-discriminator:v2:blake3:ae12c1bd5c974ce1df6254fdff30ce90dfba1332bf8317caadc39d1cc32a9d36",
             ),
             (
                 CausalRef::ProcessEvent {
                     process_id: "p".to_string(),
                     sequence: 0,
                 },
-                "direct-discriminator:v2:sha256:2cbd3b1a805e104eb070159b3400e7ee17d91782c845fc6a2089776e7f0396b5",
+                "direct-discriminator:v2:blake3:0644b6d881b463c4a0af5439e1215e344eedf6722cb58aadcf0cb85936086304",
             ),
             (
                 CausalRef::TriggerOccurrence {
@@ -514,14 +514,14 @@ mod tests {
                     subscription_incarnation: None,
                     subscription_revision: Some(0),
                 },
-                "direct-discriminator:v2:sha256:938f50b9f4edbb90cf2287f3c23996b883f8400c562de92e340e4ca28b223df3",
+                "direct-discriminator:v2:blake3:ca1bcd4e4d73231f9aed50b606f78c0d5b4f008c03127d27f7e8ee615a0986e1",
             ),
             (
                 CausalRef::SessionNode {
                     session_id: "s".to_string(),
                     node_id: "n".to_string(),
                 },
-                "direct-discriminator:v2:sha256:c6e89d10a5ad2cdf621d59b70b5d0f3fcf8bf8bd4f0e48c902b906cb82503279",
+                "direct-discriminator:v2:blake3:16c84d9fc9b0b5190737be74c70df27637aa93a72558ff00fc639cfb17188403",
             ),
         ];
         for (cause, expected) in causes {
@@ -539,7 +539,7 @@ mod tests {
                 None,
                 99,
             ),
-            "direct-discriminator:v2:sha256:1eb28645e78667703f0b891533ee432ba5980d060c95f85f00e3c779759b1a68"
+            "direct-discriminator:v2:blake3:eea6883a6f67874275731b7f5a3c9cf2e87ee743edd7c9e06004b39d5d47e2b5"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -550,7 +550,7 @@ mod tests {
                 None,
                 0,
             ),
-            "direct-discriminator:v2:sha256:9dd568ea674ab6bb59ca91a19cc78d8fddaa867a1d7171d6b71db92515e7dbf2"
+            "direct-discriminator:v2:blake3:464a8832ef048a3c853cc771a55b2b10ce49699f6c7265fa1992047b533021b6"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -561,7 +561,7 @@ mod tests {
                 }),
                 1,
             ),
-            "direct-discriminator:v2:sha256:851eac6c6173fdebd77d789659a58b29a6e35512e9bcf7b6b96e8ebacf96c454"
+            "direct-discriminator:v2:blake3:990084fc9028c4cdec32cdc3182e323cdc03bf1fef212862fbd9442d60a69d42"
         );
         assert_eq!(
             direct_request_discriminator(
@@ -572,19 +572,19 @@ mod tests {
                 }),
                 1,
             ),
-            "direct-discriminator:v2:sha256:d12bd74978fdbeb07f21a9be7a6d0c71ad782c42fc54f12610261f097c0068a8"
+            "direct-discriminator:v2:blake3:4652b5ce2ed67bdb741213cc408c6da739e11ff4d9cced560bd083384a31dc98"
         );
 
         let discriminator = direct_request_discriminator(None, None, 1);
         let preimage = direct_effect_replay_preimage("s", Some("t"), "u", &discriminator);
         assert_eq!(
             hex(&preimage),
-            "6c6173682d737461626c652d6964656e746974790102000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a7368613235363a30326635353330323361353334646636613061326635353032346133396439636539393761313837383339326432633834313832383739666562626531653062"
+            "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
         );
         assert_eq!(
             direct_effect_invocation("s", "u", discriminator, Some("t"), None).replay_key(),
             Some(
-                "direct:v2:sha256:ffb654de07fc7da33c21bd5f38d41723f21b8bce4210447e72eea6fe59d3c113"
+                "direct:v2:blake3:c92b5337c6f126eb1f8951b3c0c5eea412be5953c0e254bc4369e08d29d33451"
             )
         );
 
@@ -600,13 +600,13 @@ mod tests {
             direct_effect_replay_preimage("s", Some("t"), "u", &first_discriminator);
         assert_eq!(
             hex(&first_preimage),
-            "6c6173682d737461626c652d6964656e746974790102000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a7368613235363a39386133616536303031616136636536346266343439643435613364386438316635383965646535633835653965373538336632306666373265633332636266"
+            "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b657900000000000000017301000000000000000174000000000000000175000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a38356537333765643465663038366634653336616436386263396330333632393264363665623430613831646130383031356436363163653530373435303263"
         );
         let first = direct_effect_invocation("s", "u", first_discriminator, Some("t"), None);
         assert_eq!(
             first.replay_key(),
             Some(
-                "direct:v2:sha256:bacd099ab1d458389023cbd77d9a0b01f445614605b3be524e53ef94d9c079ea"
+                "direct:v2:blake3:359eeeb5c5899114070602cf4659773cf646c6bd8aa919596785bfe55de41e34"
             )
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
@@ -618,7 +618,7 @@ mod tests {
         );
         assert_eq!(
             hex(&second_preimage),
-            "6c6173682d737461626c652d6964656e746974790102000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76323a7368613235363a30326635353330323361353334646636613061326635353032346133396439636539393761313837383339326432633834313832383739666562626531653062"
+            "6c6173682d737461626c652d6964656e746974790202000000000000001d6c6173682e6469726563742d6566666563742d7265706c61792d6b6579000000000000000173010000000000000001740000000000000017753a6469726563743a76323a63616c6c65723a32313a78000000000000005f6469726563742d6469736372696d696e61746f723a76323a626c616b65333a63646236306335326563653334356438396261353435633835626163323238343534653562353834336132646534306536376632386434343464323364323064"
         );
         let second = direct_effect_invocation(
             "s",
@@ -630,7 +630,7 @@ mod tests {
         assert_eq!(
             second.replay_key(),
             Some(
-                "direct:v2:sha256:ef6db53d141681ee0c320815146b0788d8afd0cc636c4dfa121c9260301c0858"
+                "direct:v2:blake3:91275bb8dccd63323941efc579d9177fbc134adde4f970c0c521623d7ef5edc7"
             )
         );
         assert_ne!(first.replay_key(), second.replay_key());

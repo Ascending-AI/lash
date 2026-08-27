@@ -165,7 +165,7 @@ async fn scheduled_retention_refuses_a_witnessed_empty_attachment_root_set() {
         .expect("unreferenced attachment");
     let orphan_path = attachment_store
         .root()
-        .join("sha256")
+        .join("blake3")
         .join(&orphan.id.as_str()[..2])
         .join(orphan.id.as_str());
     let older_than_retention_window = SystemTime::now()

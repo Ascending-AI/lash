@@ -85,7 +85,6 @@ use lash_core::{
     facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
-use sha2::{Digest, Sha256};
 
 use conn::SqliteConnection;
 

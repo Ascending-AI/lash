@@ -335,7 +335,7 @@ mod wake_delivery_identity_tests {
     fn delivery_row_reuses_structural_wake_id() {
         let wake = ProcessWakeDelivery {
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            wake_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
+            wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
             target_session_id: "session".to_string(),
             process_id: "process".to_string(),
             sequence: 1,
@@ -354,13 +354,13 @@ mod wake_delivery_identity_tests {
         let delivery = WakeDelivery::pending(wake, WakeDeliveryConfig::default()).unwrap();
         assert_eq!(
             delivery.delivery_id,
-            format!("wake:v1:sha256:{}", "a".repeat(64))
+            format!("wake:v1:blake3:{}", "a".repeat(64))
         );
     }
 
     #[test]
     fn delivery_row_rejects_untrusted_wake_identity() {
-        for wake_id in ["", "wake:v1:sha256:abc", "wake:vx:sha256:0000"] {
+        for wake_id in ["", "wake:v1:blake3:abc", "wake:v1:sha256:0000"] {
             let wake = ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: wake_id.to_string(),
