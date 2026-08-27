@@ -3,6 +3,119 @@ use crate::runtime::javascript_array_index_key;
 use std::borrow::Cow;
 
 impl Heap {
+    fn assignment_index<'a>(
+        indexes: &'a [Value],
+        index_cursor: &mut usize,
+    ) -> Result<&'a Value, RuntimeError> {
+        let index = indexes
+            .get(*index_cursor)
+            .ok_or(RuntimeError::MissingAssignmentIndex)?;
+        *index_cursor += 1;
+        Ok(index)
+    }
+
+    fn javascript_assignment_index_key(
+        &self,
+        indexes: &[Value],
+        index_cursor: usize,
+    ) -> Result<Option<String>, RuntimeError> {
+        indexes
+            .get(index_cursor)
+            .map(|index| self.javascript_to_string(index))
+            .transpose()
+    }
+
+    fn next_javascript_assignment_index_key(
+        &self,
+        indexes: &[Value],
+        index_cursor: &mut usize,
+    ) -> Result<String, RuntimeError> {
+        let index = Self::assignment_index(indexes, index_cursor)?;
+        self.javascript_to_string(index)
+    }
+
+    fn assign_regexp_match_index(
+        &self,
+        result: &mut RegExpMatchObject,
+        key: String,
+        imported: Value,
+        old_logical_bytes: u64,
+    ) -> Result<(), RuntimeError> {
+        match key.as_str() {
+            "index" => result.index = imported,
+            "input" => result.input = imported,
+            "groups" => result.groups = imported,
+            "length" => self.assign_regexp_match_length(result, &imported)?,
+            _ => {
+                let index = decode_javascript_array_index(key)?;
+                if index > result.items.len() {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: format!(
+                            "TS_SPARSE_ARRAY_UNSUPPORTED: assignment index {index} skips array length {}",
+                            result.items.len()
+                        ),
+                    });
+                }
+                if index == result.items.len() {
+                    let attempted = old_logical_bytes.saturating_add(VALUE_SLOT_BYTES + 1);
+                    if attempted > self.logical_byte_limit {
+                        return Err(RuntimeError::MemoryLimitExceeded {
+                            limit: self.logical_byte_limit,
+                            attempted,
+                        });
+                    }
+                    result.items.try_reserve_exact(1).map_err(|_| {
+                        RuntimeError::MemoryLimitExceeded {
+                            limit: self.logical_byte_limit,
+                            attempted,
+                        }
+                    })?;
+                    result.items.push(Value::Undefined);
+                }
+                result.items[index] = imported;
+            }
+        }
+        Ok(())
+    }
+
+    fn assign_regexp_match_field(
+        &self,
+        result: &mut RegExpMatchObject,
+        field: &str,
+        imported: Value,
+    ) -> Result<(), RuntimeError> {
+        match field {
+            "index" => result.index = imported,
+            "input" => result.input = imported,
+            "groups" => result.groups = imported,
+            "length" => self.assign_regexp_match_length(result, &imported)?,
+            _ => {
+                return Err(RuntimeError::CannotAssignField {
+                    field: field.to_string(),
+                    actual: "RegExp match array".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn assign_regexp_match_length(
+        &self,
+        result: &mut RegExpMatchObject,
+        imported: &Value,
+    ) -> Result<(), RuntimeError> {
+        let length = javascript_array_length(self.javascript_to_number(imported)?)?;
+        if length > result.items.len() {
+            return Err(RuntimeError::ValidationFailed {
+                reason: format!(
+                    "TS_SPARSE_ARRAY_UNSUPPORTED: assigning RegExp match length {length} would create holes; use indexed appends"
+                ),
+            });
+        }
+        result.items.truncate(length);
+        Ok(())
+    }
+
     pub(crate) fn delete_javascript_member(
         &mut self,
         receiver: &Value,
@@ -108,51 +221,24 @@ impl Heap {
                         field: names[field].text.to_string(),
                     })?,
                 (HeapObject::List(values), CompiledAssignPathStep::Index) => {
-                    let index = indexes
-                        .get(index_cursor)
-                        .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                    index_cursor += 1;
-                    let key = self.javascript_to_string(index)?;
-                    let index = javascript_array_index_key(&key).ok_or_else(|| {
-                        RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key }
-                    })?;
+                    let key =
+                        self.next_javascript_assignment_index_key(indexes, &mut index_cursor)?;
+                    let index = decode_javascript_array_index(key)?;
                     values
                         .get(index)
                         .cloned()
                         .ok_or(RuntimeError::ListAssignmentIndexOutOfBounds)?
                 }
                 (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Field(field)) => {
-                    match names[field].text.as_ref() {
-                        "index" => result.index.clone(),
-                        "input" => result.input.clone(),
-                        "groups" => result.groups.clone(),
-                        _ => {
-                            return Err(RuntimeError::MissingAssignmentField {
-                                field: names[field].text.to_string(),
-                            });
-                        }
-                    }
+                    lookup_regexp_match_field(&result, names[field].text.as_ref())?
                 }
                 (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Index) => {
-                    let index = indexes
-                        .get(index_cursor)
-                        .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                    index_cursor += 1;
-                    let key = self.javascript_to_string(index)?;
-                    match key.as_str() {
-                        "index" => result.index.clone(),
-                        "input" => result.input.clone(),
-                        "groups" => result.groups.clone(),
-                        _ => javascript_array_index_key(&key)
-                            .and_then(|index| result.items.get(index).cloned())
-                            .ok_or(RuntimeError::ListAssignmentIndexOutOfBounds)?,
-                    }
+                    let key =
+                        self.next_javascript_assignment_index_key(indexes, &mut index_cursor)?;
+                    lookup_regexp_match_index(&result, &key)?
                 }
                 (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
-                    let index = indexes
-                        .get(index_cursor)
-                        .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                    index_cursor += 1;
+                    let index = Self::assignment_index(indexes, &mut index_cursor)?;
                     let key = coerce_string(index)?;
                     record.get(key.as_ref()).cloned().ok_or_else(|| {
                         RuntimeError::MissingAssignmentField {
@@ -183,10 +269,8 @@ impl Heap {
 
         let leaf_key: Option<Cow<'_, str>> = match *leaf {
             CompiledAssignPathStep::Field(field) => Some(Cow::Borrowed(names[field].text.as_ref())),
-            CompiledAssignPathStep::Index => indexes
-                .get(index_cursor)
-                .map(|index| self.javascript_to_string(index))
-                .transpose()?
+            CompiledAssignPathStep::Index => self
+                .javascript_assignment_index_key(indexes, index_cursor)?
                 .map(Cow::Owned),
         };
         // `o[key] = v` where `key` only turns out to be `__proto__` here. The
@@ -211,12 +295,9 @@ impl Heap {
         if matches!(self.get(target_id)?, HeapObject::Url(_)) {
             let property = match *leaf {
                 CompiledAssignPathStep::Field(field) => names[field].text.to_string(),
-                CompiledAssignPathStep::Index => {
-                    let index = indexes
-                        .get(index_cursor)
-                        .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                    self.javascript_to_string(index)?
-                }
+                CompiledAssignPathStep::Index => self
+                    .javascript_assignment_index_key(indexes, index_cursor)?
+                    .ok_or(RuntimeError::MissingAssignmentIndex)?,
             };
             // WHATWG exposes these as getter-only attributes. Assignment in
             // the non-strict script dialect is Node's silent no-op and does
@@ -277,13 +358,10 @@ impl Heap {
                 values.truncate(length);
             }
             (HeapObject::List(values), CompiledAssignPathStep::Index) => {
-                let index = indexes
-                    .get(index_cursor)
+                let key = self
+                    .javascript_assignment_index_key(indexes, index_cursor)?
                     .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                let key = self.javascript_to_string(index)?;
-                let index = javascript_array_index_key(&key).ok_or_else(|| {
-                    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key }
-                })?;
+                let index = decode_javascript_array_index(key)?;
                 if index > values.len() {
                     return Err(RuntimeError::ValidationFailed {
                         reason: format!(
@@ -308,93 +386,13 @@ impl Heap {
                 values[index] = imported;
             }
             (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Index) => {
-                let index = indexes
-                    .get(index_cursor)
+                let key = self
+                    .javascript_assignment_index_key(indexes, index_cursor)?
                     .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                let key = self.javascript_to_string(index)?;
-                match key.as_str() {
-                    "index" => {
-                        result.index = imported;
-                        return self.commit_reference_assignment(target_id, old_object, new_object);
-                    }
-                    "input" => {
-                        result.input = imported;
-                        return self.commit_reference_assignment(target_id, old_object, new_object);
-                    }
-                    "groups" => {
-                        result.groups = imported;
-                        return self.commit_reference_assignment(target_id, old_object, new_object);
-                    }
-                    "length" => {
-                        let length =
-                            javascript_array_length(self.javascript_to_number(&imported)?)?;
-                        if length > result.items.len() {
-                            return Err(RuntimeError::ValidationFailed {
-                                reason: format!(
-                                    "TS_SPARSE_ARRAY_UNSUPPORTED: assigning RegExp match length {length} would create holes; use indexed appends"
-                                ),
-                            });
-                        }
-                        result.items.truncate(length);
-                        return self.commit_reference_assignment(target_id, old_object, new_object);
-                    }
-                    _ => {}
-                }
-                let index = javascript_array_index_key(&key).ok_or_else(|| {
-                    RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key }
-                })?;
-                if index > result.items.len() {
-                    return Err(RuntimeError::ValidationFailed {
-                        reason: format!(
-                            "TS_SPARSE_ARRAY_UNSUPPORTED: assignment index {index} skips array length {}",
-                            result.items.len()
-                        ),
-                    });
-                }
-                if index == result.items.len() {
-                    let attempted = old_object
-                        .logical_bytes()
-                        .saturating_add(VALUE_SLOT_BYTES + 1);
-                    if attempted > self.logical_byte_limit {
-                        return Err(RuntimeError::MemoryLimitExceeded {
-                            limit: self.logical_byte_limit,
-                            attempted,
-                        });
-                    }
-                    result.items.try_reserve_exact(1).map_err(|_| {
-                        RuntimeError::MemoryLimitExceeded {
-                            limit: self.logical_byte_limit,
-                            attempted,
-                        }
-                    })?;
-                    result.items.push(Value::Undefined);
-                }
-                result.items[index] = imported;
+                self.assign_regexp_match_index(result, key, imported, old_object.logical_bytes())?;
             }
             (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Field(field)) => {
-                match names[field].text.as_ref() {
-                    "index" => result.index = imported,
-                    "input" => result.input = imported,
-                    "groups" => result.groups = imported,
-                    "length" => {
-                        let length =
-                            javascript_array_length(self.javascript_to_number(&imported)?)?;
-                        if length > result.items.len() {
-                            return Err(RuntimeError::ValidationFailed {
-                                reason: format!(
-                                    "TS_SPARSE_ARRAY_UNSUPPORTED: assigning RegExp match length {length} would create holes; use indexed appends"
-                                ),
-                            });
-                        }
-                        result.items.truncate(length);
-                    }
-                    _ => {
-                        return Err(RuntimeError::CannotAssignField {
-                            field: names[field].text.to_string(),
-                            actual: "RegExp match array".to_string(),
-                        });
-                    }
-                }
+                self.assign_regexp_match_field(result, names[field].text.as_ref(), imported)?;
             }
             (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
                 let index = indexes
@@ -457,6 +455,36 @@ impl Heap {
         self.invalidate_materialized_reaching(target_id);
         self.debug_assert_byte_accounting();
         Ok(())
+    }
+}
+
+fn decode_javascript_array_index(key: String) -> Result<usize, RuntimeError> {
+    javascript_array_index_key(&key)
+        .ok_or(RuntimeError::TypeScriptArrayNonIndexPropertyUnsupported { key })
+}
+
+fn lookup_regexp_match_field(
+    result: &RegExpMatchObject,
+    field: &str,
+) -> Result<Value, RuntimeError> {
+    match field {
+        "index" => Ok(result.index.clone()),
+        "input" => Ok(result.input.clone()),
+        "groups" => Ok(result.groups.clone()),
+        _ => Err(RuntimeError::MissingAssignmentField {
+            field: field.to_string(),
+        }),
+    }
+}
+
+fn lookup_regexp_match_index(result: &RegExpMatchObject, key: &str) -> Result<Value, RuntimeError> {
+    match key {
+        "index" => Ok(result.index.clone()),
+        "input" => Ok(result.input.clone()),
+        "groups" => Ok(result.groups.clone()),
+        _ => javascript_array_index_key(key)
+            .and_then(|index| result.items.get(index).cloned())
+            .ok_or(RuntimeError::ListAssignmentIndexOutOfBounds),
     }
 }
 
