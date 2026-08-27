@@ -103,10 +103,15 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     )
     .await
     .expect("open provisioned Postgres storage");
-    let artifact = lashlang::ModuleArtifact::from_store_bytes(include_bytes!(
+    let frozen: serde_json::Value = serde_json::from_slice(include_bytes!(
         "../../lashlang/tests/fixtures/module-artifact-old.json"
     ))
-    .expect("decode frozen artifact");
+    .expect("decode frozen artifact JSON");
+    let artifact = lashlang::ModuleArtifact::from_program(
+        serde_json::from_value(frozen["canonical_ir"].clone())
+            .expect("decode frozen artifact program"),
+    )
+    .expect("rebuild artifact with the current identity generation");
     storage
         .lashlang_artifact_store()
         .put_module_artifact(&artifact)

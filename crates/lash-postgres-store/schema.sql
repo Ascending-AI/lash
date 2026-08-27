@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 63.
+-- lash-postgres-store schema, component version 64.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
