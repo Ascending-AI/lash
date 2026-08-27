@@ -584,11 +584,11 @@ mod tests {
 
         assert_eq!(
             frame_key(&first).as_str(),
-            "frame-key/v2/0459edfd54a69f3e0dec1a4dab00019cd24c894999ef85722f0bacaf63402346"
+            "frame-key/v2/3e8253fc4debd4df1c869db9047cbee6f06b04134bd2973b32982fdd0e9da31b"
         );
         assert_eq!(
             frame_key(&redriven).as_str(),
-            "frame-key/v2/0459edfd54a69f3e0dec1a4dab00019cd24c894999ef85722f0bacaf63402346"
+            "frame-key/v2/3e8253fc4debd4df1c869db9047cbee6f06b04134bd2973b32982fdd0e9da31b"
         );
     }
 
@@ -606,11 +606,11 @@ mod tests {
 
         assert_eq!(
             frame_key(&first).as_str(),
-            "frame-key/v2/bbcbc29ebb3768b3b2ded9afafd5110e4d1126b36d54cc3a111be271a520688d"
+            "frame-key/v2/46332d13f86b0049a14335168657bb1d963373af1fdb7b01f8bc20dee27564a7"
         );
         assert_eq!(
             frame_key(&second).as_str(),
-            "frame-key/v2/90669fa2db8c1b133cc8793628ff62bdc1705be63f49e70dcb13968953ea7f64"
+            "frame-key/v2/8b96ea0418d2cb1016b6aef3421642235241ff5de500fbd6088ba2b1db1bb260"
         );
     }
 

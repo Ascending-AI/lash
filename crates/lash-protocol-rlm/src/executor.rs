@@ -1116,11 +1116,11 @@ mod tests {
             };
             assert_eq!(
                 without_trace_key.as_str(),
-                "frame-key/v2/2c37001396b384c1e849cea6d8ad03dc9187e035e8e396920539cb0bfb9b6656"
+                "frame-key/v2/36468bb73b95be8fbefc0d063cf60aeb68332484d1b8764e367b68ecbb6ae6a4"
             );
             assert_eq!(
                 with_trace_key.as_str(),
-                "frame-key/v2/2c37001396b384c1e849cea6d8ad03dc9187e035e8e396920539cb0bfb9b6656"
+                "frame-key/v2/36468bb73b95be8fbefc0d063cf60aeb68332484d1b8764e367b68ecbb6ae6a4"
             );
         });
     }
@@ -2856,7 +2856,7 @@ mod tests {
             assert!(response.error.is_none(), "{:?}", response.error);
 
             let expected_key =
-                "derived/v2/57519da9c67ac530a0b4fad977185aa53b92164b0d9b97648b1fdd10c29fae63";
+                "derived/v3/9956413528fb2c204e9f9941784a6e9d51ef7926b69d3e31e0f20cc493309a4b";
             let (effect_owner_scope, effect_subscription_key) = {
                 let envelopes = controller.envelopes.lock_recover();
                 let lash_core::RuntimeEffectCommand::Trigger { command } = &envelopes[0].command

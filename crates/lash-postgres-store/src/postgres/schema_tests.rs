@@ -2,10 +2,13 @@ use super::*;
 
 #[test]
 fn immediate_predecessor_is_a_recreate_boundary_at_the_blake3_cutover() {
+    let declared = SCHEMA_MIGRATIONS
+        .iter()
+        .find(|migration| migration.from == SCHEMA_VERSION - 1)
+        .expect("component 63 must remain visible to the refusal gate");
+
     assert!(
-        SCHEMA_MIGRATIONS
-            .iter()
-            .all(|migration| migration.from != SCHEMA_VERSION - 1),
+        declared.is_recreate_boundary(),
         "component 63 must not migrate SHA-256 identities into component 64"
     );
 }
@@ -32,7 +35,7 @@ fn component_61_is_a_recreate_boundary_without_its_divergence_witness() {
     );
 }
 
-/// The declared 53 -> 62 migration, which every case below perturbs.
+/// The declared 53 -> 64 migration, which every case below perturbs.
 fn migration() -> &'static SchemaMigration {
     SCHEMA_MIGRATIONS
         .iter()
@@ -83,7 +86,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
     });
     SchemaReport {
         schema: Some("public".to_string()),
-        expected_version: 63,
+        expected_version: 64,
         found_version: Some(53),
         findings,
     }
@@ -94,7 +97,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
 fn published_53_findings() -> Vec<SchemaFinding> {
     vec![
         SchemaFinding::VersionMismatch {
-            expected: 63,
+            expected: 64,
             found: Some(53),
         },
         SchemaFinding::UnexpectedColumn {
