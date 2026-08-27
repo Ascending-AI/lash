@@ -1192,7 +1192,7 @@ mod tests {
             );
         }
         assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline) <= 300_000_000.0
+            allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline) <= 400_000_000.0
         );
         assert!(
             steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline)

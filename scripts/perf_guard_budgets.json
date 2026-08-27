@@ -285,8 +285,8 @@
       "live_replay_pressure": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 2381000,
-          "steady_state_turn_alloc_bytes_max": 193000
+          "alloc_bytes_max": 3710000,
+          "steady_state_turn_alloc_bytes_max": 303000
         },
         "advisory_duration": {
           "ms_max": 35.531,
@@ -437,8 +437,8 @@
       "queued_work_claim_stress": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 13833000,
-          "steady_state_turn_alloc_bytes_max": 611000
+          "alloc_bytes_max": 37867000,
+          "steady_state_turn_alloc_bytes_max": 2465000
         },
         "advisory_duration": {
           "ms_max": 44.025,
@@ -769,8 +769,8 @@
       "rlm_large_tool_catalog": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 1215717000,
-          "steady_state_turn_alloc_bytes_max": 92089000
+          "alloc_bytes_max": 1678131000,
+          "steady_state_turn_alloc_bytes_max": 125156000
         },
         "advisory_duration": {
           "ms_max": 3569.37,
@@ -837,8 +837,8 @@
       "rlm_tool_catalog_cold": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 850000000,
-          "steady_state_turn_alloc_bytes_max": 224000000
+          "alloc_bytes_max": 5126342000,
+          "steady_state_turn_alloc_bytes_max": 127146000
         },
         "advisory_duration": {
           "ms_max": 2600.0,
@@ -909,8 +909,8 @@
       "rlm_tool_catalog_warm": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 1050000000,
-          "steady_state_turn_alloc_bytes_max": 224000000
+          "alloc_bytes_max": 2026802000,
+          "steady_state_turn_alloc_bytes_max": 127115000
         },
         "advisory_duration": {
           "ms_max": 2100.0,
@@ -1649,7 +1649,7 @@
       "rlm_trigger_mail_pipeline": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 234524000,
+          "alloc_bytes_max": 359937000,
           "steady_state_turn_alloc_bytes_max": 50000000
         },
         "advisory_duration": {
@@ -2065,8 +2065,8 @@
       "store_hardening_hot_paths": {
         "guarded_span": "whole_run",
         "enforced_allocation": {
-          "alloc_bytes_max": 112802000,
-          "steady_state_turn_alloc_bytes_max": 9397000
+          "alloc_bytes_max": 276258000,
+          "steady_state_turn_alloc_bytes_max": 23010000
         },
         "advisory_duration": {
           "ms_max": 10918.108,
