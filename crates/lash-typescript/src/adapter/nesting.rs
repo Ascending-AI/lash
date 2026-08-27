@@ -35,6 +35,104 @@ struct SourceNestingFrame {
     postfix: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(usize)]
+enum SourceConstruct {
+    Delimiter,
+    Operator,
+}
+
+/// The source constructs that consume the shared nesting budget.
+///
+/// Keeping the entries separate makes the limit policy explicit without
+/// splitting the cumulative counter: delimiters and operators must continue to
+/// draw on the same budget.
+const SOURCE_CONSTRUCT_LIMITS: [usize; 2] = [
+    MAX_SOURCE_NESTING_DEPTH, // SourceConstruct::Delimiter
+    MAX_SOURCE_NESTING_DEPTH, // SourceConstruct::Operator
+];
+
+#[derive(Default)]
+struct SourceNestingState {
+    frames: Vec<SourceNestingFrame>,
+    current_operators: usize,
+    open_statement_forms: usize,
+    open_conditionals: usize,
+}
+
+impl SourceNestingState {
+    fn enter(
+        &mut self,
+        delimiter: SourceDelimiter,
+        postfix: bool,
+        index: usize,
+    ) -> Result<(), SourceSpan> {
+        self.ensure_within_limit(SourceConstruct::Delimiter, self.depth() + 1, index)?;
+        self.frames.push(SourceNestingFrame {
+            delimiter,
+            outer_operators: std::mem::take(&mut self.current_operators),
+            postfix,
+        });
+        Ok(())
+    }
+
+    fn leave(&mut self, delimiter: SourceDelimiter, index: usize) -> Result<(), SourceSpan> {
+        if let Some(frame) = self.frames.pop_if(|frame| frame.delimiter == delimiter) {
+            self.current_operators = frame.outer_operators;
+            if frame.postfix {
+                self.increment_operator(index)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn increment_operator(&mut self, index: usize) -> Result<(), SourceSpan> {
+        self.current_operators += 1;
+        self.ensure_within_limit(SourceConstruct::Operator, self.depth(), index)
+    }
+
+    fn ensure_within_limit(
+        &self,
+        construct: SourceConstruct,
+        depth: usize,
+        index: usize,
+    ) -> Result<(), SourceSpan> {
+        if depth > SOURCE_CONSTRUCT_LIMITS[construct as usize] {
+            return Err(SourceSpan {
+                start: index,
+                end: index + 1,
+            });
+        }
+        Ok(())
+    }
+
+    fn depth(&self) -> usize {
+        self.frames.len()
+            + self.current_operators
+            + self
+                .frames
+                .iter()
+                .map(|frame| frame.outer_operators)
+                .sum::<usize>()
+    }
+
+    fn current_delimiter(&self) -> Option<SourceDelimiter> {
+        self.frames.last().map(|frame| frame.delimiter)
+    }
+
+    fn at_statement_level(&self) -> bool {
+        self.frames
+            .last()
+            .is_none_or(|frame| frame.delimiter == SourceDelimiter::StatementBrace)
+    }
+
+    fn reset_statement(&mut self) {
+        self.current_operators = 0;
+        self.open_statement_forms = 0;
+        self.open_conditionals = 0;
+    }
+}
+
 /// The last significant token. It decides whether a `{` opens an object literal
 /// or a statement block, whether a `(`/`[`/`` ` `` is a postfix tail on an
 /// existing expression, and whether a newline can end a statement.
@@ -336,405 +434,381 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 // which makes the next line a tagged template, and `as`/`satisfies`, which make
 // it a cast — or a newline-separated chain would slip through uncharged.
 pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
-    let bytes = source.as_bytes();
-    let mut mode = ScanMode::Code;
-    let mut escaped = false;
-    let mut regexp_class = false;
-    let mut regexp_pattern_start = 0usize;
-    let mut frames = Vec::new();
-    let mut current_operators = 0usize;
-    let mut previous = PreviousToken::None;
-    // A newline that could end a statement; the following token decides whether
-    // it actually did.
-    let mut pending_statement_end = false;
-    // Statement forms whose controlled statement has not been reached yet. A
-    // newline cannot end a statement while one is open: `if (1)` is not a
-    // complete statement however the line breaks.
-    let mut open_statement_forms = 0usize;
-    // Conditional operators awaiting their `:`. A `:` that no `?` is waiting for
-    // is a label or an annotation, not a ternary arm.
-    let mut open_conditionals = 0usize;
-    let mut index = 0usize;
+    SourceNestingVisitor::new(source)
+        .scan()
+        .map_err(|error| match error {
+            SourceScanError::NestingLimit(span) => source_nesting_diagnostic(Some(span)),
+            SourceScanError::Diagnostic(diagnostic) => diagnostic,
+        })
+}
 
-    while index < bytes.len() {
-        let byte = bytes[index];
-        let next = bytes.get(index + 1).copied();
-        match mode {
-            ScanMode::Code => {
-                // `None` leaves the previous significant token in place, so
-                // whitespace and comments never change how a `{` is classified.
-                let mut scanned = Some(PreviousToken::Byte(byte));
-                if pending_statement_end && !byte.is_ascii_whitespace() {
-                    let word = if is_identifier_start(byte)
-                        && unicode_line_terminator_length(bytes, index).is_none()
-                    {
-                        Some(&source[index..identifier_end(bytes, index)])
-                    } else {
-                        None
-                    };
-                    let comment = byte == b'/' && matches!(next, Some(b'/') | Some(b'*'));
-                    if !comment {
-                        pending_statement_end = false;
-                        if !continues_previous_statement(byte, word) {
-                            current_operators = 0;
-                            open_statement_forms = 0;
-                            open_conditionals = 0;
-                        }
-                    }
-                }
-                match (byte, next) {
-                    (b'/', Some(b'/')) => {
-                        mode = ScanMode::LineComment;
-                        index += 1;
-                        scanned = None;
-                    }
-                    (b'/', Some(b'*')) => {
-                        mode = ScanMode::BlockComment;
-                        index += 1;
-                        scanned = None;
-                    }
-                    (b'/', _) if !previous.can_end_expression() => {
-                        // SWC lexes a RegExp literal as one token. Its grouping
-                        // punctuation therefore does not recurse the TypeScript
-                        // parser and must not consume this source-nesting budget;
-                        // the RegExp validator applies its separate 32-group cap.
-                        mode = ScanMode::RegExp;
-                        escaped = false;
-                        regexp_class = false;
-                        regexp_pattern_start = index + 1;
-                    }
-                    (b'\'', _) => {
-                        mode = ScanMode::SingleQuoted;
-                        escaped = false;
-                    }
-                    (b'"', _) => {
-                        mode = ScanMode::DoubleQuoted;
-                        escaped = false;
-                    }
-                    (b'`', _) => {
-                        // A tagged template is a postfix tail; charge it now,
-                        // since the template body is scanned in another mode.
-                        if previous.can_end_expression() {
-                            increment_source_operators(&frames, &mut current_operators, index)?;
-                        }
-                        mode = ScanMode::Template;
-                        escaped = false;
-                    }
-                    (b'(', _) => enter_source_delimiter(
-                        &mut frames,
-                        &mut current_operators,
-                        SourceDelimiter::Paren,
-                        previous.can_end_expression(),
-                        index,
-                    )?,
-                    (b')', _) => leave_source_delimiter(
-                        &mut frames,
-                        &mut current_operators,
-                        SourceDelimiter::Paren,
-                        index,
-                    )?,
-                    (b'[', _) => enter_source_delimiter(
-                        &mut frames,
-                        &mut current_operators,
-                        SourceDelimiter::Bracket,
-                        previous.can_end_expression(),
-                        index,
-                    )?,
-                    (b']', _) => leave_source_delimiter(
-                        &mut frames,
-                        &mut current_operators,
-                        SourceDelimiter::Bracket,
-                        index,
-                    )?,
-                    (b'{', _) => enter_source_delimiter(
-                        &mut frames,
-                        &mut current_operators,
-                        if previous.opens_expression_brace() {
-                            SourceDelimiter::Brace
-                        } else {
-                            SourceDelimiter::StatementBrace
-                        },
-                        false,
-                        index,
-                    )?,
-                    (b'}', _) => {
-                        let closed =
-                            frames
-                                .last()
-                                .map(|frame| frame.delimiter)
-                                .filter(|delimiter| {
-                                    matches!(
-                                        delimiter,
-                                        SourceDelimiter::Brace
-                                            | SourceDelimiter::StatementBrace
-                                            | SourceDelimiter::TemplateExpression
-                                    )
-                                });
-                        if let Some(delimiter) = closed {
-                            leave_source_delimiter(
-                                &mut frames,
-                                &mut current_operators,
-                                delimiter,
-                                index,
-                            )?;
-                        }
-                        match closed {
-                            // A statement block ends every statement form that
-                            // introduced it, so the next statement starts over.
-                            Some(SourceDelimiter::StatementBrace) => {
-                                current_operators = 0;
-                                open_statement_forms = 0;
-                                open_conditionals = 0;
-                            }
-                            Some(SourceDelimiter::TemplateExpression) => mode = ScanMode::Template,
-                            _ => {}
-                        }
-                    }
-                    (b';' | b',', _) => {
-                        current_operators = 0;
-                        open_conditionals = 0;
-                        // A `;` inside a delimiter is a `for` header separator
-                        // and a `,` is an element separator; neither ends the
-                        // statement that opened the delimiter. Clearing the
-                        // open statement forms there would let a newline end a
-                        // `for (;;)` that has not reached its body yet.
-                        if frames.last().is_none_or(|frame: &SourceNestingFrame| {
-                            frame.delimiter == SourceDelimiter::StatementBrace
-                        }) {
-                            open_statement_forms = 0;
-                        }
-                    }
-                    (b':', _) => {
-                        if open_conditionals > 0 {
-                            // The second arm of a conditional, already charged
-                            // by its `?`.
-                            open_conditionals -= 1;
-                        } else if previous.can_name_a_label()
-                            && frames.last().is_none_or(|frame: &SourceNestingFrame| {
-                                frame.delimiter == SourceDelimiter::StatementBrace
-                            })
-                        {
-                            // `LabelledStatement := Identifier ':' Statement`
-                            // recurses without bound and uses no delimiter, so
-                            // the label itself has to carry the charge. A type
-                            // annotation in the same position charges one unit
-                            // too, which its statement boundary releases.
-                            increment_source_operators(&frames, &mut current_operators, index)?;
-                        }
-                    }
-                    _ if unicode_line_terminator_length(bytes, index).is_some() => {
-                        // U+2028 / U+2029 end a line in ECMAScript, so SWC
-                        // inserts a semicolon after them and the budget has to
-                        // release in the same places.
-                        index += unicode_line_terminator_length(bytes, index)
-                            .expect("a line terminator was just matched")
-                            - 1;
-                        if previous.can_end_statement()
-                            && open_statement_forms == 0
-                            && frames.last().is_none_or(|frame: &SourceNestingFrame| {
-                                frame.delimiter == SourceDelimiter::StatementBrace
-                            })
-                        {
-                            pending_statement_end = true;
-                        }
-                        scanned = None;
-                    }
-                    _ if is_identifier_start(byte) => {
-                        let start = index;
-                        index = identifier_end(bytes, index) - 1;
-                        let word = &source[start..=index];
-                        if is_recursive_operator_word(word) {
-                            increment_source_operators(&frames, &mut current_operators, start)?;
-                        }
-                        if is_statement_form_word(word) {
-                            open_statement_forms += 1;
-                        }
-                        scanned = Some(PreviousToken::word(word));
-                    }
-                    _ if is_recursive_operator_start(byte) => {
-                        increment_source_operators(&frames, &mut current_operators, index)?;
-                        let extra = recursive_operator_extra_bytes(bytes, index);
-                        if byte == b'?' && extra == 0 {
-                            open_conditionals += 1;
-                        }
-                        index += extra;
-                    }
-                    (b'\n' | b'\r', _) => {
-                        // Automatic semicolon insertion ends the statement here
-                        // unless the next token continues the expression, and
-                        // only where a statement can actually end.
-                        if previous.can_end_statement()
-                            && open_statement_forms == 0
-                            && frames.last().is_none_or(|frame: &SourceNestingFrame| {
-                                frame.delimiter == SourceDelimiter::StatementBrace
-                            })
-                        {
-                            pending_statement_end = true;
-                        }
-                        scanned = None;
-                    }
-                    _ if byte.is_ascii_whitespace() => scanned = None,
-                    _ => {}
-                }
-                if let Some(token) = scanned {
-                    previous = token;
-                }
-            }
+enum SourceScanError {
+    NestingLimit(SourceSpan),
+    Diagnostic(Diagnostic),
+}
+
+struct SourceNestingVisitor<'source> {
+    source: &'source str,
+    bytes: &'source [u8],
+    mode: ScanMode,
+    escaped: bool,
+    regexp_class: bool,
+    regexp_pattern_start: usize,
+    nesting: SourceNestingState,
+    previous: PreviousToken,
+    /// A newline that could end a statement; the following token decides
+    /// whether it actually did.
+    pending_statement_end: bool,
+    index: usize,
+}
+
+impl<'source> SourceNestingVisitor<'source> {
+    fn new(source: &'source str) -> Self {
+        Self {
+            source,
+            bytes: source.as_bytes(),
+            mode: ScanMode::Code,
+            escaped: false,
+            regexp_class: false,
+            regexp_pattern_start: 0,
+            nesting: SourceNestingState::default(),
+            previous: PreviousToken::None,
+            pending_statement_end: false,
+            index: 0,
+        }
+    }
+
+    fn scan(mut self) -> Result<(), SourceScanError> {
+        while self.index < self.bytes.len() {
+            self.visit_current()?;
+            self.index += 1;
+        }
+        Ok(())
+    }
+
+    fn visit_current(&mut self) -> Result<(), SourceScanError> {
+        let byte = self.bytes[self.index];
+        let next = self.bytes.get(self.index + 1).copied();
+        match self.mode {
+            ScanMode::Code => self.visit_code(byte, next),
             ScanMode::SingleQuoted => {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == b'\'' {
-                    mode = ScanMode::Code;
-                    previous = PreviousToken::Byte(b'0');
-                }
+                self.visit_quoted(byte, b'\'');
+                Ok(())
             }
             ScanMode::DoubleQuoted => {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == b'"' {
-                    mode = ScanMode::Code;
-                    previous = PreviousToken::Byte(b'0');
-                }
+                self.visit_quoted(byte, b'"');
+                Ok(())
             }
-            ScanMode::Template => {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == b'`' {
-                    mode = ScanMode::Code;
-                    previous = PreviousToken::Byte(b'0');
-                } else if byte == b'$' && next == Some(b'{') {
-                    index += 1;
-                    // A template lowers to a left-nested concatenation chain, so
-                    // each hole deepens the tree the same way a `+` term does
-                    // and has to keep drawing on the budget after it closes.
-                    increment_source_operators(&frames, &mut current_operators, index)?;
-                    enter_source_delimiter(
-                        &mut frames,
-                        &mut current_operators,
-                        SourceDelimiter::TemplateExpression,
-                        false,
-                        index,
-                    )?;
-                    mode = ScanMode::Code;
-                    // A template hole is expression position, like `(`.
-                    previous = PreviousToken::Byte(b'(');
-                }
-            }
-            ScanMode::RegExp => {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == b'[' {
-                    regexp_class = true;
-                } else if byte == b']' {
-                    regexp_class = false;
-                } else if byte == b'/' && !regexp_class {
-                    crate::regex::validate_literal_shape(
-                        &source[regexp_pattern_start..index],
-                        Some(SourceSpan {
-                            start: regexp_pattern_start,
-                            end: index,
-                        }),
-                    )?;
-                    mode = ScanMode::Code;
-                    previous = PreviousToken::Byte(b'0');
-                }
-            }
+            ScanMode::Template => self.visit_template(byte, next),
+            ScanMode::RegExp => self.visit_regexp(byte),
             ScanMode::LineComment => {
-                let unicode_terminator = unicode_line_terminator_length(bytes, index);
-                if matches!(byte, b'\n' | b'\r') || unicode_terminator.is_some() {
-                    index += unicode_terminator.unwrap_or(1) - 1;
-                    mode = ScanMode::Code;
-                    // This newline never reaches the code scanner, so apply the
-                    // automatic-semicolon-insertion rule here instead.
-                    if previous.can_end_statement()
-                        && open_statement_forms == 0
-                        && frames.last().is_none_or(|frame: &SourceNestingFrame| {
-                            frame.delimiter == SourceDelimiter::StatementBrace
-                        })
-                    {
-                        pending_statement_end = true;
-                    }
-                }
+                self.visit_line_comment(byte);
+                Ok(())
             }
             ScanMode::BlockComment => {
-                if byte == b'*' && next == Some(b'/') {
-                    mode = ScanMode::Code;
-                    index += 1;
-                }
+                self.visit_block_comment(byte, next);
+                Ok(())
             }
         }
-        index += 1;
     }
-    Ok(())
-}
 
-fn enter_source_delimiter(
-    frames: &mut Vec<SourceNestingFrame>,
-    current_operators: &mut usize,
-    delimiter: SourceDelimiter,
-    postfix: bool,
-    index: usize,
-) -> Result<(), Diagnostic> {
-    let next_depth = source_nesting_depth(frames, *current_operators) + 1;
-    if next_depth > MAX_SOURCE_NESTING_DEPTH {
-        return Err(source_nesting_diagnostic(Some(SourceSpan {
-            start: index,
-            end: index + 1,
-        })));
+    fn visit_code(&mut self, byte: u8, next: Option<u8>) -> Result<(), SourceScanError> {
+        self.resolve_pending_statement_end(byte, next);
+
+        // `None` leaves the previous significant token in place, so whitespace
+        // and comments never change how a `{` is classified.
+        let mut scanned = Some(PreviousToken::Byte(byte));
+        match (byte, next) {
+            (b'/', Some(b'/')) => {
+                self.mode = ScanMode::LineComment;
+                self.index += 1;
+                scanned = None;
+            }
+            (b'/', Some(b'*')) => {
+                self.mode = ScanMode::BlockComment;
+                self.index += 1;
+                scanned = None;
+            }
+            (b'/', _) if !self.previous.can_end_expression() => self.start_regexp(),
+            (b'\'', _) => self.start_quoted(ScanMode::SingleQuoted),
+            (b'"', _) => self.start_quoted(ScanMode::DoubleQuoted),
+            (b'`', _) => self.start_template()?,
+            (b'(', _) => {
+                self.enter_delimiter(SourceDelimiter::Paren, self.previous.can_end_expression())?
+            }
+            (b')', _) => self.leave_delimiter(SourceDelimiter::Paren)?,
+            (b'[', _) => {
+                self.enter_delimiter(SourceDelimiter::Bracket, self.previous.can_end_expression())?
+            }
+            (b']', _) => self.leave_delimiter(SourceDelimiter::Bracket)?,
+            (b'{', _) => self.enter_delimiter(
+                if self.previous.opens_expression_brace() {
+                    SourceDelimiter::Brace
+                } else {
+                    SourceDelimiter::StatementBrace
+                },
+                false,
+            )?,
+            (b'}', _) => self.close_brace()?,
+            (b';' | b',', _) => self.visit_separator(),
+            (b':', _) => self.visit_colon()?,
+            _ if unicode_line_terminator_length(self.bytes, self.index).is_some() => {
+                self.visit_unicode_line_terminator();
+                scanned = None;
+            }
+            _ if is_identifier_start(byte) => {
+                scanned = Some(self.visit_identifier()?);
+            }
+            _ if is_recursive_operator_start(byte) => self.visit_operator(byte)?,
+            (b'\n' | b'\r', _) => {
+                self.mark_pending_statement_end();
+                scanned = None;
+            }
+            _ if byte.is_ascii_whitespace() => scanned = None,
+            _ => {}
+        }
+        if let Some(token) = scanned {
+            self.previous = token;
+        }
+        Ok(())
     }
-    frames.push(SourceNestingFrame {
-        delimiter,
-        outer_operators: std::mem::take(current_operators),
-        postfix,
-    });
-    Ok(())
-}
 
-fn leave_source_delimiter(
-    frames: &mut Vec<SourceNestingFrame>,
-    current_operators: &mut usize,
-    delimiter: SourceDelimiter,
-    index: usize,
-) -> Result<(), Diagnostic> {
-    if let Some(frame) = frames.pop_if(|frame| frame.delimiter == delimiter) {
-        *current_operators = frame.outer_operators;
-        if frame.postfix {
-            increment_source_operators(frames, current_operators, index)?;
+    fn resolve_pending_statement_end(&mut self, byte: u8, next: Option<u8>) {
+        if !self.pending_statement_end || byte.is_ascii_whitespace() {
+            return;
+        }
+        let word = if is_identifier_start(byte)
+            && unicode_line_terminator_length(self.bytes, self.index).is_none()
+        {
+            Some(&self.source[self.index..identifier_end(self.bytes, self.index)])
+        } else {
+            None
+        };
+        let comment = byte == b'/' && matches!(next, Some(b'/') | Some(b'*'));
+        if !comment {
+            self.pending_statement_end = false;
+            if !continues_previous_statement(byte, word) {
+                self.nesting.reset_statement();
+            }
         }
     }
-    Ok(())
-}
 
-fn increment_source_operators(
-    frames: &[SourceNestingFrame],
-    current_operators: &mut usize,
-    index: usize,
-) -> Result<(), Diagnostic> {
-    *current_operators += 1;
-    if source_nesting_depth(frames, *current_operators) > MAX_SOURCE_NESTING_DEPTH {
-        return Err(source_nesting_diagnostic(Some(SourceSpan {
-            start: index,
-            end: index + 1,
-        })));
+    fn start_regexp(&mut self) {
+        // SWC lexes a RegExp literal as one token. Its grouping punctuation
+        // therefore does not consume the TypeScript source-nesting budget; the
+        // RegExp validator applies its separate group cap.
+        self.mode = ScanMode::RegExp;
+        self.escaped = false;
+        self.regexp_class = false;
+        self.regexp_pattern_start = self.index + 1;
     }
-    Ok(())
-}
 
-fn source_nesting_depth(frames: &[SourceNestingFrame], current_operators: usize) -> usize {
-    frames.len()
-        + current_operators
-        + frames
-            .iter()
-            .map(|frame| frame.outer_operators)
-            .sum::<usize>()
+    fn start_quoted(&mut self, mode: ScanMode) {
+        self.mode = mode;
+        self.escaped = false;
+    }
+
+    fn start_template(&mut self) -> Result<(), SourceScanError> {
+        // A tagged template is a postfix tail; charge it now, since the
+        // template body is scanned in another mode.
+        if self.previous.can_end_expression() {
+            self.increment_operator()?;
+        }
+        self.mode = ScanMode::Template;
+        self.escaped = false;
+        Ok(())
+    }
+
+    fn enter_delimiter(
+        &mut self,
+        delimiter: SourceDelimiter,
+        postfix: bool,
+    ) -> Result<(), SourceScanError> {
+        self.nesting
+            .enter(delimiter, postfix, self.index)
+            .map_err(SourceScanError::NestingLimit)
+    }
+
+    fn leave_delimiter(&mut self, delimiter: SourceDelimiter) -> Result<(), SourceScanError> {
+        self.nesting
+            .leave(delimiter, self.index)
+            .map_err(SourceScanError::NestingLimit)
+    }
+
+    fn increment_operator(&mut self) -> Result<(), SourceScanError> {
+        self.nesting
+            .increment_operator(self.index)
+            .map_err(SourceScanError::NestingLimit)
+    }
+
+    fn close_brace(&mut self) -> Result<(), SourceScanError> {
+        let closed = self.nesting.current_delimiter().filter(|delimiter| {
+            matches!(
+                delimiter,
+                SourceDelimiter::Brace
+                    | SourceDelimiter::StatementBrace
+                    | SourceDelimiter::TemplateExpression
+            )
+        });
+        if let Some(delimiter) = closed {
+            self.leave_delimiter(delimiter)?;
+        }
+        match closed {
+            // A statement block ends every statement form that introduced it,
+            // so the next statement starts over.
+            Some(SourceDelimiter::StatementBrace) => self.nesting.reset_statement(),
+            Some(SourceDelimiter::TemplateExpression) => self.mode = ScanMode::Template,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn visit_separator(&mut self) {
+        self.nesting.current_operators = 0;
+        self.nesting.open_conditionals = 0;
+        // A `;` inside a delimiter is a `for` header separator and a `,` is an
+        // element separator; neither ends the statement that opened the
+        // delimiter. Clearing the open statement forms there would let a
+        // newline end a `for (;;)` that has not reached its body yet.
+        if self.nesting.at_statement_level() {
+            self.nesting.open_statement_forms = 0;
+        }
+    }
+
+    fn visit_colon(&mut self) -> Result<(), SourceScanError> {
+        if self.nesting.open_conditionals > 0 {
+            // The second arm of a conditional, already charged by its `?`.
+            self.nesting.open_conditionals -= 1;
+        } else if self.previous.can_name_a_label() && self.nesting.at_statement_level() {
+            // `LabelledStatement := Identifier ':' Statement` recurses without
+            // bound and uses no delimiter, so the label itself carries the
+            // charge. A type annotation in the same position charges one unit
+            // too, which its statement boundary releases.
+            self.increment_operator()?;
+        }
+        Ok(())
+    }
+
+    fn visit_unicode_line_terminator(&mut self) {
+        // U+2028 / U+2029 end a line in ECMAScript, so SWC inserts a semicolon
+        // after them and the budget has to release in the same places.
+        self.index += unicode_line_terminator_length(self.bytes, self.index)
+            .expect("a line terminator was just matched")
+            - 1;
+        self.mark_pending_statement_end();
+    }
+
+    fn visit_identifier(&mut self) -> Result<PreviousToken, SourceScanError> {
+        let start = self.index;
+        self.index = identifier_end(self.bytes, self.index) - 1;
+        let word = &self.source[start..=self.index];
+        if is_recursive_operator_word(word) {
+            self.nesting
+                .increment_operator(start)
+                .map_err(SourceScanError::NestingLimit)?;
+        }
+        if is_statement_form_word(word) {
+            self.nesting.open_statement_forms += 1;
+        }
+        Ok(PreviousToken::word(word))
+    }
+
+    fn visit_operator(&mut self, byte: u8) -> Result<(), SourceScanError> {
+        self.increment_operator()?;
+        let extra = recursive_operator_extra_bytes(self.bytes, self.index);
+        if byte == b'?' && extra == 0 {
+            self.nesting.open_conditionals += 1;
+        }
+        self.index += extra;
+        Ok(())
+    }
+
+    fn mark_pending_statement_end(&mut self) {
+        // Statement forms whose controlled statement has not been reached yet
+        // suppress automatic semicolon insertion: `if (1)` is not a complete
+        // statement however the line breaks.
+        if self.previous.can_end_statement()
+            && self.nesting.open_statement_forms == 0
+            && self.nesting.at_statement_level()
+        {
+            self.pending_statement_end = true;
+        }
+    }
+
+    fn visit_quoted(&mut self, byte: u8, quote: u8) {
+        if self.escaped {
+            self.escaped = false;
+        } else if byte == b'\\' {
+            self.escaped = true;
+        } else if byte == quote {
+            self.mode = ScanMode::Code;
+            self.previous = PreviousToken::Byte(b'0');
+        }
+    }
+
+    fn visit_template(&mut self, byte: u8, next: Option<u8>) -> Result<(), SourceScanError> {
+        if self.escaped {
+            self.escaped = false;
+        } else if byte == b'\\' {
+            self.escaped = true;
+        } else if byte == b'`' {
+            self.mode = ScanMode::Code;
+            self.previous = PreviousToken::Byte(b'0');
+        } else if byte == b'$' && next == Some(b'{') {
+            self.index += 1;
+            // A template lowers to a left-nested concatenation chain, so each
+            // hole deepens the tree like a `+` term and keeps drawing on the
+            // budget after it closes.
+            self.increment_operator()?;
+            self.enter_delimiter(SourceDelimiter::TemplateExpression, false)?;
+            self.mode = ScanMode::Code;
+            // A template hole is expression position, like `(`.
+            self.previous = PreviousToken::Byte(b'(');
+        }
+        Ok(())
+    }
+
+    fn visit_regexp(&mut self, byte: u8) -> Result<(), SourceScanError> {
+        if self.escaped {
+            self.escaped = false;
+        } else if byte == b'\\' {
+            self.escaped = true;
+        } else if byte == b'[' {
+            self.regexp_class = true;
+        } else if byte == b']' {
+            self.regexp_class = false;
+        } else if byte == b'/' && !self.regexp_class {
+            crate::regex::validate_literal_shape(
+                &self.source[self.regexp_pattern_start..self.index],
+                Some(SourceSpan {
+                    start: self.regexp_pattern_start,
+                    end: self.index,
+                }),
+            )
+            .map_err(SourceScanError::Diagnostic)?;
+            self.mode = ScanMode::Code;
+            self.previous = PreviousToken::Byte(b'0');
+        }
+        Ok(())
+    }
+
+    fn visit_line_comment(&mut self, byte: u8) {
+        let unicode_terminator = unicode_line_terminator_length(self.bytes, self.index);
+        if matches!(byte, b'\n' | b'\r') || unicode_terminator.is_some() {
+            self.index += unicode_terminator.unwrap_or(1) - 1;
+            self.mode = ScanMode::Code;
+            // This newline never reaches the code scanner, so apply the
+            // automatic-semicolon-insertion rule here instead.
+            self.mark_pending_statement_end();
+        }
+    }
+
+    fn visit_block_comment(&mut self, byte: u8, next: Option<u8>) {
+        if byte == b'*' && next == Some(b'/') {
+            self.mode = ScanMode::Code;
+            self.index += 1;
+        }
+    }
 }
 
 /// ECMAScript identifiers are Unicode, and the scanner only has to agree with
