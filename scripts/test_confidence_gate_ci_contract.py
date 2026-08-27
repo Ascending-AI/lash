@@ -203,9 +203,26 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(evaluate(needs, "pull_request"), [])
         self.assertEqual(evaluate(needs, "merge_group"), [])
         push_problems = evaluate(needs, "push")
-        self.assertEqual(len(push_problems), len(trunk_only))
+        self.assertEqual(len(push_problems), len(trunk_only) + 2)
         for problem in push_problems:
-            self.assertIn("although plan.", problem)
+            self.assertTrue("although plan." in problem or "workers E2E job" in problem)
+        for job in ("restate-postgres-workers", "restate-postgres-workers-summary"):
+            needs[job] = {"result": "skipped", "outputs": {}}
+        for job in trunk_only:
+            needs[job] = {"result": "success", "outputs": {}}
+        self.assertEqual(
+            plan["evaluate_conclusion"](needs, "push", "refs/heads/feature"), []
+        )
+        for job in trunk_only:
+            needs[job] = {"result": "skipped", "outputs": {}}
+        self.assertIn(
+            "ungated job restate-postgres-workers ended with 'skipped', expected success",
+            plan["evaluate_conclusion"](needs, "pull_request"),
+        )
+        self.assertIn(
+            "ungated job restate-postgres-workers ended with 'skipped', expected success",
+            plan["evaluate_conclusion"](needs, "push", "refs/heads/main"),
+        )
         needs["api-coverage"] = {"result": "success", "outputs": {}}
         self.assertIn(
             "full-profile job api-coverage ended with 'success' on a "
@@ -225,23 +242,27 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             api_coverage,
         )
 
-        # Workers E2E runs only on the full profile (workflow_dispatch),
-        # through step-level guards; every other event gets an explain step.
+        # Workers E2E is neutral on plain branch pushes, but runs on PRs,
+        # merge-group runs, main pushes, and workflow_dispatch.
         workers = workflow_job_block(workflow, "restate-postgres-workers")
-        self.assertIn("if: github.event_name != 'workflow_dispatch'", workers)
         self.assertIn(
-            "if: github.event_name == 'workflow_dispatch' "
+            "if: github.event_name != 'push' || github.ref == 'refs/heads/main'",
+            workers,
+        )
+        self.assertIn(
+            "if: (github.event_name != 'push' || github.ref == 'refs/heads/main') "
             "&& needs.plan.outputs.workers_e2e == 'true'",
             workers,
         )
-        self.assertNotIn(
-            "github.event_name != 'pull_request' && needs.plan.outputs.workers_e2e",
-            workflow,
+        summary = workflow_job_block(workflow, "restate-postgres-workers-summary")
+        self.assertIn(
+            "if: always() && (github.event_name != 'push' || github.ref == 'refs/heads/main')",
+            summary,
         )
-        self.assertNotIn(
-            "github.event_name != 'merge_group' "
-            "&& needs.plan.outputs.workers_e2e",
-            workflow,
+        self.assertIn(
+            "if: (github.event_name != 'push' || github.ref == 'refs/heads/main') "
+            "&& needs.plan.outputs.workers_e2e == 'true'",
+            summary,
         )
 
         # Lean runs test only the primary Postgres major; the full profile
