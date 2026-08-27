@@ -6867,7 +6867,7 @@ async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_i
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -6934,7 +6934,7 @@ async fn durable_controller_reports_a_retryable_busy_lane_when_the_holder_is_ali
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -7029,7 +7029,7 @@ async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pending() {
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -7112,7 +7112,7 @@ async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait_budget() {
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,

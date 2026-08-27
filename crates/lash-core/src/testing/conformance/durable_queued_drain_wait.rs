@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use super::runtime_persistence::RuntimePersistenceLeaseTiming;
+use crate::QueuedLaneHolder;
 use crate::runtime::session_execution_lease::queued_lane_wait::{
     QueuedLaneGiveUp, QueuedLaneWait, QueuedLaneWaitStep,
 };
@@ -59,7 +60,7 @@ async fn waits_out_a_crashed_holder_then_claims(
             SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => break acquisition,
             SessionExecutionLeaseClaimOutcome::Busy { holder: observed } => {
                 assert_eq!(observed.executor_id, "crashed-holder-executor");
-                match wait.observe(&observed) {
+                match wait.observe(&QueuedLaneHolder::new(observed)) {
                     QueuedLaneWaitStep::Wait { slice_ms } => {
                         lease_timing.pass_wait_slice(slice_ms).await;
                     }
@@ -120,7 +121,7 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
 
     let mut wait = QueuedLaneWait::default();
     let first = busy_holder(store, session_id, &drain, ttl_ms).await;
-    assert_eq!(first.executor_id, "live-holder-executor");
+    assert_eq!(first.lease().executor_id, "live-holder-executor");
     let slice_ms = match wait.observe(&first) {
         QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
         QueuedLaneWaitStep::GiveUp(give_up) => {
@@ -134,9 +135,9 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
         .await
         .expect("the live holder renews its own lane");
     assert!(
-        renewed.expires_at_epoch_ms > first.expires_at_epoch_ms,
+        renewed.expires_at_epoch_ms > first.lease().expires_at_epoch_ms,
         "a renewal must publish a strictly later expiry: {} then {}",
-        first.expires_at_epoch_ms,
+        first.lease().expires_at_epoch_ms,
         renewed.expires_at_epoch_ms
     );
 
@@ -162,13 +163,13 @@ async fn busy_holder(
     session_id: &str,
     drain: &crate::LeaseOwnerIdentity,
     ttl_ms: u64,
-) -> crate::store::SessionExecutionLease {
+) -> QueuedLaneHolder {
     match store
         .try_claim_session_execution_lease(session_id, drain, "drain-executor", ttl_ms)
         .await
         .expect("durable queued drain claim attempt")
     {
-        SessionExecutionLeaseClaimOutcome::Busy { holder } => holder,
+        SessionExecutionLeaseClaimOutcome::Busy { holder } => QueuedLaneHolder::new(holder),
         SessionExecutionLeaseClaimOutcome::Acquired(_) => {
             panic!("a live holder's lane must not be granted to the drain")
         }

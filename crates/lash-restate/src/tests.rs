@@ -31,9 +31,10 @@ use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOp
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
     ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand, ProcessEffectOutcome,
-    ProcessExecutionContext, ProcessExternalRef, ProcessRegistry, Resolution, ResolveOutcome,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
+    ProcessExecutionContext, ProcessExternalRef, ProcessRegistry, QueuedLaneAcquisition,
+    QueuedLaneAttempt, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
     facade_support::DurableProcessWorker, facade_support::ProcessAttach,
     facade_support::ProcessRunHandle, facade_support::TurnAddress, facade_support::TurnAttach,
 };
@@ -85,6 +86,78 @@ fn registry_local_executor(
         &registry,
     )));
     RuntimeEffectLocalExecutor::processes(registry, process_work)
+}
+
+struct QueuedLaneProbeDouble {
+    attempts: Mutex<VecDeque<QueuedLaneAttempt>>,
+    try_calls: AtomicUsize,
+    pause_calls: AtomicUsize,
+}
+
+impl QueuedLaneProbeDouble {
+    fn new(attempts: impl IntoIterator<Item = QueuedLaneAttempt>) -> Self {
+        Self {
+            attempts: Mutex::new(attempts.into_iter().collect()),
+            try_calls: AtomicUsize::new(0),
+            pause_calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl QueuedLaneProbe for QueuedLaneProbeDouble {
+    async fn try_acquire(&self) -> Result<QueuedLaneAttempt, lash_core::RuntimeError> {
+        self.try_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self
+            .attempts
+            .lock_recover()
+            .pop_front()
+            .expect("queued-lane probe attempt"))
+    }
+
+    async fn pause(&self, _slice: Duration) {
+        self.pause_calls.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn restate_controller_waits_but_deployment_host_keeps_the_one_shot_lane_default() {
+    let controller_probe = Arc::new(QueuedLaneProbeDouble::new([
+        QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_400)),
+        QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_401)),
+    ]));
+    let controller = RestateRuntimeEffectController::new(Arc::new(RecordingContext::default()));
+    let result = controller
+        .acquire_queued_lane(
+            Arc::clone(&controller_probe) as Arc<dyn QueuedLaneProbe>,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+    let Err(error) = result else {
+        panic!("the Restate handler controller must use the engine-paced lane wait")
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
+    );
+    assert!(error.is_retryable());
+    assert_eq!(controller_probe.try_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(controller_probe.pause_calls.load(Ordering::SeqCst), 1);
+
+    let host_probe = Arc::new(QueuedLaneProbeDouble::new([QueuedLaneAttempt::Busy(
+        lash_core::testing::queued_lane_holder_for_testing(7_400),
+    )]));
+    let host = RestateEffectHost::new("http://127.0.0.1:8080");
+    let result = host
+        .acquire_queued_lane(
+            Arc::clone(&host_probe) as Arc<dyn QueuedLaneProbe>,
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("deployment-host queued-lane default");
+    assert!(matches!(result, QueuedLaneAcquisition::NotAcquired));
+    assert_eq!(host_probe.try_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host_probe.pause_calls.load(Ordering::SeqCst), 0);
 }
 
 fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::ProcessWorkWiring {

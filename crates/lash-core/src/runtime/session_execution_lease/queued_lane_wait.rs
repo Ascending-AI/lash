@@ -29,7 +29,7 @@
 //! row. Nothing here subtracts a local timestamp from a store-written one. The
 //! local clock is used only to measure a slice, which is clock-domain free.
 
-use crate::store::SessionExecutionLease;
+use crate::runtime::effect::QueuedLaneHolder;
 
 /// Total in-process waiting for a busy session lane, as a multiple of the
 /// observed holder's own persisted lease term.
@@ -105,23 +105,7 @@ pub(crate) struct QueuedLaneWait {
     budget_ms: u64,
     slice_ms: u64,
     waited_ms: u64,
-    previous: Option<PreviousObservation>,
-}
-
-#[derive(Debug)]
-struct PreviousObservation {
-    owner_id: String,
-    incarnation_id: String,
-    executor_id: String,
-    expires_at_epoch_ms: u64,
-}
-
-impl PreviousObservation {
-    fn is_same_holder(&self, holder: &SessionExecutionLease) -> bool {
-        self.owner_id == holder.owner.owner_id
-            && self.incarnation_id == holder.owner.incarnation_id
-            && self.executor_id == holder.executor_id
-    }
+    previous: Option<QueuedLaneHolder>,
 }
 
 impl QueuedLaneWait {
@@ -137,20 +121,18 @@ impl QueuedLaneWait {
     }
 
     /// Decide what to do with `holder`, the busy holder this round observed.
-    pub(crate) fn observe(&mut self, holder: &SessionExecutionLease) -> QueuedLaneWaitStep {
+    pub(crate) fn observe(&mut self, holder: &QueuedLaneHolder) -> QueuedLaneWaitStep {
         match self.previous.take() {
             None => {
                 self.budget_ms = holder
-                    .lease_term_ms
+                    .lease_term_ms()
                     .saturating_mul(TOTAL_WAIT_TTL_MULTIPLE)
                     .clamp(MIN_SLICE_MS, MAX_WAIT_BUDGET_MS);
                 self.slice_ms =
-                    (holder.lease_term_ms / PROBES_PER_TTL).clamp(MIN_SLICE_MS, MAX_SLICE_MS);
+                    (holder.lease_term_ms() / PROBES_PER_TTL).clamp(MIN_SLICE_MS, MAX_SLICE_MS);
             }
             Some(previous) => {
-                if previous.is_same_holder(holder)
-                    && holder.expires_at_epoch_ms > previous.expires_at_epoch_ms
-                {
+                if holder.renewed_since(&previous) {
                     return QueuedLaneWaitStep::GiveUp(QueuedLaneGiveUp::HolderIsAlive);
                 }
             }
@@ -161,12 +143,7 @@ impl QueuedLaneWait {
         }
         let slice_ms = self.slice_ms.min(remaining_ms);
         self.waited_ms += slice_ms;
-        self.previous = Some(PreviousObservation {
-            owner_id: holder.owner.owner_id.clone(),
-            incarnation_id: holder.owner.incarnation_id.clone(),
-            executor_id: holder.executor_id.clone(),
-            expires_at_epoch_ms: holder.expires_at_epoch_ms,
-        });
+        self.previous = Some(holder.clone());
         QueuedLaneWaitStep::Wait { slice_ms }
     }
 }
@@ -179,11 +156,11 @@ impl QueuedLaneWait {
 /// cause makes a `RuntimeError` terminal, and this outcome is explicitly safe to
 /// retry.
 pub(crate) fn lane_busy_error(
-    session_id: &str,
-    holder: &SessionExecutionLease,
+    holder: &QueuedLaneHolder,
     give_up: QueuedLaneGiveUp,
     waited_ms: u64,
 ) -> crate::RuntimeError {
+    let lease = holder.lease();
     let reason = match give_up {
         QueuedLaneGiveUp::HolderIsAlive => "the holder renewed its lease",
         QueuedLaneGiveUp::WaitBudgetExhausted => "the in-process wait budget elapsed",
@@ -196,11 +173,12 @@ pub(crate) fn lane_busy_error(
              `{owner}` incarnation `{incarnation}` executor `{executor}` \
              (fencing generation {fencing_token}, expires at {expires_at_epoch_ms}); \
              stopped waiting after {waited_ms}ms because {reason}",
-            owner = holder.owner.owner_id,
-            incarnation = holder.owner.incarnation_id,
-            executor = holder.executor_id,
-            fencing_token = holder.fencing_token,
-            expires_at_epoch_ms = holder.expires_at_epoch_ms,
+            session_id = lease.session_id,
+            owner = lease.owner.owner_id,
+            incarnation = lease.owner.incarnation_id,
+            executor = lease.executor_id,
+            fencing_token = lease.fencing_token,
+            expires_at_epoch_ms = lease.expires_at_epoch_ms,
         ),
     )
 }
@@ -209,20 +187,16 @@ pub(crate) fn lane_busy_error(
 /// crashed-looking holder. INFO because a queued workflow that appears stuck is
 /// an ordinary production question, and an operator cannot enable debug logging
 /// retroactively.
-pub(crate) fn trace_busy_wait(
-    session_id: &str,
-    holder: &SessionExecutionLease,
-    slice_ms: u64,
-    waited_ms: u64,
-) {
+pub(crate) fn trace_busy_wait(holder: &QueuedLaneHolder, slice_ms: u64, waited_ms: u64) {
+    let lease = holder.lease();
     tracing::info!(
-        session_id = %session_id,
-        holder_owner_id = %holder.owner.owner_id,
-        holder_incarnation_id = %holder.owner.incarnation_id,
-        holder_executor_id = %holder.executor_id,
-        holder_fencing_token = holder.fencing_token,
-        holder_expires_at_epoch_ms = holder.expires_at_epoch_ms,
-        holder_lease_term_ms = holder.lease_term_ms,
+        session_id = %lease.session_id,
+        holder_owner_id = %lease.owner.owner_id,
+        holder_incarnation_id = %lease.owner.incarnation_id,
+        holder_executor_id = %lease.executor_id,
+        holder_fencing_token = lease.fencing_token,
+        holder_expires_at_epoch_ms = lease.expires_at_epoch_ms,
+        holder_lease_term_ms = lease.lease_term_ms,
         slice_ms,
         waited_ms,
         event = "session_execution_lease.busy_wait",
@@ -233,19 +207,19 @@ pub(crate) fn trace_busy_wait(
 /// `session_execution_lease.busy_gave_up`: this drain stopped waiting and is
 /// handing pacing back to the controller's engine.
 pub(crate) fn trace_busy_gave_up(
-    session_id: &str,
-    holder: &SessionExecutionLease,
+    holder: &QueuedLaneHolder,
     give_up: QueuedLaneGiveUp,
     waited_ms: u64,
 ) {
+    let lease = holder.lease();
     tracing::info!(
-        session_id = %session_id,
-        holder_owner_id = %holder.owner.owner_id,
-        holder_incarnation_id = %holder.owner.incarnation_id,
-        holder_executor_id = %holder.executor_id,
-        holder_fencing_token = holder.fencing_token,
-        holder_expires_at_epoch_ms = holder.expires_at_epoch_ms,
-        holder_lease_term_ms = holder.lease_term_ms,
+        session_id = %lease.session_id,
+        holder_owner_id = %lease.owner.owner_id,
+        holder_incarnation_id = %lease.owner.incarnation_id,
+        holder_executor_id = %lease.executor_id,
+        holder_fencing_token = lease.fencing_token,
+        holder_expires_at_epoch_ms = lease.expires_at_epoch_ms,
+        holder_lease_term_ms = lease.lease_term_ms,
         waited_ms,
         give_up = give_up.as_str(),
         event = "session_execution_lease.busy_gave_up",
@@ -262,8 +236,8 @@ mod tests {
         claimed_at_epoch_ms: u64,
         lease_term_ms: u64,
         expires_at_epoch_ms: u64,
-    ) -> SessionExecutionLease {
-        SessionExecutionLease {
+    ) -> QueuedLaneHolder {
+        QueuedLaneHolder::new(crate::store::SessionExecutionLease {
             session_id: "queued-lane-wait".to_string(),
             owner: crate::LeaseOwnerIdentity::opaque("host", "host:boot"),
             executor_id: executor_id.to_string(),
@@ -272,7 +246,7 @@ mod tests {
             claimed_at_epoch_ms,
             lease_term_ms,
             expires_at_epoch_ms,
-        }
+        })
     }
 
     /// A 6_400ms observed TTL slices into 64 probes of 100ms.

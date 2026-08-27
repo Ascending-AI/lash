@@ -22,6 +22,7 @@ mod trigger;
 pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
+    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
     Resolution, ResolveOutcome, RuntimeEffectController, ScopedEffectController, SegmentProgress,
 };
 pub(crate) use control::{

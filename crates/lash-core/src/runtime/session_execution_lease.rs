@@ -128,7 +128,7 @@ pub(super) struct SessionExecutionLeaseCommitEvidence {
     lease_lost: bool,
 }
 
-pub(super) struct SessionExecutionLeaseGuard {
+pub(crate) struct SessionExecutionLeaseGuard {
     store: Arc<dyn RuntimePersistence>,
     lease: Arc<StdMutex<SessionExecutionLease>>,
     release_state: Arc<AtomicU8>,

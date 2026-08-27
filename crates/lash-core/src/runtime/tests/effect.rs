@@ -34,7 +34,7 @@ pub(super) struct RecordingEffectController {
     inline: InlineRuntimeEffectController,
     cancel_after_llm: bool,
     controller_owned_replay: bool,
-    durable_workflow_controller: bool,
+    engine_paced_lane: bool,
     replay_by_key: bool,
     execute_llm_locally: bool,
     cancel_watch: CancelWatchBehavior,
@@ -65,12 +65,11 @@ impl RecordingEffectController {
         self
     }
 
-    /// Opt into the durable-workflow-controller capability the aliveness-aware
-    /// queued-drain busy policy keys on. Deliberately separate from
-    /// [`with_controller_owned_replay`](Self::with_controller_owned_replay), so
-    /// a test can hold the two axes apart exactly as the product does.
-    pub(super) fn with_durable_workflow_controller(mut self) -> Self {
-        self.durable_workflow_controller = true;
+    /// Route queued-lane acquisition through the engine-paced wait policy.
+    /// Deliberately separate from controller-owned replay, so tests hold the
+    /// two behaviors apart exactly as the product does.
+    pub(super) fn with_engine_paced_lane(mut self) -> Self {
+        self.engine_paced_lane = true;
         self
     }
 
@@ -197,8 +196,21 @@ impl crate::AwaitEventResolver for RecordingEffectController {
         }
     }
 
-    fn durable_workflow_controller(&self) -> bool {
-        self.durable_workflow_controller
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn crate::QueuedLaneProbe>,
+        cancel: CancellationToken,
+    ) -> Result<crate::QueuedLaneAcquisition, RuntimeError> {
+        if self.engine_paced_lane {
+            self.wait_out_crashed_lane_holder(lane, cancel).await
+        } else {
+            match lane.try_acquire().await? {
+                crate::QueuedLaneAttempt::Acquired(guard) => {
+                    Ok(crate::QueuedLaneAcquisition::Acquired(guard))
+                }
+                crate::QueuedLaneAttempt::Busy(_) => Ok(crate::QueuedLaneAcquisition::NotAcquired),
+            }
+        }
     }
 
     async fn await_event_key(

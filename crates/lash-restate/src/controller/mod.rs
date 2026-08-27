@@ -18,12 +18,12 @@ use std::time::Duration;
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     PluginError, ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord,
-    ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    RuntimeInvocation, ScopedEffectController, facade_support::CanonicalRuntimeEffectEnvelope,
-    facade_support::RuntimeAwaitEventOptions, facade_support::RuntimeSleepOptions,
-    facade_support::refuse_unhonored_group_membership,
+    ProcessRegistry, QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeError, RuntimeErrorCode, RuntimeInvocation, ScopedEffectController,
+    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
+    facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
 };
 use restate_sdk::context::RunRetryPolicy;
@@ -444,8 +444,12 @@ where
     /// The deployment-level [`RestateEffectHost`](crate::RestateEffectHost)
     /// deliberately does not opt in: it serves requests from outside a handler,
     /// where nothing re-drives the caller.
-    fn durable_workflow_controller(&self) -> bool {
-        true
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        self.wait_out_crashed_lane_holder(lane, cancel).await
     }
 
     fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use crate::runtime::session_execution_lease::queued_lane_wait;
 use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
@@ -592,6 +593,88 @@ pub(crate) mod facade_ops {
 
 type EffectControllerTaskFuture<'run> = Pin<Box<dyn Future<Output = ()> + Send + 'run>>;
 
+/// Guard on the acquired lane. Opaque newtype over `SessionExecutionLeaseGuard`.
+pub struct QueuedLaneGuard(crate::runtime::session_execution_lease::SessionExecutionLeaseGuard);
+
+impl QueuedLaneGuard {
+    pub(crate) fn new(
+        guard: crate::runtime::session_execution_lease::SessionExecutionLeaseGuard,
+    ) -> Self {
+        Self(guard)
+    }
+
+    pub(crate) fn into_inner(
+        self,
+    ) -> crate::runtime::session_execution_lease::SessionExecutionLeaseGuard {
+        self.0
+    }
+}
+
+/// One attempt at the durable lane a queued drain must own, plus the facts a
+/// bounded wait needs. Opaque: no store type, no lease timings, no guard
+/// internals cross the seam.
+#[derive(Clone, Debug)]
+pub struct QueuedLaneHolder(crate::store::SessionExecutionLease);
+
+impl QueuedLaneHolder {
+    pub(crate) fn new(holder: crate::store::SessionExecutionLease) -> Self {
+        Self(holder)
+    }
+
+    pub(crate) fn lease(&self) -> &crate::store::SessionExecutionLease {
+        &self.0
+    }
+
+    /// The holder's own persisted lease term. The only honest budget unit for
+    /// waiting one out — see `session_execution_lease/queued_lane_wait.rs:26-31`.
+    pub fn lease_term_ms(&self) -> u64 {
+        self.0.lease_term_ms
+    }
+
+    /// True iff this observation proves the holder renewed under an unchanged
+    /// identity triple since `previous`: alive, not crashed.
+    pub fn renewed_since(&self, previous: &QueuedLaneHolder) -> bool {
+        self.0.owner == previous.0.owner
+            && self.0.executor_id == previous.0.executor_id
+            && self.0.expires_at_epoch_ms > previous.0.expires_at_epoch_ms
+    }
+
+    /// Describes the persisted holder identity and lease facts for diagnostics.
+    pub fn describe(&self) -> String {
+        format!(
+            "owner `{}` incarnation `{}` executor `{}` (fencing generation {}, expires at {})",
+            self.0.owner.owner_id,
+            self.0.owner.incarnation_id,
+            self.0.executor_id,
+            self.0.fencing_token,
+            self.0.expires_at_epoch_ms,
+        )
+    }
+}
+
+/// Result of one attempt to acquire the queued-work execution lane.
+pub enum QueuedLaneAttempt {
+    Acquired(QueuedLaneGuard),
+    Busy(QueuedLaneHolder),
+}
+
+/// Result of applying a boundary's queued-lane acquisition policy.
+pub enum QueuedLaneAcquisition {
+    Acquired(QueuedLaneGuard),
+    NotAcquired,
+}
+
+/// Core-provided probe. Owns everything it needs — `Arc<dyn RuntimePersistence>`,
+/// copied owner/executor identity, copied `LeaseTimings`, `Arc<dyn Clock>` — so
+/// it can cross an owned channel. The substrate decides how many times and how
+/// long to try; it never learns what it is trying.
+#[async_trait::async_trait]
+pub trait QueuedLaneProbe: Send + Sync {
+    async fn try_acquire(&self) -> Result<QueuedLaneAttempt, RuntimeError>;
+    /// Sleep `slice` through the runtime's injected clock.
+    async fn pause(&self, slice: std::time::Duration);
+}
+
 pub(crate) enum EffectControllerTaskRequest {
     Execute {
         envelope: Box<RuntimeEffectEnvelope>,
@@ -607,6 +690,11 @@ pub(crate) enum EffectControllerTaskRequest {
         key: AwaitEventKey,
         resolution: Resolution,
         response: oneshot::Sender<Result<ResolveOutcome, RuntimeError>>,
+    },
+    AcquireQueuedLane {
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: CancellationToken,
+        response: oneshot::Sender<Result<QueuedLaneAcquisition, RuntimeError>>,
     },
 }
 
@@ -637,6 +725,13 @@ impl EffectControllerTaskRequest {
             } => Box::pin(async move {
                 let _ = response.send(controller.resolve_await_event(&key, resolution).await);
             }),
+            Self::AcquireQueuedLane {
+                lane,
+                cancel,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.acquire_queued_lane(lane, cancel).await);
+            }),
         }
     }
 }
@@ -651,7 +746,6 @@ pub(super) struct RemoteLocalExecutionRequest {
 pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     replay_ownership: crate::EffectReplayOwnership,
-    durable_workflow_controller: bool,
     journal_addressing: crate::EffectJournalAddressing,
     allows_process_lifetime_completion_keys: bool,
     supports_concurrent_effects: bool,
@@ -672,7 +766,6 @@ impl EffectTaskController {
         let proxy = Self {
             requests,
             replay_ownership: controller.replay_ownership(),
-            durable_workflow_controller: controller.durable_workflow_controller(),
             journal_addressing: controller.journal_addressing(),
             allows_process_lifetime_completion_keys: controller
                 .allows_process_lifetime_completion_keys(),
@@ -691,16 +784,38 @@ impl AwaitEventResolver for EffectTaskController {
         self.replay_ownership
     }
 
-    fn durable_workflow_controller(&self) -> bool {
-        self.durable_workflow_controller
-    }
-
     fn journal_addressing(&self) -> crate::EffectJournalAddressing {
         self.journal_addressing
     }
 
     fn allows_process_lifetime_completion_keys(&self) -> bool {
         self.allows_process_lifetime_completion_keys
+    }
+
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::AcquireQueuedLane {
+                lane,
+                cancel,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "queued-lane controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "queued-lane controller response was dropped",
+            )
+        })?
     }
 
     async fn await_event_key(
@@ -883,33 +998,83 @@ pub trait AwaitEventResolver: Send + Sync {
         crate::EffectReplayOwnership::Runtime
     }
 
-    /// Whether this boundary is a durable workflow controller whose engine owns
-    /// retry pacing for the whole invocation.
+    /// Acquire the authoritative session-execution lane a durable queued drain
+    /// needs before it may claim work.
     ///
-    /// Opting in changes exactly one behaviour: a queued-work drain that finds
-    /// the session execution lane held no longer answers "nothing to drain"
-    /// (which an engine would read as a settled queue). It waits out a
-    /// crashed-looking holder and otherwise fails with the typed retryable
-    /// [`RuntimeErrorCode::SessionExecutionLaneBusy`](crate::RuntimeErrorCode::SessionExecutionLaneBusy),
-    /// which the controller surfaces to its engine so the engine's retry policy
-    /// paces the next attempt.
+    /// The default is the one-shot contract every non-re-driven boundary owes:
+    /// one attempt, `Busy` reported as `NotAcquired`, the durable row left
+    /// pending. A boundary whose *invocation* is re-driven by a durable engine
+    /// overrides with [`wait_out_crashed_lane_holder`](Self::wait_out_crashed_lane_holder):
+    /// it waits out a crashed-looking holder and otherwise fails with the typed
+    /// retryable `RuntimeErrorCode::SessionExecutionLaneBusy` so the engine's
+    /// retry policy — not a sleep inside one invocation — paces the next
+    /// attempt. Neither path bypasses or forges the holder's lease.
     ///
-    /// This is deliberately a separate question from
-    /// [`replay_ownership`](Self::replay_ownership): a store-backed durable
-    /// effect host also owns effect replay, yet has no engine-side retry policy
-    /// to hand the outcome to, so it must keep the ordinary one-shot drain
-    /// contract. Implement this only for a boundary whose *invocation* is
-    /// re-driven by a durable engine.
-    fn durable_workflow_controller(&self) -> bool {
-        false
+    /// Arguments are owned so this can be proxied across
+    /// `EffectControllerTaskRequest`.
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        _cancel: CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        match lane.try_acquire().await? {
+            QueuedLaneAttempt::Acquired(guard) => Ok(QueuedLaneAcquisition::Acquired(guard)),
+            QueuedLaneAttempt::Busy(_) => Ok(QueuedLaneAcquisition::NotAcquired),
+        }
+    }
+
+    /// Bounded, aliveness-aware wait for engine-re-driven boundaries. Provided
+    /// so `lash-restate` adopts the policy without lash-core exporting the
+    /// policy types or a second free function.
+    async fn wait_out_crashed_lane_holder(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        let mut wait = queued_lane_wait::QueuedLaneWait::default();
+        loop {
+            let acquisition = lane.try_acquire().await?;
+            match acquisition {
+                QueuedLaneAttempt::Acquired(guard) => {
+                    return Ok(QueuedLaneAcquisition::Acquired(guard));
+                }
+                QueuedLaneAttempt::Busy(holder) => {
+                    let slice_ms = match wait.observe(&holder) {
+                        queued_lane_wait::QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
+                        queued_lane_wait::QueuedLaneWaitStep::GiveUp(give_up) => {
+                            let waited_ms = wait.waited_ms();
+                            queued_lane_wait::trace_busy_gave_up(&holder, give_up, waited_ms);
+                            return Err(queued_lane_wait::lane_busy_error(
+                                &holder, give_up, waited_ms,
+                            ));
+                        }
+                    };
+                    queued_lane_wait::trace_busy_wait(&holder, slice_ms, wait.waited_ms());
+                    let sleep = lane.pause(std::time::Duration::from_millis(slice_ms));
+                    tokio::select! {
+                        () = sleep => {}
+                        () = cancel.cancelled() => {
+                            let give_up = queued_lane_wait::QueuedLaneGiveUp::CancelledWhileWaiting;
+                            let waited_ms = wait.waited_ms();
+                            queued_lane_wait::trace_busy_gave_up(
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            );
+                            return Err(queued_lane_wait::lane_busy_error(
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            ));
+                        },
+                    }
+                }
+            }
+        }
     }
 
     /// Describes how this boundary addresses replayed journal entries.
     ///
-    /// Keep this capability independent from any future
-    /// `durable_workflow_controller()` capability. The two are candidates for
-    /// a consolidated controller-traits surface, but durability and journal
-    /// addressing answer different questions today.
     fn journal_addressing(&self) -> crate::EffectJournalAddressing {
         crate::EffectJournalAddressing::Runtime
     }
@@ -1311,6 +1476,240 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestResolver;
+
+    impl AwaitEventResolver for TestResolver {}
+
+    #[async_trait::async_trait]
+    impl RuntimeEffectController for TestResolver {
+        async fn execute_effect(
+            &self,
+            _envelope: RuntimeEffectEnvelope,
+            _local_executor: RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            unreachable!("queued-lane controller tests do not execute effects")
+        }
+    }
+
+    struct FakeQueuedLaneProbe {
+        attempts: std::sync::Mutex<std::collections::VecDeque<QueuedLaneAttempt>>,
+        try_calls: std::sync::atomic::AtomicUsize,
+        pause_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl FakeQueuedLaneProbe {
+        fn new(attempts: impl IntoIterator<Item = QueuedLaneAttempt>) -> Self {
+            Self {
+                attempts: std::sync::Mutex::new(attempts.into_iter().collect()),
+                try_calls: std::sync::atomic::AtomicUsize::new(0),
+                pause_calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn try_calls(&self) -> usize {
+            self.try_calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn pause_calls(&self) -> usize {
+            self.pause_calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl QueuedLaneProbe for FakeQueuedLaneProbe {
+        async fn try_acquire(&self) -> Result<QueuedLaneAttempt, RuntimeError> {
+            self.try_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self
+                .attempts
+                .lock()
+                .expect("fake queued-lane attempts")
+                .pop_front()
+                .expect("fake queued-lane attempt available"))
+        }
+
+        async fn pause(&self, _slice: std::time::Duration) {
+            self.pause_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    fn queued_lane_holder(expires_at_epoch_ms: u64) -> QueuedLaneHolder {
+        QueuedLaneHolder(crate::store::SessionExecutionLease {
+            session_id: "queued-lane-test".to_string(),
+            owner: crate::LeaseOwnerIdentity::opaque("holder", "holder:incarnation"),
+            executor_id: "holder-executor".to_string(),
+            lease_token: "holder-token".to_string(),
+            fencing_token: 7,
+            claimed_at_epoch_ms: 1_000,
+            lease_term_ms: 6_400,
+            expires_at_epoch_ms,
+        })
+    }
+
+    async fn queued_lane_guard() -> QueuedLaneGuard {
+        let clock: Arc<dyn crate::Clock> = Arc::new(crate::testing::TestClock::new(1_000));
+        let store = Arc::new(crate::runtime::InMemorySessionStore::with_clock(
+            Arc::clone(&clock),
+        ));
+        let guard =
+            crate::runtime::session_execution_lease::SessionExecutionLeaseGuard::try_acquire(
+                store as Arc<dyn crate::store::RuntimePersistence>,
+                "queued-lane-test",
+                &crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation"),
+                "queued-lane-test-executor",
+                crate::LeaseTimings::default(),
+                clock,
+            )
+            .await
+            .expect("queued-lane test claim")
+            .expect("queued-lane test guard");
+        QueuedLaneGuard(guard)
+    }
+
+    #[tokio::test]
+    async fn default_queued_lane_acquisition_stops_after_one_busy_attempt() {
+        let probe = Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Busy(
+            queued_lane_holder(7_400),
+        )]));
+
+        let result = TestResolver
+            .acquire_queued_lane(
+                Arc::clone(&probe) as Arc<dyn QueuedLaneProbe>,
+                CancellationToken::new(),
+            )
+            .await
+            .expect("default queued-lane acquisition");
+
+        assert!(matches!(result, QueuedLaneAcquisition::NotAcquired));
+        assert_eq!(probe.try_calls(), 1);
+        assert_eq!(probe.pause_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn provided_wait_retries_a_crashed_looking_holder_until_acquired() {
+        let probe = Arc::new(FakeQueuedLaneProbe::new([
+            QueuedLaneAttempt::Busy(queued_lane_holder(7_400)),
+            QueuedLaneAttempt::Acquired(queued_lane_guard().await),
+        ]));
+
+        let result = TestResolver
+            .wait_out_crashed_lane_holder(
+                Arc::clone(&probe) as Arc<dyn QueuedLaneProbe>,
+                CancellationToken::new(),
+            )
+            .await
+            .expect("provided queued-lane wait");
+
+        assert!(
+            matches!(result, QueuedLaneAcquisition::Acquired(_)),
+            "expected acquisition after one crashed-looking holder; try_calls={}, pause_calls={}",
+            probe.try_calls(),
+            probe.pause_calls(),
+        );
+        assert_eq!(probe.try_calls(), 2);
+        assert_eq!(probe.pause_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn provided_wait_reports_a_renewing_holder_as_typed_retryable_busy() {
+        let probe = Arc::new(FakeQueuedLaneProbe::new([
+            QueuedLaneAttempt::Busy(queued_lane_holder(7_400)),
+            QueuedLaneAttempt::Busy(queued_lane_holder(7_401)),
+        ]));
+
+        let result = TestResolver
+            .wait_out_crashed_lane_holder(
+                Arc::clone(&probe) as Arc<dyn QueuedLaneProbe>,
+                CancellationToken::new(),
+            )
+            .await;
+
+        let Err(error) = result else {
+            panic!("a renewing holder must hand pacing back to the engine")
+        };
+        assert_eq!(error.code, RuntimeErrorCode::SessionExecutionLaneBusy);
+        assert!(error.is_retryable());
+        assert_eq!(probe.try_calls(), 2);
+        assert_eq!(probe.pause_calls(), 1);
+    }
+
+    async fn acquire_through_task_controller(
+        controller: &TestResolver,
+        probe: Arc<dyn QueuedLaneProbe>,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        let (scoped, mut requests) = EffectTaskController::scoped(
+            controller,
+            ExecutionScope::queue_drain("queued-lane-test", "drain"),
+        )?;
+        let acquire = scoped
+            .controller()
+            .acquire_queued_lane(probe, CancellationToken::new());
+        let drive = async {
+            requests
+                .recv()
+                .await
+                .expect("queued-lane task request")
+                .into_future(controller)
+                .await;
+        };
+        let (result, ()) = tokio::join!(acquire, drive);
+        result
+    }
+
+    #[tokio::test]
+    async fn queued_lane_acquisition_round_trips_through_the_task_controller() {
+        let controller = TestResolver;
+        let busy = acquire_through_task_controller(
+            &controller,
+            Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Busy(
+                queued_lane_holder(7_400),
+            )])),
+        )
+        .await
+        .expect("busy queued-lane proxy response");
+        assert!(matches!(busy, QueuedLaneAcquisition::NotAcquired));
+
+        let acquired = acquire_through_task_controller(
+            &controller,
+            Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Acquired(
+                queued_lane_guard().await,
+            )])),
+        )
+        .await
+        .expect("acquired queued-lane proxy response");
+        assert!(matches!(acquired, QueuedLaneAcquisition::Acquired(_)));
+    }
+
+    #[tokio::test]
+    async fn closed_task_controller_returns_a_typed_queued_lane_error() {
+        let controller = TestResolver;
+        let (scoped, requests) = EffectTaskController::scoped(
+            &controller,
+            ExecutionScope::queue_drain("queued-lane-test", "closed"),
+        )
+        .expect("queued-lane task proxy");
+        drop(requests);
+
+        let result = scoped
+            .controller()
+            .acquire_queued_lane(
+                Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Busy(
+                    queued_lane_holder(7_400),
+                )])),
+                CancellationToken::new(),
+            )
+            .await;
+
+        let Err(error) = result else {
+            panic!("a closed queued-lane task must return a typed error")
+        };
+        assert_eq!(
+            error.code,
+            RuntimeErrorCode::RuntimeEffectControllerTaskClosed
+        );
+    }
 
     #[test]
     fn journal_identity_is_typed_and_session_qualified() {

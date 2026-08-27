@@ -3,7 +3,6 @@ use super::logical_turn::agent_frame_follow_turn_id;
 use super::logical_turn::{
     LogicalTurnClaims, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
 };
-use super::session_execution_lease::queued_lane_wait;
 use super::turn_control::ActiveTurnControl;
 use super::*;
 use crate::facade_support::{
@@ -744,6 +743,43 @@ impl Drop for TurnDriverSessionLoan<'_, '_> {
     }
 }
 
+struct SessionExecutionLaneProbe {
+    store: Arc<dyn crate::store::RuntimePersistence>,
+    session_id: String,
+    owner: crate::LeaseOwnerIdentity,
+    executor_id: String,
+    timings: crate::LeaseTimings,
+    clock: Arc<dyn crate::Clock>,
+}
+
+#[async_trait::async_trait]
+impl crate::QueuedLaneProbe for SessionExecutionLaneProbe {
+    async fn try_acquire(&self) -> Result<crate::QueuedLaneAttempt, RuntimeError> {
+        match SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
+            Arc::clone(&self.store),
+            &self.session_id,
+            &self.owner,
+            &self.executor_id,
+            self.timings,
+            Arc::clone(&self.clock),
+        )
+        .await
+        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
+        {
+            SessionExecutionLeaseGuardAcquisition::Acquired(guard) => Ok(
+                crate::QueuedLaneAttempt::Acquired(crate::QueuedLaneGuard::new(guard)),
+            ),
+            SessionExecutionLeaseGuardAcquisition::Busy(holder) => Ok(
+                crate::QueuedLaneAttempt::Busy(crate::QueuedLaneHolder::new(holder)),
+            ),
+        }
+    }
+
+    async fn pause(&self, slice: std::time::Duration) {
+        self.clock.sleep(slice).await;
+    }
+}
+
 impl LashRuntime {
     pub(super) fn invalidate_resident_session_state(&mut self) {
         if matches!(self.resident_session_state, ResidentSessionState::Valid) {
@@ -1048,11 +1084,10 @@ impl LashRuntime {
     /// attempt. Either way the foreign executor's lease authority is never
     /// bypassed or forged.
     ///
-    /// The gate is the controller's own
-    /// [`durable_workflow_controller`](crate::AwaitEventResolver::durable_workflow_controller)
-    /// capability rather than [`crate::EffectReplayOwnership::Controller`]:
-    /// store-backed durable effect hosts also own effect replay while having no
-    /// engine-side retry policy, so they keep the ordinary one-shot contract.
+    /// The controller's [`acquire_queued_lane`](crate::AwaitEventResolver::acquire_queued_lane)
+    /// operation owns that distinction: store-backed durable effect hosts keep
+    /// the one-shot default, while an engine-re-driven handler overrides with
+    /// the provided aliveness-aware wait.
     async fn claim_session_execution_lease_for_queued_work(
         &mut self,
         opts: &TurnOptions<'_>,
@@ -1064,82 +1099,22 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        let wait_for_lease = opts
+        let lane: Arc<dyn crate::QueuedLaneProbe> = Arc::new(SessionExecutionLaneProbe {
+            store,
+            session_id: self.state.session_id.clone(),
+            owner: self.runtime_lease_owner.clone(),
+            executor_id: self.runtime_lease_executor_id.clone(),
+            timings: self.host.core.control.lease_timings,
+            clock: Arc::clone(&self.host.core.clock),
+        });
+        match opts
             .scoped_effect_controller()
             .controller()
-            .durable_workflow_controller();
-        let mut wait = queued_lane_wait::QueuedLaneWait::default();
-        loop {
-            let acquisition = SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
-                Arc::clone(&store),
-                &self.state.session_id,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
-            .await
-            .map_err(|err| {
-                RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
-            })?;
-            match acquisition {
-                SessionExecutionLeaseGuardAcquisition::Acquired(guard) => {
-                    return Ok(Some(guard));
-                }
-                SessionExecutionLeaseGuardAcquisition::Busy(_) if !wait_for_lease => {
-                    return Ok(None);
-                }
-                SessionExecutionLeaseGuardAcquisition::Busy(holder) => {
-                    let slice_ms = match wait.observe(&holder) {
-                        queued_lane_wait::QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
-                        queued_lane_wait::QueuedLaneWaitStep::GiveUp(give_up) => {
-                            let waited_ms = wait.waited_ms();
-                            queued_lane_wait::trace_busy_gave_up(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            );
-                            return Err(queued_lane_wait::lane_busy_error(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            ));
-                        }
-                    };
-                    queued_lane_wait::trace_busy_wait(
-                        &self.state.session_id,
-                        &holder,
-                        slice_ms,
-                        wait.waited_ms(),
-                    );
-                    let sleep = self
-                        .host
-                        .core
-                        .clock
-                        .sleep(std::time::Duration::from_millis(slice_ms));
-                    tokio::select! {
-                        () = sleep => {}
-                        () = opts.cancel.cancelled() => {
-                            let give_up = queued_lane_wait::QueuedLaneGiveUp::CancelledWhileWaiting;
-                            let waited_ms = wait.waited_ms();
-                            queued_lane_wait::trace_busy_gave_up(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            );
-                            return Err(queued_lane_wait::lane_busy_error(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            ));
-                        },
-                    }
-                }
-            }
+            .acquire_queued_lane(lane, opts.cancel.clone())
+            .await?
+        {
+            crate::QueuedLaneAcquisition::Acquired(guard) => Ok(Some(guard.into_inner())),
+            crate::QueuedLaneAcquisition::NotAcquired => Ok(None),
         }
     }
 

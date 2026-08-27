@@ -51,10 +51,6 @@ impl AwaitEventResolver for InlineEffectHost {
         self.controller.replay_ownership()
     }
 
-    fn durable_workflow_controller(&self) -> bool {
-        self.controller.durable_workflow_controller()
-    }
-
     fn journal_addressing(&self) -> crate::EffectJournalAddressing {
         self.controller.journal_addressing()
     }

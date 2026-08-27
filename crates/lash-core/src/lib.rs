@@ -1062,6 +1062,7 @@ pub use runtime::{
     ProcessWorklistPage, ProjectionWatermark, PromptUsage, ProtocolSessionExtension,
     ProtocolSessionExtensionHandle, ProtocolTurnExtension, ProtocolTurnExtensionHandle,
     QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
     QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
     QueuedWorkSubstrate, RecoveryContract, Resolution, ResolveOutcome, RuntimeCheckpointComponents,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,

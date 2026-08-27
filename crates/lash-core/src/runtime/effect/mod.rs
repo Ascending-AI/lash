@@ -24,7 +24,8 @@ pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
     InlineRuntimeEffectController, ProcessLocalExecution, ProcessOutcomeObserver,
-    ProcessTurnCancellation, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
+    QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
     RuntimeSleepOptions, ScopedEffectController, SegmentProgress, TriggerLocalExecution,
 };
