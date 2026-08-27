@@ -6,8 +6,7 @@ use super::process::{
     ProcessRegistry,
 };
 use super::{
-    DurableProcessWorker, EffectHost, InlineEffectHost, NativeProcessWork, NativeQueuedWork,
-    NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkRunHandle,
+    EffectHost, InlineEffectHost, NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring,
     QueuedWorkSubstrate, SessionStoreFactory, TerminationPolicy,
 };
 
@@ -265,25 +264,6 @@ pub struct ProcessRuntimeHost {
 impl ProcessRuntimeHost {
     pub(crate) fn embedded(&self) -> &EmbeddedRuntimeHost {
         &self.embedded
-    }
-    /// Construct a host using both first-party work ports.
-    pub fn native(
-        embedded: EmbeddedRuntimeHost,
-        registry: Arc<dyn ProcessRegistry>,
-        queued_run_handle: Arc<dyn QueuedWorkRunHandle>,
-        worker: DurableProcessWorker,
-    ) -> Self {
-        let (registry, hub) = super::watch_process_registry(registry);
-        let process_work = Arc::new(NativeProcessWork::new(
-            Arc::clone(&registry),
-            hub.clone(),
-            worker,
-        ));
-        Self::with_ports(
-            embedded,
-            ProcessWorkWiring::new(registry, hub, process_work),
-            Arc::new(NativeQueuedWork::new(queued_run_handle)),
-        )
     }
 
     /// Construct a process-capable host from a registry/port wiring and a

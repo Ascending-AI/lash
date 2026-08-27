@@ -626,11 +626,11 @@ impl ProcessAttach for RestateProcessIngressRunner {
         if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
             return Ok(output.clone());
         }
-        match self.await_terminal_wait(process_id).await? {
-            ProcessTerminalWait::Terminal(output) => Ok(output),
-            ProcessTerminalWait::Reattach => Err(PluginError::Session(format!(
-                "bounded Restate attachment for process `{process_id}` elapsed; reattach through ProcessWorkSubstrate"
-            ))),
+        loop {
+            match self.await_terminal_wait(process_id).await? {
+                ProcessTerminalWait::Terminal(output) => return Ok(output),
+                ProcessTerminalWait::Reattach => {}
+            }
         }
     }
 }

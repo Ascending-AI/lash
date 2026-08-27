@@ -4909,7 +4909,6 @@ lash::process::ProcessRegistry::with_runtime_clock
 lash::process::ProcessRunHandle
 lash::process::ProcessRunHandle::claim_and_run_pending
 lash::process::ProcessRuntimeHost
-lash::process::ProcessRuntimeHost::native
 lash::process::ProcessRuntimeHost::process_registry
 lash::process::ProcessRuntimeHost::process_work
 lash::process::ProcessRuntimeHost::queued_work

@@ -300,6 +300,14 @@ impl NativeSubstrateSlot {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn native_process_change_hub(&self) -> Option<facade_support::ProcessChangeHub> {
+        match &self.setup.process {
+            ProcessPortSetup::LazyDefault { hub, .. } => Some(hub.clone()),
+            ProcessPortSetup::None | ProcessPortSetup::External { .. } => None,
+        }
+    }
+
     pub(super) fn configured_worker_process_work(
         &self,
     ) -> Option<(facade_support::ProcessChangeHub, WorkerProcessWork)> {

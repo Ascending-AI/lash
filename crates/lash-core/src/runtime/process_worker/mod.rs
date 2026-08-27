@@ -1528,7 +1528,6 @@ impl DurableProcessWorker {
         .with_plugin_options(plugin_options)
         .with_session_store_factory(Arc::clone(&self.config.session_store_factory))
         .with_trigger_store(Arc::clone(&self.config.trigger_store))
-        .with_process_registry(Arc::clone(&self.config.process_registry))
         .with_process_work(process_work)
         .with_attachment_manifest_store(attachment_manifest_store)
         .with_store(store)

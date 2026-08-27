@@ -469,6 +469,50 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
 }
 
 #[tokio::test]
+async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
+    let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
+        .build(crate::testing::runtime_lease_owner())?;
+    let worker_hub = core
+        .substrate_slot
+        .native_process_change_hub()
+        .expect("native worker change hub");
+    let ports = core.substrate_slot.ports().await;
+    let resolved_env = core
+        .env
+        .clone()
+        .with_work_ports(ports.process.clone(), ports.queued_port());
+    let wiring_registry = resolved_env
+        .process_registry
+        .expect("native wiring process registry");
+    let process_id = "facade-native-same-hub";
+    let mut worker_changes = worker_hub.subscribe(process_id);
+
+    wiring_registry
+        .register_process(lash_core::ProcessRegistration::new(
+            process_id,
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+        ))
+        .await?;
+
+    tokio::time::timeout(
+        std::time::Duration::from_millis(20),
+        worker_changes.changed(),
+    )
+    .await
+    .expect("wiring registry mutation must wake the worker-side hub")
+    .expect("worker-side hub remains live");
+    Ok(())
+}
+
+#[tokio::test]
 async fn durable_process_worker_config_uses_core_process_registry() -> Result<()> {
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;

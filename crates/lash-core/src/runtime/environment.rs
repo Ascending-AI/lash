@@ -46,8 +46,13 @@ pub struct RuntimeEnvironment {
     // `PluginSession` is built from it via `PluginHost::build_session`.
     pub plugin_host: Option<Arc<crate::PluginHost>>,
 
-    // Host-owned process lifecycle support. When present, `work` is the
-    // corresponding `RuntimeWork::Processes` value before host construction.
+    /// Host-owned process lifecycle support.
+    ///
+    /// This can be present while `work` is [`RuntimeWork::SessionsOnly`] in the
+    /// named registry-only state used by the facade's lazy native composition:
+    /// facade/admin/session consumers use the watched registry before the
+    /// native process port is resolved. Once process work is wired, this is the
+    /// registry carried by that same wiring.
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
 
     // Host-owned trigger subscription and trigger occurrence routing.
@@ -108,7 +113,6 @@ impl ParkedSession {
 /// Fluent builder for `RuntimeEnvironment`.
 pub struct RuntimeEnvironmentBuilder {
     env: RuntimeEnvironment,
-    process_registry: Option<Arc<dyn ProcessRegistry>>,
 }
 
 impl RuntimeEnvironmentBuilder {
@@ -130,7 +134,6 @@ impl RuntimeEnvironmentBuilder {
                 work: RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
                 core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
             },
-            process_registry: None,
         }
     }
     pub fn with_plugin_host(mut self, host: Arc<crate::PluginHost>) -> Self {
@@ -138,8 +141,16 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
+    /// Configure the registry-only state used when a host will resolve native
+    /// process work lazily. This is mutually exclusive with
+    /// [`Self::with_process_work`]; attempting to set both is a configuration
+    /// error and panics immediately.
     pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.process_registry = Some(process_registry);
+        assert!(
+            self.env.process_registry.is_none(),
+            "process registry is already configured; use either with_process_registry or with_process_work"
+        );
+        self.env.process_registry = Some(process_registry);
         self
     }
 
@@ -157,8 +168,14 @@ impl RuntimeEnvironmentBuilder {
     }
 
     /// Set the host's process work driver. Every `RuntimeHost` built from this
-    /// environment carries it, so process starts can directly drive pending work.
+    /// environment carries it, so process starts can directly drive pending
+    /// work. This is mutually exclusive with [`Self::with_process_registry`];
+    /// attempting to set both is a configuration error and panics immediately.
     pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
+        assert!(
+            self.env.process_registry.is_none(),
+            "process registry is already configured; use either with_process_registry or with_process_work"
+        );
         self.env.process_registry = Some(Arc::clone(wiring.registry()));
         self.env.work = self.env.work.with_process_wiring(wiring);
         self
@@ -255,11 +272,7 @@ impl RuntimeEnvironmentBuilder {
     }
 
     pub fn build(self) -> RuntimeEnvironment {
-        let mut env = self.env;
-        if env.process_registry.is_none() {
-            env.process_registry = self.process_registry;
-        }
-        env
+        self.env
     }
 }
 

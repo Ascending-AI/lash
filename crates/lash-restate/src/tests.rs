@@ -15342,6 +15342,49 @@ async fn spawn_restate_http_black_hole() -> (String, tokio::task::JoinHandle<()>
     (format!("http://{addr}"), server)
 }
 
+async fn spawn_restate_http_timeout_then_capture(
+    response: MockHttpResponse,
+    first_hold: Duration,
+) -> (String, Arc<Mutex<Vec<String>>>, tokio::task::JoinHandle<()>) {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let captured_server = Arc::clone(&captured);
+    let server = tokio::spawn(async move {
+        let (mut first_socket, _) = listener.accept().await.expect("accept first wait");
+        let first_request = read_http_request(&mut first_socket).await;
+        captured_server.lock_recover().push(first_request);
+        let first_wait = tokio::spawn(async move {
+            tokio::time::sleep(first_hold).await;
+            drop(first_socket);
+        });
+
+        let (mut second_socket, _) = listener.accept().await.expect("accept reattached wait");
+        let second_request = read_http_request(&mut second_socket).await;
+        captured_server.lock_recover().push(second_request);
+        let body = response.body.as_bytes();
+        let header = format!(
+            "HTTP/1.1 {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            response.status,
+            body.len()
+        );
+        second_socket
+            .write_all(header.as_bytes())
+            .await
+            .expect("write response headers");
+        second_socket
+            .write_all(body)
+            .await
+            .expect("write response body");
+        second_socket.flush().await.expect("flush");
+        first_wait.await.expect("first wait holder");
+    });
+    (format!("http://{addr}"), captured, server)
+}
+
 async fn spawn_restate_http_stalled_body(
     status: &'static str,
     body: &'static str,
@@ -16083,6 +16126,39 @@ async fn restate_process_attach_preserves_re_attach_signal_on_ceiling() {
     let _ = black_hole.await;
 
     assert_eq!(wait, lash_core::ProcessTerminalWait::Reattach);
+}
+
+#[tokio::test]
+async fn restate_process_attach_reattaches_after_timeout_until_terminal() {
+    let expected = legacy_process_success(serde_json::json!({"reattached": true}));
+    let (base_url, captured, server) = spawn_restate_http_timeout_then_capture(
+        MockHttpResponse {
+            status: "200 OK",
+            body: r#"{"type":"success","value":{"reattached":true}}"#,
+        },
+        Duration::from_millis(100),
+    )
+    .await;
+    let runner = RestateProcessIngressRunner::new(
+        RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
+        process_registry(),
+        continuation_store(),
+    );
+
+    let output = ProcessAttach::await_terminal(&runner, "process-1")
+        .await
+        .expect("legacy attach re-enters after a bounded wait timeout");
+    server.await.expect("timeout-then-terminal server");
+
+    assert_eq!(output, expected);
+    let requests = captured.lock_recover();
+    assert_eq!(requests.len(), 2, "attach must re-enter with the same id");
+    assert!(
+        requests
+            .iter()
+            .all(|request| request
+                .starts_with("POST /LashProcessWorkflow/process-1/await_terminal "))
+    );
 }
 
 #[tokio::test]

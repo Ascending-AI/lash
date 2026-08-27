@@ -797,25 +797,27 @@ impl LashRuntime {
             AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
             AcceptedSessionCommand::Queued(handle) => handle.receipt,
         };
-        if matches!(
-            self.host
-                .queued_work()
-                .drain_session_work(
-                    crate::SessionWorkTarget::Session(receipt.session_id.clone()),
-                    "session_command",
-                )
-                .await
-                .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?,
-            crate::SessionDrainOutcome::Ran
-        ) {
-            // An inline or external driver may have committed the command
-            // before returning. Reconcile that authoritative head before this
-            // resident runtime reaches another commit boundary; its lease is
-            // advisory, so retaining the pre-drive head would manufacture a
-            // stale CAS conflict on close.
-            self.refresh_session_graph_from_store()
-                .await
-                .map_err(runtime_error_from_session_command_refresh)?;
+        let outcome = self
+            .host
+            .queued_work()
+            .drain_session_work(
+                crate::SessionWorkTarget::Session(receipt.session_id.clone()),
+                "session_command",
+            )
+            .await
+            .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?;
+        match outcome {
+            crate::SessionDrainOutcome::Ran => {
+                // An inline or external driver may have committed the command
+                // before returning. Reconcile that authoritative head before this
+                // resident runtime reaches another commit boundary; its lease is
+                // advisory, so retaining the pre-drive head would manufacture a
+                // stale CAS conflict on close.
+                self.refresh_session_graph_from_store()
+                    .await
+                    .map_err(runtime_error_from_session_command_refresh)?;
+            }
+            crate::SessionDrainOutcome::Deferred => {}
         }
         Ok(receipt)
     }
