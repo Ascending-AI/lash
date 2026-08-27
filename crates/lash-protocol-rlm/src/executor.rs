@@ -2312,8 +2312,7 @@ mod tests {
             surface.clone(),
         )));
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
-        let (registry_dyn, process_change_hub) =
-            lash_core::facade_support::watch_process_registry(registry_dyn);
+        let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
         let worker = lash_core::facade_support::DurableProcessWorker::new(
             lash_core::facade_support::DurableProcessWorkerConfig::new(
                 Arc::new(lash_core::facade_support::PluginHost::new(
@@ -2321,9 +2320,8 @@ mod tests {
                 )),
                 runtime_host,
                 Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-                registry_dyn,
-                process_change_hub,
-                lash_core::WorkerProcessWork::SelfNative,
+                lash_core::WorkerProcessWork::SelfNative(watched),
+                Arc::new(lash_core::NoQueuedWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy.clone()),
@@ -2455,8 +2453,7 @@ mod tests {
             surface.clone(),
         )));
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
-        let (registry_dyn, process_change_hub) =
-            lash_core::facade_support::watch_process_registry(registry_dyn);
+        let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
         let _worker = lash_core::facade_support::DurableProcessWorker::new(
             lash_core::facade_support::DurableProcessWorkerConfig::new(
                 Arc::new(lash_core::facade_support::PluginHost::new(
@@ -2464,9 +2461,8 @@ mod tests {
                 )),
                 runtime_host,
                 Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-                registry_dyn,
-                process_change_hub,
-                lash_core::WorkerProcessWork::SelfNative,
+                lash_core::WorkerProcessWork::SelfNative(watched),
+                Arc::new(lash_core::NoQueuedWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy.clone()),

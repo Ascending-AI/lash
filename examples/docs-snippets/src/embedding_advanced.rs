@@ -23,6 +23,7 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -61,6 +62,7 @@ async fn sqlite_core(
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
@@ -170,6 +172,7 @@ async fn process_registry_core(
         artifact_store,
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
@@ -211,6 +214,7 @@ async fn subagents_core(
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -293,6 +297,7 @@ fn configured_mcp_core(
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -352,6 +357,7 @@ async fn durable_stores_core(
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")

@@ -207,6 +207,7 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
     // process registry (and thus no store factory) and run non-persistent turns
     // — which the live `TurnContext` plugin input path requires.
     LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("mock-model")

@@ -86,6 +86,7 @@ async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> an
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -149,6 +150,7 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .session_spec(root_spec)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -185,6 +187,7 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .session_spec(root_spec)
         .plugins(plugins)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

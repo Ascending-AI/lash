@@ -93,6 +93,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
         );
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .effect_host(Arc::new(
                 lash::durability::InlineEffectHost::default()
                     .allow_process_lifetime_completion_keys(),

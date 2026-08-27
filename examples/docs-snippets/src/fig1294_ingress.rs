@@ -16,6 +16,7 @@ fn test_core(
     registry: Arc<lash::testing::TestLocalProcessRegistry>,
 ) -> lash::Result<lash::LashCore> {
     lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(lash::provider::ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("docs-ingress-model")
@@ -466,6 +467,7 @@ async fn ingress_core_with_effect_host(
         )
         .await?;
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(lash::provider::ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("pg-tool-intent-ingress-model")

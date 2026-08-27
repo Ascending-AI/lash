@@ -309,8 +309,7 @@ fn process_worker(
     env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     plugin: Arc<dyn lash_core::facade_support::PluginFactory>,
 ) -> lash_core::facade_support::DurableProcessWorker {
-    let (registry, process_change_hub) =
-        lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
@@ -331,9 +330,8 @@ fn process_worker(
             ])),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            registry,
-            process_change_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(lash_core::testing::mock_session_policy()),

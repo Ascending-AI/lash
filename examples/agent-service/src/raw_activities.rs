@@ -328,6 +328,7 @@ finish "done through raw activities"
             ),
         );
         let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("scripted-model")

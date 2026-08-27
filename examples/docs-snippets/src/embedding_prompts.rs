@@ -72,6 +72,7 @@ async fn lazy_projection(provider: ProviderHandle, model: lash::ModelSpec) -> an
     )
     .with_projection_resolver(registry.clone());
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(model)
         .plugins(runtime_plugin_stack())
@@ -115,6 +116,7 @@ async fn prompt_template(provider: ProviderHandle) -> anyhow::Result<()> {
     ]);
 
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -316,6 +318,7 @@ async fn tone_session(
         std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())

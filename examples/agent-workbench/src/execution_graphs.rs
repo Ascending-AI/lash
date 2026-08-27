@@ -484,6 +484,7 @@ mod tests {
         registry: Arc<dyn lash::process::ProcessRegistry>,
     ) -> lash::process::ProcessWorkObserver {
         let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .with_native_queued_work()
             .model(
                 lash::ModelSpec::builder("test-model")
                     .context_window_tokens(4096)

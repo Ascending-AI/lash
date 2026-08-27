@@ -279,6 +279,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     ));
     let core_builder =
         lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(model_spec)
             .store_factory(

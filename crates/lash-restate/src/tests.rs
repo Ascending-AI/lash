@@ -160,10 +160,10 @@ async fn restate_controller_waits_but_deployment_host_keeps_the_one_shot_lane_de
 }
 
 fn registry_process_wiring(registry: Arc<dyn ProcessRegistry>) -> lash_core::ProcessWorkWiring {
-    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let registry = Arc::clone(watched.registry());
     lash_core::ProcessWorkWiring::new(
-        Arc::clone(&registry),
-        hub,
+        watched,
         Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
     )
 }
@@ -8850,7 +8850,7 @@ async fn restate_enqueue_never_errors_after_commit() {
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
-        .queued_work(Arc::new(lash_core::NativeQueuedWork::new(
+        .with_queued_work(Arc::new(lash_core::NativeQueuedWork::new(
             queued_work.clone(),
         )))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -9296,12 +9296,11 @@ async fn replay_test_runtime_with_plugins_and_registry(
     .with_plugin_factories(plugin_factories)
     .with_store(store);
     if let Some(process_registry) = process_registry {
-        let (process_registry, hub) =
-            lash_core::facade_support::watch_process_registry(process_registry);
+        let watched = lash_core::facade_support::watch_process_registry(process_registry);
+        let process_registry = Arc::clone(watched.registry());
         builder = builder
             .with_process_work(lash_core::ProcessWorkWiring::new(
-                Arc::clone(&process_registry),
-                hub,
+                watched,
                 Arc::new(lash_core::NativeProcessWork::for_registry(process_registry)),
             ))
             .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()));
@@ -9478,8 +9477,7 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
     let process_registry = process_registry();
     fig1293_seed_control_target(&process_registry, session_id).await;
     let plugin_factories = fig1293_migrated_tool_factories();
-    let (worker_registry, worker_hub) =
-        lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
+    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     context.install_process_worker(DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -9487,9 +9485,8 @@ async fn fig1293_public_migrated_tools_redrive_with_literal_restate_outcomes() {
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            worker_registry,
-            worker_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ),
     ));
@@ -9868,8 +9865,7 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
     let context = Arc::new(ReplayableRecordingContext::default());
     context.defer_process_workflows();
     let process_registry = process_registry();
-    let (worker_registry, worker_hub) =
-        lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
+    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     context.install_process_worker(DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -9877,9 +9873,8 @@ async fn restate_public_parent_end_cancel_survives_crash_after_tool_batch_commit
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            worker_registry,
-            worker_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ),
     ));
@@ -10664,8 +10659,7 @@ finish (await handle)?
         )
         .await
         .expect("register the recorded-intent signal target");
-    let (worker_registry, worker_hub) =
-        lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
+    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     let process_worker =
         DurableProcessWorker::new(lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(
@@ -10673,9 +10667,8 @@ finish (await handle)?
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            worker_registry,
-            worker_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ));
     context.install_process_worker(process_worker);
@@ -12710,6 +12703,21 @@ fn runtime_handler_error_classification_keeps_lane_busy_retryable() {
 }
 
 #[test]
+fn runtime_handler_error_classification_keeps_restate_ingress_retryable() {
+    let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
+        lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::RestateProcessIngressSubmit,
+            "process workflow ingress is temporarily unavailable",
+        ),
+    ));
+    let debug = format!("{error:?}");
+    assert!(
+        debug.contains("Retryable"),
+        "typed Restate ingress failures must ask Restate to retry: {debug}"
+    );
+}
+
+#[test]
 fn runtime_handler_error_classification_makes_terminal_runtime_error_terminal() {
     let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
         lash_core::RuntimeError::new(
@@ -13021,8 +13029,7 @@ fn recovery_worker_with_plugins(
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
-    let (registry, process_change_hub) =
-        lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecoveryProcessTool);
     let mut plugins = vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new())
@@ -13051,9 +13058,8 @@ fn recovery_worker_with_plugins(
             Arc::new(plugin_host),
             runtime_host,
             store_factory,
-            registry,
-            process_change_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy()),
@@ -13169,8 +13175,7 @@ fn process_parent_worker(
     plugin: Arc<dyn lash_core::facade_support::PluginFactory>,
     probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
 ) -> DurableProcessWorker {
-    let (registry, process_change_hub) =
-        lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         RECOVERY_PROCESS_ENV_STORE.clone();
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
@@ -13193,9 +13198,8 @@ fn process_parent_worker(
             Arc::new(lash_core::facade_support::PluginHost::new(plugins)),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            registry,
-            process_change_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(recovery_session_policy())
@@ -14483,7 +14487,6 @@ async fn process_deployment_driver_and_workflow_share_registry() {
         Arc::clone(&registry),
         continuation_store(),
     );
-    let driver_registry = deployment.test_registry();
     let process_work = deployment.process_work();
 
     let worker =
@@ -14494,9 +14497,8 @@ async fn process_deployment_driver_and_workflow_share_registry() {
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&driver_registry),
-            lash_core::facade_support::ProcessChangeHub::new(),
             lash_core::WorkerProcessWork::External(process_work),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ));
     let service = deployment.workflow(worker).serve();

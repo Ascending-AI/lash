@@ -1244,16 +1244,13 @@ mod process_work_tests {
         Arc<dyn lash::process::ProcessRegistry>,
         lash::process::ProcessWorkWiring,
     ) {
-        let (registry, hub) = lash::process::watch_process_registry_with_sink(
+        let watched = lash::process::watch_process_registry_with_sink(
             registry,
             Some(Arc::new(ChannelProcessEventSink::new(sink_tx, fault_tx))),
         );
+        let registry = Arc::clone(watched.registry());
         let process_work = lash::process::NativeProcessWork::for_registry(Arc::clone(&registry));
-        let wiring = lash::process::ProcessWorkWiring::new(
-            Arc::clone(&registry),
-            hub,
-            Arc::new(process_work),
-        );
+        let wiring = lash::process::ProcessWorkWiring::new(watched, Arc::new(process_work));
         (registry, wiring)
     }
 }

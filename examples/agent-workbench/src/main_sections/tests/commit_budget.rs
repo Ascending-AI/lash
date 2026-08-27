@@ -23,6 +23,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     assert_eq!(default_pending_age, std::time::Duration::from_secs(30));
 
     let error = match lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -38,6 +39,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     assert!(matches!(error, lash::EmbedError::MissingCommitBudget));
 
     let error = match lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -54,6 +56,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
     assert!(matches!(error, lash::EmbedError::MissingQueuedWorkBatching));
 
     let configured = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

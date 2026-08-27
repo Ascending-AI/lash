@@ -464,6 +464,7 @@ mod tests {
             Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
         );
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .generation(GenerationOptions {
                 stop_sequences: vec![LASHLANG_CLOSE_DELIMITER.to_string()],
                 ..GenerationOptions::default()

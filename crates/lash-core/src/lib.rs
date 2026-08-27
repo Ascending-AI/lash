@@ -426,6 +426,7 @@ pub mod facade_support {
     pub use crate::runtime::UsageTotals;
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
+    pub use crate::runtime::WatchedRegistry;
     #[doc(hidden)]
     pub use crate::runtime::await_event_coordinator;
     pub use crate::runtime::current_epoch_ms;
@@ -1075,7 +1076,8 @@ pub use runtime::{
     TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    WakeDiscardReason, WatchedRegistry, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
+    WorkerSlotSupplier,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

@@ -326,16 +326,6 @@ impl RuntimeWork {
         }
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn process_ports(
-        &self,
-    ) -> Option<(&Arc<dyn ProcessRegistry>, &Arc<dyn ProcessWorkSubstrate>)> {
-        match self {
-            Self::SessionsOnly { .. } => None,
-            Self::Processes { wiring, .. } => Some((wiring.registry(), wiring.port())),
-        }
-    }
-
     pub(crate) fn process_wiring(&self) -> Option<&ProcessWorkWiring> {
         match self {
             Self::SessionsOnly { .. } => None,
@@ -378,11 +368,11 @@ impl RuntimeHost {
     }
 
     pub(crate) fn process_registry(&self) -> Option<&Arc<dyn ProcessRegistry>> {
-        self.work.process_ports().map(|(registry, _)| registry)
+        self.work.process_wiring().map(ProcessWorkWiring::registry)
     }
 
     pub(crate) fn process_work(&self) -> Option<&Arc<dyn ProcessWorkSubstrate>> {
-        self.work.process_ports().map(|(_, process)| process)
+        self.work.process_wiring().map(ProcessWorkWiring::port)
     }
 
     pub(crate) fn queued_work(&self) -> &Arc<dyn QueuedWorkSubstrate> {

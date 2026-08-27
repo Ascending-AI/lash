@@ -6,10 +6,14 @@ use super::*;
 use crate::{
     AbandonRequest, ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef, ProcessInput,
     ProcessProvenance, ProcessRegistration, ProcessStarted, ProjectionWatermark,
-    TestLocalProcessRegistry, TestProcessRegistryWriteExt, WaitState, watch_process_registry,
-    watch_process_registry_with_sink,
+    TestLocalProcessRegistry, TestProcessRegistryWriteExt, WaitState, WatchedRegistry,
+    watch_process_registry, watch_process_registry_with_sink,
 };
 use lash_sansio::sync::MutexExt;
+
+fn watched_parts(watched: WatchedRegistry) -> (Arc<dyn ProcessRegistry>, ProcessChangeHub) {
+    (Arc::clone(watched.registry()), watched.hub().clone())
+}
 
 fn registration(process_id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
@@ -95,7 +99,7 @@ fn backoff_schedule_has_25ms_floor_doubling_to_1s_cap() {
 #[tokio::test]
 async fn prune_through_decorator_does_not_bump_the_hub() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc-terminal"))
         .await
@@ -154,7 +158,7 @@ async fn hub_subscribe_then_notify_wakes_and_gc_drops_empty_entry() {
 #[tokio::test]
 async fn await_event_returns_historical_event_immediately() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc"))
         .await
@@ -244,7 +248,7 @@ async fn polling_awaiter_resolves_via_backoff() {
 #[tokio::test]
 async fn watched_awaiter_observes_terminal_without_lost_wakeup() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc"))
         .await
@@ -271,7 +275,7 @@ async fn watched_awaiter_observes_terminal_without_lost_wakeup() {
 #[tokio::test]
 async fn watched_registry_bumps_on_mutations() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     let mut rx = hub.subscribe("proc");
     registry
         .register_process(registration("proc"))
@@ -299,7 +303,10 @@ async fn watched_registry_bumps_on_mutations() {
 async fn sink_receives_appended_events_in_order() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     registry
         .register_process(registration_with_events(
             "proc",
@@ -337,7 +344,7 @@ async fn sink_receives_appended_events_in_order() {
 #[tokio::test]
 async fn sink_absent_leaves_appends_unchanged() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, _hub) = watch_process_registry_with_sink(raw, None);
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(raw, None));
     registry
         .register_process(registration_with_events("proc", &["producer.a"]))
         .await
@@ -356,7 +363,10 @@ async fn sink_absent_leaves_appends_unchanged() {
 async fn sink_receives_complete_process_terminal_append() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     registry
         .register_process(registration_with_events("proc", &["producer.a"]))
         .await
@@ -396,7 +406,10 @@ async fn sink_receives_complete_process_terminal_append() {
 async fn sink_receives_runtime_lifecycle_events_in_order() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     let mut lifecycle_registration = ProcessRegistration::new(
         "proc",
         ProcessInput::Engine {
@@ -488,7 +501,8 @@ async fn sink_receives_runtime_lifecycle_events_in_order() {
 async fn sink_present_still_bumps_hub_on_append() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink)));
+    let (registry, hub) =
+        watched_parts(watch_process_registry_with_sink(raw, Some(Arc::new(sink))));
     let mut rx = hub.subscribe("proc");
     registry
         .register_process(registration_with_events("proc", &["producer.a"]))
@@ -514,7 +528,7 @@ async fn sink_present_still_bumps_hub_on_append() {
 #[tokio::test]
 async fn native_awaiter_returns_an_already_terminal_process() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
     registry
         .register_process(registration("proc"))
@@ -540,7 +554,7 @@ async fn native_awaiter_returns_an_already_terminal_process() {
 #[tokio::test]
 async fn native_awaiter_refuses_await_on_caller_departed_row() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
     registry
         .register_process(registration("proc"))
@@ -569,7 +583,9 @@ async fn native_awaiter_refuses_await_on_caller_departed_row() {
 #[tokio::test]
 async fn caller_departed_refuses_before_terminal_outcome() {
     let raw = Arc::new(TestLocalProcessRegistry::default());
-    let (registry, hub) = watch_process_registry(Arc::clone(&raw) as Arc<dyn ProcessRegistry>);
+    let (registry, hub) = watched_parts(watch_process_registry(
+        Arc::clone(&raw) as Arc<dyn ProcessRegistry>
+    ));
     let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
 
     registry
@@ -606,7 +622,7 @@ async fn caller_departed_refuses_before_terminal_outcome() {
 #[tokio::test]
 async fn concurrent_waiters_all_resolve_with_identical_output_on_completion() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc"))
         .await
@@ -676,7 +692,10 @@ impl ProcessEventSink for LossySink {
 async fn lossy_sink_still_reconciles_complete_log_from_events_after() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = LossySink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     registry
         .register_process(registration_with_events("proc", &["producer.step"]))
         .await

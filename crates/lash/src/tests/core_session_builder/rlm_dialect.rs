@@ -82,6 +82,7 @@ async fn typescript_dialect_is_selected_on_the_production_session_path_and_survi
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder())
+        .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -157,6 +158,7 @@ async fn queued_session_command_restores_the_recorded_typescript_dialect() -> Re
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(rlm_core_builder())
+        .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)

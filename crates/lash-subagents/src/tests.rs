@@ -1090,8 +1090,7 @@ async fn run_seed_probe_inner(
     // the worker runs each process on its own task, so the parent's await never
     // parks the runner away from the child.
     let worker_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
-    let (worker_registry, process_change_hub) =
-        lash_core::facade_support::watch_process_registry(worker_registry);
+    let watched = lash_core::facade_support::watch_process_registry(worker_registry);
     let worker = lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
@@ -1109,22 +1108,17 @@ async fn run_seed_probe_inner(
                 config
             },
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&worker_registry),
-            process_change_hub.clone(),
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched.clone()),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(policy.clone()),
     );
     let process_port: Arc<dyn lash_core::ProcessWorkSubstrate> =
-        Arc::new(lash_core::NativeProcessWork::new(
-            Arc::clone(&worker_registry),
-            process_change_hub.clone(),
-            worker,
-        ));
+        Arc::new(lash_core::NativeProcessWork::new(&watched, worker));
     let host = ProcessRuntimeHost::with_ports(
         embedded,
-        lash_core::ProcessWorkWiring::new(worker_registry, process_change_hub, process_port),
+        lash_core::ProcessWorkWiring::new(watched, process_port),
         Arc::new(lash_core::NoQueuedWork::new()),
     );
     let mut runtime = LashRuntime::from_background_state(

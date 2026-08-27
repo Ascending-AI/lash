@@ -19,8 +19,8 @@ pub use advanced_builder::AdvancedLashCoreBuilder;
 pub use drain::DeploymentDrainStatus;
 use queued_work::InlineQueuedWorkRunConfig;
 use work_drivers::{
-    NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup, ProcessWorkSource,
-    QueuedPortSetup, QueuedWorkSource, WakeDeliveryDriverSetup,
+    NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup, ProcessWorkSelection,
+    ProcessWorkSource, QueuedPortSetup, QueuedWorkSource, WakeDeliveryDriverSetup,
 };
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
@@ -713,18 +713,24 @@ impl LashCore {
         &self,
         extra_plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
     ) -> Result<DurableProcessWorkerConfig> {
-        let Some(process_registry) = self.process_registry() else {
+        if self.process_registry().is_none() {
             return Err(EmbedError::MissingProcessRegistry);
-        };
+        }
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
             extra_plugin_factories.into_iter().collect(),
         )?;
-        let Some((process_change_hub, process_work)) =
-            self.substrate_slot.configured_worker_process_work()
-        else {
+        let Some(process_work) = self.substrate_slot.configured_worker_process_work() else {
             return Err(EmbedError::MissingProcessRegistry);
+        };
+        let queued_work: Arc<dyn QueuedWorkSubstrate> = match &self.substrate_slot.setup.queued {
+            QueuedPortSetup::External { port } => Arc::clone(port),
+            // The outer dispatcher owns the native queued-work lane; nested
+            // process runtimes must not start a competing dispatcher.
+            QueuedPortSetup::Disabled | QueuedPortSetup::Native { .. } => {
+                Arc::new(NoQueuedWork::new())
+            }
         };
         worker_config(
             &plugin_host,
@@ -734,11 +740,45 @@ impl LashCore {
             self.process_execution_concurrency,
             self.worker_slot_supplier.clone(),
             self.session_execution_owner.clone(),
-            process_registry,
-            process_change_hub,
             process_work,
-            self.substrate_slot.configured_queued_port(),
+            queued_work,
             self.process_event_sink.clone(),
+            lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct InlineProcessWorkerSetup {
+    worker_plugin_host: PluginHost,
+    env: RuntimeEnvironment,
+    process_lifecycle_available: bool,
+    policy: SessionPolicy,
+    process_execution_concurrency: usize,
+    worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
+    session_execution_owner: lash_core::LeaseOwnerIdentity,
+    process_work: WorkerProcessWork,
+    process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
+    turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
+}
+
+impl InlineProcessWorkerSetup {
+    fn build(
+        &self,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
+    ) -> Result<DurableProcessWorkerConfig> {
+        worker_config(
+            &self.worker_plugin_host,
+            &self.env,
+            self.process_lifecycle_available,
+            self.policy.clone(),
+            self.process_execution_concurrency,
+            self.worker_slot_supplier.clone(),
+            self.session_execution_owner.clone(),
+            self.process_work.clone(),
+            queued_work,
+            self.process_event_sink.clone(),
+            self.turn_phase_probe_slot.clone(),
         )
     }
 }
@@ -752,11 +792,10 @@ fn worker_config(
     process_execution_concurrency: usize,
     worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     session_execution_owner: lash_core::LeaseOwnerIdentity,
-    process_registry: Arc<dyn ProcessRegistry>,
-    process_change_hub: facade_support::ProcessChangeHub,
     process_work: WorkerProcessWork,
     queued_work: Arc<dyn QueuedWorkSubstrate>,
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
+    turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
 ) -> Result<DurableProcessWorkerConfig> {
     let Some(store_factory) = env.session_store_factory.as_ref() else {
         return Err(EmbedError::MissingProcessWorkerStoreFactory);
@@ -767,13 +806,12 @@ fn worker_config(
         Arc::new(worker_plugin_host.clone()),
         runtime_host,
         Arc::clone(store_factory),
-        process_registry,
-        process_change_hub,
         process_work,
+        queued_work,
         session_execution_owner,
     )
     .with_session_policy(policy)
-    .with_turn_phase_probe_slot(lash_core::runtime::RuntimeTurnPhaseProbeSlot::default())
+    .with_turn_phase_probe_slot(turn_phase_probe_slot)
     .with_process_execution_concurrency(process_execution_concurrency)?;
     if let Some(worker_slot_supplier) = worker_slot_supplier {
         config = config.with_worker_slot_supplier(worker_slot_supplier);
@@ -784,7 +822,6 @@ fn worker_config(
     if let Some(sink) = process_event_sink {
         config = config.with_process_event_sink(sink);
     }
-    config = config.with_queued_work(queued_work);
     Ok(config)
 }
 
@@ -824,7 +861,7 @@ pub struct LashCoreBuilder {
     clock: Option<Arc<dyn lash_core::Clock>>,
     // Single source of truth for process lifecycle support and process-work
     // consumption.
-    process_work_source: ProcessWorkSource,
+    process_work_source: ProcessWorkSelection,
     // Per-worker bound for the default inline process executor.
     process_execution_concurrency: Option<usize>,
     // Per-driver bound for the default inline queued-work executor.
@@ -865,13 +902,13 @@ impl LashCoreBuilder {
             plugin_host: None,
             lease_timings: None,
             clock: None,
-            process_work_source: ProcessWorkSource::default(),
+            process_work_source: ProcessWorkSelection::default(),
             process_execution_concurrency: None,
             queued_work_execution_concurrency: None,
             worker_slot_supplier: None,
             process_event_sink: None,
             process_tool_visibility_filter: None,
-            queued_work_source: QueuedWorkSource::default(),
+            queued_work_source: QueuedWorkSource::Unset,
             live_replay_store: None,
         }
     }
@@ -1074,6 +1111,15 @@ impl LashCoreBuilder {
         mut self,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
     ) -> Result<LashCore> {
+        if matches!(self.queued_work_source, QueuedWorkSource::Unset) {
+            return Err(EmbedError::MissingQueuedWorkSource);
+        }
+        if matches!(self.queued_work_source, QueuedWorkSource::Native)
+            && self.child_store_factory.is_none()
+            && self.store_factory.is_none()
+        {
+            return Err(EmbedError::NativeQueuedWorkRequiresStoreFactory);
+        }
         let process_execution_concurrency = self
             .process_execution_concurrency
             .unwrap_or(facade_support::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
@@ -1120,8 +1166,7 @@ impl LashCoreBuilder {
         let process_work_source = self
             .process_work_source
             .clone()
-            .with_runtime_clock(Arc::clone(&core.clock))
-            .watched(process_event_sink.clone());
+            .resolve(Arc::clone(&core.clock), process_event_sink.clone());
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
                 Arc::new(facade_support::SingleProviderResolver::new(provider));
@@ -1217,7 +1262,7 @@ impl LashCoreBuilder {
             process_lifecycle_available,
             worker_slot_supplier.clone(),
             queued_work_execution_concurrency,
-        );
+        )?;
         let substrate = NativeSubstrateSetup {
             process: process_port,
             queued: queued_port,
@@ -1277,14 +1322,14 @@ impl LashCoreBuilder {
         session_execution_owner: lash_core::LeaseOwnerIdentity,
         process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     ) -> Result<ProcessPortSetup> {
-        let (process_registry, process_change_hub) = match process_work_source {
+        let watched = match process_work_source {
             ProcessWorkSource::None => return Ok(ProcessPortSetup::None),
             ProcessWorkSource::External(wiring) => {
                 return Ok(ProcessPortSetup::External {
                     wiring: wiring.clone(),
                 });
             }
-            ProcessWorkSource::Inline { registry, hub } => (Arc::clone(registry), hub.clone()),
+            ProcessWorkSource::Inline(watched) => watched.clone(),
         };
         // The worker rebuilds a session runtime per process, so it needs a store
         // factory; without one the default runner could not execute anything, so
@@ -1292,27 +1337,23 @@ impl LashCoreBuilder {
         if env.session_store_factory.is_none() {
             return Err(EmbedError::ProcessRegistryRequiresStoreFactory);
         }
-        let process_change_hub =
-            process_change_hub.expect("native process registry is watched before worker assembly");
-        let config = Box::new(worker_config(
-            worker_plugin_host,
-            env,
+        let config = Box::new(InlineProcessWorkerSetup {
+            worker_plugin_host: worker_plugin_host.clone(),
+            env: env.clone(),
             process_lifecycle_available,
-            policy.clone(),
+            policy: policy.clone(),
             process_execution_concurrency,
             worker_slot_supplier,
             session_execution_owner,
-            process_registry,
-            process_change_hub.clone(),
-            WorkerProcessWork::SelfNative,
-            Arc::new(NoQueuedWork::new()),
+            process_work: WorkerProcessWork::SelfNative(watched.clone()),
             // Admission-only drive faults otherwise have no path to the host.
             process_event_sink,
-        )?);
-        Ok(ProcessPortSetup::LazyDefault {
-            config,
-            hub: process_change_hub,
-        })
+            turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
+        });
+        // Validate the same worker assembly eagerly. The live inline worker is
+        // constructed lazily once the outer queued-work dispatcher exists.
+        config.build(Arc::new(NoQueuedWork::new()))?;
+        Ok(ProcessPortSetup::LazyDefault { config, watched })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1328,14 +1369,15 @@ impl LashCoreBuilder {
         process_lifecycle_available: bool,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         queued_work_execution_concurrency: usize,
-    ) -> QueuedPortSetup {
-        match queued_work_source {
+    ) -> Result<QueuedPortSetup> {
+        Ok(match queued_work_source {
+            QueuedWorkSource::Unset => return Err(EmbedError::MissingQueuedWorkSource),
             QueuedWorkSource::Disabled => QueuedPortSetup::Disabled,
             QueuedWorkSource::External(port) => QueuedPortSetup::External {
                 port: Arc::clone(port),
             },
-            QueuedWorkSource::LazyDefault => match store_factory {
-                Some(store_factory) => QueuedPortSetup::LazyDefault {
+            QueuedWorkSource::Native => match store_factory {
+                Some(store_factory) => QueuedPortSetup::Native {
                     config: Arc::new(InlineQueuedWorkRunConfig {
                         session_execution_owner,
                         env,
@@ -1349,9 +1391,9 @@ impl LashCoreBuilder {
                     slot_supplier: worker_slot_supplier,
                     execution_concurrency: queued_work_execution_concurrency,
                 },
-                None => QueuedPortSetup::Disabled,
+                None => return Err(EmbedError::NativeQueuedWorkRequiresStoreFactory),
             },
-        }
+        })
     }
 
     /// Converts this builder into its advanced configuration facade.
@@ -1361,10 +1403,7 @@ impl LashCoreBuilder {
 
     /// Configures the process registry used by the built core.
     pub fn process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.process_work_source = ProcessWorkSource::Inline {
-            registry: process_registry,
-            hub: None,
-        };
+        self.process_work_source = ProcessWorkSelection::Inline(process_registry);
         self
     }
 
@@ -1410,13 +1449,19 @@ impl LashCoreBuilder {
     /// The wiring's registry becomes the core's process registry and no inline
     /// runner is spawned.
     pub fn process_work(mut self, wiring: ProcessWorkWiring) -> Self {
-        self.process_work_source = ProcessWorkSource::External(wiring);
+        self.process_work_source = ProcessWorkSelection::External(wiring);
         self
     }
 
     /// Configure an externally owned queued-work port.
-    pub fn queued_work(mut self, port: Arc<dyn QueuedWorkSubstrate>) -> Self {
+    pub fn with_queued_work(mut self, port: Arc<dyn QueuedWorkSubstrate>) -> Self {
         self.queued_work_source = QueuedWorkSource::External(port);
+        self
+    }
+
+    /// Configure Lash's native queued-work executor.
+    pub fn with_native_queued_work(mut self) -> Self {
+        self.queued_work_source = QueuedWorkSource::Native;
         self
     }
 

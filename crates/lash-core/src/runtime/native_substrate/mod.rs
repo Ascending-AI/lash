@@ -12,7 +12,7 @@ pub use queued::*;
 pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
 use super::ProcessAdmissionReport;
-use super::process::{ProcessChangeHub, ProcessRegistry};
+use super::process::{ProcessRegistry, WatchedRegistry};
 use crate::{PluginError, ProcessAwaitOutput};
 
 /// Deployment port for durable **queued session work**: work already committed
@@ -98,7 +98,7 @@ pub enum ProcessTerminalWait {
 /// bound to it.
 #[derive(Clone)]
 pub struct ProcessWorkWiring {
-    registry: Arc<dyn ProcessRegistry>,
+    watched: WatchedRegistry,
     port: Arc<dyn ProcessWorkSubstrate>,
     event_awaiter: NativeProcessAwaiter,
 }
@@ -107,21 +107,22 @@ impl ProcessWorkWiring {
     /// Pair a watched registry and its change hub with the process port bound
     /// to exactly that handle. This constructs core's one event awaiter; the
     /// caller that created the port owns the pairing contract.
-    pub fn new(
-        registry: Arc<dyn ProcessRegistry>,
-        hub: ProcessChangeHub,
-        port: Arc<dyn ProcessWorkSubstrate>,
-    ) -> Self {
-        let event_awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+    pub fn new(watched: WatchedRegistry, port: Arc<dyn ProcessWorkSubstrate>) -> Self {
+        let event_awaiter =
+            NativeProcessAwaiter::new(Arc::clone(watched.registry()), watched.hub().clone());
         Self {
-            registry,
+            watched,
             port,
             event_awaiter,
         }
     }
 
     pub(crate) fn registry(&self) -> &Arc<dyn ProcessRegistry> {
-        &self.registry
+        self.watched.registry()
+    }
+
+    pub(crate) fn watched(&self) -> &WatchedRegistry {
+        &self.watched
     }
 
     pub(crate) fn port(&self) -> &Arc<dyn ProcessWorkSubstrate> {

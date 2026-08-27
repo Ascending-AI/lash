@@ -13,39 +13,52 @@ pub(super) enum ProcessPortSetup {
     /// factory is rejected at build with
     /// [`EmbedError::ProcessRegistryRequiresStoreFactory`].
     LazyDefault {
-        config: Box<DurableProcessWorkerConfig>,
-        hub: facade_support::ProcessChangeHub,
+        config: Box<super::InlineProcessWorkerSetup>,
+        watched: facade_support::WatchedRegistry,
     },
     /// The host wired an external process-work port.
     External { wiring: ProcessWorkWiring },
 }
 
 #[derive(Clone, Default)]
-pub(super) enum ProcessWorkSource {
+pub(super) enum ProcessWorkSelection {
     #[default]
     None,
-    Inline {
-        registry: Arc<dyn ProcessRegistry>,
-        hub: Option<facade_support::ProcessChangeHub>,
-    },
+    Inline(Arc<dyn ProcessRegistry>),
+    External(ProcessWorkWiring),
+}
+
+impl ProcessWorkSelection {
+    pub(super) fn resolve(
+        self,
+        clock: Arc<dyn lash_core::Clock>,
+        sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
+    ) -> ProcessWorkSource {
+        match self {
+            Self::None => ProcessWorkSource::None,
+            Self::Inline(registry) => {
+                let registry = registry.with_runtime_clock(clock).unwrap_or(registry);
+                ProcessWorkSource::Inline(facade_support::watch_process_registry_with_sink(
+                    registry, sink,
+                ))
+            }
+            Self::External(wiring) => ProcessWorkSource::External(wiring),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) enum ProcessWorkSource {
+    None,
+    Inline(facade_support::WatchedRegistry),
     External(ProcessWorkWiring),
 }
 
 impl ProcessWorkSource {
-    pub(super) fn with_runtime_clock(self, clock: Arc<dyn lash_core::Clock>) -> Self {
-        match self {
-            Self::Inline { registry, hub } => Self::Inline {
-                registry: registry.with_runtime_clock(clock).unwrap_or(registry),
-                hub,
-            },
-            other => other,
-        }
-    }
-
     pub(super) fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
         match self {
             Self::None => None,
-            Self::Inline { registry, .. } => Some(Arc::clone(registry)),
+            Self::Inline(watched) => Some(Arc::clone(watched.registry())),
             Self::External(_) => None,
         }
     }
@@ -53,46 +66,26 @@ impl ProcessWorkSource {
     pub(super) fn external_wiring(&self) -> Option<ProcessWorkWiring> {
         match self {
             Self::External(wiring) => Some(wiring.clone()),
-            Self::None | Self::Inline { .. } => None,
+            Self::None | Self::Inline(_) => None,
         }
     }
 
     pub(super) fn has_registry(&self) -> bool {
         !matches!(self, Self::None)
     }
-
-    pub(super) fn watched(self, sink: Option<Arc<dyn facade_support::ProcessEventSink>>) -> Self {
-        match self {
-            Self::Inline {
-                registry,
-                hub: None,
-            } => {
-                let (registry, hub) =
-                    facade_support::watch_process_registry_with_sink(registry, sink);
-                Self::Inline {
-                    registry,
-                    hub: Some(hub),
-                }
-            }
-            // An external deployment was wrapped by its host, which installs any
-            // sink through its constructor; the inline sink does not
-            // apply here. Already-watched inline sources keep their wrap.
-            other => other,
-        }
-    }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(super) enum QueuedWorkSource {
+    Unset,
     Disabled,
-    #[default]
-    LazyDefault,
+    Native,
     External(Arc<dyn QueuedWorkSubstrate>),
 }
 
 pub(super) enum QueuedPortSetup {
     Disabled,
-    LazyDefault {
+    Native {
         config: Arc<InlineQueuedWorkRunConfig>,
         slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         execution_concurrency: usize,
@@ -199,7 +192,7 @@ impl QueuedWorkSubstrate for ResolvedQueuedWork {
 /// once across `LashCore` clones, on the first `session().open()` or admin path
 /// that needs them.
 pub(crate) struct NativeSubstrateSlot {
-    setup: NativeSubstrateSetup,
+    pub(super) setup: NativeSubstrateSetup,
     drivers: tokio::sync::OnceCell<ResolvedPorts>,
     phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
 }
@@ -227,7 +220,7 @@ impl NativeSubstrateSlot {
                 let queued_port: Arc<dyn QueuedWorkSubstrate> = match &self.setup.queued {
                     QueuedPortSetup::Disabled => Arc::new(NoQueuedWork::new()),
                     QueuedPortSetup::External { port } => Arc::clone(port),
-                    QueuedPortSetup::LazyDefault {
+                    QueuedPortSetup::Native {
                         config,
                         slot_supplier,
                         execution_concurrency,
@@ -247,25 +240,22 @@ impl NativeSubstrateSlot {
                         })
                     }
                 };
-                let (process, drive_process_on_open) =
-                    match &self.setup.process {
-                        ProcessPortSetup::None => (None, false),
-                        ProcessPortSetup::External { wiring } => (Some(wiring.clone()), false),
-                        ProcessPortSetup::LazyDefault { config, hub } => {
-                            let config = (**config)
-                                .clone()
-                                .with_queued_work(Arc::clone(&queued_port));
-                            let registry = Arc::clone(&config.process_registry);
-                            let worker = DurableProcessWorker::new(config);
-                            let port: Arc<dyn ProcessWorkSubstrate> = Arc::new(
-                                NativeProcessWork::new(Arc::clone(&registry), hub.clone(), worker),
-                            );
-                            (
-                                Some(ProcessWorkWiring::new(registry, hub.clone(), port)),
-                                true,
-                            )
-                        }
-                    };
+                let (process, drive_process_on_open) = match &self.setup.process {
+                    ProcessPortSetup::None => (None, false),
+                    ProcessPortSetup::External { wiring } => (Some(wiring.clone()), false),
+                    ProcessPortSetup::LazyDefault { config, watched } => {
+                        // The worker only forwards notifications through this port;
+                        // the outer dispatcher remains the sole native-lane owner.
+                        let config = config
+                            .build(Arc::clone(&queued_port))
+                            .expect("inline process-worker assembly was validated at build");
+                        let watched = watched.clone();
+                        let worker = DurableProcessWorker::new(config);
+                        let port: Arc<dyn ProcessWorkSubstrate> =
+                            Arc::new(NativeProcessWork::new(&watched, worker));
+                        (Some(ProcessWorkWiring::new(watched, port)), true)
+                    }
+                };
                 let queued = Arc::new(ResolvedQueuedWork::new(queued_port));
                 if let Some(setup) = self.setup.wake.as_ref() {
                     let queued_for_wake: Arc<dyn QueuedWorkSubstrate> = queued.clone();
@@ -293,9 +283,13 @@ impl NativeSubstrateSlot {
     }
 
     #[cfg(test)]
-    pub(crate) fn process_worker_config(&self) -> Option<&DurableProcessWorkerConfig> {
+    pub(crate) fn process_worker_config(&self) -> Option<DurableProcessWorkerConfig> {
         match &self.setup.process {
-            ProcessPortSetup::LazyDefault { config, .. } => Some(config),
+            ProcessPortSetup::LazyDefault { config, .. } => Some(
+                config
+                    .build(Arc::new(NoQueuedWork::new()))
+                    .expect("inline process-worker assembly was validated at build"),
+            ),
             ProcessPortSetup::None | ProcessPortSetup::External { .. } => None,
         }
     }
@@ -303,33 +297,19 @@ impl NativeSubstrateSlot {
     #[cfg(test)]
     pub(crate) fn native_process_change_hub(&self) -> Option<facade_support::ProcessChangeHub> {
         match &self.setup.process {
-            ProcessPortSetup::LazyDefault { hub, .. } => Some(hub.clone()),
+            ProcessPortSetup::LazyDefault { watched, .. } => Some(watched.hub().clone()),
             ProcessPortSetup::None | ProcessPortSetup::External { .. } => None,
         }
     }
 
-    pub(super) fn configured_worker_process_work(
-        &self,
-    ) -> Option<(facade_support::ProcessChangeHub, WorkerProcessWork)> {
+    pub(super) fn configured_worker_process_work(&self) -> Option<WorkerProcessWork> {
         match &self.setup.process {
             ProcessPortSetup::None => None,
-            ProcessPortSetup::LazyDefault { hub, .. } => {
-                Some((hub.clone(), WorkerProcessWork::SelfNative))
+            ProcessPortSetup::LazyDefault { watched, .. } => {
+                Some(WorkerProcessWork::SelfNative(watched.clone()))
             }
-            ProcessPortSetup::External { wiring } => Some((
-                // External nested waits use the external port. The required
-                // native hub is consequently never consulted on this variant.
-                facade_support::ProcessChangeHub::new(),
-                WorkerProcessWork::External(wiring.clone()),
-            )),
-        }
-    }
-
-    pub(super) fn configured_queued_port(&self) -> Arc<dyn QueuedWorkSubstrate> {
-        match &self.setup.queued {
-            QueuedPortSetup::External { port } => Arc::clone(port),
-            QueuedPortSetup::Disabled | QueuedPortSetup::LazyDefault { .. } => {
-                Arc::new(NoQueuedWork::new())
+            ProcessPortSetup::External { wiring } => {
+                Some(WorkerProcessWork::External(wiring.clone()))
             }
         }
     }

@@ -227,7 +227,7 @@ pub use process::{
     UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind, WaitState, WakeDelivery,
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
-    allocate_process_event_sequence, apply_process_event_projection,
+    WatchedRegistry, allocate_process_event_sequence, apply_process_event_projection,
     apply_process_status_projection, current_epoch_ms, epoch_ms_from_system_time,
     fold_process_record, load_process_execution_env, materialize_process_event_semantics,
     persist_process_execution_env, prepare_process_event_append, prepare_process_registration,

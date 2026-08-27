@@ -800,6 +800,7 @@ fn standard_core(
     trace_path: PathBuf,
 ) -> Result<LashCore> {
     let mut builder = LashCore::standard_builder(lash::TurnBudget::bounded(turn_budget))
+        .without_queued_work()
         .provider(provider)
         .model(model)
         .generation(generation(output_cap))
@@ -844,6 +845,7 @@ fn rlm_core(
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
         factory,
     )
+    .without_queued_work()
     .provider(provider)
     .model(model)
     .generation(generation(output_cap))

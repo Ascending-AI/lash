@@ -5,6 +5,10 @@
 /// A standard-mode builder with a model + provider already named, ready for the
 /// explicit dependency wiring under test.
 fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
+    peer_coherence_builder_without_queued_choice().without_queued_work()
+}
+
+fn peer_coherence_builder_without_queued_choice() -> crate::core::LashCoreBuilder {
     LashCore::standard_builder(crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
@@ -16,6 +20,7 @@ fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
 fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
         LashCore::standard_builder(crate::TurnBudget::Unbounded)
+            .without_queued_work()
             .provider(mock_provider())
             .model(mock_model_spec())
             .effect_host(Arc::new(
@@ -43,6 +48,7 @@ fn commit_budget_is_required_for_builder_construction_and_deserialization() {
 fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
         LashCore::standard_builder(crate::TurnBudget::Unbounded)
+            .without_queued_work()
             .provider(mock_provider())
             .model(mock_model_spec())
             .effect_host(Arc::new(
@@ -59,6 +65,30 @@ fn queued_work_action_reserve_is_required() {
         "builder must reject a missing queued-work action reserve",
     );
     assert!(matches!(error, EmbedError::MissingQueuedWorkBatching));
+}
+
+#[test]
+fn queued_work_composition_is_required() {
+    let error = expect_build_error(
+        ephemeral_facets_without_queued_work_choice(peer_coherence_builder_without_queued_choice())
+            .build(crate::testing::runtime_lease_owner()),
+        "builder must reject an unset queued-work composition",
+    );
+    assert!(matches!(error, EmbedError::MissingQueuedWorkSource));
+}
+
+#[test]
+fn native_queued_work_requires_a_store_factory() {
+    let error = expect_build_error(
+        explicit_ephemeral_facets(peer_coherence_builder())
+            .with_native_queued_work()
+            .build(crate::testing::runtime_lease_owner()),
+        "builder must reject native queued work without a store factory",
+    );
+    assert!(matches!(
+        error,
+        EmbedError::NativeQueuedWorkRequiresStoreFactory
+    ));
 }
 
 fn durable_session_store_factory(dir: &std::path::Path) -> Arc<dyn lash_core::SessionStoreFactory> {
@@ -111,6 +141,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(clock.clone()))
             as Arc<dyn lash_core::SessionStoreFactory>;
     let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
+        .without_queued_work()
         .model(
             lash_core::ModelSpec::builder("clock-wiring-model")
                 .context_window_tokens(4_096)
@@ -366,15 +397,12 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
 {
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
-    let driver_registry = Arc::clone(&registry);
-    let wiring = lash_core::ProcessWorkWiring::new(
-        Arc::clone(&registry),
-        hub,
-        Arc::new(NoopProcessWork),
-    );
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let driver_registry = Arc::clone(watched.registry());
+    let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .process_work(wiring)
+        .without_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
 
     let configured = core
@@ -390,17 +418,14 @@ async fn process_work_driver_configures_external_runner_without_inline_store_fac
 async fn external_process_port_composes_native_queued_port_and_refreshes_after_ran() -> Result<()> {
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
-    let wiring = lash_core::ProcessWorkWiring::new(
-        Arc::clone(&registry),
-        hub,
-        Arc::new(NoopProcessWork),
-    );
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_work(wiring)
+        .with_native_queued_work()
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("external-process-native-queue").open().await?;
@@ -535,7 +560,7 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
     let core_registry = core
         .process_registry()
         .expect("process registry must be configured");
-    assert!(Arc::ptr_eq(&config.process_registry, &core_registry));
+    assert!(Arc::ptr_eq(config.process_registry(), &core_registry));
     assert!(Arc::ptr_eq(&config.trigger_store, &trigger_store));
     assert_eq!(config.lease_owner.owner_id, "durable-worker-facade-owner");
     assert_eq!(

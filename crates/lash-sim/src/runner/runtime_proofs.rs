@@ -10,6 +10,7 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         runtime_provider_components(OPENAI_COMPATIBLE, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .effect_host(Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
@@ -126,6 +127,7 @@ pub(super) async fn run_live_turn_facts(
         runtime_provider_components(provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .effect_host(Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
@@ -277,6 +279,7 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .effect_host(Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
@@ -514,6 +517,7 @@ pub(super) async fn prove_final_value_semantic_channel()
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .effect_host(Arc::new(
             lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
         ))

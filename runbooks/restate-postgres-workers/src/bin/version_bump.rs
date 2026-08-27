@@ -397,6 +397,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         Arc::new(storage.lashlang_artifact_store()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("version-bump-mock")

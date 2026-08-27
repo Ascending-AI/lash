@@ -44,6 +44,7 @@ async fn plugin_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model_id)

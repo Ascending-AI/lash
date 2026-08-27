@@ -1401,6 +1401,7 @@ impl BackendRunner {
         )
         .expect("build differential lifecycle provider");
         lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .with_native_queued_work()
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

@@ -19,6 +19,7 @@ async fn facade_turn(
     let events = NoopTurnActivitySink;
     // docs:start:facade-turn
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")

@@ -70,6 +70,7 @@ mod tests {
             artifact_store,
         );
         lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
@@ -1274,6 +1275,7 @@ finish initial
             artifact_store_for_core,
         );
         let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(model)
             .store_factory(Arc::clone(&core_store_factory))
@@ -1947,7 +1949,7 @@ finish initial
             .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
             .effect_host(turn_deployment.effect_host())
             .process_work(process_deployment.process_work())
-            .queued_work(queued_work_port)
+            .with_queued_work(queued_work_port)
             .lease_timings(lease_timings)
             .build(crate::test_core_owner())
             .expect("build core");
@@ -2267,6 +2269,7 @@ finish initial
             artifact_store,
         );
         LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(model)
             .store_factory(session_store_factory)

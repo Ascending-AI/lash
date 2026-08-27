@@ -740,9 +740,8 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     );
     let registry =
         Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
-    let wiring =
-        lash_core::ProcessWorkWiring::new(Arc::clone(&registry), hub, Arc::new(NoopProcessWork));
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -750,6 +749,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_work(wiring)
+        .without_queued_work()
         .advanced()
         .runtime_host_config(runtime_host)
         .build(crate::testing::runtime_lease_owner())?;
@@ -899,15 +899,14 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
         let create_process_id = format!("managed-create-process-{case}");
         let registry = Arc::new(TestLocalProcessRegistry::default());
         let process_registry = registry.clone() as Arc<dyn lash_core::ProcessRegistry>;
-        let (process_registry, hub) =
-            lash_core::facade_support::watch_process_registry(process_registry);
-        let wiring =
-            lash_core::ProcessWorkWiring::new(process_registry, hub, Arc::new(NoopProcessWork));
+        let watched = lash_core::facade_support::watch_process_registry(process_registry);
+        let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
         let mut builder =
             explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
                 .provider(mock_provider())
                 .model(mock_model_spec())
-                .process_work(wiring);
+                .process_work(wiring)
+                .without_queued_work();
         if let Some(store_factory) = store_factory.clone() {
             builder = builder.store_factory(store_factory);
         }

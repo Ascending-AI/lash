@@ -436,8 +436,7 @@ fn process_worker(
         ),
     ));
     runtime_host.control.effect_host = effect_host;
-    let (registry, process_change_hub) =
-        lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(vec![
@@ -447,9 +446,8 @@ fn process_worker(
             ])),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            registry,
-            process_change_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(lash_core::testing::mock_session_policy()),

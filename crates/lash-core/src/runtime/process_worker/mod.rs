@@ -88,7 +88,7 @@ pub struct ProcessExecutionConcurrencyError {
 #[derive(Clone)]
 pub enum WorkerProcessWork {
     /// Compose native process work over this worker.
-    SelfNative,
+    SelfNative(crate::WatchedRegistry),
     /// Use an externally composed process-work port.
     External(crate::ProcessWorkWiring),
 }
@@ -104,8 +104,6 @@ pub struct DurableProcessWorkerConfig {
     pub runtime_host: RuntimeHostConfig,
     pub session_policy: crate::SessionPolicy,
     pub session_store_factory: Arc<dyn SessionStoreFactory>,
-    pub process_registry: Arc<dyn ProcessRegistry>,
-    process_change_hub: crate::ProcessChangeHub,
     /// Host-facing sink this worker reports [`ProcessWorkerFault`]s on.
     ///
     /// Wire the same sink the registry decorator was built with: a drive
@@ -144,9 +142,8 @@ impl DurableProcessWorkerConfig {
         plugin_host: Arc<PluginHost>,
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        process_registry: Arc<dyn ProcessRegistry>,
-        process_change_hub: crate::ProcessChangeHub,
         process_work: WorkerProcessWork,
+        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         let clock = Arc::clone(&runtime_host.clock);
@@ -155,12 +152,10 @@ impl DurableProcessWorkerConfig {
             runtime_host,
             session_policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             session_store_factory,
-            process_registry,
-            process_change_hub,
             process_event_sink: None,
             trigger_store: Arc::new(crate::InMemoryTriggerStore::with_clock(clock)),
             process_work,
-            queued_work: Arc::new(crate::NoQueuedWork::new()),
+            queued_work,
             turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot::default(),
             process_execution_concurrency: ProcessExecutionConcurrency::DEFAULT,
             worker_slot_supplier: None,
@@ -176,6 +171,17 @@ impl DurableProcessWorkerConfig {
     pub fn with_session_policy(mut self, policy: crate::SessionPolicy) -> Self {
         self.session_policy = policy;
         self
+    }
+
+    pub fn process_registry(&self) -> &Arc<dyn ProcessRegistry> {
+        self.watched_registry().registry()
+    }
+
+    pub(crate) fn watched_registry(&self) -> &crate::WatchedRegistry {
+        match &self.process_work {
+            WorkerProcessWork::SelfNative(watched) => watched,
+            WorkerProcessWork::External(wiring) => wiring.watched(),
+        }
     }
 
     /// Set the maximum processes this worker executes inline at once.
@@ -210,11 +216,6 @@ impl DurableProcessWorkerConfig {
         self
     }
 
-    pub fn with_queued_work(mut self, queued_work: Arc<dyn crate::QueuedWorkSubstrate>) -> Self {
-        self.queued_work = queued_work;
-        self
-    }
-
     #[doc(hidden)]
     pub fn with_turn_phase_probe_slot(
         mut self,
@@ -228,18 +229,16 @@ impl DurableProcessWorkerConfig {
         plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        process_registry: Arc<dyn ProcessRegistry>,
-        process_change_hub: crate::ProcessChangeHub,
         process_work: WorkerProcessWork,
+        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::new(
             Arc::new(PluginHost::new(plugin_factories.into_iter().collect())),
             runtime_host,
             session_store_factory,
-            process_registry,
-            process_change_hub,
             process_work,
+            queued_work,
             lease_owner,
         )
     }
@@ -248,18 +247,16 @@ impl DurableProcessWorkerConfig {
         plugin_stack: PluginStack,
         runtime_host: RuntimeHostConfig,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        process_registry: Arc<dyn ProcessRegistry>,
-        process_change_hub: crate::ProcessChangeHub,
         process_work: WorkerProcessWork,
+        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
         Self::from_plugin_factories(
             plugin_stack.into_factories(),
             runtime_host,
             session_store_factory,
-            process_registry,
-            process_change_hub,
             process_work,
+            queued_work,
             lease_owner,
         )
     }
@@ -483,19 +480,10 @@ impl DurableProcessWorker {
 
     fn process_wiring(&self) -> crate::ProcessWorkWiring {
         match &self.config.process_work {
-            WorkerProcessWork::SelfNative => {
-                let registry = Arc::clone(&self.config.process_registry);
+            WorkerProcessWork::SelfNative(watched) => {
                 let port: Arc<dyn crate::ProcessWorkSubstrate> =
-                    Arc::new(crate::NativeProcessWork::new(
-                        Arc::clone(&registry),
-                        self.config.process_change_hub.clone(),
-                        self.clone(),
-                    ));
-                crate::ProcessWorkWiring::new(
-                    registry,
-                    self.config.process_change_hub.clone(),
-                    port,
-                )
+                    Arc::new(crate::NativeProcessWork::new(watched, self.clone()));
+                crate::ProcessWorkWiring::new(watched.clone(), port)
             }
             WorkerProcessWork::External(wiring) => wiring.clone(),
         }
@@ -526,7 +514,7 @@ impl DurableProcessWorker {
         }
         let current = self
             .config
-            .process_registry
+            .process_registry()
             .get_process(&registration.id)
             .await?
             .ok_or_else(|| {
@@ -577,7 +565,7 @@ impl DurableProcessWorker {
         });
         let execution_write_authority = execution_write_authority.bind_attempt(attempt);
         self.config
-            .process_registry
+            .process_registry()
             .record_first_started_with_authority(
                 &registration.id,
                 crate::ProcessStarted {
@@ -632,7 +620,7 @@ impl DurableProcessWorker {
             .run_process(
                 registration,
                 execution_context,
-                Arc::clone(&self.config.process_registry),
+                Arc::clone(self.config.process_registry()),
                 scoped_effect_controller,
                 cancellation,
                 handover,
@@ -729,7 +717,7 @@ impl DurableProcessWorker {
         if let Some(limit) = fetch_initial_page {
             let page = match self
                 .config
-                .process_registry
+                .process_registry()
                 .list_non_terminal_page(limit, None)
                 .await
             {
@@ -866,7 +854,7 @@ impl DurableProcessWorker {
             .collect::<Vec<_>>();
         let missing_process_ids = self
             .config
-            .process_registry
+            .process_registry()
             .filter_unregistered_process_ids(&candidate_process_ids)
             .await?
             .into_iter()
@@ -896,7 +884,7 @@ impl DurableProcessWorker {
                 match router
                     .start_delivery(
                         &delivery,
-                        Arc::clone(&self.config.process_registry),
+                        Arc::clone(self.config.process_registry()),
                         scoped_effect_controller.controller(),
                     )
                     .await
@@ -1369,7 +1357,7 @@ impl DurableProcessWorker {
                 _ = self.config.runtime_host.clock.sleep(self.lease_timings().renew_interval()) => {
                     match self
                         .config
-                        .process_registry
+                        .process_registry()
                         .renew_process_lease(&lease, self.lease_timings().ttl_ms())
                         .await
                     {
@@ -1405,7 +1393,7 @@ impl DurableProcessWorker {
         reason: Option<String>,
     ) -> Result<(), PluginError> {
         self.config
-            .process_registry
+            .process_registry()
             .append_event(
                 process_id,
                 crate::ProcessEventAppendRequest::cancel_requested(process_id, reason),

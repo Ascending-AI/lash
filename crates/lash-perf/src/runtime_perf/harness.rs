@@ -677,6 +677,7 @@ pub(crate) fn build_embed_core(
     match scenario {
         RuntimePerfScenario::EmbedStandard => {
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(effect_host.clone())
                 .provider(benchmark_provider(scenario).into_handle())
@@ -696,6 +697,7 @@ pub(crate) fn build_embed_core(
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
             lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(effect_host.clone())
                 .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
@@ -844,6 +846,7 @@ pub(crate) async fn build_runtime_with_store(
     let core = match execution_mode {
         ExecutionMode::Standard => {
             let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
                 .provider(provider)
@@ -881,6 +884,7 @@ pub(crate) async fn build_runtime_with_store(
                 factory = factory.with_lashlang_execution_jsonl_path(path);
             }
             let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
                 .provider(provider)
@@ -1283,6 +1287,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let core = match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .provider(provider)
                 .model(benchmark_model_spec())
                 .effect_host(effect_host.clone())
@@ -1313,6 +1318,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             );
             BenchmarkCore::Rlm(
                 lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                    .with_native_queued_work()
                     .provider(provider)
                     .model(benchmark_model_spec())
                     .effect_host(effect_host.clone())
@@ -1402,6 +1408,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let core = match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .provider(provider)
                 .model(benchmark_model_spec())
                 .effect_host(effect_host.clone())
@@ -1427,6 +1434,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
             );
             BenchmarkCore::Rlm(
                 lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                    .with_native_queued_work()
                     .provider(provider)
                     .model(benchmark_model_spec())
                     .effect_host(effect_host.clone())

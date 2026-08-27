@@ -71,8 +71,8 @@ impl RuntimeEnvironment {
     #[doc(hidden)]
     pub fn process_work(&self) -> Option<Arc<dyn super::ProcessWorkSubstrate>> {
         self.work
-            .process_ports()
-            .map(|(_, process)| Arc::clone(process))
+            .process_wiring()
+            .map(|wiring| Arc::clone(wiring.port()))
     }
 
     #[doc(hidden)]

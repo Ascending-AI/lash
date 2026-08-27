@@ -292,7 +292,7 @@ async fn async_main() -> AnyhowResult<()> {
         // needs it too, because the durable process worker it configures
         // reports its faults there and nowhere else.
         .process_event_sink(Arc::clone(&process_event_sink))
-        .queued_work(queued_work_port)
+        .with_queued_work(queued_work_port)
         .advanced()
         .runtime_host_config(runtime_host_config)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

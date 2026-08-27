@@ -83,6 +83,16 @@ pub enum EmbedError {
     )]
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
+    #[error(
+        "queued-work composition is required; call .with_native_queued_work(), .with_queued_work(...), or .without_queued_work()"
+    )]
+    /// Returned when the host did not choose how queued work is executed.
+    MissingQueuedWorkSource,
+    #[error(
+        "native queued work requires a LashCore store factory; call .store_factory(...) or choose .with_queued_work(...) or .without_queued_work()"
+    )]
+    /// Returned when native queued work cannot rebuild session runtimes.
+    NativeQueuedWorkRequiresStoreFactory,
     #[error("failed to create store for session `{session_id}`: {message}")]
     /// Store creation failed for the identified session.
     StoreFactory {
@@ -270,6 +280,8 @@ impl EmbedError {
             | Self::MissingProcessEnvStore
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
+            | Self::MissingQueuedWorkSource
+            | Self::NativeQueuedWorkRequiresStoreFactory
             | Self::StoreSessionMismatch { .. }
             | Self::MissingProcessWorkerStoreFactory
             | Self::ProcessRegistryRequiresStoreFactory

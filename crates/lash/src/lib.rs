@@ -672,7 +672,7 @@ pub mod process {
         ProcessSessionDeleteReport, ProcessStartOptions, ProcessStartRequest, ProcessStarted,
         ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessWakeDelivery,
         ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor,
-        ProcessWorklistPage, ProjectionWatermark, RecoveryContract, SessionScope,
+        ProcessWorklistPage, ProjectionWatermark, RecoveryContract, SessionScope, WatchedRegistry,
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
         facade_support::ObservedWorkItem, facade_support::ProcessAdmissionDeferred,
         facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,

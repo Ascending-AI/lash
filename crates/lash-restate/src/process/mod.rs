@@ -17,7 +17,7 @@ use lash_core::{
     PluginError, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionContext,
     ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
     ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, RecoveryContract, Resolution,
-    RuntimeError, ScopedEffectController, facade_support::DurableProcessWorker,
+    RuntimeError, RuntimeErrorCode, ScopedEffectController, facade_support::DurableProcessWorker,
     facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionReport,
     facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptOutcome,
     facade_support::ProcessRecoveryOperation, facade_support::ProcessWorkerFault,
@@ -27,7 +27,6 @@ use restate_sdk::context::ContextPromises;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use serde::Serialize;
 
-use crate::controller::RestateEffectError;
 use crate::durable_wait::restate_await_event_key;
 use crate::ingress::{RestateConnection, RestateIngressClient};
 
@@ -435,7 +434,10 @@ impl RestateProcessIngressRunner {
                 } else {
                     format!("ingress submit for process `{process_id}` failed: {err}")
                 };
-                RestateEffectError::BackgroundScheduler(detail).into_plugin_error()
+                PluginError::Runtime(RuntimeError::new(
+                    RuntimeErrorCode::RestateProcessIngressSubmit,
+                    detail,
+                ))
             })?;
         // Record the durable backend reference so the process is observably
         // owned by Restate, mirroring `schedule_restate_process`.
@@ -644,19 +646,19 @@ impl RestateProcessIngressRunner {
                     // A shared handler, so the 404 has two readings and this
                     // client cannot tell them apart: nothing binds the service,
                     // or nothing is left of this process's invocation.
-                    Err(RestateEffectError::BackgroundScheduler(
+                    Err(PluginError::Runtime(RuntimeError::new(
+                        RuntimeErrorCode::RestateProcessAwait,
                         crate::ingress::unresolvable_call_target_message(
                             "LashProcessWorkflow",
                             "await_terminal",
                             &err,
                         ),
-                    )
-                    .into_plugin_error())
+                    )))
                 } else {
-                    Err(RestateEffectError::BackgroundScheduler(format!(
-                        "ingress await for process `{process_id}` failed: {err}"
-                    ))
-                    .into_plugin_error())
+                    Err(PluginError::Runtime(RuntimeError::new(
+                        RuntimeErrorCode::RestateProcessAwait,
+                        format!("ingress await for process `{process_id}` failed: {err}"),
+                    )))
                 }
             })
     }
@@ -719,7 +721,8 @@ impl RestateProcessDeployment {
     ) -> Self {
         let connection = connection.into();
         let fault_sink = sink.clone();
-        let (registry, hub) = watch_process_registry_with_sink(registry, sink);
+        let watched = watch_process_registry_with_sink(registry, sink);
+        let registry = Arc::clone(watched.registry());
         let ingress_runner = Arc::new(
             RestateProcessIngressRunner::new(
                 connection.clone(),
@@ -730,7 +733,7 @@ impl RestateProcessDeployment {
         );
         let process_work = ingress_runner;
         let port: Arc<dyn ProcessWorkSubstrate> = process_work.clone();
-        let wiring = ProcessWorkWiring::new(Arc::clone(&registry), hub, port);
+        let wiring = ProcessWorkWiring::new(watched, port);
         Self {
             #[cfg(test)]
             process_work,

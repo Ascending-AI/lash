@@ -6,7 +6,7 @@ impl DurableProcessWorker {
         loop {
             let plans = self
                 .config
-                .process_registry
+                .process_registry()
                 .list_pending_parent_end_plans(limit)
                 .await?;
             if plans.is_empty() {
@@ -21,7 +21,7 @@ impl DurableProcessWorker {
     async fn drive_one_parent_end_plan(&self, process_id: &str) -> Result<(), PluginError> {
         if let Some(plan) = self
             .config
-            .process_registry
+            .process_registry()
             .get_pending_parent_end_plan(process_id)
             .await?
         {
@@ -57,7 +57,7 @@ impl DurableProcessWorker {
     ) -> Result<(), PluginError> {
         let record = self
             .config
-            .process_registry
+            .process_registry()
             .get_process(&plan.process_id)
             .await?
             .ok_or_else(|| {
@@ -106,7 +106,7 @@ impl DurableProcessWorker {
             .finish_process_parent_end_actions(scoped_effect_controller, &plan.actions)
             .await?;
         self.config
-            .process_registry
+            .process_registry()
             .complete_parent_end_plan(&plan.process_id)
             .await
     }

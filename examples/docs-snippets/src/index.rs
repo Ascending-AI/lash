@@ -39,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
 // one LashCore per app, cloned freely.
 fn hello_lash_core(provider: ProviderHandle, model: ModelSpec) -> lash::Result<LashCore> {
     LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(model)
         .instructions("Answer in one short sentence. Skip preamble.")

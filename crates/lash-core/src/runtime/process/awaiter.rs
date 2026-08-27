@@ -36,14 +36,45 @@ struct WatchedProcessRegistry {
     event_paths: Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
 }
 
+/// A process registry paired with the change hub published by its decorator.
+///
+/// The fields are private so consumers cannot combine a registry from one
+/// watch with the hub from another.
+#[derive(Clone)]
+pub struct WatchedRegistry {
+    registry: Arc<dyn ProcessRegistry>,
+    hub: ProcessChangeHub,
+}
+
+impl WatchedRegistry {
+    fn new(inner: Arc<dyn ProcessRegistry>, sink: Option<Arc<dyn ProcessEventSink>>) -> Self {
+        let hub = ProcessChangeHub::new();
+        let registry: Arc<dyn ProcessRegistry> = Arc::new(WatchedProcessRegistry {
+            inner: Arc::clone(&inner),
+            hub: hub.clone(),
+            sink: sink.clone(),
+            event_paths: Mutex::new(HashMap::new()),
+        });
+        Self { registry, hub }
+    }
+
+    /// The watched registry handle.
+    pub fn registry(&self) -> &Arc<dyn ProcessRegistry> {
+        &self.registry
+    }
+
+    /// The change hub paired with this watched registry.
+    pub fn hub(&self) -> &ProcessChangeHub {
+        &self.hub
+    }
+}
+
 /// Wrap `inner` in a change-publishing registry decorator with no event sink.
 ///
 /// The decorated handle publishes change ticks to the returned
 /// [`ProcessChangeHub`]. Use [`watch_process_registry_with_sink`] to also feed a
 /// host-facing [`ProcessEventSink`].
-pub fn watch_process_registry(
-    inner: Arc<dyn ProcessRegistry>,
-) -> (Arc<dyn ProcessRegistry>, ProcessChangeHub) {
+pub fn watch_process_registry(inner: Arc<dyn ProcessRegistry>) -> WatchedRegistry {
     watch_process_registry_with_sink(inner, None)
 }
 
@@ -54,17 +85,8 @@ pub fn watch_process_registry(
 pub fn watch_process_registry_with_sink(
     inner: Arc<dyn ProcessRegistry>,
     sink: Option<Arc<dyn ProcessEventSink>>,
-) -> (Arc<dyn ProcessRegistry>, ProcessChangeHub) {
-    let hub = ProcessChangeHub::new();
-    (
-        Arc::new(WatchedProcessRegistry {
-            inner,
-            hub: hub.clone(),
-            sink,
-            event_paths: Mutex::new(HashMap::new()),
-        }),
-        hub,
-    )
+) -> WatchedRegistry {
+    WatchedRegistry::new(inner, sink)
 }
 
 #[async_trait::async_trait]

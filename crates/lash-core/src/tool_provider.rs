@@ -935,12 +935,11 @@ impl<'run> ToolContext<'run> {
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
     ) -> Self {
         let process_id = process_id.into();
-        let (registry, hub) = crate::facade_support::watch_process_registry(registry);
-        let process_work = crate::ProcessWorkWiring::new(
-            Arc::clone(&registry),
-            hub,
-            Arc::new(crate::NativeProcessWork::for_registry(registry)),
-        );
+        let watched = crate::facade_support::watch_process_registry(registry);
+        let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+            watched.registry(),
+        )));
+        let process_work = crate::ProcessWorkWiring::new(watched, port);
         self.process_events = Some(ToolProcessEventContext {
             execution_write_authority,
             process_id,

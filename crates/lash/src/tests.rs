@@ -2365,6 +2365,21 @@ fn explicit_ephemeral_facets(
     explicit_ephemeral_facets_with_budget(builder, crate::CommitBudget::bounded(1024 * 1024, 512))
 }
 
+fn ephemeral_facets_without_queued_work_choice(
+    builder: crate::core::LashCoreBuilder,
+) -> crate::core::LashCoreBuilder {
+    builder
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .effect_host(Arc::new(
+            crate::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+        ))
+        .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            crate::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+}
+
 fn explicit_ephemeral_facets_with_budget(
     builder: crate::core::LashCoreBuilder,
     commit_budget: crate::CommitBudget,
@@ -2379,6 +2394,7 @@ fn explicit_ephemeral_facets_with_budget(
         .process_env_store(Arc::new(
             crate::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
+        .without_queued_work()
 }
 
 fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message {

@@ -865,7 +865,8 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             .expect("Standard scenario model"),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
-    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let registry = Arc::clone(watched.registry());
     let mut runtime = lash_core::facade_support::LashRuntime::builder(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
@@ -878,8 +879,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         lash_core::facade_support::SingleProviderResolver::new(provider.into_handle()),
     ))
     .with_process_work(lash_core::ProcessWorkWiring::new(
-        Arc::clone(&registry),
-        hub,
+        watched,
         Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
     ))
     .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))

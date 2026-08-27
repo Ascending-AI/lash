@@ -80,8 +80,10 @@ lash::EmbedError::MissingProcessRegistry
 lash::EmbedError::MissingProcessWorkerStoreFactory
 lash::EmbedError::MissingProtocolPlugin
 lash::EmbedError::MissingQueuedWorkBatching
+lash::EmbedError::MissingQueuedWorkSource
 lash::EmbedError::MissingSessionStoreFactory
 lash::EmbedError::MissingTurnBudget
+lash::EmbedError::NativeQueuedWorkRequiresStoreFactory
 lash::EmbedError::Plugin
 lash::EmbedError::Plugin::0
 lash::EmbedError::ProcessExecutionConcurrency
@@ -209,7 +211,6 @@ lash::LashCoreBuilder::process_wake_delivery_policy
 lash::LashCoreBuilder::process_work
 lash::LashCoreBuilder::protocol_plugin
 lash::LashCoreBuilder::provider
-lash::LashCoreBuilder::queued_work
 lash::LashCoreBuilder::queued_work_batching
 lash::LashCoreBuilder::queued_work_execution_concurrency
 lash::LashCoreBuilder::session_spec
@@ -222,6 +223,8 @@ lash::LashCoreBuilder::trace_level
 lash::LashCoreBuilder::trace_sink
 lash::LashCoreBuilder::trigger_store
 lash::LashCoreBuilder::turn_budget
+lash::LashCoreBuilder::with_native_queued_work
+lash::LashCoreBuilder::with_queued_work
 lash::LashCoreBuilder::without_queued_work
 lash::LashCoreBuilder::worker_slot_supplier
 lash::LashSession
@@ -1271,7 +1274,6 @@ lash::durability::DurableProcessWorkerConfig::turn_phase_probe_slot
 lash::durability::DurableProcessWorkerConfig::validate_process_execution_concurrency
 lash::durability::DurableProcessWorkerConfig::with_process_event_sink
 lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency
-lash::durability::DurableProcessWorkerConfig::with_queued_work
 lash::durability::DurableProcessWorkerConfig::with_session_policy
 lash::durability::DurableProcessWorkerConfig::with_trigger_store
 lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot
@@ -1436,6 +1438,7 @@ lash::durability::WorkerProcessWork
 lash::durability::WorkerProcessWork::External
 lash::durability::WorkerProcessWork::External::0
 lash::durability::WorkerProcessWork::SelfNative
+lash::durability::WorkerProcessWork::SelfNative::0
 lash::durability::ensure_durable_effect_input
 lash::formats::BYTECODE_FORMAT_VERSION
 lash::formats::CHECKPOINT_COMPONENT_ENCODING_VERSION
@@ -3870,8 +3873,10 @@ lash::prelude::EmbedError::MissingProcessRegistry
 lash::prelude::EmbedError::MissingProcessWorkerStoreFactory
 lash::prelude::EmbedError::MissingProtocolPlugin
 lash::prelude::EmbedError::MissingQueuedWorkBatching
+lash::prelude::EmbedError::MissingQueuedWorkSource
 lash::prelude::EmbedError::MissingSessionStoreFactory
 lash::prelude::EmbedError::MissingTurnBudget
+lash::prelude::EmbedError::NativeQueuedWorkRequiresStoreFactory
 lash::prelude::EmbedError::Plugin
 lash::prelude::EmbedError::Plugin::0
 lash::prelude::EmbedError::ProcessExecutionConcurrency
@@ -3978,7 +3983,6 @@ lash::prelude::LashCoreBuilder::process_wake_delivery_policy
 lash::prelude::LashCoreBuilder::process_work
 lash::prelude::LashCoreBuilder::protocol_plugin
 lash::prelude::LashCoreBuilder::provider
-lash::prelude::LashCoreBuilder::queued_work
 lash::prelude::LashCoreBuilder::queued_work_batching
 lash::prelude::LashCoreBuilder::queued_work_execution_concurrency
 lash::prelude::LashCoreBuilder::session_spec
@@ -3991,6 +3995,8 @@ lash::prelude::LashCoreBuilder::trace_level
 lash::prelude::LashCoreBuilder::trace_sink
 lash::prelude::LashCoreBuilder::trigger_store
 lash::prelude::LashCoreBuilder::turn_budget
+lash::prelude::LashCoreBuilder::with_native_queued_work
+lash::prelude::LashCoreBuilder::with_queued_work
 lash::prelude::LashCoreBuilder::without_queued_work
 lash::prelude::LashCoreBuilder::worker_slot_supplier
 lash::prelude::LashSession
@@ -5227,6 +5233,9 @@ lash::process::WakeDiscardReason::SequenceRewound
 lash::process::WakeDiscardReason::TargetGone
 lash::process::WakeDiscardReason::as_str
 lash::process::WakeDiscardReason::blocks_ordering_group
+lash::process::WatchedRegistry
+lash::process::WatchedRegistry::hub
+lash::process::WatchedRegistry::registry
 lash::process::lashlang_process_event_types
 lash::process::lashlang_process_signal_event_types
 lash::process::process_wake_source_key
@@ -7769,6 +7778,8 @@ lash::runtime::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
 lash::runtime::RuntimeErrorCode::RestateJournaledEffectPoisoned
 lash::runtime::RuntimeErrorCode::RestateProcessAwait
 lash::runtime::RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
+lash::runtime::RuntimeErrorCode::RestateProcessCancel
+lash::runtime::RuntimeErrorCode::RestateProcessIngressSubmit
 lash::runtime::RuntimeErrorCode::RestateProcessTerminalEncode
 lash::runtime::RuntimeErrorCode::RestateProcessTurnCancelContextMissing
 lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMismatch

@@ -121,7 +121,7 @@ async fn recoverable_chat_test_state_with_dependencies_and_context(
         .process_registry(Arc::clone(&process_registry))
         .trigger_store(Arc::clone(&trigger_store));
     if let Some(queued_work_driver) = queued_work_driver {
-        core_builder = core_builder.queued_work(queued_work_driver);
+        core_builder = core_builder.with_queued_work(queued_work_driver);
     }
     let core = core_builder
         .build(crate::test_core_owner())

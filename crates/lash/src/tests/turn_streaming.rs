@@ -1177,6 +1177,7 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -1398,6 +1399,7 @@ async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Result<()> {
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(Arc::new(
@@ -5140,6 +5142,7 @@ async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability
         inner: lash_core::facade_support::InMemorySessionStoreFactory::new(),
     });
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
@@ -5264,6 +5267,7 @@ async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
         .into_handle();
     let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .store_factory(store_factory.clone())
@@ -8537,6 +8541,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
     )
     .expect("scoped durable effect controller");
     let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(agent_frame_switch_provider())
         .model(mock_model_spec())
         .tools(Arc::new(AgentFrameSwitchTools))

@@ -45,12 +45,11 @@ pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::Queued
 pub(crate) fn process_work_wiring_for_registry(
     registry: Arc<dyn crate::ProcessRegistry>,
 ) -> crate::ProcessWorkWiring {
-    let (registry, hub) = crate::facade_support::watch_process_registry(registry);
-    crate::ProcessWorkWiring::new(
-        Arc::clone(&registry),
-        hub,
-        Arc::new(crate::NativeProcessWork::for_registry(registry)),
-    )
+    let watched = crate::facade_support::watch_process_registry(registry);
+    let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+        watched.registry(),
+    )));
+    crate::ProcessWorkWiring::new(watched, port)
 }
 
 use crate::llm::transport::LlmTransportError;

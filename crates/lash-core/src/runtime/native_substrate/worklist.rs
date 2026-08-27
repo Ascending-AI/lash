@@ -97,7 +97,7 @@ impl DurableProcessWorker {
         for attempt in 1..=WORKLIST_FETCH_ATTEMPTS {
             match self
                 .config
-                .process_registry
+                .process_registry()
                 .list_non_terminal_page(limit, continuation.clone())
                 .await
             {

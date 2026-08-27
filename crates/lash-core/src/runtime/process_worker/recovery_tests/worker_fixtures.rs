@@ -155,7 +155,7 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
 ) {
     let test_registry = Arc::new(TestLocalProcessRegistry::default());
     let raw_registry: Arc<dyn ProcessRegistry> = test_registry.clone();
-    let (registry, driver_hub, process_work) =
+    let (registry, _driver_hub, process_work) =
         late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
     let mut runtime_host = RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -176,9 +176,8 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
         Arc::new(PluginHost::new(Vec::new())),
         runtime_host,
         Arc::new(TestSessionStoreFactory),
-        Arc::clone(&registry),
-        driver_hub,
         crate::WorkerProcessWork::External(process_work),
+        Arc::new(crate::NoQueuedWork::new()),
         local_owner("engine-worker", "host-a", "engine-start"),
     )
     .with_session_policy(policy)

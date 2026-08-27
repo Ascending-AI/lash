@@ -30,6 +30,7 @@ async fn sqlite_core(
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -121,6 +122,7 @@ fn build_persistent_core(
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
 ) -> lash::Result<LashCore> {
     lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
@@ -267,6 +269,7 @@ async fn shared_factory(
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -414,6 +417,7 @@ async fn enumerate_sessions() -> anyhow::Result<()> {
     use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
 
     let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("docs-session-enumeration")

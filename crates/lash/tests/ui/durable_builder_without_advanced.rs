@@ -23,6 +23,7 @@ async fn durable_core_without_advanced(
                 .expect("sqlite artifact store"),
         ),
     ))
+    .with_native_queued_work()
     .provider(provider)
     .model(model)
     .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(

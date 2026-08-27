@@ -568,6 +568,7 @@ async fn park_node_budget_failure_is_typed_terminal_and_actionable() -> Result<(
 #[test]
 fn typed_core_builders_require_explicit_store_choice() {
     let err = match LashCore::standard_builder(crate::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())
@@ -578,6 +579,7 @@ fn typed_core_builders_require_explicit_store_choice() {
     assert!(matches!(err, EmbedError::MissingEffectHost));
 
     let err = match LashCore::standard_builder(crate::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(mock_provider())
         .model(mock_model_spec())
         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
@@ -594,6 +596,7 @@ fn typed_core_builders_require_explicit_store_choice() {
         // so a missing-artifact-store error is unrepresentable. The RLM preset
         // still must not install implicit generic stores.
         let err = match rlm_core_builder()
+            .without_queued_work()
             .provider(mock_provider())
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())
@@ -851,6 +854,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
     .expect("rlm config");
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(config, inmem_artifact_store());
     let core = LashCore::rlm_builder(crate::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
         .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))

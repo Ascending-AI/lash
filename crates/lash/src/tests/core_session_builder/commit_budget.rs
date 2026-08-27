@@ -18,6 +18,7 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
     .store_factory(Arc::new(
         lash_core::facade_support::InMemorySessionStoreFactory::new(),
     ))
+    .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("commit-graph-only-budget-surface")

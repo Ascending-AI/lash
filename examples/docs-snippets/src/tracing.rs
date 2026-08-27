@@ -18,6 +18,7 @@ async fn jsonl_trace_core(provider: ProviderHandle, model: String) -> anyhow::Re
     let trace_sink: Arc<dyn TraceSink> = Arc::new(JsonlTraceSink::new("./.lash-data/trace.jsonl"));
 
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -55,6 +56,7 @@ async fn lashlang_execution_jsonl(
     )
     .with_lashlang_execution_jsonl_path("./.lash-data/lashlang-execution.jsonl");
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(model)
         .effect_host(std::sync::Arc::new(
@@ -97,6 +99,7 @@ async fn lashlang_graph_store(provider: ProviderHandle, model: ModelSpec) -> any
     )
     .with_lashlang_execution_sink(lashlang_execution_sink);
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
@@ -143,6 +146,7 @@ async fn otel_trace_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::
     // process-global OpenTelemetry tracer provider.
     let sink: Arc<dyn TraceSink> = Arc::new(OtelTraceSink::from_global_provider());
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(model)
         .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))

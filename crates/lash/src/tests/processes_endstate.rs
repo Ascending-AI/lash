@@ -1266,8 +1266,7 @@ fn recovery_process_worker(
     registry: Arc<dyn lash_core::ProcessRegistry>,
     owner: lash_core::LeaseOwnerIdentity,
 ) -> lash_core::facade_support::DurableProcessWorker {
-    let (registry, process_change_hub) =
-        lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
@@ -1276,9 +1275,8 @@ fn recovery_process_worker(
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            registry,
-            process_change_hub,
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             owner,
         ),
     )

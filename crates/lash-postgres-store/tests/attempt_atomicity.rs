@@ -560,7 +560,8 @@ async fn public_signal_runtime(
     let policy = public_runtime_policy();
     let store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(lash_core::facade_support::InMemorySessionStore::new());
-    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let registry = Arc::clone(watched.registry());
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -579,8 +580,7 @@ async fn public_signal_runtime(
         )
         .with_store(store)
         .with_process_work(lash_core::ProcessWorkWiring::new(
-            Arc::clone(&registry),
-            hub,
+            watched,
             Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
         ))
         .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
@@ -854,7 +854,7 @@ async fn fig1293_runtime(
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
 ) -> lash_core::facade_support::LashRuntime {
-    let (registry, hub) = lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     let factories = fig1293_factories();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -871,20 +871,14 @@ async fn fig1293_runtime(
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&registry),
-            hub.clone(),
-            lash_core::WorkerProcessWork::SelfNative,
+            lash_core::WorkerProcessWork::SelfNative(watched.clone()),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ),
     );
     let process_work = lash_core::ProcessWorkWiring::new(
-        Arc::clone(&registry),
-        hub.clone(),
-        Arc::new(lash_core::NativeProcessWork::new(
-            Arc::clone(&registry),
-            hub,
-            worker,
-        )),
+        watched.clone(),
+        Arc::new(lash_core::NativeProcessWork::new(&watched, worker)),
     );
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(

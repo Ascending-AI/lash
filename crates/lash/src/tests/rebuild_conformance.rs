@@ -87,6 +87,7 @@ fn runtime_rebuild_and_worker_recovery_with_inline_stores() {
                 artifact_store: Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new()),
                 build_core: Box::new(move |builder| {
                     explicit_ephemeral_facets(builder)
+                        .with_native_queued_work()
                         .store_factory(Arc::clone(&store_factory))
                         .trigger_store(Arc::clone(&trigger_store))
                         .build(crate::testing::runtime_lease_owner())

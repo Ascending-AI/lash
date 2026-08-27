@@ -124,12 +124,11 @@ impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
         process_id: &str,
     ) -> Result<crate::ProcessTerminalWait, PluginError> {
         crate::NativeProcessWork::for_registry(Arc::clone(
-            &self
-                .worker
+            self.worker
                 .get()
                 .expect("test process worker is bound before execution")
                 .config
-                .process_registry,
+                .process_registry(),
         ))
         .await_terminal(process_id)
         .await
@@ -145,9 +144,11 @@ fn late_bound_process_work_wiring(
     crate::ProcessChangeHub,
     crate::ProcessWorkWiring,
 ) {
-    let (registry, hub) = crate::watch_process_registry(registry);
+    let watched = crate::watch_process_registry(registry);
+    let registry = Arc::clone(watched.registry());
+    let hub = watched.hub().clone();
     let port: Arc<dyn crate::ProcessWorkSubstrate> = process_work;
-    let wiring = crate::ProcessWorkWiring::new(Arc::clone(&registry), hub.clone(), port);
+    let wiring = crate::ProcessWorkWiring::new(watched, port);
     (registry, hub, wiring)
 }
 
@@ -228,7 +229,7 @@ fn inline_worker_with_trigger_store(
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
-    let (registry, hub) = crate::watch_process_registry(registry);
+    let watched = crate::watch_process_registry(registry);
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
@@ -237,9 +238,8 @@ fn inline_worker_with_trigger_store(
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(InlineSessionStoreFactory),
-            registry,
-            hub,
-            crate::WorkerProcessWork::SelfNative,
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
             lease_owner,
         )
         .with_trigger_store(trigger_store),
@@ -256,7 +256,7 @@ fn reentrant_worker_with_trigger_store(
     trigger_store: Arc<dyn TriggerStore>,
     run_handle: Arc<LateBoundProcessWork>,
 ) -> DurableProcessWorker {
-    let (driver_registry, driver_hub, process_work) =
+    let (_driver_registry, _driver_hub, process_work) =
         late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
@@ -266,9 +266,8 @@ fn reentrant_worker_with_trigger_store(
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(InlineSessionStoreFactory),
-            driver_registry,
-            driver_hub,
             crate::WorkerProcessWork::External(process_work),
+            Arc::new(crate::NoQueuedWork::new()),
             lease_owner,
         )
         .with_trigger_store(trigger_store),
@@ -1059,7 +1058,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     });
     let run_handle = Arc::new(LateBoundProcessWork::default());
     let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let (registry, hub, process_work) =
+    let (registry, _hub, process_work) =
         late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
     let mut runtime_host = RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1079,9 +1078,8 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
             Arc::new(PluginHost::new(plugin_factories)),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
-            Arc::clone(&registry),
-            hub,
             crate::WorkerProcessWork::External(process_work),
+            Arc::new(crate::NoQueuedWork::new()),
             local_owner("session-turn-worker", "host-a", "session-turn-start"),
         )
         .with_session_policy(policy.clone())
@@ -1162,15 +1160,14 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     .await
     .expect("persist process env");
     let worker = DurableProcessWorker::new({
-        let (worker_registry, hub) =
+        let watched =
             crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             Arc::new(SegmentBoundarySessionStoreFactory),
-            worker_registry,
-            hub,
-            crate::WorkerProcessWork::SelfNative,
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
             local_owner("segment-worker", "host-a", "start-a"),
         )
         .with_session_policy(policy)
@@ -1356,15 +1353,14 @@ async fn snapshot_recovery_fixture(
         .expect("post-reserve mutation command")
         .expect("post-reserve mutation");
     let worker = DurableProcessWorker::new({
-        let (worker_registry, hub) =
+        let watched =
             crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
-            worker_registry,
-            hub,
-            crate::WorkerProcessWork::SelfNative,
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
             local_owner(
                 "snapshot-recovery-worker",
                 "host-a",

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use crate::{
-    PluginError, ProcessAdmissionReport, ProcessAwaitOutput, ProcessChangeHub, ProcessEvent,
-    ProcessRegistry,
-};
+use crate::{PluginError, ProcessAdmissionReport, WatchedRegistry};
+
+#[cfg(any(test, feature = "testing"))]
+use crate::{ProcessAwaitOutput, ProcessEvent, ProcessRegistry};
 
 use super::{NativeProcessAwaiter, ProcessTerminalWait, ProcessWorkSubstrate};
 use crate::runtime::DurableProcessWorker;
@@ -24,14 +24,13 @@ enum NativeProcessWorker {
 
 impl NativeProcessWork {
     /// Construct native process work over an already-watched registry.
-    pub fn new(
-        registry: Arc<dyn ProcessRegistry>,
-        hub: ProcessChangeHub,
-        worker: DurableProcessWorker,
-    ) -> Self {
+    pub fn new(watched: &WatchedRegistry, worker: DurableProcessWorker) -> Self {
         Self {
             worker: NativeProcessWorker::Durable(worker),
-            terminal_awaiter: NativeProcessAwaiter::new(registry, hub),
+            terminal_awaiter: NativeProcessAwaiter::new(
+                Arc::clone(watched.registry()),
+                watched.hub().clone(),
+            ),
         }
     }
 

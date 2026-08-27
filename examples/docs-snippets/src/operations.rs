@@ -32,6 +32,7 @@ fn configure_lease_timings(
     .expect("ttl >= 3 * renew_interval");
 
     let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -268,6 +269,7 @@ mod tests {
                 .expect("open in-memory process registry"),
         );
         let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .with_native_queued_work()
             .model(crate::test_support::model())
             .store_factory(Arc::new(
                 lash::persistence::InMemorySessionStoreFactory::new(),

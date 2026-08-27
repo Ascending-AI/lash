@@ -350,6 +350,7 @@ mod dialect_pin_tests {
             ),
         );
         LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(mock_model_spec())
             .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(

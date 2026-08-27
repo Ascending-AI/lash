@@ -154,15 +154,8 @@ pub enum RestateEffectError {
         effect: String,
         terminal: TerminalError,
     },
-    #[error("Restate background scheduler error: {0}")]
-    BackgroundScheduler(String),
 }
 
-impl RestateEffectError {
-    pub(crate) fn into_plugin_error(self) -> PluginError {
-        PluginError::Session(self.to_string())
-    }
-}
 async fn resolve_restate_await_event<'ctx, C>(
     context: &C,
     key: &AwaitEventKey,
@@ -1104,8 +1097,10 @@ where
                         })
                         .await
                         .map_err(|err| {
-                            RestateEffectError::BackgroundScheduler(err.to_string())
-                                .into_plugin_error()
+                            PluginError::Runtime(RuntimeError::new(
+                                RuntimeErrorCode::RestateProcessCancel,
+                                format!("Restate process cancellation failed: {err}"),
+                            ))
                         })?;
                     trace_park("process_after_turn_cancel");
                     match context.await_process_terminal(process_id.clone()).await {
@@ -1158,7 +1153,10 @@ where
                 .request_process_workflow_cancel(RestateProcessCancelRequest { process_id, reason })
                 .await
                 .map_err(|err| {
-                    RestateEffectError::BackgroundScheduler(err.to_string()).into_plugin_error()
+                    PluginError::Runtime(RuntimeError::new(
+                        RuntimeErrorCode::RestateProcessCancel,
+                        format!("Restate process cancellation failed: {err}"),
+                    ))
                 })?;
             Ok(ProcessEffectOutcome::Cancel {
                 record: Box::new(record),
@@ -1198,8 +1196,10 @@ where
                             })
                             .await
                             .map_err(|err| {
-                                RestateEffectError::BackgroundScheduler(err.to_string())
-                                    .into_plugin_error()
+                                PluginError::Runtime(RuntimeError::new(
+                                    RuntimeErrorCode::RestateProcessCancel,
+                                    format!("Restate process cancellation failed: {err}"),
+                                ))
                             })?;
                         Ok(())
                     }
@@ -1251,7 +1251,10 @@ where
                 })
                 .await
                 .map_err(|err| {
-                    RestateEffectError::BackgroundScheduler(err.to_string()).into_plugin_error()
+                    PluginError::Runtime(RuntimeError::new(
+                        RuntimeErrorCode::RestateAwaitEventResolve,
+                        format!("Restate process signal resolution failed: {err}"),
+                    ))
                 })?;
             Ok(ProcessEffectOutcome::Signal {
                 event: Box::new(result.event),
@@ -1305,7 +1308,10 @@ where
         .start_process_workflow(registration, execution_context)
         .await
         .map_err(|err| {
-            RestateEffectError::BackgroundScheduler(err.to_string()).into_plugin_error()
+            PluginError::Runtime(RuntimeError::new(
+                RuntimeErrorCode::RestateProcessIngressSubmit,
+                format!("Restate process workflow start failed: {err}"),
+            ))
         })?;
     registry
         .set_external_ref(
