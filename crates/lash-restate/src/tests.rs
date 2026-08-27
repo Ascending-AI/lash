@@ -12718,6 +12718,61 @@ fn runtime_handler_error_classification_keeps_restate_ingress_retryable() {
 }
 
 #[test]
+fn ingress_submit_maps_an_unregistered_service_to_the_terminal_code() {
+    let unregistered = crate::RestateHttpError::Status {
+        operation: "Restate workflow call",
+        url: "https://restate.invalid/LashProcessWorkflow/k/run".to_string(),
+        status: 404,
+        body: "not found".to_string(),
+    };
+    let lash_core::PluginError::Runtime(error) =
+        crate::process::process_ingress_submit_error("proc-1", unregistered)
+    else {
+        panic!("ingress submit failures must stay typed runtime errors");
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateServiceUnregistered
+    );
+    assert!(!error.code.is_retryable());
+
+    let transient = crate::RestateHttpError::Status {
+        operation: "Restate workflow call",
+        url: "https://restate.invalid/LashProcessWorkflow/k/run".to_string(),
+        status: 503,
+        body: "unavailable".to_string(),
+    };
+    let lash_core::PluginError::Runtime(error) =
+        crate::process::process_ingress_submit_error("proc-1", transient)
+    else {
+        panic!("ingress submit failures must stay typed runtime errors");
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::RestateProcessIngressSubmit
+    );
+    assert!(error.code.is_retryable());
+}
+
+#[test]
+fn runtime_handler_error_classification_makes_unregistered_service_terminal() {
+    // An unregistered service is a deployment fact: retrying cannot make an
+    // unbound service appear, so the ingress-submit 404 must not join the
+    // retryable ingress class above.
+    let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
+        lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::RestateServiceUnregistered,
+            "no deployment binds LashProcessWorkflow/run",
+        ),
+    ));
+    let debug = format!("{error:?}");
+    assert!(
+        debug.contains("Terminal"),
+        "an unregistered-service ingress failure must stop Restate redelivery: {debug}"
+    );
+}
+
+#[test]
 fn runtime_handler_error_classification_makes_terminal_runtime_error_terminal() {
     let error = handler_error_from_plugin(lash_core::PluginError::Runtime(
         lash_core::RuntimeError::new(

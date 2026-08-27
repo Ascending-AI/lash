@@ -87,6 +87,27 @@ pub(crate) fn handler_error_from_plugin(error: PluginError) -> HandlerError {
     }
 }
 
+/// Maps an ingress submit failure for `LashProcessWorkflow/run`. A 404 here is
+/// a deployment that never bound the process workflow, not a busy engine:
+/// terminal by construction, because retrying cannot make an unbound service
+/// appear (FIG-1579). Every other failure stays in the retryable ingress class.
+pub(crate) fn process_ingress_submit_error(
+    process_id: &str,
+    err: crate::RestateHttpError,
+) -> PluginError {
+    if err.is_service_unregistered() {
+        PluginError::Runtime(RuntimeError::new(
+            RuntimeErrorCode::RestateServiceUnregistered,
+            crate::ingress::unregistered_service_message("LashProcessWorkflow", "run", &err),
+        ))
+    } else {
+        PluginError::Runtime(RuntimeError::new(
+            RuntimeErrorCode::RestateProcessIngressSubmit,
+            format!("ingress submit for process `{process_id}` failed: {err}"),
+        ))
+    }
+}
+
 pub(crate) fn boundary_must_be_declined(record: Option<&ProcessRecord>) -> bool {
     record.is_some_and(|record| record.wait.is_some())
 }
@@ -425,20 +446,7 @@ impl RestateProcessIngressRunner {
                 },
             )
             .await
-            .map_err(|err| {
-                // A 404 here is a deployment that never bound the process
-                // workflow, not a busy engine: named as such so the operator is
-                // not told to look at scheduling.
-                let detail = if err.is_service_unregistered() {
-                    crate::ingress::unregistered_service_message("LashProcessWorkflow", "run", &err)
-                } else {
-                    format!("ingress submit for process `{process_id}` failed: {err}")
-                };
-                PluginError::Runtime(RuntimeError::new(
-                    RuntimeErrorCode::RestateProcessIngressSubmit,
-                    detail,
-                ))
-            })?;
+            .map_err(|err| process_ingress_submit_error(&process_id, err))?;
         // Record the durable backend reference so the process is observably
         // owned by Restate, mirroring `schedule_restate_process`.
         self.registry

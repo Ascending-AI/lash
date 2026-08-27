@@ -749,7 +749,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_work(wiring)
-        .without_queued_work()
+        .with_native_queued_work()
         .advanced()
         .runtime_host_config(runtime_host)
         .build(crate::testing::runtime_lease_owner())?;
@@ -905,11 +905,14 @@ async fn managed_create_publishes_host_observers_before_returning() -> Result<()
             explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
                 .provider(mock_provider())
                 .model(mock_model_spec())
-                .process_work(wiring)
-                .without_queued_work();
-        if let Some(store_factory) = store_factory.clone() {
-            builder = builder.store_factory(store_factory);
-        }
+                .process_work(wiring);
+        builder = if let Some(store_factory) = store_factory.clone() {
+            builder
+                .store_factory(store_factory)
+                .with_native_queued_work()
+        } else {
+            builder.without_queued_work()
+        };
         let core = builder.build(crate::testing::runtime_lease_owner())?;
         let session = core.session(&parent_session_id).open().await?;
 

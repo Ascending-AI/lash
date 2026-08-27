@@ -141,7 +141,7 @@ async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(clock.clone()))
             as Arc<dyn lash_core::SessionStoreFactory>;
     let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
-        .without_queued_work()
+        .with_native_queued_work()
         .model(
             lash_core::ModelSpec::builder("clock-wiring-model")
                 .context_window_tokens(4_096)
@@ -215,6 +215,7 @@ async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_
     const NOW_MS: u64 = 4_200_000;
     let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
         .clock(Arc::clone(&clock))
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::with_clock(clock.clone()),
@@ -278,6 +279,7 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
         .expect("open durable registry"),
     );
     peer_coherence_builder()
+        .with_native_queued_work()
         .effect_host(Arc::new(
             lash_core::facade_support::InlineEffectHost::default(),
         ))
@@ -305,6 +307,7 @@ async fn durable_process_worker_config_uses_child_store_factory_without_root() -
     );
     let child_factory = durable_session_store_factory(dir.path());
     let core = peer_coherence_builder()
+        .with_native_queued_work()
         .effect_host(Arc::new(
             lash_core::facade_support::InlineEffectHost::default(),
         ))
@@ -326,6 +329,7 @@ async fn durable_process_worker_config_matches_inline_child_factory_when_both_ar
     let root_factory = durable_session_store_factory(&dir.path().join("root"));
     let child_factory = durable_session_store_factory(&dir.path().join("child"));
     let core = peer_coherence_builder()
+        .with_native_queued_work()
         .effect_host(Arc::new(
             lash_core::facade_support::InlineEffectHost::default(),
         ))
@@ -362,6 +366,7 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
     // An all-in-memory build succeeds, including the explicit session store
     // factory that backs process execution.
     explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -421,6 +426,7 @@ async fn external_process_port_composes_native_queued_port_and_refreshes_after_r
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -482,6 +488,7 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
     };
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
         .store_factory(Arc::new(ReusableStoreFactory { store }))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner())?;
@@ -496,6 +503,7 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
 #[tokio::test]
 async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
     let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -548,6 +556,7 @@ async fn durable_process_worker_config_uses_core_process_registry() -> Result<()
         "durable-worker-facade-boot",
     );
     let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
@@ -1363,6 +1372,7 @@ fn builder_rejects_invalid_queued_work_execution_concurrency() {
 #[tokio::test]
 async fn durable_process_worker_config_requires_core_process_registry() {
     let core = explicit_ephemeral_facets(peer_coherence_builder())
+        .with_native_queued_work()
         .store_factory(Arc::new(
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))

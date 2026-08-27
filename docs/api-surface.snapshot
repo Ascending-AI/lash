@@ -7782,6 +7782,7 @@ lash::runtime::RuntimeErrorCode::RestateProcessCancel
 lash::runtime::RuntimeErrorCode::RestateProcessIngressSubmit
 lash::runtime::RuntimeErrorCode::RestateProcessTerminalEncode
 lash::runtime::RuntimeErrorCode::RestateProcessTurnCancelContextMissing
+lash::runtime::RuntimeErrorCode::RestateServiceUnregistered
 lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMismatch
 lash::runtime::RuntimeErrorCode::RestateTurnCancelScopeMissing
 lash::runtime::RuntimeErrorCode::RestateTurnTerminalAttach

@@ -47,9 +47,11 @@ pub(super) fn runtime_core_for_scripts(
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .provider(provider_handle)
         .model(model);
-    if disable_inline_queued_work_driver {
-        builder = builder.without_queued_work();
-    }
+    builder = if disable_inline_queued_work_driver {
+        builder.without_queued_work()
+    } else {
+        builder.with_native_queued_work()
+    };
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;

@@ -22,7 +22,7 @@ async fn test_core() -> lash::Result<lash::LashCore> {
         )
         .await?;
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .without_queued_work()
+        .with_native_queued_work()
         .provider(lash::provider::ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("intent-ingress-observability-model")

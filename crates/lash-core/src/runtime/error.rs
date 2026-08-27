@@ -142,6 +142,10 @@ pub enum RuntimeErrorCode {
     RestateProcessAwait,
     RestateProcessCancel,
     RestateProcessIngressSubmit,
+    /// The ingress target names a service no deployment has bound. A
+    /// deployment fact, not a busy engine: retrying cannot make an unbound
+    /// service appear, so this code is terminal by construction.
+    RestateServiceUnregistered,
     RestateProcessAwaitAfterTurnCancel,
     RestateProcessTurnCancelContextMissing,
     RestateProcessTerminalEncode,
@@ -536,6 +540,7 @@ impl RuntimeErrorCode {
             Self::RestateProcessAwait => "restate_process_await",
             Self::RestateProcessCancel => "restate_process_cancel",
             Self::RestateProcessIngressSubmit => "restate_process_ingress_submit",
+            Self::RestateServiceUnregistered => "restate_service_unregistered",
             Self::RestateProcessAwaitAfterTurnCancel => "restate_process_await_after_turn_cancel",
             Self::RestateProcessTurnCancelContextMissing => {
                 "restate_process_turn_cancel_context_missing"
@@ -737,6 +742,7 @@ impl RuntimeErrorCode {
                 | Self::RestateEffectHostRequiresHandlerScope
                 | Self::RestateJournaledEffectPoisoned
                 | Self::RestateProcessAwait
+                | Self::RestateServiceUnregistered
                 | Self::RestateProcessAwaitAfterTurnCancel
                 | Self::RestateProcessTurnCancelContextMissing
                 | Self::RestateProcessTerminalEncode
@@ -892,6 +898,7 @@ impl RuntimeErrorCode {
             "restate_process_await" => Self::RestateProcessAwait,
             "restate_process_cancel" => Self::RestateProcessCancel,
             "restate_process_ingress_submit" => Self::RestateProcessIngressSubmit,
+            "restate_service_unregistered" => Self::RestateServiceUnregistered,
             "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,
             "restate_process_turn_cancel_context_missing" => {
                 Self::RestateProcessTurnCancelContextMissing
@@ -1251,6 +1258,7 @@ mod tests {
             | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
             | RuntimeErrorCode::RestateJournaledEffectPoisoned
             | RuntimeErrorCode::RestateProcessAwait
+            | RuntimeErrorCode::RestateServiceUnregistered
             | RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
             | RuntimeErrorCode::RestateProcessTurnCancelContextMissing
             | RuntimeErrorCode::RestateProcessTerminalEncode
@@ -1420,6 +1428,7 @@ mod tests {
             RuntimeErrorCode::RestateProcessAwait,
             RuntimeErrorCode::RestateProcessCancel,
             RuntimeErrorCode::RestateProcessIngressSubmit,
+            RuntimeErrorCode::RestateServiceUnregistered,
             RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
             RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
             RuntimeErrorCode::RestateProcessTerminalEncode,

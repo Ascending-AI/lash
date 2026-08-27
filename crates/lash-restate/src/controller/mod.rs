@@ -1243,7 +1243,7 @@ where
                 &ExecutionScope::process(process_id.clone()),
                 AwaitEventWaitIdentity::process_signal(process_id.clone(), signal_name, ordinal),
             )
-            .map_err(|err| PluginError::Session(err.to_string()))?;
+            .map_err(PluginError::Runtime)?;
             context
                 .resolve_event(RestateDurableWaitResolveRequest {
                     key,
