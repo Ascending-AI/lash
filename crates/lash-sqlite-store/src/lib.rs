@@ -65,8 +65,8 @@ use lash_core::store::queued_work::{
     select_turn_work_claim_prefix,
 };
 use lash_core::store::{
-    HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt,
-    SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
+    RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,

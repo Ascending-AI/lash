@@ -8,7 +8,7 @@ fn type_witness<T>() {}
 fn member_witness<T>(_: T) {}
 fn field_witness<T>(_: impl FnOnce(&T)) {}
 fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
-
+type CheckpointComponent = lash::persistence::HydratedCheckpointComponent;
 pub(crate) fn store_area_facade_witnesses() {
     // FIG-2105-WITNESS-0001: lash::TurnEvent::QueuedMessagesCommitted [variant]
     variant_witness(|value: &lash::TurnEvent| {
@@ -167,8 +167,8 @@ pub(crate) fn store_area_facade_witnesses() {
     });
     // FIG-2105-WITNESS-0045: lash::persistence::HydratedCheckpointComponent::Changed::body [field]
     field_witness(|value: &lash::persistence::HydratedCheckpointComponent| {
-        if let lash::persistence::HydratedCheckpointComponent::Changed { body, .. } = value {
-            let _ = body;
+        if let CheckpointComponent::Changed { body, body_ref, .. } = value {
+            let _ = (body, body_ref);
         }
     });
     // FIG-2105-WITNESS-0046: lash::persistence::HydratedCheckpointComponent::Changed::encoding_version [field]

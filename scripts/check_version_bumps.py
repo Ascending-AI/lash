@@ -147,6 +147,12 @@ IDENTIFIER_RENAME_BASELINES = {
     # regenerating the artifact header). Comment-only; the executed DDL is
     # semantically unchanged, so SCHEMA_VERSION stays 64.
     'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:ad84fa487a6f19843092785c6fffa288262eae5af183d394465d4c3e21c93e9c',
+    # FIG-2235: the changed-component carrier gained a serde-skipped body_ref
+    # reused across commit projections; rmp/JSON serialization is
+    # byte-identical and round-trip reconstructs the digest, so
+    # CHECKPOINT_COMPONENT_ENCODING_VERSION stays 2 (a bump would refuse
+    # every existing v2 checkpoint).
+    'crates/lash-core/src/store/checkpoint.rs:CHECKPOINT_COMPONENT_ENCODING_VERSION': 'sha256:ae8d9e989bceae4d42097ec18cb935616de4f30ccdb35507e04fb0fd90438da8',
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

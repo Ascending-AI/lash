@@ -14183,7 +14183,16 @@ availability = "default+all-features"
 aliases = ["lash_core::HydratedCheckpointComponent::Changed::body"]
 area = "stores"
 disposition = "used-unasserted"
-usage = "examples/docs-snippets/src/stores_facade.rs:170#if let lash::persistence::HydratedCheckpointComponent::Changed { body, .. } = value {"
+usage = "examples/docs-snippets/src/stores_facade.rs:170#if let CheckpointComponent::Changed { body, body_ref, .. } = value {"
+
+[[api]]
+symbol = "lash::persistence::HydratedCheckpointComponent::Changed::body_ref"
+kind = "field"
+availability = "default+all-features"
+aliases = ["lash_core::HydratedCheckpointComponent::Changed::body_ref"]
+area = "stores"
+disposition = "used-unasserted"
+usage = "examples/docs-snippets/src/stores_facade.rs:170#if let CheckpointComponent::Changed { body, body_ref, .. } = value {"
 
 [[api]]
 symbol = "lash::persistence::HydratedCheckpointComponent::Changed::encoding_version"

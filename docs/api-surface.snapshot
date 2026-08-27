@@ -1882,6 +1882,7 @@ lash::persistence::GraphAppend::validate_append_topology
 lash::persistence::HydratedCheckpointComponent
 lash::persistence::HydratedCheckpointComponent::Changed
 lash::persistence::HydratedCheckpointComponent::Changed::body
+lash::persistence::HydratedCheckpointComponent::Changed::body_ref
 lash::persistence::HydratedCheckpointComponent::Changed::encoding_version
 lash::persistence::HydratedCheckpointComponent::Hydrated
 lash::persistence::HydratedCheckpointComponent::Hydrated::body

@@ -50,14 +50,27 @@ impl Store {
         content: &[u8],
         profile: BuiltinBlobProfile,
     ) -> Result<BlobRef, StoreError> {
-        let hash = blob_content_hash(content);
+        let blob_ref = BlobRef(blob_content_hash(content));
+        Self::insert_artifact_blob_conn_typed_with_ref(
+            conn, descriptor, content, profile, &blob_ref,
+        )?;
+        Ok(blob_ref)
+    }
+
+    fn insert_artifact_blob_conn_typed_with_ref(
+        conn: &Connection,
+        descriptor: BlobArtifactDescriptor,
+        content: &[u8],
+        profile: BuiltinBlobProfile,
+        blob_ref: &BlobRef,
+    ) -> Result<(), StoreError> {
         let stored = encode_artifact_blob(&descriptor, profile, content)?;
         conn.execute(
             "INSERT OR IGNORE INTO blobs (hash, content) VALUES (?1, ?2)",
-            params![hash, stored],
+            params![blob_ref.as_str(), stored],
         )
         .map_err(sqlite_error)?;
-        Ok(BlobRef(hash))
+        Ok(())
     }
 
     pub(crate) fn put_typed_artifact_blob_conn<T: serde::Serialize>(
@@ -106,7 +119,20 @@ impl Store {
                         record_kind: "HydratedSessionCheckpoint",
                         message: format!("manifest projection lost component `{key}`"),
                     })?;
-            if let Some(body) = component.body() {
+            if let HydratedCheckpointComponent::Changed { body, body_ref, .. } = component {
+                Self::insert_artifact_blob_conn_typed_with_ref(
+                    conn,
+                    BlobArtifactDescriptor::checkpoint_component(),
+                    body,
+                    profile,
+                    body_ref,
+                )?;
+                lash_core::store::ensure_checkpoint_component_hash_agreement(
+                    key,
+                    body_ref,
+                    &descriptor.blob_ref,
+                )?;
+            } else if let Some(body) = component.body() {
                 let stored_ref = Self::insert_artifact_blob_conn_typed(
                     conn,
                     BlobArtifactDescriptor::checkpoint_component(),

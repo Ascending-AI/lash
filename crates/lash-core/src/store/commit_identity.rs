@@ -1346,18 +1346,26 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
             components: checkpoint
                 .components
                 .iter()
-                .map(|(key, component)| CheckpointComponentIntent {
-                    key,
-                    blob_ref: component.body().map_or_else(
-                        || component.blob_ref().cloned(),
-                        |body| {
+                .map(|(key, component)| {
+                    let blob_ref = match component {
+                        HydratedCheckpointComponent::Changed { body_ref, .. } => {
+                            Some(body_ref.clone())
+                        }
+                        HydratedCheckpointComponent::Unchanged { descriptor } => {
+                            Some(descriptor.blob_ref.clone())
+                        }
+                        HydratedCheckpointComponent::Hydrated { body, .. } => {
                             let blob_ref = BlobRef::for_content(body);
                             #[cfg(feature = "perf-witness")]
                             crate::perf_witness::record_hash_pass(body.len());
                             Some(blob_ref)
-                        },
-                    ),
-                    encoding_version: component.encoding_version(),
+                        }
+                    };
+                    CheckpointComponentIntent {
+                        key,
+                        blob_ref,
+                        encoding_version: component.encoding_version(),
+                    }
                 })
                 .collect(),
             plugin_snapshot_revision: checkpoint.plugin_snapshot_revision,
