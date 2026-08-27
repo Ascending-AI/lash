@@ -2924,7 +2924,7 @@ class LowLevelRowsRunTheSameValidator(unittest.TestCase):
 
 class TheExampleTestTierRatchetCountsBothTables(unittest.TestCase):
     def test_the_pin_is_unchanged_by_the_shared_validator(self):
-        self.assertEqual(EXAMPLE_TEST_TIER_RATCHET, 1922)
+        self.assertEqual(EXAMPLE_TEST_TIER_RATCHET, 1931)
 
 
 if __name__ == "__main__":
