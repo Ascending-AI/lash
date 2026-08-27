@@ -850,6 +850,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let after_build_memory = process_memory_sample();
     let session_id = runtime.session().session_id().to_string();
     let store = runtime.persistence();
+    let store_metrics = runtime.store_metrics();
     // The scenario drives the retained persistence handle directly. Close the
     // facade session before advancing the durable head so its resident cursor
     // cannot attempt a stale close-time commit after the contention window.
@@ -902,6 +903,11 @@ pub(crate) async fn run_once_durable_queued_work_contention(
 
     let run_before_alloc = allocator_stats();
     let run_started = Instant::now();
+    let pool_wait_collector = if scenario.uses_postgres() {
+        Some(lash_core::perf_witness::Collector::install()?)
+    } else {
+        None
+    };
     let counters = Arc::new(DurableContentionCounters::default());
     let samples = Arc::new(DurableContentionSamples::default());
     let mut tasks = tokio::task::JoinSet::new();
@@ -920,6 +926,11 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         result.map_err(anyhow::Error::from)??;
     }
     let run_turn_ms = elapsed_ms(run_started);
+    if let Some(collector) = pool_wait_collector.as_ref() {
+        let witness: lash_core::perf_witness::Snapshot = collector.snapshot();
+        store_metrics.record_pool_checkout_waits(witness.pool_checkout_wait_nanos);
+    }
+    drop(pool_wait_collector);
     let run_turn_alloc = alloc_delta(run_before_alloc, allocator_stats());
     let after_turn_memory = process_memory_sample();
     store
@@ -939,6 +950,8 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let service_ms = samples.service_ms.lock_recover().clone();
     let claim_summary = crate::perf_support::metrics::percentile_summary(claim_wait_ms.clone());
     let service_summary = crate::perf_support::metrics::percentile_summary(service_ms.clone());
+    let pool_wait_ms = store_metrics.pool_checkout_wait_samples_ms();
+    let pool_wait_summary = crate::perf_support::metrics::percentile_summary(pool_wait_ms.clone());
     let completed = counters
         .completions
         .load(std::sync::atomic::Ordering::Relaxed);
@@ -949,7 +962,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             claim_wait_ms,
         ),
         ("durable_contention.service_ms".to_string(), service_ms),
-        ("durable_contention.pool_wait_ms".to_string(), Vec::new()),
+        ("durable_contention.pool_wait_ms".to_string(), pool_wait_ms),
     ]);
     let phase_profile = BTreeMap::from([
         (
@@ -962,10 +975,10 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         ),
         (
             "durable_contention.pool_wait".to_string(),
-            metric_phase(&[]),
+            metric_phase(&metric_samples_ms["durable_contention.pool_wait_ms"]),
         ),
     ]);
-    let extra_counters = BTreeMap::from([
+    let mut extra_counters = BTreeMap::from([
         ("durable_contention.workers".to_string(), workers as u64),
         (
             "durable_contention.seeded_batches".to_string(),
@@ -1049,12 +1062,22 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .cas_failures
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
-        // RuntimePersistence brackets include connection checkout but expose no
-        // checkout subspan. The observability flag is the complete observation;
-        // no value key is emitted for an unavailable measurement.
-        ("durable_contention.pool_wait_observable".to_string(), 0),
+        (
+            "durable_contention.pool_wait_observable".to_string(),
+            u64::from(scenario.uses_postgres()),
+        ),
         ("durable_contention.remaining_batches".to_string(), 0),
     ]);
+    if scenario.uses_postgres() {
+        extra_counters.insert(
+            "durable_contention.pool_wait_p50_micros".to_string(),
+            millis_to_micros(pool_wait_summary.p50),
+        );
+        extra_counters.insert(
+            "durable_contention.pool_wait_p95_micros".to_string(),
+            millis_to_micros(pool_wait_summary.p95),
+        );
+    }
     let total_alloc = alloc_delta(total_before_alloc, allocator_stats());
     let zero_alloc = zero_allocation_delta();
     let turn = RuntimePerfTurnResult {

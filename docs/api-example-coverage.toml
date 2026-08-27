@@ -20224,7 +20224,7 @@ availability = "default+all-features"
 aliases = ["lash_core::TurnInputClaimData::inputs"]
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3861#inputs,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:3898#inputs,"
 [[api]]
 symbol = "lash::persistence::TurnInputClaimData::mode"
 kind = "field"
@@ -72615,7 +72615,7 @@ kind = "struct"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:441#let work_collector = lash_core::perf_witness::Collector::install()?;"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:247#let work_collector = lash_core::perf_witness::Collector::install()?;"
 
 [[api]]
 symbol = "lash_core::perf_witness::Collector"
@@ -72623,7 +72623,7 @@ kind = "struct"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:441#let work_collector = lash_core::perf_witness::Collector::install()?;"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:247#let work_collector = lash_core::perf_witness::Collector::install()?;"
 
 [[api]]
 symbol = "lash_core::perf_witness::Collector::install"
@@ -72631,7 +72631,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:441#let work_collector = lash_core::perf_witness::Collector::install()?;"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:247#let work_collector = lash_core::perf_witness::Collector::install()?;"
 
 [[api]]
 symbol = "lash_core::perf_witness::Collector::snapshot"
@@ -72639,7 +72639,7 @@ kind = "function"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:508#let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:314#let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();"
 
 [[api]]
 symbol = "lash_core::perf_witness::Snapshot"
@@ -72647,7 +72647,7 @@ kind = "struct"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:508#let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:314#let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();"
 
 [[api]]
 symbol = "lash_core::perf_witness::Snapshot::body_copy_passes"
@@ -72655,7 +72655,7 @@ kind = "field"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:529#(\"runtime_body_copy_count\", work.body_copy_passes),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:335#(\"runtime_body_copy_count\", work.body_copy_passes),"
 
 [[api]]
 symbol = "lash_core::perf_witness::Snapshot::copied_bytes"
@@ -72663,7 +72663,7 @@ kind = "field"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:530#(\"runtime_body_copy_bytes\", work.copied_bytes),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:336#(\"runtime_body_copy_bytes\", work.copied_bytes),"
 
 [[api]]
 symbol = "lash_core::perf_witness::Snapshot::hash_passes"
@@ -72671,7 +72671,7 @@ kind = "field"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:527#(\"runtime_hash_count\", work.hash_passes),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:333#(\"runtime_hash_count\", work.hash_passes),"
 
 [[api]]
 symbol = "lash_core::perf_witness::Snapshot::hashed_bytes"
@@ -72679,7 +72679,23 @@ kind = "field"
 availability = "all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs:528#(\"runtime_hash_bytes\", work.hashed_bytes),"
+usage = "crates/lash-perf/src/runtime_perf/measurement/checkpoint_curve.rs:334#(\"runtime_hash_bytes\", work.hashed_bytes),"
+
+[[api]]
+symbol = "lash_core::perf_witness::Snapshot::pool_checkout_wait_nanos"
+kind = "field"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-perf/src/runtime_perf/measurement/contention.rs:931#store_metrics.record_pool_checkout_waits(witness.pool_checkout_wait_nanos);"
+
+[[api]]
+symbol = "lash_core::perf_witness::record_pool_checkout_wait"
+kind = "function"
+availability = "all-features"
+area = "stores"
+disposition = "internal-consumed"
+usage = "crates/lash-postgres-store/src/lib.rs:85#lash_core::perf_witness::record_pool_checkout_wait(started_at.elapsed());"
 
 [[api]]
 symbol = "lash_core::perf_witness::record_body_copy"
@@ -81205,7 +81221,7 @@ kind = "field"
 availability = "default+all-features"
 area = "stores"
 disposition = "internal-consumed"
-usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4230#fencing_token: current.fencing_token,"
+usage = "crates/lash-postgres-store/src/postgres/runtime_persistence.rs:4269#fencing_token: current.fencing_token,"
 [[api]]
 symbol = "lash_core::store_backend_support::SessionExecutionLeaseFenceFacts::lease_token"
 kind = "field"

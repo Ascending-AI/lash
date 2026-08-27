@@ -457,6 +457,71 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn durable_queued_work_contention_postgres_smoke_binds_pool_wait_subspan() {
+    if std::env::var_os("LASH_POSTGRES_DATABASE_URL").is_none()
+        && std::env::var_os("DATABASE_URL").is_none()
+    {
+        return;
+    }
+
+    let workers = 4;
+    let turns = 2;
+    let result = Box::pin(run_once(
+        RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
+        turns,
+        workers,
+        &checkpoint_curve_config(),
+        &high_traffic_config(),
+    ))
+    .await
+    .expect("durable queued-work contention PostgreSQL smoke should run");
+
+    let completed = result.extra_counters["durable_contention.completed_batches"];
+    assert_eq!(completed, (workers * turns) as u64);
+    assert_eq!(
+        result.extra_counters["durable_contention.pool_wait_observable"],
+        1
+    );
+    for percentile in [
+        "durable_contention.pool_wait_p50_micros",
+        "durable_contention.pool_wait_p95_micros",
+    ] {
+        assert!(result.extra_counters.contains_key(percentile));
+    }
+
+    let pool_wait = &result.metric_samples_ms["durable_contention.pool_wait_ms"];
+    let claim_wait = &result.metric_samples_ms["durable_contention.claim_wait_ms"];
+    let service = &result.metric_samples_ms["durable_contention.service_ms"];
+    assert!(
+        pool_wait.len() >= completed as usize,
+        "every completed batch must expose at least one checkout wait: pool_wait_samples={}, completed_batches={completed}",
+        pool_wait.len()
+    );
+    assert!(
+        pool_wait
+            .iter()
+            .all(|sample| sample.is_finite() && *sample > 0.0),
+        "checkout waits must be measured nonzero durations: {pool_wait:?}"
+    );
+    let enclosing_span_max = claim_wait
+        .iter()
+        .chain(service)
+        .copied()
+        .reduce(f64::max)
+        .expect("contention run must emit claim/service spans");
+    assert!(
+        pool_wait.iter().all(|sample| *sample <= enclosing_span_max),
+        "checkout waits must fit within an observed claim/service span: pool_wait_max={:?}, enclosing_span_max={enclosing_span_max}",
+        pool_wait.iter().copied().reduce(f64::max)
+    );
+    assert!(
+        pool_wait.iter().all(|sample| *sample <= result.run_turn_ms),
+        "checkout waits must fit within the whole contention run: run_turn_ms={}, pool_wait={pool_wait:?}",
+        result.run_turn_ms
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
     let config = checkpoint_curve_config();
