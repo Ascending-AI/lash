@@ -24,8 +24,9 @@ Two consequences are load-bearing:
   this point by ADR 0046: emission is uniform across explicit appends, lifecycle
   verbs, and terminal completion, so projections never silently miss a
   transition. This ADR originally excluded terminal events from the sink.)*
-  Terminal *observation* still rides `ProcessWorkDriver::await_terminal`
-  (ADR 0016), which reads the durable terminal state — engine-native (Restate
+  Terminal *observation* still rides
+  `ProcessWorkSubstrate::await_process_terminal` (ADR 0016), implemented by
+  `NativeProcessWork`, which reads the durable terminal state — engine-native (Restate
   ingress attach) where available, the in-process change hub plus backoff point
   reads otherwise. The sink stays best-effort freshness: hosts must not wait on
   it for completion, and a terminal seen on the sink is a hint, not delivery.
@@ -37,7 +38,7 @@ Two consequences are load-bearing:
 
 The sink is installed once, at the point the decorator is wrapped —
 `watch_process_registry_with_sink`, threaded through the three wrap funnels:
-`ProcessWorkDriver::new_with_sink` (bare callers), `RestateProcessDeployment::new_with_sink`
+`NativeProcessWork` (bare callers), `RestateProcessDeployment::new_with_sink`
 (durable hosts), and `LashCoreBuilder::process_event_sink` (the facade's inline
 registry path). Stores stay pure state: nothing sink-related touches the
 `ProcessRegistry` implementations or the store crates.

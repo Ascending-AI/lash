@@ -176,7 +176,7 @@ impl RuntimeEffectController for WorkflowEffectController {
         <div class="section">
           <div class="section-header">
             <h2>Processes</h2>
-            <p>A process is durable background work named by a <code>ProcessRecord</code>. Process support is opt-in: a deployment installs a <code>ProcessRegistry</code> (such as <code>lash-sqlite-store::SqliteProcessRegistry</code> or <code>lash-postgres-store::PostgresProcessRegistry</code>) and either lets the facade build the inline <code>ProcessWorkDriver</code> or supplies an external one. The registry records state; the driver owns execution and coordination waits. Without a process plane, start/await/cancel/transfer/list all fail clearly rather than degrading silently.</p>
+            <p>A process is durable background work named by a <code>ProcessRecord</code>. Process support is opt-in: a deployment installs a <code>ProcessRegistry</code> (such as <code>lash-sqlite-store::SqliteProcessRegistry</code> or <code>lash-postgres-store::PostgresProcessRegistry</code>) and either lets the facade build the inline <code>NativeProcessWork</code> or supplies an external <code>ProcessWorkSubstrate</code>. The registry records state; the substrate owns process-work execution and coordination waits. Without a process plane, start/await/cancel/transfer/list all fail clearly rather than degrading silently.</p>
           </div>
           <div class="diagram">
             <div class="diagram-title">Process lifecycle</div>
@@ -187,7 +187,7 @@ flowchart LR
   Register --> Worker["DurableProcessWorker<br/>(ephemeral runtime from captured env)"]
   Worker --> Events["append_event<br/>(event-sourced state)"]
   Events --> Terminal["keyed terminal event"]
-  Observe --> Await["await handle<br/>ProcessWorkDriver / ProcessAwaiter"]
+  Observe --> Await["await handle<br/>ProcessWorkSubstrate / NativeProcessWork"]
   Observe --> Cancel["cancel observed handle<br/>process.cancel_requested"]
   Terminal --> Await
             </div>
