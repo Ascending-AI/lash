@@ -5,7 +5,7 @@ is started: start writes durable intent, and a lash-owned `DurableProcessWorker`
 is the *sole* executor of every non-terminal process, behind a single-owner
 `ProcessLease`. There is no off-lease in-process spawn — out-of-turn starts no
 longer run on a detached `tokio::spawn`. The registry's non-terminal rows are the
-durable work queue, and a `ProcessWorkDriver` drains them **after a successful
+durable work queue, and `NativeProcessWork` drains them **after a successful
 start and once on session open**. The same driver/awaiter seam owns process
 waits; registries remain point-read/write state stores. So the *first* run of an out-of-turn start is
 itself lease-protected and prompt (the driver is invoked directly after the
@@ -259,12 +259,12 @@ Observation and retention are two more host levers on the same seam, kept honest
 against the durable log (see
 `docs/adr/0017-process-observation-is-best-effort-push-over-state-truth.md`). An
 optional `ProcessEventSink`, installed once at construction
-(`ProcessWorkDriver::new_with_sink`, `RestateProcessDeployment::new_with_sink`,
+(`NativeProcessWork`, `RestateProcessDeployment::new_with_sink`,
 or `LashCoreBuilder::process_event_sink`), pushes each appended event to the host
 best-effort — freshness over the durable log, never truth. It makes no delivery
 guarantee, so a consumer that needs completeness reconciles from `events_after`,
 and terminal events deliberately do not ride the sink (they ride
-`await_terminal`). Because the decorator awaits `emit` inline on the append path,
+`ProcessWorkSubstrate::await_process_terminal`). Because the decorator awaits `emit` inline on the append path,
 a sink must return fast and offload any I/O. Host retention is
 `core.processes().prune(cutoff_epoch_ms, filter, watermark)`:
 a host that has
@@ -272,7 +272,7 @@ projected a process's outcome into its own store calls it on the maintenance
 cadence to replace eligible terminal rows with payload-free tombstones after
 the projection watermark advances — removing their events, wakes, observer edges, leases, and
 settled parent-end plans — only once host policy has retained them beyond every still-replayable
-`await_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
+`ProcessWorkSubstrate::await_process_terminal`. Lash exposes no finite maximum waiter lifetime to validate a
 cutoff against; a later await after pruning receives `ProcessNoLongerRetained`.
 The optional `ProcessListFilter` narrows which eligible rows one call reclaims,
 so differentiated policy is several scheduled calls over one lever (ADR 0023):
@@ -370,7 +370,7 @@ A generalization of code that already existed for turns — not a new subsystem:
   reported as a typed `ProcessWorkerFault` on the `ProcessEventSink`, an
   unconditional surface present in every build (never a feature-gated metrics
   recorder). Waiting for a terminal outcome stays on the engine seam
-  (`ProcessWorkDriver::await_terminal`); the worker exposes no completion
+  (`ProcessWorkSubstrate::await_process_terminal`); the worker exposes no completion
   handle. It fetches a bounded page only as dispatch capacity
   frees, claims each lease (skipping any held live by another owner), re-checks terminality after
   claiming, then handles each row by its declared `RecoveryContract` (ADR
@@ -504,7 +504,7 @@ There is exactly one legitimate writer per path:
 **Elapsed time alone never produces a terminal state.** Lease expiry without death
 evidence is exposed read-side, not terminalized: a started `OwnerBound` holder
 stays non-terminal until its owner drains it or an operator authorizes abandonment.
-`Abandoned` rides `await_terminal`
+`Abandoned` rides `ProcessWorkSubstrate::await_process_terminal`
 and reconcile like any terminal, and — unchanged by ADR 0017 — it does not ride
 the best-effort event sink.
 
@@ -552,7 +552,7 @@ all three backends already filter on.
 Because no writer can ever terminalize such a row — nothing observed the
 outcome, and no owner exists to drain it — the state is retired without being
 terminal (`ProcessStatus::is_retired`). Recovery's live worklist
-(`status IN ('running','waiting')`) skips it, `await_terminal` refuses it with
+(`status IN ('running','waiting')`) skips it, `ProcessWorkSubstrate::await_process_terminal` refuses it with
 the typed `PluginError::ProcessCallerDeparted` instead of parking on a wait that
 can never resolve, and retention reclaims it exactly like a terminal row; a
 prune filter may name `CallerDeparted` directly, and only the two live statuses
@@ -624,7 +624,7 @@ gone — out of turn there is no turn-scoped controller, so the host's explicitl
 named runtime effect controller is used for the effect that registers the row. A
 `Start` only *registers* the row (the inline off-lease `tokio::spawn` is
 deleted), and `ProcessCommandRunner::run` drives the host's
-`ProcessWorkDriver` after a successful `Start`. The driver is wired by the
+`NativeProcessWork` after a successful `Start`. The substrate is wired by the
 host through one of two facade sources: `.process_registry(...)` selects the
 inline source — the default driver's `DurableProcessWorkerConfig` is built
 eagerly at `build()` (failing loudly with

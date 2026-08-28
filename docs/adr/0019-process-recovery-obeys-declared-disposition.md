@@ -70,7 +70,7 @@ departs inside that window leaves an outcome lash never observed, and inventing
 `Cancelled` or `Failed` there would break this ADR's own rule that a terminal is
 a written fact. Such a row takes the durable, non-terminal `CallerDeparted`
 state instead: recovery never claims it (it is outside the live worklist),
-`await_terminal` refuses it with a typed error rather than parking forever, and
+`ProcessWorkSubstrate::await_process_terminal` refuses it with a typed error rather than parking forever, and
 retention reclaims it like a terminal row. Elapsed time still terminalizes
 nothing.
 
