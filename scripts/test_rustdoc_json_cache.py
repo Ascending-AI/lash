@@ -258,7 +258,7 @@ class RustdocJsonCacheTest(unittest.TestCase):
     def test_key_ignores_where_the_artifacts_are_built(self) -> None:
         """`CARGO_TARGET_DIR` decides where cargo writes, not what rustdoc says.
 
-        FIG-1823: the API-coverage gate isolates its builds by pointing this
+        FIG-1823: the facade snapshot gate isolates its builds by pointing this
         variable at a subdirectory of its own. That must leave the key alone,
         or one entry per checkout replaces the cross-worktree reuse this cache
         exists for.
@@ -270,7 +270,7 @@ class RustdocJsonCacheTest(unittest.TestCase):
     def test_the_salt_orphans_entries_stored_under_the_previous_version(self) -> None:
         """FIG-1823: a salt bump is how a fix reaches entries already on disk.
 
-        The API-coverage gate used to read a `doc/` path other documentation
+        The facade snapshot gate used to read a `doc/` path other documentation
         builds also wrote, so entries stored before it built under a directory
         of its own can hold another feature set's document. Nothing in the key
         or in `usable()` can tell such an entry from an honest one, so the salt

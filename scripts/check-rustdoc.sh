@@ -3,7 +3,7 @@
 # integrator-contract rustdoc on lash-core's retained public member surface.
 #
 # The public API docs are the contract hosts read, so a link that silently
-# stopped resolving is drift the API example-coverage inventory cannot catch:
+# stopped resolving is drift the generated API surface snapshot cannot catch:
 # the symbol is still exported, only its documentation is now wrong. Both
 # feature configurations are linted because `all-features` exposes surface
 # (`testing`, conformance suites) the default build never documents.
@@ -26,7 +26,7 @@ target_dir="$({ cargo metadata --no-deps --format-version 1; } | \
 # Routed through the content-addressed cache: a later run on an unchanged tree
 # reuses the document this pass produced. The key covers the rustdoc command
 # line verbatim, so this pass keeps its own entry rather than sharing the
-# API-coverage gate's differently-invoked one -- the cheap, honest direction.
+# facade snapshot gate's differently-invoked one -- the cheap, honest direction.
 # The member check below always runs against whichever copy the cache names.
 core_json="$(RUSTDOCFLAGS="${RUSTDOCFLAGS} -Z unstable-options --output-format json" \
   python3 scripts/rustdoc_json_cache.py \

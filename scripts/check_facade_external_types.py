@@ -15,7 +15,6 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import api_surface  # noqa: E402
-import check_api_example_coverage as api_coverage  # noqa: E402
 
 
 ALLOWLIST = SCRIPTS / "facade-external-types.toml"
@@ -94,7 +93,7 @@ def exposed_references(
 def external_types(all_features: bool) -> set[str]:
     """Return canonical third-party type paths exposed by facade signatures."""
     document = api_surface.rustdoc("lash-runtime", "lash", all_features)
-    workspace_crates = set(api_coverage.crate_directories()) | {"lash"}
+    workspace_crates = set(api_surface.crate_directories()) | {"lash"}
     leaked: set[str] = set()
 
     for export in public_exports(document):

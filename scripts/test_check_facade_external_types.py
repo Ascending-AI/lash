@@ -119,7 +119,7 @@ class ExternalModuleTests(unittest.TestCase):
                 return_value=(dependency["index"]["90"], dependency),
             ),
             mock.patch.object(
-                gate.api_coverage, "crate_directories", return_value=[]
+            gate.api_surface, "crate_directories", return_value=[]
             ),
             mock.patch.object(gate, "configured_allowlist", return_value=set()),
             mock.patch.object(sys, "argv", [str(Path(gate.__file__))]),

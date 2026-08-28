@@ -227,7 +227,7 @@ jobs:
   # This job is deliberately *only* the cache superset (which now includes the
   # trybuild fixture graph, see the step) and the doctests. Every
   # gate that neither warms nor needs that superset — the repository gates, the
-  # public-API coverage gate, the package feature checks, the default-off runtime
+  # facade API gates, the package feature checks, the default-off runtime
   # boundary — used to queue behind it as serial steps, which made this job the
   # run's critical path (9m40s warm, 20m36s on a cold branch cache) for work
   # that has no dependency on it. They are sibling jobs now; nothing was dropped
@@ -404,7 +404,6 @@ jobs:
       - name: Test repository scripts
         run: |
           python3 scripts/test_api_surface.py
-          python3 scripts/test_check_api_example_coverage.py
           python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_facade_external_types.py
           python3 scripts/test_check_facade_only_examples.py
@@ -440,16 +439,15 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # The public-API disposition gate builds rustdoc JSON for the facade crates,
-  # which is its own compile of the dependency graph — 7m49s of the old 21m
-  # test-doc critical path, and independent of every other check. Its own job.
-  api-coverage:
-    name: Public API example coverage
+  # The generated facade contract gates build rustdoc JSON for the facade crate,
+  # independently of the workspace build. They run only on the full profile.
+  facade-gates:
+    name: Facade API contract gates
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: plan
-    # Full-profile only (2026-08-26 ruling): the API example-coverage and
-    # surface-snapshot gates certify docs/ artifacts, not the build, so they
+    # Full-profile only (2026-08-26 ruling): the surface snapshot and related
+    # facade gates certify docs/ artifacts, not the build, so they
     # run on workflow_dispatch — which the release gate requires on the
     # release SHA — instead of spending a rustdoc compile on every PR.
     if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.rust == 'true'
@@ -491,9 +489,6 @@ jobs:
 
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
-
-      - name: Check public API example coverage
-        run: python3 scripts/check_api_example_coverage.py
 
       - name: Check facade external types
         run: python3 scripts/check_facade_external_types.py
@@ -2015,7 +2010,7 @@ jobs:
       - facade-only-examples
       - test-doc
       - repo-gates
-      - api-coverage
+      - facade-gates
       - semver-advisory
       - lashlang-git-consumer
       - package-feature-checks

@@ -29,9 +29,10 @@ import tempfile
 import time
 from typing import Any, NamedTuple
 
+import api_surface  # noqa: E402  (sibling script)
+
 
 REPO = Path(__file__).resolve().parents[1]
-SURFACE_CHECK = REPO / "scripts" / "check_api_example_coverage.py"
 DEFAULT_EXAMPLE_PACKAGES = (
     "agent-service",
     "agent-workbench",
@@ -86,17 +87,12 @@ def canonical_surface() -> list[SurfaceItem]:
     # member-identity rules.  The prototype needs one representative feature
     # configuration, so it deliberately avoids the gate's second all-features
     # build and availability merge.
-    scripts = str(SURFACE_CHECK.parent)
-    if scripts not in sys.path:
-        sys.path.insert(0, scripts)
-    import check_api_example_coverage as coverage
-
-    raw_surface = coverage.lash_surface(
-        coverage.rustdoc("lash-runtime", "lash", False), False
+    raw_surface = api_surface.lash_surface(
+        api_surface.rustdoc("lash-runtime", "lash", False), False
     )
     items: list[SurfaceItem] = []
-    for (identity, kind), paths in coverage.api_items(raw_surface).items():
-        primary = coverage.primary_path(paths)
+    for (identity, kind), paths in api_surface.api_items(raw_surface).items():
+        primary = api_surface.primary_path(paths)
         if not primary.startswith("lash::"):
             continue
         items.append(

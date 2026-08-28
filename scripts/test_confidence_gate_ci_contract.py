@@ -198,8 +198,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         for job in trunk_only:
             needs[job] = {"result": "skipped", "outputs": {}}
         # Full-profile jobs skip everywhere except workflow_dispatch.
-        self.assertEqual(plan["FULL_PROFILE_JOBS"], {"api-coverage"})
-        needs["api-coverage"] = {"result": "skipped", "outputs": {}}
+        self.assertEqual(plan["FULL_PROFILE_JOBS"], {"facade-gates"})
+        needs["facade-gates"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
         self.assertEqual(evaluate(needs, "merge_group"), [])
         push_problems = evaluate(needs, "push")
@@ -223,23 +223,23 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "ungated job restate-postgres-workers ended with 'skipped', expected success",
             plan["evaluate_conclusion"](needs, "push", "refs/heads/main"),
         )
-        needs["api-coverage"] = {"result": "success", "outputs": {}}
+        needs["facade-gates"] = {"result": "success", "outputs": {}}
         self.assertIn(
-            "full-profile job api-coverage ended with 'success' on a "
+            "full-profile job facade-gates ended with 'success' on a "
             "pull_request event, expected skipped",
             evaluate(needs, "pull_request"),
         )
         self.assertEqual(
-            [p for p in evaluate(needs, "workflow_dispatch") if "api-coverage" in p],
+            [p for p in evaluate(needs, "workflow_dispatch") if "facade-gates" in p],
             [],
         )
-        needs["api-coverage"] = {"result": "skipped", "outputs": {}}
+        needs["facade-gates"] = {"result": "skipped", "outputs": {}}
 
-        api_coverage = workflow_job_block(workflow, "api-coverage")
+        facade_gates = workflow_job_block(workflow, "facade-gates")
         self.assertIn(
             "if: github.event_name == 'workflow_dispatch' "
             "&& needs.plan.outputs.rust == 'true'",
-            api_coverage,
+            facade_gates,
         )
 
         # Workers E2E is neutral on plain branch pushes, but runs on PRs,
@@ -1538,7 +1538,6 @@ derive_mutation_jobs() {{
             test_doc,
         )
         for foreign in (
-            "python3 scripts/check_api_example_coverage.py",
             "python3 scripts/lint_docs.py",
             "cargo check -p agent-service --features restate --all-targets --locked",
             "cargo check -p lash-runtime --no-default-features --locked",
@@ -1559,8 +1558,8 @@ derive_mutation_jobs() {{
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
             ),
-            "api-coverage": (
-                "python3 scripts/check_api_example_coverage.py",
+            "facade-gates": (
+                "python3 scripts/check_facade_external_types.py",
                 "python3 scripts/api_surface.py check",
             ),
             "package-feature-checks": (
@@ -1783,7 +1782,7 @@ derive_mutation_jobs() {{
             "test-doc",
             "test-shard",
             "repo-gates",
-            "api-coverage",
+            "facade-gates",
             "package-feature-checks",
             "runtime-feature-boundary",
             "lint",

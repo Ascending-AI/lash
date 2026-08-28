@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Content-addressed reuse of `rustdoc --output-format json` artifacts.
 
-The API-example-coverage gate and the rustdoc gate together spawn seven
+The facade snapshot gate and the rustdoc gate together spawn the required
 rustdoc-JSON generations, several of which are byte-identical between runs and
 between gates.  Regenerating them is the whole cost of running either gate on
 an unchanged tree, so this module keys each artifact by everything that can
@@ -93,7 +93,7 @@ TEMPORARY_MAX_AGE_SECONDS = 60 * 60
 #: Salt over every key, bumped when previously stored entries can no longer be
 #: trusted for a reason the key itself cannot see.
 #:
-#: `3` (FIG-1823): until the API-coverage gate built under a target directory of
+#: `3` (FIG-1823): until the facade snapshot gate built under a target directory of
 #: its own, it read `<target>/doc/<crate>.json` -- a path every `cargo doc` in
 #: the checkout writes -- so an all-features document that another
 #: documentation build had left there could be stored under a default-features

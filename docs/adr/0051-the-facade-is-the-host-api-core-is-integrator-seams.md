@@ -1,7 +1,19 @@
 # 0051. The facade is the host API; lash-core's public surface is its integrator seams
 
 Date: 2026-08-03
-Status: accepted, superseded in part by 0079
+Status: accepted, superseded in part by [ADR 0079](0079-one-promised-package-facade-owns-the-api.md)
+
+ADR 0079 is authoritative for the single promised package and for replacing the
+hand-maintained API example-coverage ledger. Its successor doctrine is:
+
+> Every facade API is exercised by a compiled example or doctest. Enforced
+> mechanically wherever compiler derivation reaches; the remainder is a
+> review-time expectation recorded in this ADR — never a prose ledger.
+
+The generated facade surface snapshot, semver baseline, external-type allowlist,
+facade-only import scan, and missing-documentation checks are the successor
+gates. The inventory and its checker are historical context below, not current
+enforcement.
 
 ## Decision
 

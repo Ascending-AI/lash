@@ -284,10 +284,9 @@ durable process after restart.
   public builder and inspects the persisted session payload.
 - `docs/rlm.html`, `docs/embedding-turns.html`, and `docs/execution-modes.html`
   document host selection and the durable default.
-- `docs/api-example-coverage.toml` registers the new enum, variants,
-  `language_id`, and builder method against executable examples; low-level
-  factory plumbing is explicitly justified rather than presented as host API.
-  The registry gate covers 8,114 entries and passes.
+- The facade contract is checked by the generated surface snapshot, external-type
+  allowlist, facade-only import scan, documentation lint, and semver baseline;
+  compiled examples and doctests remain the usage contract.
 
 ## Executed fluency result
 
@@ -607,8 +606,8 @@ Things a reader should not have to dig for:
   branch. It was never reached until this round.
 - **Two CI-only gates were red at the previous head** and are fixed in
   `77c67d938`: clippy under `-D warnings` (three needless borrows introduced by
-  routing opens through `open_session(&str)`) and the API example-coverage
-  registry (124 anchors pointing at pre-shift line numbers). Neither is visible
+  routing opens through `open_session(&str)`) and the former hand-maintained
+  API disposition registry (124 anchors pointing at pre-shift line numbers). Neither is visible
   to the pre-commit hooks, and the round that introduced them reported green.
 - **Three prompt-advertised behaviours were unmeasured by the corpus that exists
   to measure the prompt** (F4). The prompt was honest about them — the reviewer
@@ -673,7 +672,7 @@ with no other heavy build job running concurrently.
 | `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-typescript -p lash-trace -p lash-restate-postgres-workers-e2e --locked` | PASS; **724 run, 724 passed**, 13 skipped after the closure round (722 before it). Red once first: the driver-mechanics fixture asserted the retry copy's old noun |
 | `cargo test -p lash-runtime --features rlm --lib` | PASS; 248 tests. Run explicitly because the RLM-feature tests, including the new per-turn-override pin, are `cfg(feature = "rlm")` |
 | `cargo test --workspace --locked` | PASS; **4,502 passed, zero failures**, exit 0 (4,501 at `0602c5f4a`; the closure round adds the served-prompt assertion). Executed alone with nothing else building and scored on the **passed count** rather than the exit code. Its first execution was red on three agent-scenario size labels; those are this round's own doing (the shortened `continue_as` description) and are re-recorded, not drift |
-| `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,488 entries, after re-anchoring 33 references. `RlmSessionReadViewExt` and its `rlm_dialect` moved from `unused-add` to `used-asserted` on the new end-to-end label assertion |
+| Facade API contract gates | PASS; generated surface, external-type, import, and documentation checks |
 | `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
 | `python3 scripts/test_judged_runbook_matrix.py` | PASS; 6 tests (4 before this round) |
 | `python3 scripts/judged_runbook_matrix.py --shard 1/1` | PASS; 63 validated rows |
@@ -691,7 +690,7 @@ The workspace suite was executed alone.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | PASS (exit 0) |
 | `cargo nextest run -p agent-workbench -p agent-service -p lash-protocol-rlm -p lash-restate-postgres-workers-e2e --locked` | PASS; 527 run, 527 passed, 13 skipped |
 | `cargo test --workspace --locked` | PASS; **4,508 passed, zero failures**, exit 0 |
-| `python3 scripts/check_api_example_coverage.py` | PASS (exit 0); 8,491 entries. Three new rows — `RlmDialect::ALL`, `from_language_id`, `registered_language_ids` — and a re-anchor after the session routes moved out of `routes.rs` |
+| Facade API contract gates | PASS; generated surface, external-type, import, and documentation checks |
 | `python3 scripts/lint_docs.py` | PASS; 46 HTML and 42 registry pages |
 | `python3 scripts/check_included_file_formatting.py` | PASS |
 | `bash scripts/check-production-file-size.sh` | PASS. Red once: `routes.rs` crossed the 1,600-line production budget, which is why the session routes have their own file |

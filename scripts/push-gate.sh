@@ -431,9 +431,9 @@ run_minio_conformance() {
 #     pass here. The two that have self-tests still run them above, because a
 #     hook that has stopped working is invisible from the hook itself.
 #
-#   scripts/check_api_example_coverage.py
-#     Builds rustdoc JSON for the facade crates — its own compile of the
-#     dependency graph, and its own CI job for that reason.
+#   scripts/api_surface.py check
+#     Builds rustdoc JSON for the facade crate — its own compile of the
+#     dependency graph, and its own full-profile CI job for that reason.
 #
 #   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
 #   scripts/profile_runtime.py, scripts/profile_lashlang.py,
