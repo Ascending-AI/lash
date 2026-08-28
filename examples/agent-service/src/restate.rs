@@ -419,10 +419,10 @@ mod restate_tests {
                 })
                 .await;
         });
-        harness
+        let _ = harness
             .process_deployment
             .process_work()
-            .claim_and_run_pending("agent_service_e2e_startup")
+            .admit_pending_processes("agent_service_e2e_startup")
             .await
             .expect("drive startup recovery");
 

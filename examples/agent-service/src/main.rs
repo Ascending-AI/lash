@@ -435,9 +435,9 @@ async fn async_main() -> anyhow_like::Result<()> {
                 .listen_and_serve(restate_endpoint_addr)
                 .await;
         });
-        process_deployment
+        let _ = process_deployment
             .process_work()
-            .claim_and_run_pending("agent_service_startup")
+            .admit_pending_processes("agent_service_startup")
             .await
             .map_err(|err| err.to_string())?;
         println!("agent-service Restate endpoint listening on http://{restate_endpoint_addr}");
