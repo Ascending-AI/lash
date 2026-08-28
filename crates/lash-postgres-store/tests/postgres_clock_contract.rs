@@ -244,7 +244,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         ),
         // Effect-replay leases fence exactly-once execution across hosts, so
         // the persistence adapter's claim/finalize/renew atoms read the server
-        // clock like every other lease path. The shared `EffectReplayDriver`
+        // clock like every other lease path. The shared `StoreEffectReplayDriver`
         // carries a wall clock for sleeps only; if it ever reached these atoms,
         // this fence is what fails.
         (

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+use crate::runtime::native_substrate::lane_wait as queued_lane_wait;
 use crate::{RuntimeError, RuntimeErrorCode};
 
 use super::super::envelope::{RuntimeEffectEnvelope, RuntimeEffectOutcome};
@@ -19,7 +20,7 @@ use super::{RuntimeEffectControllerError, RuntimeEffectLocalExecutor, TurnCancel
 /// Stable semantic identity for one effectful runtime operation.
 ///
 /// The scope is chosen by the host boundary before any nondeterministic work is
-/// planned. It is intentionally generic: Restate, an inline test host, or a
+/// planned. It is intentionally generic: Restate, an native test host, or a
 /// future durable effect host all receive the same Lash scope vocabulary.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -592,6 +593,184 @@ pub(crate) mod facade_ops {
 
 type EffectControllerTaskFuture<'run> = Pin<Box<dyn Future<Output = ()> + Send + 'run>>;
 
+/// Guard on the acquired lane. Opaque newtype over `SessionExecutionLeaseGuard`.
+pub struct QueuedLaneGuard(crate::runtime::session_execution_lease::SessionExecutionLeaseGuard);
+
+impl QueuedLaneGuard {
+    pub(crate) fn new(
+        guard: crate::runtime::session_execution_lease::SessionExecutionLeaseGuard,
+    ) -> Self {
+        Self(guard)
+    }
+
+    pub(crate) fn into_inner(
+        self,
+    ) -> crate::runtime::session_execution_lease::SessionExecutionLeaseGuard {
+        self.0
+    }
+}
+
+/// Opaque guard holding one facade tool-intent submission gate.
+#[allow(dead_code)]
+pub struct ToolIntentSubmissionGuard(tokio::sync::OwnedMutexGuard<()>);
+
+impl ToolIntentSubmissionGuard {
+    /// Wrap the owned mutex guard supplied by the facade's submission-gate
+    /// collaborator.
+    #[doc(hidden)]
+    pub fn from_owned_mutex_guard(guard: tokio::sync::OwnedMutexGuard<()>) -> Self {
+        Self(guard)
+    }
+}
+
+/// Core-provided collaborator for durable tool-intent admission and outcome
+/// recording. The effect-host seam never learns which registry or lock table
+/// backs these operations.
+#[async_trait::async_trait]
+pub trait ToolIntentOutcomeSink: Send + Sync {
+    async fn lock_submission_gate(&self, replay_key: &str) -> ToolIntentSubmissionGuard;
+
+    async fn admit(
+        &self,
+        record: crate::ToolIntentSubmissionRecord,
+    ) -> Result<crate::ToolIntentSubmissionAdmission, RuntimeError>;
+
+    async fn complete_submission(
+        &self,
+        identity: &crate::ToolIntentIdentity,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError>;
+
+    async fn retain_in_journal(
+        &self,
+        identity: &crate::ToolIntentIdentity,
+        submitted: crate::ToolIntent,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError>;
+}
+
+/// Preparation chosen by the effect host before one tool intent is realized.
+pub enum ToolIntentPreparation {
+    /// The controller journal owns the submission.
+    ControllerOwned,
+    /// The runtime registry owns the submission row and the gate remains held
+    /// until realization and outcome recording finish.
+    RuntimeOwned {
+        admission: crate::ToolIntentSubmissionAdmission,
+        _guard: ToolIntentSubmissionGuard,
+    },
+}
+
+/// Whether a runtime-effect failure should end the controller invocation or
+/// be recorded as an ordinary failed turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeEffectFailureDisposition {
+    AbortInvocation,
+    RecordTurnFailure,
+}
+
+/// Whether turn-control reads participate in a durable controller journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnControlParticipation {
+    Local,
+    DurableJournaled,
+}
+
+/// How turn-control promises are addressed for one turn. Exhaustive: there is
+/// no third arrangement, and no field is optional.
+pub enum TurnControlBinding<'a> {
+    HostOwned {
+        resolver: &'a dyn AwaitEventResolver,
+        peek: ScopedEffectController<'a>,
+    },
+    RunScoped {
+        resolver: &'a dyn AwaitEventResolver,
+        durable_cancel_after_llm: bool,
+    },
+}
+
+/// Result of preparing an externally routable tool completion key.
+pub enum CompletionKeyPreparation {
+    NotNeeded,
+    Unsupported,
+    Issued(AwaitEventKey),
+}
+
+/// One attempt at the durable lane a queued drain must own, plus the facts a
+/// bounded wait needs. Opaque: no store type, no lease timings, no guard
+/// internals cross the seam.
+#[derive(Clone)]
+pub struct QueuedLaneHolder(crate::store::SessionExecutionLease);
+
+/// Prints only the [`QueuedLaneHolder::describe`] facts. The inner store row
+/// carries the lease token, which must never reach logs or panic messages.
+impl std::fmt::Debug for QueuedLaneHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("QueuedLaneHolder")
+            .field(&self.describe())
+            .finish()
+    }
+}
+
+impl QueuedLaneHolder {
+    pub(crate) fn new(holder: crate::store::SessionExecutionLease) -> Self {
+        Self(holder)
+    }
+
+    pub(crate) fn lease(&self) -> &crate::store::SessionExecutionLease {
+        &self.0
+    }
+
+    /// The holder's own persisted lease term. The only honest budget unit for
+    /// waiting one out — see `native_substrate/lane_wait.rs`.
+    pub fn lease_term_ms(&self) -> u64 {
+        self.0.lease_term_ms
+    }
+
+    /// True iff this observation proves the holder renewed under an unchanged
+    /// identity triple since `previous`: alive, not crashed.
+    pub fn renewed_since(&self, previous: &QueuedLaneHolder) -> bool {
+        self.0.owner == previous.0.owner
+            && self.0.executor_id == previous.0.executor_id
+            && self.0.expires_at_epoch_ms > previous.0.expires_at_epoch_ms
+    }
+
+    /// Describes the persisted holder identity and lease facts for diagnostics.
+    pub fn describe(&self) -> String {
+        format!(
+            "owner `{}` incarnation `{}` executor `{}` (fencing generation {}, expires at {})",
+            self.0.owner.owner_id,
+            self.0.owner.incarnation_id,
+            self.0.executor_id,
+            self.0.fencing_token,
+            self.0.expires_at_epoch_ms,
+        )
+    }
+}
+
+/// Result of one attempt to acquire the queued-work execution lane.
+pub enum QueuedLaneAttempt {
+    Acquired(QueuedLaneGuard),
+    Busy(QueuedLaneHolder),
+}
+
+/// Result of applying a boundary's queued-lane acquisition policy.
+pub enum QueuedLaneAcquisition {
+    Acquired(QueuedLaneGuard),
+    NotAcquired,
+}
+
+/// Core-provided probe. Owns everything it needs — `Arc<dyn RuntimePersistence>`,
+/// copied owner/executor identity, copied `LeaseTimings`, `Arc<dyn Clock>` — so
+/// it can cross an owned channel. The substrate decides how many times and how
+/// long to try; it never learns what it is trying.
+#[async_trait::async_trait]
+pub trait QueuedLaneProbe: Send + Sync {
+    async fn try_acquire(&self) -> Result<QueuedLaneAttempt, RuntimeError>;
+    /// Sleep `slice` through the runtime's injected clock.
+    async fn pause(&self, slice: std::time::Duration);
+}
+
 pub(crate) enum EffectControllerTaskRequest {
     Execute {
         envelope: Box<RuntimeEffectEnvelope>,
@@ -607,6 +786,24 @@ pub(crate) enum EffectControllerTaskRequest {
         key: AwaitEventKey,
         resolution: Resolution,
         response: oneshot::Sender<Result<ResolveOutcome, RuntimeError>>,
+    },
+    AcquireQueuedLane {
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: CancellationToken,
+        response: oneshot::Sender<Result<QueuedLaneAcquisition, RuntimeError>>,
+    },
+    PrepareCompletionKey {
+        scope: ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+        response: oneshot::Sender<Result<CompletionKeyPreparation, RuntimeError>>,
+    },
+    RuntimeEffectFailureDisposition {
+        code: RuntimeErrorCode,
+        response: oneshot::Sender<Result<RuntimeEffectFailureDisposition, RuntimeError>>,
+    },
+    TurnControlParticipation {
+        response: oneshot::Sender<Result<TurnControlParticipation, RuntimeError>>,
     },
 }
 
@@ -637,6 +834,31 @@ impl EffectControllerTaskRequest {
             } => Box::pin(async move {
                 let _ = response.send(controller.resolve_await_event(&key, resolution).await);
             }),
+            Self::AcquireQueuedLane {
+                lane,
+                cancel,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(controller.acquire_queued_lane(lane, cancel).await);
+            }),
+            Self::PrepareCompletionKey {
+                scope,
+                wait,
+                may_defer,
+                response,
+            } => Box::pin(async move {
+                let _ = response.send(
+                    controller
+                        .prepare_completion_key(&scope, wait, may_defer)
+                        .await,
+                );
+            }),
+            Self::RuntimeEffectFailureDisposition { code, response } => Box::pin(async move {
+                let _ = response.send(controller.runtime_effect_failure_disposition(code).await);
+            }),
+            Self::TurnControlParticipation { response } => Box::pin(async move {
+                let _ = response.send(controller.turn_control_participation().await);
+            }),
         }
     }
 }
@@ -650,10 +872,6 @@ pub(super) struct RemoteLocalExecutionRequest {
 #[derive(Clone)]
 pub(crate) struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
-    replay_ownership: crate::EffectReplayOwnership,
-    durable_workflow_controller: bool,
-    journal_addressing: crate::EffectJournalAddressing,
-    allows_process_lifetime_completion_keys: bool,
     supports_concurrent_effects: bool,
 }
 
@@ -671,11 +889,6 @@ impl EffectTaskController {
         let (requests, request_rx) = mpsc::unbounded_channel();
         let proxy = Self {
             requests,
-            replay_ownership: controller.replay_ownership(),
-            durable_workflow_controller: controller.durable_workflow_controller(),
-            journal_addressing: controller.journal_addressing(),
-            allows_process_lifetime_completion_keys: controller
-                .allows_process_lifetime_completion_keys(),
             supports_concurrent_effects: controller.supports_concurrent_effects(),
         };
         Ok((
@@ -687,20 +900,58 @@ impl EffectTaskController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for EffectTaskController {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        self.replay_ownership
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::AcquireQueuedLane {
+                lane,
+                cancel,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "queued-lane controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "queued-lane controller response was dropped",
+            )
+        })?
     }
 
-    fn durable_workflow_controller(&self) -> bool {
-        self.durable_workflow_controller
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        self.journal_addressing
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.allows_process_lifetime_completion_keys
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::PrepareCompletionKey {
+                scope: scope.clone(),
+                wait,
+                may_defer,
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "completion-key controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "completion-key controller response was dropped",
+            )
+        })?
     }
 
     async fn await_event_key(
@@ -760,6 +1011,52 @@ impl AwaitEventResolver for EffectTaskController {
 impl RuntimeEffectController for EffectTaskController {
     fn supports_concurrent_effects(&self) -> bool {
         self.supports_concurrent_effects
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(
+                EffectControllerTaskRequest::RuntimeEffectFailureDisposition {
+                    code,
+                    response: response_tx,
+                },
+            )
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "effect-failure disposition controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "effect-failure disposition controller response was dropped",
+            )
+        })?
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.requests
+            .send(EffectControllerTaskRequest::TurnControlParticipation {
+                response: response_tx,
+            })
+            .map_err(|_| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                    "turn-control participation controller task is no longer running",
+                )
+            })?;
+        response_rx.await.map_err(|_| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "turn-control participation controller response was dropped",
+            )
+        })?
     }
 
     async fn execute_effect(
@@ -872,58 +1169,99 @@ pub(crate) async fn drive_effect_controller_task(
     }
 }
 
-/// Shared effect replay and AwaitEvent contract for effect boundaries.
+/// Shared AwaitEvent contract for effect boundaries.
 ///
 /// Both the deployment-level [`EffectHost`] factory and the per-run
-/// [`RuntimeEffectController`] resolve AwaitEvents and describe which layer
-/// owns effect replay.
+/// [`RuntimeEffectController`] resolve AwaitEvents.
 #[async_trait::async_trait]
 pub trait AwaitEventResolver: Send + Sync {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        crate::EffectReplayOwnership::Runtime
+    /// Acquire the authoritative session-execution lane a durable queued drain
+    /// needs before it may claim work.
+    ///
+    /// The default is the one-shot contract every non-re-driven boundary owes:
+    /// one attempt, `Busy` reported as `NotAcquired`, the durable row left
+    /// pending. A boundary whose *invocation* is re-driven by a durable engine
+    /// overrides with [`wait_out_crashed_lane_holder`](Self::wait_out_crashed_lane_holder):
+    /// it waits out a crashed-looking holder and otherwise fails with the typed
+    /// retryable `RuntimeErrorCode::SessionExecutionLaneBusy` so the engine's
+    /// retry policy — not a sleep inside one invocation — paces the next
+    /// attempt. Neither path bypasses or forges the holder's lease.
+    ///
+    /// Arguments are owned so this can be proxied across
+    /// `EffectControllerTaskRequest`.
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        _cancel: CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        match lane.try_acquire().await? {
+            QueuedLaneAttempt::Acquired(guard) => Ok(QueuedLaneAcquisition::Acquired(guard)),
+            QueuedLaneAttempt::Busy(_) => Ok(QueuedLaneAcquisition::NotAcquired),
+        }
     }
 
-    /// Whether this boundary is a durable workflow controller whose engine owns
-    /// retry pacing for the whole invocation.
-    ///
-    /// Opting in changes exactly one behaviour: a queued-work drain that finds
-    /// the session execution lane held no longer answers "nothing to drain"
-    /// (which an engine would read as a settled queue). It waits out a
-    /// crashed-looking holder and otherwise fails with the typed retryable
-    /// [`RuntimeErrorCode::SessionExecutionLaneBusy`](crate::RuntimeErrorCode::SessionExecutionLaneBusy),
-    /// which the controller surfaces to its engine so the engine's retry policy
-    /// paces the next attempt.
-    ///
-    /// This is deliberately a separate question from
-    /// [`replay_ownership`](Self::replay_ownership): a store-backed durable
-    /// effect host also owns effect replay, yet has no engine-side retry policy
-    /// to hand the outcome to, so it must keep the ordinary one-shot drain
-    /// contract. Implement this only for a boundary whose *invocation* is
-    /// re-driven by a durable engine.
-    fn durable_workflow_controller(&self) -> bool {
-        false
+    /// Bounded, aliveness-aware wait for engine-re-driven boundaries. Provided
+    /// so `lash-restate` adopts the policy without lash-core exporting the
+    /// policy types or a second free function.
+    async fn wait_out_crashed_lane_holder(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        let mut wait = queued_lane_wait::QueuedLaneWait::default();
+        loop {
+            let acquisition = lane.try_acquire().await?;
+            match acquisition {
+                QueuedLaneAttempt::Acquired(guard) => {
+                    return Ok(QueuedLaneAcquisition::Acquired(guard));
+                }
+                QueuedLaneAttempt::Busy(holder) => {
+                    let slice_ms = match wait.observe(&holder) {
+                        queued_lane_wait::QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
+                        queued_lane_wait::QueuedLaneWaitStep::GiveUp(give_up) => {
+                            let waited_ms = wait.waited_ms();
+                            queued_lane_wait::trace_busy_gave_up(&holder, give_up, waited_ms);
+                            return Err(queued_lane_wait::lane_busy_error(
+                                &holder, give_up, waited_ms,
+                            ));
+                        }
+                    };
+                    queued_lane_wait::trace_busy_wait(&holder, slice_ms, wait.waited_ms());
+                    let sleep = lane.pause(std::time::Duration::from_millis(slice_ms));
+                    tokio::select! {
+                        () = sleep => {}
+                        () = cancel.cancelled() => {
+                            let give_up = queued_lane_wait::QueuedLaneGiveUp::CancelledWhileWaiting;
+                            let waited_ms = wait.waited_ms();
+                            queued_lane_wait::trace_busy_gave_up(
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            );
+                            return Err(queued_lane_wait::lane_busy_error(
+                                &holder,
+                                give_up,
+                                waited_ms,
+                            ));
+                        },
+                    }
+                }
+            }
+        }
     }
 
-    /// Describes how this boundary addresses replayed journal entries.
-    ///
-    /// Keep this capability independent from any future
-    /// `durable_workflow_controller()` capability. The two are candidates for
-    /// a consolidated controller-traits surface, but durability and journal
-    /// addressing answer different questions today.
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        crate::EffectJournalAddressing::Runtime
-    }
-
-    /// Whether [`ToolContext::completion_key`](crate::ToolContext::completion_key)
-    /// may issue an externally routable key through this resolver.
-    ///
-    /// Replay ownership is only a routing fact and does not imply that another
-    /// process can resolve a key after this one exits. Implementations must opt
-    /// in explicitly either because their await-event ingress and state survive
-    /// process loss or because the deployment explicitly accepts process-local
-    /// key lifetime.
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        false
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        let _ = (scope, wait);
+        if may_defer {
+            Ok(CompletionKeyPreparation::Unsupported)
+        } else {
+            Ok(CompletionKeyPreparation::NotNeeded)
+        }
     }
 
     async fn await_event_key(
@@ -1014,6 +1352,52 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(None)
     }
 
+    async fn turn_control_binding<'a>(
+        &'a self,
+        scoped: &'a ScopedEffectController<'_>,
+    ) -> Result<TurnControlBinding<'a>, RuntimeError> {
+        let durable_cancel_after_llm =
+            match scoped.controller().turn_control_participation().await? {
+                TurnControlParticipation::Local => false,
+                TurnControlParticipation::DurableJournaled => true,
+            };
+        Ok(TurnControlBinding::RunScoped {
+            resolver: scoped.controller(),
+            durable_cancel_after_llm,
+        })
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        sink: &dyn ToolIntentOutcomeSink,
+        identity: &crate::ToolIntentIdentity,
+        intent: crate::ToolIntent,
+    ) -> Result<ToolIntentPreparation, RuntimeError> {
+        let guard = sink.lock_submission_gate(&identity.replay_key).await;
+        let record =
+            crate::ToolIntentSubmissionRecord::new(identity.clone(), intent).map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RecordEncodingFailed,
+                    format!("failed to hash tool-intent submission: {error}"),
+                )
+            })?;
+        let admission = sink.admit(record).await?;
+        Ok(ToolIntentPreparation::RuntimeOwned {
+            admission,
+            _guard: guard,
+        })
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn ToolIntentOutcomeSink,
+        identity: &crate::ToolIntentIdentity,
+        _submitted: crate::ToolIntent,
+        outcome: crate::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError> {
+        sink.complete_submission(identity, outcome).await
+    }
+
     /// Retire durable effect history after its owning lifecycle is no longer
     /// executable.
     async fn retire_effect_journal(
@@ -1030,6 +1414,17 @@ pub trait EffectHost: AwaitEventResolver {
 /// Boundary for nondeterministic runtime work.
 #[async_trait::async_trait]
 pub trait RuntimeEffectController: AwaitEventResolver {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(RuntimeEffectFailureDisposition::RecordTurnFailure)
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        Ok(TurnControlParticipation::Local)
+    }
+
     /// Advises an engine to end the current in-process execution segment at a
     /// quiescent point. Engines may decline when live state is not capturable,
     /// but must make progress before returning another decline. In particular,
@@ -1309,86 +1704,5 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn journal_identity_is_typed_and_session_qualified() {
-        let scopes = [
-            ExecutionScope::turn("session", "shared"),
-            ExecutionScope::queue_drain("session", "shared"),
-            ExecutionScope::session_delete("session"),
-            ExecutionScope::process("shared"),
-            ExecutionScope::runtime_operation("shared"),
-        ];
-        let identities = scopes
-            .iter()
-            .map(|scope| scope.journal_identity().expect("durable identity"))
-            .collect::<Vec<_>>();
-        let keys = identities
-            .iter()
-            .map(EffectJournalIdentity::key)
-            .collect::<std::collections::HashSet<_>>();
-        assert_eq!(keys.len(), scopes.len());
-        for identity in &identities[..3] {
-            assert_eq!(identity.session_id(), Some("session"));
-        }
-        for identity in &identities[3..] {
-            assert_eq!(identity.session_id(), None);
-        }
-    }
-
-    /// Every variant survives the round trip, not just the one the drain
-    /// happens to exercise.
-    ///
-    /// `from_journal_key` is the drain's only way back from a journal row to a
-    /// scope, and it re-derives each variant from a `kind` string by hand. A
-    /// variant whose forward and backward spellings drift apart makes every
-    /// row written under it undrainable — refused as a scope no version of this
-    /// runtime writes, which is exactly the wrong answer for a scope this
-    /// version writes constantly. Only the whole set proves the mapping; one
-    /// variant proves the plumbing.
-    #[test]
-    fn every_scope_variant_round_trips_through_its_journal_key() {
-        for scope in [
-            ExecutionScope::turn("session", "shared"),
-            ExecutionScope::queue_drain("session", "shared"),
-            ExecutionScope::session_delete("session"),
-            ExecutionScope::process("shared"),
-            ExecutionScope::runtime_operation("shared"),
-        ] {
-            let key = scope
-                .journal_identity()
-                .expect("durable identity")
-                .key()
-                .to_string();
-            assert_eq!(
-                ExecutionScope::from_journal_key(&key),
-                Some(scope.clone()),
-                "scope {scope:?} did not come back from its own journal key `{key}`"
-            );
-        }
-    }
-
-    /// A key this build cannot read is refused rather than guessed at, which is
-    /// what lets the drain treat `None` as corruption instead of as a default.
-    #[test]
-    fn a_journal_key_this_build_cannot_read_is_refused() {
-        for key in [
-            "",
-            "not json",
-            r#"{"version":1,"kind":"turn","session_id":"s","execution_id":"t"}"#,
-            r#"{"version":2,"kind":"nonsense","execution_id":"t"}"#,
-            // Right kind, missing the field that kind requires.
-            r#"{"version":2,"kind":"turn","session_id":"s"}"#,
-            // Decodes, but to a scope the forward direction would refuse.
-            r#"{"version":2,"kind":"process","execution_id":""}"#,
-        ] {
-            assert_eq!(
-                ExecutionScope::from_journal_key(key),
-                None,
-                "`{key}` is not a scope this build wrote"
-            );
-        }
-    }
-}
+#[path = "control/tests.rs"]
+mod tests;

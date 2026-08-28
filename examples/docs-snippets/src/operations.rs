@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash::durability::{InlineEffectHost, LeaseTimings};
+use lash::durability::{LeaseTimings, NativeEffectHost};
 use lash::persistence::{
     AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvStore, SessionLeaseRenewal,
     SessionStoreFactory,
@@ -32,6 +32,7 @@ fn configure_lease_timings(
     .expect("ttl >= 3 * renew_interval");
 
     let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -40,7 +41,7 @@ fn configure_lease_timings(
                 .expect("valid model metadata"),
         )
         .store_factory(store_factory)
-        .effect_host(Arc::new(InlineEffectHost::default()))
+        .effect_host(Arc::new(NativeEffectHost::default()))
         .attachment_store(attachment_store)
         .process_env_store(process_env_store)
         // Start bounded; tune both limits for your backend's latency envelope.
@@ -268,12 +269,13 @@ mod tests {
                 .expect("open in-memory process registry"),
         );
         let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .with_native_queued_work()
             .model(crate::test_support::model())
             .store_factory(Arc::new(
                 lash::persistence::InMemorySessionStoreFactory::new(),
             ))
             .process_registry(registry.clone())
-            .effect_host(Arc::new(InlineEffectHost::default()))
+            .effect_host(Arc::new(NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),

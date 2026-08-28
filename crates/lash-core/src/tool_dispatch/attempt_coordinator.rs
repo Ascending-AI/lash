@@ -307,37 +307,31 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
     let mut attempts = Vec::new();
 
     for attempt in 1..=max_attempts {
-        let completion_key = if context.tools.attempt_may_defer(&call.tool_id)
-            && context
-                .effect_controller
-                .controller()
-                .allows_process_lifetime_completion_keys()
+        let completion_key = match context
+            .effect_controller
+            .controller()
+            .prepare_completion_key(
+                context.effect_controller.scoped().execution_scope(),
+                crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
+                context.tools.attempt_may_defer(&call.tool_id),
+            )
+            .await
         {
-            match context
-                .effect_controller
-                .controller()
-                .await_event_key(
-                    context.effect_controller.scoped().execution_scope(),
-                    crate::AwaitEventWaitIdentity::tool_completion(call.call_id.clone()),
-                )
-                .await
-            {
-                Ok(key) => Some(key),
-                Err(err) => {
-                    return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
-                            &call,
-                            "tool_completion_key_prederive_failed",
-                            err.to_string(),
-                            identity.duration_ms(context, started_at, 0),
-                            attempts,
-                        ))),
-                        triggers,
-                    };
-                }
+            Ok(crate::CompletionKeyPreparation::Issued(key)) => Some(key),
+            Ok(crate::CompletionKeyPreparation::NotNeeded)
+            | Ok(crate::CompletionKeyPreparation::Unsupported) => None,
+            Err(err) => {
+                return CoordinatedToolInvocation {
+                    launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
+                        &call,
+                        "tool_completion_key_prederive_failed",
+                        err.to_string(),
+                        identity.duration_ms(context, started_at, 0),
+                        attempts,
+                    ))),
+                    triggers,
+                };
             }
-        } else {
-            None
         };
         let invocation = identity.attempt_invocation(context, &call, attempt);
         let outcome = context

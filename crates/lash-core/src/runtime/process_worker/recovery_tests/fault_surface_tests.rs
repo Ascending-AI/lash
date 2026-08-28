@@ -33,7 +33,7 @@ async fn drive_one_faulted_row(
     process_id: &str,
     inject: impl AsyncFnOnce(&Arc<TestLocalProcessRegistry>),
 ) -> (ProcessAdmissionReport, ProcessWorkerFault, usize) {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (_worker, registry, run_handle, env_ref, test_registry, sink) =
         worker_with_engine_and_fault_sink(1, Arc::new(ImmediateSuccessEngine), run_handle).await;
     registry
@@ -187,7 +187,7 @@ async fn a_row_this_worker_is_already_running_is_deferred_busy_not_admitted_twic
         }
     }
 
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (_worker, registry, run_handle, env_ref, _test_registry, sink) =
         worker_with_engine_and_fault_sink(
             1,
@@ -243,7 +243,7 @@ async fn a_row_this_worker_is_already_running_is_deferred_busy_not_admitted_twic
 /// this change blinder than it went in.
 #[tokio::test]
 async fn a_sinkless_worker_reports_faults_on_the_tracing_seam() {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (worker, _registry, _run_handle, _env_ref, _test_registry) =
         worker_with_engine_and_registry(1, Arc::new(ImmediateSuccessEngine), run_handle).await;
     assert!(

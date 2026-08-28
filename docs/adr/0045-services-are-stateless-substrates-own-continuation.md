@@ -39,10 +39,10 @@ engine's contractual job.
 ## The reference substrate
 
 The in-process `DurableProcessWorker`, the SQLite and Postgres stores, and
-the inline drivers together form the reference substrate lash ships so the
+the native drivers together form the reference substrate lash ships so the
 batteries-included path works without an engine. There, lash *is* the
 substrate, so it redrives after restart — and its execution budget (the
-inline process execution concurrency bound) is that driver's scheduling
+native process execution concurrency bound) is that driver's scheduling
 policy, not a lash-level recovery semantic. Design pressure on the reference
 substrate must not leak into the contracts.
 
@@ -62,7 +62,7 @@ one.
 Anything found to keep correctness state only in instance memory across an
 effect boundary is a defect against this document. New coordination features
 land on the engine seam first, with the reference substrate implementing the
-same contract inline. When a bound, a wait, or a redrive path is proposed
+same contract natively. When a bound, a wait, or a redrive path is proposed
 inside lash-core, the first question is whether it belongs to the substrate —
 the answer decided FIG-526, and it will decide the next one.
 

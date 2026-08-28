@@ -13,19 +13,30 @@ impl RuntimeTurnDriver<'_> {
         ));
     }
 
-    pub(super) fn should_abort_for_runtime_effect_error(&self) -> bool {
-        self.scoped_effect_controller
+    pub(super) async fn should_abort_for_runtime_effect_error(
+        &self,
+        code: RuntimeErrorCode,
+    ) -> Result<bool, RuntimeError> {
+        match self
+            .scoped_effect_controller
             .controller()
-            .replay_ownership()
-            == crate::EffectReplayOwnership::Controller
+            .runtime_effect_failure_disposition(code)
+            .await?
+        {
+            crate::RuntimeEffectFailureDisposition::AbortInvocation => Ok(true),
+            crate::RuntimeEffectFailureDisposition::RecordTurnFailure => Ok(false),
+        }
     }
 
-    pub(super) fn fail_or_abort_runtime_effect_controller(
+    pub(super) async fn fail_or_abort_runtime_effect_controller(
         &self,
         machine: &mut TurnMachine,
         err: RuntimeEffectControllerError,
     ) -> Result<(), RuntimeError> {
-        if self.should_abort_for_runtime_effect_error() {
+        if self
+            .should_abort_for_runtime_effect_error(err.code.clone())
+            .await?
+        {
             Err(err.into_runtime_error())
         } else {
             Self::fail_runtime_effect_controller(machine, err);

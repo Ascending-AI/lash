@@ -55,6 +55,7 @@ pub async fn public_signal_intent_wakes_parked_process(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     registry: Arc<dyn crate::ProcessRegistry>,
+    process_work: Arc<dyn crate::ProcessWorkSubstrate>,
 ) {
     let session_id = format!("{prefix}-session");
     let turn_id = format!("{prefix}-turn");
@@ -78,22 +79,44 @@ pub async fn public_signal_intent_wakes_parked_process(
         )
         .await
         .expect("register public signal-intent target");
-    let wait_scope = effect_host
-        .scoped(crate::ExecutionScope::turn(&session_id, &turn_id))
-        .expect("scope durable signal wait");
-    let wake_key = wait_scope
-        .controller()
+    let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+        serde_json::json!({"signal": "observed"}),
+    ));
+    let terminal_wait = {
+        let process_work = Arc::clone(&process_work);
+        let process_id = process_id.clone();
+        crate::task::spawn(async move {
+            let mut reattachments = 0_usize;
+            loop {
+                match process_work
+                    .await_process_terminal(&process_id)
+                    .await
+                    .expect(
+                        "wait for the public signal-intent target through the process substrate",
+                    ) {
+                    crate::ProcessTerminalWait::Terminal(output) => break output,
+                    crate::ProcessTerminalWait::Reattach => {
+                        reattachments += 1;
+                        assert!(
+                            reattachments <= 3,
+                            "process substrate must eventually settle after bounded reattachments"
+                        );
+                    }
+                }
+            }
+        })
+    };
+    tokio::task::yield_now().await;
+    let wake_key = effect_host
         .await_event_key(
             &crate::ExecutionScope::process(&process_id),
             crate::AwaitEventWaitIdentity::process_signal(&process_id, "resume", 1),
         )
         .await
         .expect("mint durable process-signal wait");
-    let wait_controller = wait_scope
-        .owned_controller()
-        .expect("durable conformance effect scope owns its controller");
+    let wait_host = Arc::clone(&effect_host);
     let wait = crate::task::spawn(async move {
-        wait_controller
+        wait_host
             .await_await_event(&wake_key, tokio_util::sync::CancellationToken::new(), None)
             .await
     });
@@ -174,7 +197,10 @@ pub async fn public_signal_intent_wakes_parked_process(
                 .collect(),
         )
         .with_store(Arc::new(crate::InMemorySessionStore::new()))
-        .with_process_registry(Arc::clone(&registry))
+        .with_process_work(crate::testing::process_work_wiring_for_registry(
+            Arc::clone(&registry),
+        ))
+        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
         .build(),
     )
     .await
@@ -213,4 +239,15 @@ pub async fn public_signal_intent_wakes_parked_process(
             .count(),
         1
     );
+
+    registry
+        .complete_process(
+            &process_id,
+            terminal.clone(),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("terminalize the public signal-intent target");
+    let observed = terminal_wait.await.expect("terminal-wait task joins");
+    assert_eq!(observed, terminal);
 }

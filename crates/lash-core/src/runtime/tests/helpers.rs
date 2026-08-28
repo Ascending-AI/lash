@@ -33,19 +33,19 @@ pub(crate) fn default_state() -> RuntimeSessionState {
     state
 }
 
-pub(crate) fn inline_scope(scope: crate::ExecutionScope) -> crate::ScopedEffectController<'static> {
+pub(crate) fn native_scope(scope: crate::ExecutionScope) -> crate::ScopedEffectController<'static> {
     crate::ScopedEffectController::shared(
-        Arc::new(crate::InlineRuntimeEffectController::default()),
+        Arc::new(crate::NativeRuntimeEffectController::default()),
         scope,
     )
-    .expect("inline execution scope")
+    .expect("native execution scope")
 }
 
 pub(crate) fn named_turn_scope(
     session_id: &str,
     turn_id: &str,
 ) -> crate::ScopedEffectController<'static> {
-    inline_scope(crate::ExecutionScope::turn(session_id, turn_id))
+    native_scope(crate::ExecutionScope::turn(session_id, turn_id))
 }
 
 #[test]
@@ -610,8 +610,8 @@ impl TestRuntime {
         )));
         let plugin_host = crate::PluginHost::new(factories);
         let plugin_session = plugin_host.build_session("root").expect("plugins");
-        let mut runtime = match self.store {
-            Some(store) => LashRuntime::from_persistent_embedded_state(
+        let runtime = match (self.store, self.process_registry) {
+            (Some(store), None) => LashRuntime::from_persistent_embedded_state(
                 standard_test_policy(),
                 self.host,
                 crate::PersistentRuntimeServices::new(plugin_session, store),
@@ -620,7 +620,7 @@ impl TestRuntime {
             )
             .await
             .expect("runtime"),
-            None => LashRuntime::from_embedded_state(
+            (None, None) => LashRuntime::from_embedded_state(
                 standard_test_policy(),
                 self.host,
                 crate::RuntimeServices::new(plugin_session),
@@ -629,8 +629,44 @@ impl TestRuntime {
             )
             .await
             .expect("runtime"),
+            (Some(store), Some(registry)) => {
+                let host = crate::ProcessRuntimeHost::with_ports(
+                    self.host,
+                    crate::testing::process_work_wiring_for_registry(registry),
+                    Arc::new(crate::NoQueuedWork::new()),
+                );
+                LashRuntime::from_persistent_background_state(
+                    standard_test_policy(),
+                    host,
+                    crate::PersistentRuntimeServices::new(plugin_session, store),
+                    RuntimeSessionState::new(crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                    )),
+                    crate::testing::runtime_lease_owner(),
+                )
+                .await
+                .expect("runtime")
+            }
+            (None, Some(registry)) => {
+                let host = crate::ProcessRuntimeHost::with_ports(
+                    self.host,
+                    crate::testing::process_work_wiring_for_registry(registry),
+                    Arc::new(crate::NoQueuedWork::new()),
+                );
+                LashRuntime::from_background_state(
+                    standard_test_policy(),
+                    host,
+                    crate::RuntimeServices::new(plugin_session),
+                    RuntimeSessionState::new(crate::SessionPolicy::new(
+                        crate::TurnBudget::Unbounded,
+                    )),
+                    crate::testing::runtime_lease_owner(),
+                )
+                .await
+                .expect("runtime")
+            }
         };
-        runtime.host.process_registry = self.process_registry;
+        let mut runtime = runtime;
         set_runtime_provider(&mut runtime, self.transport.into_handle());
         runtime
     }
@@ -639,13 +675,13 @@ impl TestRuntime {
 #[tokio::test]
 async fn test_runtime_process_registry_defaults_and_can_be_disabled() {
     let runtime = TestRuntime::new(mock_provider(Vec::new())).build().await;
-    assert!(runtime.host.process_registry.is_some());
+    assert!(runtime.host.process_registry().is_some());
 
     let runtime = TestRuntime::new(mock_provider(Vec::new()))
         .without_process_registry()
         .build()
         .await;
-    assert!(runtime.host.process_registry.is_none());
+    assert!(runtime.host.process_registry().is_none());
 }
 
 pub(crate) async fn standard_runtime_with_transport(transport: TestProvider) -> LashRuntime {

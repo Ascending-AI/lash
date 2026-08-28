@@ -35,43 +35,39 @@ const DIRECT_MODEL: &str = "mock-model";
 const DIRECT_TEXT: &str = "unstubbed direct answer";
 const FOLLOW_ON_EFFECT_ID: &str = "attempt-atomicity-follow-on";
 
-/// A controller-owned tier stand-in with an explicit journal-addressing model.
+/// A controller-owned tier stand-in.
 struct ControllerOwnedTier {
-    inner: crate::InlineRuntimeEffectController,
-    addressing: crate::EffectJournalAddressing,
+    inner: crate::NativeRuntimeEffectController,
 }
 
 impl ControllerOwnedTier {
     fn ordinal_addressed() -> Self {
         Self {
-            inner: crate::InlineRuntimeEffectController::default(),
-            addressing: crate::EffectJournalAddressing::OrdinalAddressed,
+            inner: crate::NativeRuntimeEffectController::default(),
         }
     }
 
     fn key_addressed() -> Self {
         Self {
-            inner: crate::InlineRuntimeEffectController::default(),
-            addressing: crate::EffectJournalAddressing::KeyAddressed,
+            inner: crate::NativeRuntimeEffectController::default(),
         }
     }
 }
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for ControllerOwnedTier {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        crate::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        self.addressing
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        // Opted in so `completion_key()` reaches its await-event derivation
-        // instead of stopping at the process-lifetime refusal; the derivation
-        // is the route this matrix is classifying.
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
+        if !may_defer {
+            return Ok(crate::CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(crate::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -93,6 +89,19 @@ impl crate::AwaitEventResolver for ControllerOwnedTier {
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for ControllerOwnedTier {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+        Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+        Ok(crate::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: crate::RuntimeEffectEnvelope,
@@ -281,8 +290,7 @@ fn tool_context_with_provider<'run>(
         processes,
         trigger_router: Some(crate::TriggerRouter::new(
             Arc::clone(&fixtures.trigger_store) as Arc<dyn crate::TriggerStore>,
-            Some(Arc::clone(&fixtures.registry)),
-            None,
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
         )),
         effect_controller,
         direct_completions,
@@ -314,11 +322,10 @@ fn tool_context_with_provider<'run>(
         .process_events(
             LIVE_PROCESS,
             crate::ProcessExecutionWriteAuthority::lease(fixtures.lease.clone()),
-            Arc::clone(&fixtures.registry),
-            crate::ProcessAwaiter::polling(Arc::clone(&fixtures.registry)),
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
             None,
             None,
-            None,
+            Arc::new(crate::NoQueuedWork::new()),
             crate::DeliveryPolicy::EarliestSafeBoundary,
             Arc::new(crate::SystemClock),
         )
@@ -581,7 +588,12 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
-        crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&fixtures.registry), None),
+        crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&fixtures.registry),
+            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                &fixtures.registry,
+            ))),
+        ),
     )
     .await
     .expect("cancel outside an attempt");
@@ -626,7 +638,10 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
                     ),
                     crate::RuntimeEffectCommand::process(command),
                 ),
-                crate::RuntimeEffectLocalExecutor::processes(registry, None),
+                crate::RuntimeEffectLocalExecutor::processes(
+                    Arc::clone(&registry),
+                    Arc::new(crate::NativeProcessWork::for_registry(registry)),
+                ),
             )
             .await?;
             Ok(crate::RuntimeEffectOutcome::ToolAttempt {
@@ -859,7 +874,10 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             attributed,
             crate::RuntimeEffectCommand::process(command.clone()),
         ),
-        crate::RuntimeEffectLocalExecutor::processes(registry.clone(), None),
+        crate::RuntimeEffectLocalExecutor::processes(
+            registry.clone(),
+            Arc::new(crate::NativeProcessWork::for_registry(registry.clone())),
+        ),
     )
     .await
     .expect("unprefixed command executes");
@@ -879,7 +897,10 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
             ),
             crate::RuntimeEffectCommand::process(command),
         ),
-        crate::RuntimeEffectLocalExecutor::processes(registry, None),
+        crate::RuntimeEffectLocalExecutor::processes(
+            registry.clone(),
+            Arc::new(crate::NativeProcessWork::for_registry(registry)),
+        ),
     )
     .await
     .expect("unattributed command executes");
@@ -976,7 +997,7 @@ struct JournalEntry {
 /// and a command that meets a different recorded entry at its ordinal is
 /// refused the way an ordinal-addressed engine refuses it (Restate `RT0016`).
 struct OrdinalJournaledTier {
-    inner: crate::InlineRuntimeEffectController,
+    inner: crate::NativeRuntimeEffectController,
     journal: std::sync::Mutex<Vec<JournalEntry>>,
     replaying: std::sync::atomic::AtomicBool,
     cursor: AtomicUsize,
@@ -985,7 +1006,7 @@ struct OrdinalJournaledTier {
 impl OrdinalJournaledTier {
     fn recording() -> Self {
         Self {
-            inner: crate::InlineRuntimeEffectController::default(),
+            inner: crate::NativeRuntimeEffectController::default(),
             journal: std::sync::Mutex::new(Vec::new()),
             replaying: std::sync::atomic::AtomicBool::new(false),
             cursor: AtomicUsize::new(0),
@@ -1020,14 +1041,6 @@ impl OrdinalJournaledTier {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for OrdinalJournaledTier {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        crate::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        crate::EffectJournalAddressing::OrdinalAddressed
-    }
-
     async fn await_event_key(
         &self,
         scope: &crate::ExecutionScope,
@@ -1047,6 +1060,19 @@ impl crate::AwaitEventResolver for OrdinalJournaledTier {
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for OrdinalJournaledTier {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+        Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+        Ok(crate::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: crate::RuntimeEffectEnvelope,

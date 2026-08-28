@@ -282,7 +282,7 @@ fn restate_turn_control(ingress_url: &str) {
 
     // This durable driver can live in a different web process from the turn
     // owner. It uses LashDurableWaitWorkflow—not the Restate Admin API—and
-    // survives web-process restarts. Inline TurnWorkDriver is same-process.
+    // survives web-process restarts. Native turn work is same-process.
     let driver = deployment.turn_work_driver();
     let terminal_attach = deployment.turn_attach();
     // docs:end:restate-turn-control

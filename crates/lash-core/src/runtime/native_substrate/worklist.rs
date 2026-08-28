@@ -19,7 +19,7 @@ impl DurableProcessWorker {
             // relabel it as `Busy`.
             let externally_owned = record.disposition == RecoveryContract::ExternallyOwned;
             if state.scheduled.insert(record.id.clone()) {
-                // The inline worker still queues it, because a pending Abandon
+                // The native worker still queues it, because a pending Abandon
                 // Request on such a row is reconciled there — but it reports
                 // the same typed deferral the Restate tier reports for it.
                 if externally_owned {
@@ -78,8 +78,9 @@ impl DurableProcessWorker {
         if available == 0 && state.active != 0 {
             return None;
         }
-        let limit = std::num::NonZeroUsize::new(available.clamp(1, MAX_INTAKE_PAGE))
-            .expect("the clamped intake page bound is non-zero");
+        let limit = std::num::NonZeroUsize::new(available)
+            .unwrap_or(std::num::NonZeroUsize::MIN)
+            .min(self.config.native_substrate.worker_sweep.intake_page);
         let ProcessWorklistScan::Ready(continuation) = &state.worklist_scan else {
             return None;
         };
@@ -93,16 +94,18 @@ impl DurableProcessWorker {
         limit: std::num::NonZeroUsize,
         continuation: Option<crate::ProcessWorklistCursor>,
     ) -> Result<crate::ProcessWorklistPage, PluginError> {
-        let mut retry_after = WORKLIST_FETCH_RETRY_BASE;
-        for attempt in 1..=WORKLIST_FETCH_ATTEMPTS {
+        let policy = &self.config.native_substrate.worker_sweep;
+        let mut retry_after = policy.fetch_retry_base;
+        let mut attempt = 1;
+        loop {
             match self
                 .config
-                .process_registry
+                .process_registry()
                 .list_non_terminal_page(limit, continuation.clone())
                 .await
             {
                 Ok(page) => return Ok(page),
-                Err(error) if attempt == WORKLIST_FETCH_ATTEMPTS => return Err(error),
+                Err(error) if attempt == policy.fetch_attempts.get() => return Err(error),
                 Err(error) => {
                     tracing::warn!(
                         error = %error,
@@ -111,10 +114,10 @@ impl DurableProcessWorker {
                     );
                     tokio::time::sleep(retry_after).await;
                     retry_after = retry_after.saturating_mul(2);
+                    attempt += 1;
                 }
             }
         }
-        unreachable!("the non-zero worklist retry budget returns from the loop")
     }
 
     pub(super) async fn next_process_execution(&self) -> Option<(ProcessRecord, WorkerSlotPermit)> {

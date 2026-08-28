@@ -179,7 +179,7 @@ fn standard_core_with_attachment_policy(
     attachment_source_policy: Arc<dyn lash_core::test_support::AttachmentSourcePolicy>,
 ) -> lash::LashCore {
     lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -193,7 +193,7 @@ fn standard_core_with_attachment_policy(
         .model(model())
         .tools(tools)
         .trace_sink(trace)
-        .disable_queued_work_driver()
+        .without_queued_work()
         .advanced()
         .runtime_host_config(
             lash_core::facade_support::RuntimeHostConfig::in_memory(
@@ -288,7 +288,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .build()
         .into_handle();
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -302,7 +302,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .model(model())
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
@@ -755,7 +755,7 @@ finish { baton: baton }
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -770,7 +770,7 @@ finish { baton: baton }
         .provider(provider)
         .model(model())
         .trace_sink(trace.clone())
-        .disable_queued_work_driver()
+        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",

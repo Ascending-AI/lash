@@ -373,7 +373,7 @@ impl LashRuntime {
         enqueue_turn_input_to_store(
             self.state.session_id.clone(),
             store,
-            self.host.queued_work_driver.clone(),
+            Arc::clone(self.host.queued_work()),
             input,
             ingress,
             source_key,
@@ -537,7 +537,7 @@ impl LashRuntime {
 pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     session_id: String,
     store: Arc<dyn crate::RuntimePersistence>,
-    queued_work_driver: Option<crate::QueuedWorkDriver>,
+    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     input: crate::TurnInput,
     ingress: crate::TurnInputIngress,
     source_key: Option<String>,
@@ -554,8 +554,11 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         .enqueue_pending_turn_input(draft)
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?;
-    if is_next_turn && let Some(driver) = queued_work_driver.as_ref() {
-        driver.notify_pending_work(Some(&enqueued.session_id), "queued_turn_input");
+    if is_next_turn {
+        queued_work.notify_session_work(
+            crate::SessionWorkTarget::Session(enqueued.session_id.clone()),
+            "queued_turn_input",
+        );
     }
     Ok(enqueued)
 }
@@ -761,8 +764,11 @@ impl LashRuntime {
                     .release_if_live()
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-            } else if let Some(driver) = self.host.queued_work_driver.as_ref() {
-                driver.notify_pending_work(Some(&handle.receipt.session_id), "config_settlement");
+            } else {
+                self.host.queued_work().notify_session_work(
+                    crate::SessionWorkTarget::Session(handle.receipt.session_id.clone()),
+                    "config_settlement",
+                );
             }
             let remaining = settlement_timeout.saturating_sub(
                 self.host
@@ -791,19 +797,27 @@ impl LashRuntime {
             AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
             AcceptedSessionCommand::Queued(handle) => handle.receipt,
         };
-        if let Some(driver) = self.host.queued_work_driver.as_ref() {
-            driver
-                .claim_and_run_pending(Some(&receipt.session_id), "session_command")
-                .await
-                .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?;
-            // An inline or external driver may have committed the command
-            // before returning. Reconcile that authoritative head before this
-            // resident runtime reaches another commit boundary; its lease is
-            // advisory, so retaining the pre-drive head would manufacture a
-            // stale CAS conflict on close.
-            self.refresh_session_graph_from_store()
-                .await
-                .map_err(runtime_error_from_session_command_refresh)?;
+        let outcome = self
+            .host
+            .queued_work()
+            .drain_session_work(
+                crate::SessionWorkTarget::Session(receipt.session_id.clone()),
+                "session_command",
+            )
+            .await
+            .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?;
+        match outcome {
+            crate::SessionDrainOutcome::Ran => {
+                // A native or external driver may have committed the command
+                // before returning. Reconcile that authoritative head before this
+                // resident runtime reaches another commit boundary; its lease is
+                // advisory, so retaining the pre-drive head would manufacture a
+                // stale CAS conflict on close.
+                self.refresh_session_graph_from_store()
+                    .await
+                    .map_err(runtime_error_from_session_command_refresh)?;
+            }
+            crate::SessionDrainOutcome::Deferred => {}
         }
         Ok(receipt)
     }

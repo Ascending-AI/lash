@@ -47,6 +47,7 @@ async fn service_core(
         artifact_store,
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -60,7 +61,7 @@ async fn service_core(
         )
         .store_factory(store_factory)
         .effect_host(std::sync::Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),

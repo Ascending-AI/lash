@@ -37,6 +37,7 @@ chrono = { workspace = true }
 http = "1"
 http-body = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
+reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 lash = { package = "lash-runtime", path = "../lash", features = ["testing"] }
 lash-core = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }

@@ -8,7 +8,7 @@
 //! `close_effect_group`) still inherited their fail-closed defaults, so no
 //! production group row was ever written and no child ever carried a
 //! `group_key`. This module is that host, written once over
-//! [`EffectReplayPersistence`] so both stores delegate to it exactly as they
+//! [`EffectReplayRowStore`] so both stores delegate to it exactly as they
 //! already delegate `execute_effect`.
 //!
 //! # What is durable and what is process-local
@@ -29,8 +29,8 @@
 //!
 //! # Three mechanisms, matching the in-memory reference host
 //!
-//! The inline controller
-//! ([`InlineRuntimeEffectController`](crate::InlineRuntimeEffectController)) is
+//! The native controller
+//! ([`NativeRuntimeEffectController`](crate::NativeRuntimeEffectController)) is
 //! the conformance definition of the contract's observable semantics, so this
 //! host is written to agree with it mechanism for mechanism:
 //!
@@ -38,7 +38,7 @@
 //!   losers, because `RunToCompletion` says a losing promise keeps running.
 //! * **The rank is allocated at settlement by a single allocator.** Here that is
 //!   layer 1's single-row counter bump inside the child's own finalize
-//!   transaction (N1) rather than the inline tier's per-group lock, which is the
+//!   transaction (N1) rather than the native substrate's per-group lock, which is the
 //!   same discipline against the same defect.
 //! * **A settlement is served from the record, never re-raced.** Rank
 //!   `consumed + 1` is a `SELECT`; once decided it re-reads the same child,
@@ -48,7 +48,7 @@
 //!
 //! It is not the drain. That shipped beside it as
 //! [`group_drain`](crate::runtime::effect::group_drain) (FIG-1536), reading this
-//! layer's [`EffectReplayPersistence::read_unsettled_group_children`] and
+//! layer's [`EffectReplayRowStore::read_unsettled_group_children`] and
 //! executing what it finds through host-supplied executors — the reclamation
 //! this layer's leak note below promises.
 //!
@@ -225,8 +225,8 @@ impl DurableEffectGroups {
     }
 }
 
-impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
-    EffectReplayDriver<P, A>
+impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
+    StoreEffectReplayDriver<P, A>
 {
     /// Open — or reopen — a durable effect group, dispatching one host-owned
     /// task per child.
@@ -241,7 +241,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     ///
     /// A reopen dispatches its children again on purpose, and that is safe for
     /// exactly the reason the journal exists: each child goes through
-    /// [`execute_effect`](EffectReplayDriver::execute_effect), so a child whose
+    /// [`execute_effect`](StoreEffectReplayDriver::execute_effect), so a child whose
     /// terminal is already recorded replays it, a child under another process's
     /// live lease waits and then replays it, and only a child with an expired
     /// lease or no row at all is executed. A reopen *inside this process* skips
@@ -324,7 +324,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
             journal_identity.session_id().map(str::to_string),
             self.clock.timestamp_ms(),
         );
-        let persisted = self.persistence.open_group(&record).await?;
+        let persisted = self.row_store.open_group(&record).await?;
         fence_reopen(&record, &persisted)?;
         let Some((replay_keys, executors)) = prepared else {
             // Already running here. The durable fence above has judged the
@@ -407,7 +407,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
             return Ok(resolved);
         };
         if self
-            .persistence
+            .row_store
             .read_group(group.group_key())
             .await?
             .is_some()
@@ -481,7 +481,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// the group is both closed and complete.
     ///
     /// Retention is bounded by close **and** completion, for the same reason it
-    /// is on the inline tier: a `RunToCompletion` loser keeps settling after the
+    /// is on the native substrate: a `RunToCompletion` loser keeps settling after the
     /// caller is gone, and its settlement is exactly what this state is here to
     /// let a caller read. Completion is two claims, not one: this process's own
     /// child tasks must have returned, *and* the journal must hold no unsettled
@@ -513,7 +513,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
             return;
         }
         if self
-            .persistence
+            .row_store
             .read_unsettled_group_children(group_key)
             .await
             .is_ok_and(|unsettled| unsettled.is_empty())
@@ -565,7 +565,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
             }
             let rank = handle.consumed() + 1;
             if let Some(stored) = self
-                .persistence
+                .row_store
                 .read_group_settlement(handle.group_key(), rank)
                 .await?
             {

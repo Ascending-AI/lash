@@ -1,6 +1,6 @@
 //! Public in-memory `RuntimePersistence` + `SessionStoreFactory`.
 //!
-//! Explicitly-wired ephemeral storage for inline-tier hosts that run background
+//! Explicitly-wired ephemeral storage for native-substrate hosts that run background
 //! processes without durable backing: a `process` started in a turn (or by a
 //! trigger) is executed by the lease-protected worker, which rebuilds its
 //! session from the store factory — so even an in-memory host needs a factory.

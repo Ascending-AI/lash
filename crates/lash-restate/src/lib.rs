@@ -78,6 +78,7 @@
 
 mod controller;
 mod durable_wait;
+mod effect_group;
 mod effect_host;
 mod ingress;
 mod process;
@@ -95,6 +96,22 @@ pub use durable_wait::{
     RestateDurableWaitClassification, RestateDurableWaitIndexRequest,
     RestateDurableWaitRegistration, RestateDurableWaitResolveRequest, RestateDurableWaitScope,
     RestateDurableWaitSettleRequest, ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
+};
+pub use effect_group::{
+    EffectGroupAdmissionRequest, EffectGroupAdmissionResponse, EffectGroupAdoptRequest,
+    EffectGroupCleanup, EffectGroupCleanupFacts, EffectGroupCloseDisposition,
+    EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupDispatch,
+    EffectGroupDispatchRequest, EffectGroupDispatchState, EffectGroupFinishRetirementResponse,
+    EffectGroupIndex, EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayload,
+    EffectGroupPayloadGetResponse, EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
+    EffectGroupPhase, EffectGroupProbeAdoptResponse, EffectGroupProbeResponse,
+    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
+    EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
+    EffectGroupRecordSettlementResponse, EffectGroupRefusal, EffectGroupRefusalRequest,
+    EffectGroupRegisterRefusalResponse, EffectGroupRegisterRequest, EffectGroupRegisterResponse,
+    EffectGroupRetireResponse, EffectGroupRetirementCancelResponse, EffectGroupSettlementRecord,
+    EffectGroupSettlementTerminal, EffectGroupShape, EffectGroupWaitResolution,
+    RestateEffectGroupRetryPolicy, RestateEffectGroupServices, RestateEffectGroupWaitServices,
 };
 pub use effect_host::RestateEffectHost;
 pub use ingress::{

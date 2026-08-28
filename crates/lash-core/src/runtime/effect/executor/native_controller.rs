@@ -1,9 +1,9 @@
 //! The in-memory reference host for the durable effect-group contract, and the
-//! inline controller it hangs off (FIG-1416, ADR 0065).
+//! native controller it hangs off (FIG-1416, ADR 0065).
 //!
-//! `InlineRuntimeEffectController` stores no journal entries: its
-//! `replay_ownership` is `Runtime`, lash re-executes the local path on every
-//! attempt, and its only other state is an in-memory await-event registry. So
+//! `NativeRuntimeEffectController` stores no journal entries: lash re-executes
+//! the local path on every attempt, and its only other state is an in-memory
+//! await-event registry. So
 //! this tier cannot and does not provide cross-process settlement durability —
 //! the SQL stores own that half. What it *is* is the conformance definition of
 //! the contract's **observable semantics**: wake behaviour, settlement order by
@@ -49,8 +49,8 @@ use super::super::group::{
 };
 use super::super::group_drain::GroupExecutors;
 use super::control::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
-    ResolveOutcome, RuntimeEffectController,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
+    ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
 };
 use super::{
     RuntimeAwaitEventOptions, RuntimeEffectControllerError, RuntimeEffectLocalExecutor, task_panic,
@@ -63,7 +63,7 @@ use crate::{PluginError, ProcessRecord, RuntimeError, RuntimeErrorCode};
 
 /// Default in-process effect controller.
 ///
-/// The inline controller executes local runners in process and provides
+/// The native controller executes local runners in process and provides
 /// in-memory await-event resolution. It does not make in-flight effects crash
 /// durable; workflow adapters provide that by recording outcomes in history.
 ///
@@ -71,29 +71,42 @@ use crate::{PluginError, ProcessRecord, RuntimeError, RuntimeErrorCode};
 /// contract's observable semantics — see the module docs for what that does and
 /// does not claim.
 #[derive(Clone)]
-pub struct InlineRuntimeEffectController {
+pub struct NativeRuntimeEffectController {
     await_events: Arc<AwaitEventRegistry>,
     /// Group state lives beside the await-event registry rather than in a
     /// session store: a group host is an implementation *of* the effect-host
-    /// contract, and the inline tier's contract is in-memory.
-    groups: Arc<InlineEffectGroups>,
-    allow_process_lifetime_completion_keys: bool,
+    /// contract, and the native substrate's contract is in-memory.
+    groups: Arc<NativeEffectGroups>,
+    process_lifetime_completion_keys_enabled: bool,
 }
 
-impl Default for InlineRuntimeEffectController {
+impl Default for NativeRuntimeEffectController {
     fn default() -> Self {
         Self {
             await_events: Arc::new(AwaitEventRegistry::new()),
-            groups: Arc::new(InlineEffectGroups::default()),
-            allow_process_lifetime_completion_keys: false,
+            groups: Arc::new(NativeEffectGroups::default()),
+            process_lifetime_completion_keys_enabled: false,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl AwaitEventResolver for InlineRuntimeEffectController {
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.allow_process_lifetime_completion_keys
+impl AwaitEventResolver for NativeRuntimeEffectController {
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(CompletionKeyPreparation::NotNeeded);
+        }
+        if !self.process_lifetime_completion_keys_enabled {
+            return Ok(CompletionKeyPreparation::Unsupported);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -140,7 +153,7 @@ impl AwaitEventResolver for InlineRuntimeEffectController {
 }
 
 #[async_trait::async_trait]
-impl RuntimeEffectController for InlineRuntimeEffectController {
+impl RuntimeEffectController for NativeRuntimeEffectController {
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -195,7 +208,7 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
 
     /// `true` exactly when a [`GroupExecutors`] resolver has been registered
     /// with [`register_group_executors`](Self::register_group_executors): the
-    /// inline tier implements every observable semantic of the contract, and the
+    /// native substrate implements every observable semantic of the contract, and the
     /// resolver is where the `'static` executors the flag's other half requires
     /// come from, so a child can outlive its caller.
     ///
@@ -207,10 +220,9 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
     /// a registered controller is a different fact and keeps its own typed
     /// routing refusal.
     ///
-    /// The flag is not a durability claim and must not be read as one — that
-    /// stays `replay_ownership`. What it asserts is that a group opened here runs
-    /// its children durably *for the life of the runtime* and reports settlement
-    /// order as a fact rather than re-racing it.
+    /// The flag is not a durability claim. It asserts that a group opened here
+    /// runs its children durably *for the life of the runtime* and reports
+    /// settlement order as a fact rather than re-racing it.
     fn supports_effect_groups(&self) -> bool {
         self.groups.executors.get().is_some()
     }
@@ -227,7 +239,7 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let executors = self.groups.registered_executors()?;
-        InlineEffectGroups::open(&self.groups, &executors, group)
+        NativeEffectGroups::open(&self.groups, &executors, group)
     }
 
     async fn await_next_settlement(
@@ -236,7 +248,7 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
         cancel: CancellationToken,
     ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
         self.groups.registered_executors()?;
-        InlineEffectGroups::await_next_settlement(&self.groups, handle, cancel).await
+        NativeEffectGroups::await_next_settlement(&self.groups, handle, cancel).await
     }
 
     async fn close_effect_group(
@@ -245,11 +257,11 @@ impl RuntimeEffectController for InlineRuntimeEffectController {
         disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.groups.registered_executors()?;
-        InlineEffectGroups::close(&self.groups, &handle, disposition)
+        NativeEffectGroups::close(&self.groups, &handle, disposition)
     }
 }
 
-impl InlineRuntimeEffectController {
+impl NativeRuntimeEffectController {
     /// Register the resolver that says what code runs a grouped child, once.
     ///
     /// Until this is called the controller answers
@@ -271,14 +283,14 @@ impl InlineRuntimeEffectController {
     /// Opt into externally routable keys that remain valid only while this
     /// controller's process and owned registry remain alive.
     pub fn allow_process_lifetime_completion_keys(mut self) -> Self {
-        self.allow_process_lifetime_completion_keys = true;
+        self.process_lifetime_completion_keys_enabled = true;
         self
     }
     /// Register the process and its initial observer edges into the durable registry.
     ///
-    /// The inline controller no longer runs the process here: the registry's
+    /// The native controller no longer runs the process here: the registry's
     /// non-terminal row *is* the durable work queue, and the host-owned
-    /// [`ProcessWorkDriver`](crate::ProcessWorkDriver) is the sole executor.
+    /// [`ProcessWorkSubstrate`](crate::ProcessWorkSubstrate) is the sole executor.
     /// Registering the row is all this path does; the control seam drives the
     /// host driver after a successful start.
     pub(crate) async fn start_process(
@@ -298,7 +310,7 @@ impl InlineRuntimeEffectController {
         replay: Option<crate::RuntimeReplay>,
     ) -> Result<ProcessRecord, PluginError> {
         // Cancellation is a durable signal: the cancel event is what the
-        // runner-run process observes, so the inline controller appends it and
+        // runner-run process observes, so the native controller appends it and
         // no longer tracks an in-process cancellation token.
         let mut request =
             crate::ProcessEventAppendRequest::cancel_requested(process_id, reason.clone());
@@ -314,7 +326,7 @@ impl InlineRuntimeEffectController {
 }
 
 #[cfg(test)]
-impl InlineRuntimeEffectController {
+impl NativeRuntimeEffectController {
     /// The settlement record of one group, for the conformance tests that read
     /// what a durable tier would read out of its journal.
     pub(crate) fn recorded_group_settlements(&self, group_key: &str) -> Vec<RecordedSettlement> {
@@ -322,9 +334,9 @@ impl InlineRuntimeEffectController {
     }
 }
 
-impl std::fmt::Debug for InlineRuntimeEffectController {
+impl std::fmt::Debug for NativeRuntimeEffectController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InlineRuntimeEffectController").finish()
+        f.debug_struct("NativeRuntimeEffectController").finish()
     }
 }
 
@@ -344,8 +356,8 @@ type RecordedSettlement = (usize, u64, bool);
 /// group row whose single-row counter bump ADR 0065 makes normative, and siblings
 /// of *different* groups have no reason to contend.
 #[derive(Default)]
-pub(crate) struct InlineEffectGroups {
-    open: std::sync::RwLock<HashMap<String, Arc<InlineEffectGroup>>>,
+pub(crate) struct NativeEffectGroups {
+    open: std::sync::RwLock<HashMap<String, Arc<NativeEffectGroup>>>,
     /// This tier's one answer to "what code runs a grouped child", registered by
     /// the host that owns the runners. Absent until then, which is the same
     /// thing as this controller not supporting effect groups.
@@ -360,7 +372,7 @@ pub(crate) struct InlineEffectGroups {
 
 /// One open group: its shape, its settlement record, and the wake that tells
 /// blocked callers a new rank exists.
-struct InlineEffectGroup {
+struct NativeEffectGroup {
     children: usize,
     /// Held for reopen fencing only. The host deliberately does **not** branch on
     /// the wake rule: `await_next_settlement` serves rank `consumed + 1`
@@ -377,11 +389,11 @@ struct InlineEffectGroup {
     /// select on their own child token, so cancelling the group cancels exactly
     /// the children that have not settled.
     cancel: CancellationToken,
-    state: Mutex<InlineEffectGroupState>,
+    state: Mutex<NativeEffectGroupState>,
     settled: Notify,
 }
 
-struct InlineEffectGroupState {
+struct NativeEffectGroupState {
     /// The allocation point. Bumped once per child, under this lock, at the
     /// moment that child settles — never computed as a max over siblings, which
     /// is the read-then-max shape ADR 0065 rejects because two siblings settling
@@ -390,19 +402,19 @@ struct InlineEffectGroupState {
     /// Settled children in rank order. Allocating and appending under one lock
     /// makes append order sequence order, so rank *n* is `order[n - 1]` and the
     /// rank read is an index rather than a sort.
-    order: Vec<InlineSettlement>,
+    order: Vec<NativeSettlement>,
     /// The disposition in force, which a close may narrow but never widen.
     effective: LoserPolicy,
     closed: bool,
 }
 
-struct InlineSettlement {
+struct NativeSettlement {
     position: usize,
     sequence: u64,
     outcome: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
 }
 
-impl InlineSettlement {
+impl NativeSettlement {
     fn settlement(&self) -> GroupSettlement {
         GroupSettlement {
             position: self.position,
@@ -412,14 +424,14 @@ impl InlineSettlement {
     }
 }
 
-impl InlineEffectGroup {
+impl NativeEffectGroup {
     fn new(group: &RuntimeEffectGroup) -> Self {
         Self {
             children: group.children().len(),
             wake: group.wake(),
             declared: group.loser_disposition(),
             cancel: CancellationToken::new(),
-            state: Mutex::new(InlineEffectGroupState {
+            state: Mutex::new(NativeEffectGroupState {
                 next_sequence: 0,
                 order: Vec::new(),
                 effective: group.loser_disposition(),
@@ -435,7 +447,7 @@ impl InlineEffectGroup {
     /// A shrunk child vec under one key silently renumbers every rank above the
     /// truncation, and a changed wake rule or disposition is a changed journaled
     /// identity — neither of which the per-child envelope-hash fence can see
-    /// from inside this process, because the inline tier records no envelopes.
+    /// from inside this process, because the native substrate records no envelopes.
     fn fence_reopen(&self, group: &RuntimeEffectGroup) -> Result<(), RuntimeEffectControllerError> {
         if self.children != group.children().len() {
             return Err(group_shape_error(format!(
@@ -472,7 +484,7 @@ impl InlineEffectGroup {
     }
 }
 
-impl InlineEffectGroups {
+impl NativeEffectGroups {
     /// Registers this tier's envelope→executor resolver, once.
     ///
     /// [`OnceLock::set`] is the arbiter rather than a preceding `get`: a
@@ -497,7 +509,7 @@ impl InlineEffectGroups {
             Ok(())
         } else {
             Err(group_shape_error(
-                "this inline effect controller already has a different \
+                "this native effect controller already has a different \
                  registered group executor resolver; one host has one answer \
                  to what runs a grouped child",
             ))
@@ -518,7 +530,7 @@ impl InlineEffectGroups {
         self.executors.get().cloned().ok_or_else(|| {
             RuntimeEffectControllerError::new(
                 RuntimeErrorCode::EffectGroupUnsupported,
-                "this inline effect controller has no registered group executor \
+                "this native effect controller has no registered group executor \
                  resolver, so it does not implement durable effect groups; \
                  register one with register_group_executors at wiring time",
             )
@@ -588,7 +600,7 @@ impl InlineEffectGroups {
                 existing.fence_reopen(&group)?;
                 return Ok(handle);
             }
-            let state = Arc::new(InlineEffectGroup::new(&group));
+            let state = Arc::new(NativeEffectGroup::new(&group));
             open.insert(group.group_key().to_string(), Arc::clone(&state));
             state
         };
@@ -604,7 +616,7 @@ impl InlineEffectGroups {
     /// exactly what `RunToCompletion` says must not happen.
     fn dispatch(
         groups: &Arc<Self>,
-        state: &Arc<InlineEffectGroup>,
+        state: &Arc<NativeEffectGroup>,
         group: RuntimeEffectGroup,
         executors: Vec<RuntimeEffectLocalExecutor<'static>>,
     ) {
@@ -635,7 +647,7 @@ impl InlineEffectGroups {
     fn record(
         groups: &Arc<Self>,
         group_key: &str,
-        state: &Arc<InlineEffectGroup>,
+        state: &Arc<NativeEffectGroup>,
         position: usize,
         outcome: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
     ) {
@@ -650,7 +662,7 @@ impl InlineEffectGroups {
             }
             inner.next_sequence += 1;
             let sequence = inner.next_sequence;
-            inner.order.push(InlineSettlement {
+            inner.order.push(NativeSettlement {
                 position,
                 sequence,
                 outcome,
@@ -690,7 +702,7 @@ impl InlineEffectGroups {
                 inner
                     .order
                     .get(handle.consumed())
-                    .map(InlineSettlement::settlement)
+                    .map(NativeSettlement::settlement)
             };
             if let Some(settlement) = recorded {
                 // The cursor advances on exactly the settlement returned, so an
@@ -757,7 +769,7 @@ impl InlineEffectGroups {
                     }
                     inner.next_sequence += 1;
                     let sequence = inner.next_sequence;
-                    inner.order.push(InlineSettlement {
+                    inner.order.push(NativeSettlement {
                         position,
                         sequence,
                         outcome: Err(child_cancelled_error(handle.group_key(), position)),
@@ -776,14 +788,14 @@ impl InlineEffectGroups {
         Ok(())
     }
 
-    fn get(&self, group_key: &str) -> Option<Arc<InlineEffectGroup>> {
+    fn get(&self, group_key: &str) -> Option<Arc<NativeEffectGroup>> {
         self.open.read_recover().get(group_key).cloned()
     }
 
     fn lookup(
         &self,
         group_key: &str,
-    ) -> Result<Arc<InlineEffectGroup>, RuntimeEffectControllerError> {
+    ) -> Result<Arc<NativeEffectGroup>, RuntimeEffectControllerError> {
         self.get(group_key)
             .ok_or_else(|| closed_group_error(group_key))
     }
@@ -797,12 +809,12 @@ impl InlineEffectGroups {
     /// So retention is bounded by close **and** completion, and a caller that
     /// drops its handle without ever closing leaves its group resident for the
     /// life of the controller — an unbounded key-space growth this tier does not
-    /// defend against. That is survivable here and only here: the inline
+    /// defend against. That is survivable here and only here: the native
     /// controller is process-scoped and journals nothing, so the residue dies
     /// with the process rather than accumulating in a store. Closing is the
     /// caller's obligation under the contract; dropping a handle is not a
     /// supported way to end a group.
-    fn reap(&self, group_key: &str, state: &Arc<InlineEffectGroup>) {
+    fn reap(&self, group_key: &str, state: &Arc<NativeEffectGroup>) {
         let mut open = self.open.write_recover();
         if open
             .get(group_key)
@@ -840,7 +852,7 @@ impl InlineEffectGroups {
     }
 
     #[cfg(test)]
-    fn snapshot(inner: &InlineEffectGroupState) -> Vec<RecordedSettlement> {
+    fn snapshot(inner: &NativeEffectGroupState) -> Vec<RecordedSettlement> {
         inner
             .order
             .iter()

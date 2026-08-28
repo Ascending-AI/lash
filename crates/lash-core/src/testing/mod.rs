@@ -25,6 +25,33 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+/// Construct opaque queued-lane holder evidence for cross-crate seam tests.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn queued_lane_holder_for_testing(expires_at_epoch_ms: u64) -> crate::QueuedLaneHolder {
+    crate::QueuedLaneHolder::new(crate::store::SessionExecutionLease {
+        session_id: "queued-lane-test".to_string(),
+        owner: crate::LeaseOwnerIdentity::opaque("holder", "holder:incarnation"),
+        executor_id: "holder-executor".to_string(),
+        lease_token: "holder-token".to_string(),
+        fencing_token: 7,
+        claimed_at_epoch_ms: 1_000,
+        lease_term_ms: 6_400,
+        expires_at_epoch_ms,
+    })
+}
+
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn process_work_wiring_for_registry(
+    registry: Arc<dyn crate::ProcessRegistry>,
+) -> crate::ProcessWorkWiring {
+    let watched = crate::facade_support::watch_process_registry(registry);
+    let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+        watched.registry(),
+    )));
+    crate::ProcessWorkWiring::new(watched, port)
+}
+
 use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent};
 use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};
@@ -598,7 +625,7 @@ pub fn code_execution_context_with_trigger_store(
     trigger_store: Arc<dyn crate::TriggerStore>,
 ) -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new()
-        .trigger_router(Some(crate::TriggerRouter::new(trigger_store, None, None)))
+        .trigger_router(Some(test_trigger_router(trigger_store)))
         .build()
         .into_runtime()
 }
@@ -610,10 +637,16 @@ pub fn code_execution_context_with_trigger_store_and_effect_controller(
     effect_controller: Arc<dyn crate::RuntimeEffectController>,
 ) -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new()
-        .trigger_router(Some(crate::TriggerRouter::new(trigger_store, None, None)))
+        .trigger_router(Some(test_trigger_router(trigger_store)))
         .shared_effect_controller(effect_controller)
         .build()
         .into_runtime()
+}
+
+fn test_trigger_router(trigger_store: Arc<dyn crate::TriggerStore>) -> crate::TriggerRouter {
+    let registry: Arc<dyn crate::ProcessRegistry> =
+        Arc::new(crate::TestLocalProcessRegistry::default());
+    crate::TriggerRouter::new(trigger_store, process_work_wiring_for_registry(registry))
 }
 
 /// Builds the production-shaped `ToolContext` installed while a controller-owned
@@ -833,13 +866,17 @@ impl EffectBackedProcessService {
             scope.effect_controller.scoped().execution_scope().clone(),
         )
         .map_err(crate::RuntimeEffectControllerError::from)?;
-        let local_executor =
-            crate::RuntimeEffectLocalExecutor::processes(Arc::clone(&self.registry), None)
-                .with_process_effect_controller(
-                    proxy
-                        .owned_controller()
-                        .expect("effect-task proxy owns its controller"),
-                );
+        let local_executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&self.registry),
+            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                &self.registry,
+            ))),
+        )
+        .with_process_effect_controller(
+            proxy
+                .owned_controller()
+                .expect("effect-task proxy owns its controller"),
+        );
         let outcome = crate::runtime::effect::drive_effect_controller_task(
             controller,
             crate::RuntimeEffectEnvelope::new(
@@ -1430,7 +1467,7 @@ impl crate::ProcessService for MockSessionManager {
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, PluginError> {
         let registry: Arc<dyn crate::ProcessRegistry> = self.process_registry.clone();
-        crate::ProcessAwaiter::polling(registry)
+        crate::NativeProcessWork::for_registry(registry)
             .await_terminal(process_id)
             .await
     }
@@ -1483,7 +1520,7 @@ impl crate::ProcessService for MockSessionManager {
         process_id: &str,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
-        crate::InlineRuntimeEffectController::request_process_cancel(
+        crate::NativeRuntimeEffectController::request_process_cancel(
             self.process_registry.clone(),
             process_id,
             Some("requested by test".to_string()),
@@ -1499,7 +1536,7 @@ impl crate::ProcessService for MockSessionManager {
         reason: Option<String>,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
-        crate::InlineRuntimeEffectController::request_process_cancel(
+        crate::NativeRuntimeEffectController::request_process_cancel(
             self.process_registry.clone(),
             process_id,
             reason,

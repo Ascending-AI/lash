@@ -1423,8 +1423,8 @@ derive_mutation_jobs() {{
             # Durable-wait session-cancel evidence: the inline effect-host
             # conformance test that exercises
             # effect_host_await_event_session_cancel_resolves_outstanding_waits.
-            'step "Inline effect-host await-event session-cancel conformance"',
-            "run_cargo_tests -p lash-internal-core --locked inline_effect_host_satisfies_conformance",
+            'step "Native effect-host await-event session-cancel conformance"',
+            "run_cargo_tests -p lash-internal-core --locked native_effect_host_satisfies_conformance",
         ]
         for snippet in required_snippets:
             self.assertIn(snippet, gate)

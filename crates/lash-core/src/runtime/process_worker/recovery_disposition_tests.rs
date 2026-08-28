@@ -84,7 +84,7 @@ async fn drain_reports_superseded_terminal_as_peer_settled() {
         })
         .await;
 
-    let report = inline_worker(registry.clone(), owner)
+    let report = native_worker(registry.clone(), owner)
         .drain_owner_bound_work()
         .await
         .expect("owner drain");
@@ -127,7 +127,7 @@ async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
         })
         .await;
 
-    let report = inline_worker(registry.clone(), owner)
+    let report = native_worker(registry.clone(), owner)
         .drain_owner_bound_work()
         .await
         .expect("owner drain");
@@ -160,7 +160,7 @@ async fn drain_reports_already_terminal_completed_as_peer_settled() {
     let peer = peer_completed_record(seed_started_owner_bound(&registry, process_id, &owner).await);
     registry.set_process_read_override(peer).await;
 
-    let report = inline_worker(registry, owner)
+    let report = native_worker(registry, owner)
         .drain_owner_bound_work()
         .await
         .expect("owner drain");
@@ -189,7 +189,7 @@ async fn drain_reports_renewal_supersession_as_lease_lost() {
         }))
         .await;
 
-    let worker = inline_worker(registry, owner);
+    let worker = native_worker(registry, owner);
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -224,7 +224,7 @@ async fn drain_reports_terminal_write_supersession_as_lease_lost() {
         }))
         .await;
 
-    let worker = inline_worker(registry, owner);
+    let worker = native_worker(registry, owner);
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -260,7 +260,7 @@ async fn drain_release_failure_overrides_absent_disposition() {
         )))
         .await;
 
-    let worker = inline_worker(registry, owner);
+    let worker = native_worker(registry, owner);
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -284,7 +284,7 @@ async fn drain_release_failure_overrides_absent_disposition() {
 
 #[tokio::test]
 async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let started = Arc::new(tokio::sync::Notify::new());
     let fail = Arc::new(tokio::sync::Notify::new());
     let (worker, registry, _, env_ref, test_registry) = worker_with_engine_and_registry(
@@ -327,7 +327,7 @@ async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
 
 #[tokio::test]
 async fn recovered_live_renewal_uses_backend_error_telemetry() {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let started = Arc::new(tokio::sync::Notify::new());
     let fail = Arc::new(tokio::sync::Notify::new());
     let timings = crate::LeaseTimings::new(Duration::from_millis(30), Duration::from_millis(10))

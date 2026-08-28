@@ -909,6 +909,7 @@ finish "done through route"
             ),
         );
         let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("mock-model")
@@ -920,7 +921,7 @@ finish "done through route"
                 data_dir.join("lash-sessions"),
             )))
             .effect_host(Arc::new(
-                lash::durability::InlineEffectHost::default()
+                lash::durability::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

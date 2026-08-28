@@ -97,10 +97,11 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
 )
 .with_projection_resolver(registry.clone());
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .without_queued_work()
     .provider(provider)
     .model(model)
     .plugins(runtime_plugin_stack())
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
     .process_env_store(Arc::new(
         lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -151,6 +152,7 @@ let template = PromptTemplate::new(vec![
 ]);
 
 let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    .without_queued_work()
     .provider(provider)
     .model(
         lash::ModelSpec::builder("gpt-5.4")
@@ -158,7 +160,7 @@ let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .build()
             .expect("valid model metadata"),
     )
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
     .process_env_store(Arc::new(
         lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -327,6 +329,7 @@ impl ToneTurnExt for lash::TurnBuilder {
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .without_queued_work()
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())
@@ -335,7 +338,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .expect("valid model metadata"),
     )
     .effect_host(std::sync::Arc::new(
-        lash::durability::InlineEffectHost::default(),
+        lash::durability::NativeEffectHost::default(),
     ))
     .attachment_store(std::sync::Arc::new(
         lash::persistence::InMemoryAttachmentStore::new(),

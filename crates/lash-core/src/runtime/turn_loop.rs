@@ -3,7 +3,6 @@ use super::logical_turn::agent_frame_follow_turn_id;
 use super::logical_turn::{
     LogicalTurnClaims, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
 };
-use super::session_execution_lease::queued_lane_wait;
 use super::turn_control::ActiveTurnControl;
 use super::*;
 use crate::facade_support::{
@@ -354,21 +353,13 @@ fn scoped_child_turn_controller<'run>(
     scoped_effect_controller.rescope(scope)
 }
 
-/// Select the resolver that owns turn-control promises for this deployment.
-///
-/// Runtime-owned promise identity is instance-owned, so every control operation
-/// must use the configured host that [`TurnWorkDriver`] addresses. Controllers
-/// that own replay use the run-scoped controller so control reads and writes
-/// remain replay-aware while the deployment host supplies the live watch.
-fn turn_control_resolver<'a>(
+async fn turn_control_binding<'a>(
     effect_host: &'a dyn EffectHost,
     scoped_effect_controller: &'a ScopedEffectController<'_>,
-) -> &'a dyn AwaitEventResolver {
-    if effect_host.replay_ownership() == crate::EffectReplayOwnership::Runtime {
-        effect_host
-    } else {
-        scoped_effect_controller.controller()
-    }
+) -> Result<crate::TurnControlBinding<'a>, RuntimeError> {
+    effect_host
+        .turn_control_binding(scoped_effect_controller)
+        .await
 }
 
 pub(in crate::runtime) fn queued_work_trace_payload(
@@ -744,6 +735,43 @@ impl Drop for TurnDriverSessionLoan<'_, '_> {
     }
 }
 
+struct SessionExecutionLaneProbe {
+    store: Arc<dyn crate::store::RuntimePersistence>,
+    session_id: String,
+    owner: crate::LeaseOwnerIdentity,
+    executor_id: String,
+    timings: crate::LeaseTimings,
+    clock: Arc<dyn crate::Clock>,
+}
+
+#[async_trait::async_trait]
+impl crate::QueuedLaneProbe for SessionExecutionLaneProbe {
+    async fn try_acquire(&self) -> Result<crate::QueuedLaneAttempt, RuntimeError> {
+        match SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
+            Arc::clone(&self.store),
+            &self.session_id,
+            &self.owner,
+            &self.executor_id,
+            self.timings,
+            Arc::clone(&self.clock),
+        )
+        .await
+        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
+        {
+            SessionExecutionLeaseGuardAcquisition::Acquired(guard) => Ok(
+                crate::QueuedLaneAttempt::Acquired(crate::QueuedLaneGuard::new(guard)),
+            ),
+            SessionExecutionLeaseGuardAcquisition::Busy(holder) => Ok(
+                crate::QueuedLaneAttempt::Busy(crate::QueuedLaneHolder::new(holder)),
+            ),
+        }
+    }
+
+    async fn pause(&self, slice: std::time::Duration) {
+        self.clock.sleep(slice).await;
+    }
+}
+
 impl LashRuntime {
     pub(super) fn invalidate_resident_session_state(&mut self) {
         if matches!(self.resident_session_state, ResidentSessionState::Valid) {
@@ -1040,7 +1068,7 @@ impl LashRuntime {
     /// Ordinary controllers retain the public one-shot drain contract: Busy is
     /// reported as `None` and the durable row stays pending. A durable workflow
     /// controller instead applies the aliveness-aware policy in
-    /// [`queued_lane_wait`](super::session_execution_lease::queued_lane_wait):
+    /// [`lane_wait`](super::native_substrate::lane_wait):
     /// wait out a crashed-looking holder's TTL and retry, but report the typed
     /// retryable [`RuntimeErrorCode::SessionExecutionLaneBusy`] the moment the
     /// holder proves it is alive or the wait budget elapses, so the engine's
@@ -1048,11 +1076,10 @@ impl LashRuntime {
     /// attempt. Either way the foreign executor's lease authority is never
     /// bypassed or forged.
     ///
-    /// The gate is the controller's own
-    /// [`durable_workflow_controller`](crate::AwaitEventResolver::durable_workflow_controller)
-    /// capability rather than [`crate::EffectReplayOwnership::Controller`]:
-    /// store-backed durable effect hosts also own effect replay while having no
-    /// engine-side retry policy, so they keep the ordinary one-shot contract.
+    /// The controller's [`acquire_queued_lane`](crate::AwaitEventResolver::acquire_queued_lane)
+    /// operation owns that distinction: store-backed durable effect hosts keep
+    /// the one-shot default, while an engine-re-driven handler overrides with
+    /// the provided aliveness-aware wait.
     async fn claim_session_execution_lease_for_queued_work(
         &mut self,
         opts: &TurnOptions<'_>,
@@ -1064,82 +1091,22 @@ impl LashRuntime {
         else {
             return Ok(None);
         };
-        let wait_for_lease = opts
+        let lane: Arc<dyn crate::QueuedLaneProbe> = Arc::new(SessionExecutionLaneProbe {
+            store,
+            session_id: self.state.session_id.clone(),
+            owner: self.runtime_lease_owner.clone(),
+            executor_id: self.runtime_lease_executor_id.clone(),
+            timings: self.host.core.control.lease_timings,
+            clock: Arc::clone(&self.host.core.clock),
+        });
+        match opts
             .scoped_effect_controller()
             .controller()
-            .durable_workflow_controller();
-        let mut wait = queued_lane_wait::QueuedLaneWait::default();
-        loop {
-            let acquisition = SessionExecutionLeaseGuard::try_acquire_with_busy_holder(
-                Arc::clone(&store),
-                &self.state.session_id,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
-            .await
-            .map_err(|err| {
-                RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string())
-            })?;
-            match acquisition {
-                SessionExecutionLeaseGuardAcquisition::Acquired(guard) => {
-                    return Ok(Some(guard));
-                }
-                SessionExecutionLeaseGuardAcquisition::Busy(_) if !wait_for_lease => {
-                    return Ok(None);
-                }
-                SessionExecutionLeaseGuardAcquisition::Busy(holder) => {
-                    let slice_ms = match wait.observe(&holder) {
-                        queued_lane_wait::QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
-                        queued_lane_wait::QueuedLaneWaitStep::GiveUp(give_up) => {
-                            let waited_ms = wait.waited_ms();
-                            queued_lane_wait::trace_busy_gave_up(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            );
-                            return Err(queued_lane_wait::lane_busy_error(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            ));
-                        }
-                    };
-                    queued_lane_wait::trace_busy_wait(
-                        &self.state.session_id,
-                        &holder,
-                        slice_ms,
-                        wait.waited_ms(),
-                    );
-                    let sleep = self
-                        .host
-                        .core
-                        .clock
-                        .sleep(std::time::Duration::from_millis(slice_ms));
-                    tokio::select! {
-                        () = sleep => {}
-                        () = opts.cancel.cancelled() => {
-                            let give_up = queued_lane_wait::QueuedLaneGiveUp::CancelledWhileWaiting;
-                            let waited_ms = wait.waited_ms();
-                            queued_lane_wait::trace_busy_gave_up(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            );
-                            return Err(queued_lane_wait::lane_busy_error(
-                                &self.state.session_id,
-                                &holder,
-                                give_up,
-                                waited_ms,
-                            ));
-                        },
-                    }
-                }
-            }
+            .acquire_queued_lane(lane, opts.cancel.clone())
+            .await?
+        {
+            crate::QueuedLaneAcquisition::Acquired(guard) => Ok(Some(guard.into_inner())),
+            crate::QueuedLaneAcquisition::NotAcquired => Ok(None),
         }
     }
 
@@ -1515,8 +1482,15 @@ impl LashRuntime {
         turn_control: &ActiveTurnControl,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_resolver =
-            turn_control_resolver(turn_control_host.as_ref(), scoped_effect_controller);
+        let turn_control_binding =
+            turn_control_binding(turn_control_host.as_ref(), scoped_effect_controller).await?;
+        let turn_control_resolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            | crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
+        };
         let TurnFinishInput {
             mut turn_pipeline,
             assembler,
@@ -1956,8 +1930,15 @@ impl LashRuntime {
         session_execution_lease: Option<&SessionExecutionLeaseGuard>,
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_resolver =
-            turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
+        let turn_control_binding =
+            turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
+        let turn_control_resolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            | crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
+        };
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
@@ -3213,8 +3194,16 @@ impl LashRuntime {
                 // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                 let turn_index = self.state.turn_index + 1;
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-                let turn_control_resolver =
-                    turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
+                let turn_control_binding =
+                    turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller)
+                        .await?;
+                let turn_control_resolver = match &turn_control_binding {
+                    crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+                    | crate::TurnControlBinding::RunScoped {
+                        resolver,
+                        durable_cancel_after_llm: _,
+                    } => *resolver,
+                };
                 let turn_control = ActiveTurnControl::new(
                     turn_control_resolver,
                     TurnAddress::new(&self.state.session_id, &trace_turn_id),
@@ -3664,14 +3653,15 @@ impl LashRuntime {
         };
         let turn_events: &dyn TurnActivitySink = &scoped_turn_events;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
-        let turn_control_resolver =
-            turn_control_resolver(turn_control_host.as_ref(), &scoped_effect_controller);
-        let inline_turn_control_controller =
-            if turn_control_host.replay_ownership() == crate::EffectReplayOwnership::Runtime {
-                Some(turn_control_host.scoped(scoped_effect_controller.execution_scope().clone())?)
-            } else {
-                None
-            };
+        let turn_control_binding =
+            turn_control_binding(turn_control_host.as_ref(), &scoped_effect_controller).await?;
+        let turn_control_resolver = match &turn_control_binding {
+            crate::TurnControlBinding::HostOwned { resolver, peek: _ }
+            | crate::TurnControlBinding::RunScoped {
+                resolver,
+                durable_cancel_after_llm: _,
+            } => *resolver,
+        };
         let turn_control = Arc::new(
             ActiveTurnControl::new(
                 turn_control_resolver,
@@ -3795,16 +3785,19 @@ impl LashRuntime {
             })?;
         let cancel_state = cancel.clone();
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
-        let turn_cancel_peek_controller = inline_turn_control_controller
-            .as_ref()
-            .map(ScopedEffectController::controller)
-            .unwrap_or_else(|| finish_scoped_effect_controller.controller());
-        let observes_durable_cancel_after_llm = turn_control_host.replay_ownership()
-            == crate::EffectReplayOwnership::Controller
-            && finish_scoped_effect_controller
-                .controller()
-                .replay_ownership()
-                == crate::EffectReplayOwnership::Controller;
+        let (turn_cancel_peek_controller, observes_durable_cancel_after_llm) =
+            match &turn_control_binding {
+                crate::TurnControlBinding::HostOwned { resolver: _, peek } => {
+                    (peek.controller(), false)
+                }
+                crate::TurnControlBinding::RunScoped {
+                    resolver: _,
+                    durable_cancel_after_llm,
+                } => (
+                    finish_scoped_effect_controller.controller(),
+                    *durable_cancel_after_llm,
+                ),
+            };
         let session = self
             .session
             .take()
@@ -3814,7 +3807,7 @@ impl LashRuntime {
             policy: resolved_turn_policy,
             host: self.host.clone(),
             turn_id: crate::TurnId::from(scoped_effect_controller.scope_id()),
-            scoped_effect_controller,
+            scoped_effect_controller: scoped_effect_controller.clone(),
             session_id: self.state.session_id.clone(),
             turn_index,
             turn_pipeline,
@@ -3847,6 +3840,7 @@ impl LashRuntime {
             event_tx,
             cancel.clone(),
             protocol_run_offset,
+            Arc::clone(&self.host.core.clock),
             Arc::clone(&turn_control),
             Arc::clone(&turn_control_host),
             turn_cancel_peek_controller,
@@ -4148,6 +4142,7 @@ async fn run_turn_effect_loop(
     event_tx: mpsc::Sender<RuntimeStreamEvent>,
     cancellation: CancellationToken,
     protocol_run_offset: usize,
+    clock: Arc<dyn Clock>,
     turn_control: Arc<ActiveTurnControl>,
     turn_control_host: Arc<dyn EffectHost>,
     cancel_controller: &dyn RuntimeEffectController,
@@ -4168,7 +4163,7 @@ async fn run_turn_effect_loop(
         driver.turn_phase_probe.clone(),
         "turn_cancel.start_gate",
     );
-    let pending_cancel = await_turn_cancellation_start_gate(|| {
+    let pending_cancel = await_turn_cancellation_start_gate(clock.as_ref(), || {
         turn_control.observe_pending_cancel(
             cancel_controller,
             crate::runtime::turn_control::TurnCancelPeekIdentity::StartGate,
@@ -4182,8 +4177,9 @@ async fn run_turn_effect_loop(
     let cancel_watcher = crate::task::spawn({
         let turn_control = Arc::clone(&turn_control);
         let cancellation = cancellation.clone();
+        let clock = Arc::clone(&clock);
         async move {
-            if await_turn_cancellation_with_retry(|| {
+            if await_turn_cancellation_with_retry(clock.as_ref(), || {
                 turn_control.await_cancel(turn_control_host.as_ref(), CancellationToken::new())
             })
             .await
@@ -4226,7 +4222,15 @@ const TURN_CANCEL_WATCH_RETRY_MAX: std::time::Duration = std::time::Duration::fr
 /// unknown keys) burn attempts.
 const TURN_CANCEL_START_GATE_ATTEMPTS: usize = 3;
 
+/// Bound the live watcher to a useful transient-recovery window without letting
+/// a broken resolver outlive the turn indefinitely. Eight attempts traverse
+/// the whole exponential ladder through its one-second ceiling (2.575 seconds
+/// of injected sleep); exhaustion merely stops observation, which turn teardown
+/// already tolerates by aborting the watcher unconditionally.
+pub(super) const TURN_CANCEL_WATCH_MAX_ATTEMPTS: usize = 8;
+
 async fn await_turn_cancellation_start_gate<F, C>(
+    clock: &dyn Clock,
     mut watch: F,
 ) -> Result<Option<TurnCancellationEvidence>, RuntimeError>
 where
@@ -4246,7 +4250,7 @@ where
                     retry_after_ms = backoff.as_millis(),
                     "turn cancellation start gate failed; retrying before failing the invocation"
                 );
-                tokio::time::sleep(backoff).await;
+                clock.sleep(backoff).await;
                 backoff = backoff.saturating_mul(2).min(TURN_CANCEL_WATCH_RETRY_MAX);
             }
         }
@@ -4254,26 +4258,41 @@ where
     unreachable!("positive start-gate attempt limit")
 }
 
-async fn await_turn_cancellation_with_retry<F, C>(mut watch: F) -> Option<TurnCancellationEvidence>
+async fn await_turn_cancellation_with_retry<F, C>(
+    clock: &dyn Clock,
+    mut watch: F,
+) -> Option<TurnCancellationEvidence>
 where
     F: FnMut() -> C,
     C: std::future::Future<Output = Result<Option<TurnCancellationEvidence>, RuntimeError>>,
 {
     let mut backoff = TURN_CANCEL_WATCH_RETRY_INITIAL;
-    loop {
+    for attempt in 1..=TURN_CANCEL_WATCH_MAX_ATTEMPTS {
         match watch().await {
             Ok(observation) => return observation,
+            Err(err) if attempt == TURN_CANCEL_WATCH_MAX_ATTEMPTS => {
+                tracing::warn!(
+                    error = %err,
+                    attempts = attempt,
+                    max_attempts = TURN_CANCEL_WATCH_MAX_ATTEMPTS,
+                    "turn cancellation watcher exhausted its retry budget; stopping observation"
+                );
+                return None;
+            }
             Err(err) => {
                 tracing::warn!(
                     error = %err,
+                    attempt,
+                    max_attempts = TURN_CANCEL_WATCH_MAX_ATTEMPTS,
                     retry_after_ms = backoff.as_millis(),
                     "turn cancellation watcher failed; retrying while the turn remains active"
                 );
-                tokio::time::sleep(backoff).await;
+                clock.sleep(backoff).await;
                 backoff = backoff.saturating_mul(2).min(TURN_CANCEL_WATCH_RETRY_MAX);
             }
         }
     }
+    unreachable!("positive cancellation-watch attempt limit")
 }
 
 /// Pump the turn driver's event channel into the host sinks while the run
@@ -4352,24 +4371,73 @@ async fn emit_runtime_stream_event_to_sinks(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use super::{
-        ActiveTurnControl, TURN_CANCEL_START_GATE_ATTEMPTS, agent_frame_follow_turn_id,
-        await_turn_cancellation_start_gate, await_turn_cancellation_with_retry,
-        publish_terminal_after_commit,
+        ActiveTurnControl, TURN_CANCEL_START_GATE_ATTEMPTS, TURN_CANCEL_WATCH_MAX_ATTEMPTS,
+        agent_frame_follow_turn_id, await_turn_cancellation_start_gate,
+        await_turn_cancellation_with_retry, publish_terminal_after_commit,
     };
     use crate::{
         AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope,
-        InlineRuntimeEffectController, Resolution, ResolveOutcome, RuntimeError, TurnAddress,
+        NativeRuntimeEffectController, Resolution, ResolveOutcome, RuntimeError, TurnAddress,
         TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnTerminal,
     };
+
+    #[derive(Debug)]
+    struct RecordingTestClock {
+        inner: crate::testing::TestClock,
+        sleeps: Mutex<Vec<std::time::Duration>>,
+    }
+
+    impl RecordingTestClock {
+        fn new() -> Self {
+            Self {
+                inner: crate::testing::TestClock::new(0),
+                sleeps: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn sleeps(&self) -> Vec<std::time::Duration> {
+            self.sleeps.lock().expect("recording clock sleeps").clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::Clock for RecordingTestClock {
+        fn now(&self) -> std::time::Instant {
+            self.inner.now()
+        }
+
+        fn timestamp_ms(&self) -> u64 {
+            self.inner.timestamp_ms()
+        }
+
+        fn timestamp_rfc3339(&self) -> String {
+            self.inner.timestamp_rfc3339()
+        }
+
+        fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+            self.inner.timestamp_datetime()
+        }
+
+        async fn sleep(&self, duration: std::time::Duration) {
+            self.sleeps
+                .lock()
+                .expect("record cancellation-watch sleep")
+                .push(duration);
+        }
+
+        async fn sleep_until(&self, deadline: std::time::Instant) {
+            self.inner.sleep_until(deadline).await;
+        }
+    }
 
     #[derive(Default)]
     struct RejectTerminalPublication {
         attempts: AtomicUsize,
-        inline: InlineRuntimeEffectController,
+        native: NativeRuntimeEffectController,
     }
 
     #[async_trait::async_trait]
@@ -4379,7 +4447,7 @@ mod tests {
             scope: &ExecutionScope,
             wait: AwaitEventWaitIdentity,
         ) -> Result<AwaitEventKey, RuntimeError> {
-            self.inline.await_event_key(scope, wait).await
+            self.native.await_event_key(scope, wait).await
         }
 
         async fn resolve_await_event(
@@ -4398,7 +4466,7 @@ mod tests {
             &self,
             key: &AwaitEventKey,
         ) -> Result<Option<Resolution>, RuntimeError> {
-            self.inline.peek_await_event(key).await
+            self.native.peek_await_event(key).await
         }
 
         async fn await_await_event(
@@ -4407,14 +4475,14 @@ mod tests {
             cancel: tokio_util::sync::CancellationToken,
             deadline: Option<std::time::Instant>,
         ) -> Result<Resolution, RuntimeError> {
-            self.inline.await_await_event(key, cancel, deadline).await
+            self.native.await_await_event(key, cancel, deadline).await
         }
 
         async fn revoke_await_events_for_session(
             &self,
             session_id: &str,
         ) -> Result<(), RuntimeError> {
-            self.inline
+            self.native
                 .revoke_await_events_for_session(session_id)
                 .await
         }
@@ -4423,7 +4491,7 @@ mod tests {
             &self,
             session_id: &str,
         ) -> Result<(), RuntimeError> {
-            self.inline
+            self.native
                 .cancel_await_events_for_session(session_id)
                 .await
         }
@@ -4444,9 +4512,10 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_watch_retries_transient_errors_until_evidence_arrives() {
+        let clock = RecordingTestClock::new();
         let attempts = Arc::new(AtomicUsize::new(0));
         let observed_attempts = Arc::clone(&attempts);
-        let evidence = await_turn_cancellation_with_retry(move || {
+        let evidence = await_turn_cancellation_with_retry(&clock, move || {
             let attempt = observed_attempts.fetch_add(1, Ordering::SeqCst);
             async move {
                 if attempt < 2 {
@@ -4469,13 +4538,47 @@ mod tests {
 
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
         assert_eq!(evidence.request_id, "retry-request");
+        assert_eq!(
+            clock.sleeps(),
+            vec![
+                std::time::Duration::from_millis(25),
+                std::time::Duration::from_millis(50),
+            ],
+            "watcher retries must sleep on the injected clock"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_watch_stops_after_its_error_budget() {
+        let clock = RecordingTestClock::new();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let observed_attempts = Arc::clone(&attempts);
+        let observed = await_turn_cancellation_with_retry(&clock, move || {
+            observed_attempts.fetch_add(1, Ordering::SeqCst);
+            async {
+                Err(RuntimeError::new(
+                    crate::RuntimeErrorCode::TransientCancelWatch,
+                    "cancel resolver remains unavailable",
+                ))
+            }
+        })
+        .await;
+
+        assert!(observed.is_none());
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            TURN_CANCEL_WATCH_MAX_ATTEMPTS,
+            "the live cancellation watcher must stop observing after its retry budget"
+        );
+        assert_eq!(clock.sleeps().len(), TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1);
     }
 
     #[tokio::test]
     async fn cancellation_start_gate_fails_after_bounded_retries() {
+        let clock = RecordingTestClock::new();
         let attempts = Arc::new(AtomicUsize::new(0));
         let observed_attempts = Arc::clone(&attempts);
-        let err = await_turn_cancellation_start_gate(move || {
+        let err = await_turn_cancellation_start_gate(&clock, move || {
             observed_attempts.fetch_add(1, Ordering::SeqCst);
             async {
                 Err(RuntimeError::new(
@@ -4492,6 +4595,14 @@ mod tests {
             TURN_CANCEL_START_GATE_ATTEMPTS
         );
         assert_eq!(err.code.to_string(), "cancel_start_gate_unavailable");
+        assert_eq!(
+            clock.sleeps(),
+            vec![
+                std::time::Duration::from_millis(25),
+                std::time::Duration::from_millis(50),
+            ],
+            "start-gate retries must sleep on the injected clock"
+        );
     }
 
     #[tokio::test]

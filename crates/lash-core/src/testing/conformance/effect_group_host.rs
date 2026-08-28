@@ -5,7 +5,7 @@
 //! lash-core's own tests, where they could reach that host's internals. This
 //! module is the same matrix expressed through the *contract surface alone* —
 //! `EffectHost::scoped`, the four `RuntimeEffectController` group methods, and
-//! the `GroupExecutors` resolver the host is registered with — so the inline
+//! the `GroupExecutors` resolver the host is registered with — so the native
 //! tier and the two SQL tiers can be held to one set of laws instead of three
 //! copies that drift.
 //!
@@ -16,7 +16,7 @@
 //! `group_key`, the unsettled-children read being the exact complement of the
 //! rank read — are asserted in each store's own effect-replay tests, against
 //! the journal, because that is where the fact lives. A suite that tried to
-//! assert them through the contract would be asserting them against the inline
+//! assert them through the contract would be asserting them against the native
 //! tier too, which journals nothing and is honest about it. The one durable law
 //! that *is* expressible through the contract, because a second host instance
 //! can be asked to read it back, lives here as
@@ -55,7 +55,7 @@ type Host = Arc<dyn EffectHost>;
 /// host object over **one** substrate: two calls must reach the
 /// same journal, because a second host is how a law says "the process that
 /// resumes this continuation". On a store-backed tier that is a second host over
-/// the same database; on the inline tier, whose substrate is the process, it is
+/// the same database; on the native substrate, whose substrate is the process, it is
 /// the same host object handed out again. Laws namespace their own group keys
 /// and scopes, so sharing costs them nothing.
 pub async fn effect_group_host_conformance<F>(make: F)
@@ -65,6 +65,9 @@ where
     let unwired = || make(None);
     let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
     let prefix = format!("group-conformance-{}", uuid::Uuid::new_v4().simple());
+    // Keep the drop-based cancellation witness first: it proves the host
+    // actually stops a live loser, not merely that it records Cancelled.
+    cancel_stops_the_losers_and_closes_the_caller_out(&make, &prefix).await;
     an_unregistered_host_reports_no_groups_and_refuses_all_three(&unwired, &prefix).await;
     a_refused_open_journals_nothing(&unwired, &make, &prefix).await;
     a_child_with_no_runner_refuses_the_open_and_refuses_the_retry(&make, &prefix).await;
@@ -77,7 +80,6 @@ where
     awaiting_past_the_last_child_is_refused(&make, &prefix).await;
     a_cancelled_await_leaves_the_rank_to_be_read_again(&make, &prefix).await;
     run_to_completion_losers_settle_after_the_caller_is_gone(&make, &prefix).await;
-    cancel_stops_the_losers_and_closes_the_caller_out(&make, &prefix).await;
     a_close_may_narrow_but_never_widen(&make, &prefix).await;
     closing_twice_under_one_disposition_succeeds(&make, &prefix).await;
     a_reopen_is_fenced_on_shape_and_runs_no_child_twice(&make, &prefix).await;
@@ -87,7 +89,7 @@ where
 /// The durable-tier law: a cancelled child's terminal is a *journaled* fact.
 ///
 /// Separate from [`effect_group_host_conformance`] because it is not answerable
-/// by every host. The inline tier journals nothing, so "the cancellation
+/// by every host. The native substrate journals nothing, so "the cancellation
 /// survived the host that issued it" has no meaning there; a durable tier owes
 /// it, and owes it in the only way that proves it — a second host instance,
 /// carrying none of the first's memory, reading the terminal back at its rank.
@@ -235,7 +237,7 @@ async fn an_unregistered_host_reports_no_groups_and_refuses_all_three<F: Fn() ->
 /// child count* than the open that follows it: a group row left behind by the
 /// refusal is a recorded group of three children, and the two-child open after
 /// it trips the durable reopen fence rather than succeeding. A child row left
-/// behind shows up as rank 1 already allocated. On the inline tier, which
+/// behind shows up as rank 1 already allocated. On the native substrate, which
 /// journals nothing, both halves are true by construction and the law still pins
 /// the refusal.
 async fn a_refused_open_journals_nothing<U: Fn() -> Host, F: Fn() -> Host>(
@@ -486,7 +488,7 @@ async fn the_capability_flag_and_the_group_surface_agree<F: Fn() -> Host>(make: 
 /// terminal, the last rank would never be allocated, and the caller would park
 /// on it forever. That is a silent permanent hang, which is exactly the shape
 /// this seam refuses rather than trusts, so the law is answered by every host —
-/// including the inline tier, where the same lookup would mis-attribute the one
+/// including the native substrate, where the same lookup would mis-attribute the one
 /// settlement that did land.
 ///
 /// The second half is what makes this a law about hosts rather than about a
@@ -1155,7 +1157,7 @@ fn group(
 /// builds, and opens the group the staging returned.
 ///
 /// Crate-visible because every tier's tests inside lash-core need the same seam
-/// — the shared suite below and the inline reference tests — while a store's own
+/// — the shared suite below and the native reference tests — while a store's own
 /// tests get the resolver handed to them by the suite factory.
 pub(crate) struct StagedGroupExecutors {
     staged: std::sync::Mutex<HashMap<String, RuntimeEffectLocalExecutor<'static>>>,

@@ -5,24 +5,24 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use super::process_wake_batch_draft_with_delivery_policy;
+use crate::runtime::process_wake_batch_draft_with_delivery_policy;
 use crate::{
-    Clock, PluginError, ProcessRegistry, QueuedWorkDriver, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, WakeDeliveryClaimOutcome,
-    WakeDiscardReason,
+    Clock, PluginError, ProcessRegistry, QueuedWorkSubstrate, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionWorkTarget, StoreError,
+    WakeDeliveryClaimOutcome, WakeDiscardReason, WorkCadencePolicy,
 };
 
-const DELIVERY_BATCH_SIZE: usize = 32;
-const POLL_INITIAL: Duration = Duration::from_millis(25);
-const POLL_MAX: Duration = Duration::from_secs(1);
-const RETRY_INITIAL_MS: u64 = 50;
-const RETRY_MAX_MS: u64 = 5 * 60 * 1_000;
-
-fn retry_delay_ms(attempts: u64) -> u64 {
+fn retry_delay_ms(attempts: u64, work_cadence: &WorkCadencePolicy) -> u64 {
     let exponent = attempts.saturating_sub(1).min(63) as u32;
-    RETRY_INITIAL_MS
-        .saturating_mul(1_u64 << exponent)
-        .min(RETRY_MAX_MS)
+    let initial_ms = work_cadence
+        .delivery_retry_initial
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+    let max_ms = work_cadence
+        .delivery_retry_max
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+    initial_ms.saturating_mul(1_u64 << exponent).min(max_ms)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -60,9 +60,10 @@ pub struct WakeDeliveryDriver {
 struct WakeDeliveryDriverInner {
     registry: Arc<dyn ProcessRegistry>,
     session_store_factory: Arc<dyn SessionStoreFactory>,
-    queued_work_driver: Option<QueuedWorkDriver>,
+    queued_work: std::sync::Weak<dyn QueuedWorkSubstrate>,
     clock: Arc<dyn Clock>,
     delivery_policy: crate::DeliveryPolicy,
+    work_cadence: WorkCadencePolicy,
     notify: Notify,
 }
 
@@ -83,17 +84,38 @@ impl WakeDeliveryDriver {
     pub fn new(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work_driver: Option<QueuedWorkDriver>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
     ) -> Self {
+        Self::with_work_cadence(
+            registry,
+            session_store_factory,
+            queued_work,
+            clock,
+            delivery_policy,
+            WorkCadencePolicy::default(),
+        )
+        .expect("default work cadence is valid")
+    }
+
+    pub(crate) fn with_work_cadence(
+        registry: Arc<dyn ProcessRegistry>,
+        session_store_factory: Arc<dyn SessionStoreFactory>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        clock: Arc<dyn Clock>,
+        delivery_policy: crate::DeliveryPolicy,
+        work_cadence: WorkCadencePolicy,
+    ) -> Result<Self, crate::NativeSubstrateConfigError> {
+        work_cadence.validate()?;
         let driver = Self {
             inner: Arc::new(WakeDeliveryDriverInner {
                 registry,
                 session_store_factory,
-                queued_work_driver,
+                queued_work: Arc::downgrade(&queued_work),
                 clock,
                 delivery_policy,
+                work_cadence,
                 notify: Notify::new(),
             }),
             lifetime: Arc::new(WakeDeliveryDriverLifetime {
@@ -106,7 +128,7 @@ impl WakeDeliveryDriver {
         driver.lifetime.tasks.spawn(async move {
             Self::run_loop(inner, shutdown).await;
         });
-        driver
+        Ok(driver)
     }
 
     /// Wake the autonomous loop after a process append commits an outbox row.
@@ -130,13 +152,17 @@ impl WakeDeliveryDriver {
 
     /// Host/runbook lever: synchronously run one bounded delivery scan.
     pub async fn drive_pending(&self) -> Result<WakeDeliveryDriveReport, PluginError> {
-        Self::drive_pending_once_with_delivery_policy(
+        let Some(queued_work) = self.inner.queued_work.upgrade() else {
+            return Ok(WakeDeliveryDriveReport::default());
+        };
+        Self::drive_pending_once_with_delivery_policy_and_work_cadence(
             Arc::clone(&self.inner.registry),
             Arc::clone(&self.inner.session_store_factory),
-            self.inner.queued_work_driver.clone(),
+            queued_work,
             Arc::clone(&self.inner.clock),
             self.inner.delivery_policy,
-            DELIVERY_BATCH_SIZE,
+            self.inner.work_cadence.delivery_batch.get(),
+            &self.inner.work_cadence,
         )
         .await
     }
@@ -146,14 +172,14 @@ impl WakeDeliveryDriver {
     pub async fn drive_pending_once(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work_driver: Option<QueuedWorkDriver>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
         clock: Arc<dyn Clock>,
         limit: usize,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
         Self::drive_pending_once_with_delivery_policy(
             registry,
             session_store_factory,
-            queued_work_driver,
+            queued_work,
             clock,
             crate::DeliveryPolicy::EarliestSafeBoundary,
             limit,
@@ -165,10 +191,35 @@ impl WakeDeliveryDriver {
     pub async fn drive_pending_once_with_delivery_policy(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work_driver: Option<QueuedWorkDriver>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
         limit: usize,
+    ) -> Result<WakeDeliveryDriveReport, PluginError> {
+        let work_cadence = WorkCadencePolicy::default();
+        Box::pin(
+            Self::drive_pending_once_with_delivery_policy_and_work_cadence(
+                registry,
+                session_store_factory,
+                queued_work,
+                clock,
+                delivery_policy,
+                limit,
+                &work_cadence,
+            ),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn drive_pending_once_with_delivery_policy_and_work_cadence(
+        registry: Arc<dyn ProcessRegistry>,
+        session_store_factory: Arc<dyn SessionStoreFactory>,
+        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        clock: Arc<dyn Clock>,
+        delivery_policy: crate::DeliveryPolicy,
+        limit: usize,
+        work_cadence: &WorkCadencePolicy,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
         let mut report = WakeDeliveryDriveReport::default();
         for delivery in registry.claim_pending_wake_deliveries(limit).await? {
@@ -182,6 +233,7 @@ impl WakeDeliveryDriver {
                     clock.as_ref(),
                     WakeDeliverySettlement::Discard(WakeDiscardReason::Expired),
                     None,
+                    work_cadence,
                     &mut report,
                 )
                 .await?;
@@ -217,6 +269,7 @@ impl WakeDeliveryDriver {
                                 clock.as_ref(),
                                 WakeDeliverySettlement::Retry,
                                 None,
+                                work_cadence,
                                 &mut report,
                             )
                             .await?;
@@ -231,6 +284,7 @@ impl WakeDeliveryDriver {
                             clock.as_ref(),
                             WakeDeliverySettlement::Discard(WakeDiscardReason::TargetGone),
                             None,
+                            work_cadence,
                             &mut report,
                         )
                         .await?;
@@ -247,6 +301,7 @@ impl WakeDeliveryDriver {
                             clock.as_ref(),
                             WakeDeliverySettlement::Retry,
                             None,
+                            work_cadence,
                             &mut report,
                         )
                         .await?;
@@ -267,6 +322,7 @@ impl WakeDeliveryDriver {
                         clock.as_ref(),
                         WakeDeliverySettlement::Retry,
                         None,
+                        work_cadence,
                         &mut report,
                     )
                     .await?;
@@ -286,9 +342,10 @@ impl WakeDeliveryDriver {
                     // Dispatch is best-effort and strictly post-commit. Do it
                     // before settling the outbox claim so Applied, ClaimLost,
                     // and terminal-mark failures all re-arm the durable row.
-                    if let Some(driver) = queued_work_driver.as_ref() {
-                        driver.notify_pending_work(Some(&target_session_id), "process_wake");
-                    }
+                    queued_work.notify_session_work(
+                        SessionWorkTarget::Session(target_session_id.clone()),
+                        "process_wake",
+                    );
                     if enqueue_outcome.process_wake_was_absorbed() {
                         tracing::info!(
                             delivery_id = %delivery.delivery_id,
@@ -320,6 +377,7 @@ impl WakeDeliveryDriver {
                         clock.as_ref(),
                         WakeDeliverySettlement::Enqueued,
                         None,
+                        work_cadence,
                         &mut report,
                     )
                     .await?;
@@ -343,6 +401,7 @@ impl WakeDeliveryDriver {
                         clock.as_ref(),
                         WakeDeliverySettlement::Discard(WakeDiscardReason::SequenceRewound),
                         Some(rewind_log),
+                        work_cadence,
                         &mut report,
                     )
                     .await?;
@@ -361,6 +420,7 @@ impl WakeDeliveryDriver {
                         clock.as_ref(),
                         WakeDeliverySettlement::Retry,
                         None,
+                        work_cadence,
                         &mut report,
                     )
                     .await?;
@@ -370,6 +430,7 @@ impl WakeDeliveryDriver {
         Ok(report)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn settle(
         registry: &dyn ProcessRegistry,
         delivery: &crate::WakeDelivery,
@@ -377,6 +438,7 @@ impl WakeDeliveryDriver {
         clock: &dyn Clock,
         settlement: WakeDeliverySettlement,
         rewind_log: Option<SequenceRewindDiscardLog<'_>>,
+        work_cadence: &WorkCadencePolicy,
         report: &mut WakeDeliveryDriveReport,
     ) -> Result<(), PluginError> {
         match settlement {
@@ -421,7 +483,7 @@ impl WakeDeliveryDriver {
                             error = %error,
                             "process wake discard transition failed; delivery deferred"
                         );
-                        Self::defer_retry(registry, delivery, clock, report).await?;
+                        Self::defer_retry(registry, delivery, clock, work_cadence, report).await?;
                     }
                 }
             }
@@ -451,12 +513,12 @@ impl WakeDeliveryDriver {
                             error = %error,
                             "process wake terminal mark failed; delivery deferred"
                         );
-                        Self::defer_retry(registry, delivery, clock, report).await?;
+                        Self::defer_retry(registry, delivery, clock, work_cadence, report).await?;
                     }
                 }
             }
             WakeDeliverySettlement::Retry => {
-                Self::defer_retry(registry, delivery, clock, report).await?;
+                Self::defer_retry(registry, delivery, clock, work_cadence, report).await?;
             }
         }
         Ok(())
@@ -477,6 +539,7 @@ impl WakeDeliveryDriver {
         registry: &dyn ProcessRegistry,
         delivery: &crate::WakeDelivery,
         clock: &dyn Clock,
+        work_cadence: &WorkCadencePolicy,
         report: &mut WakeDeliveryDriveReport,
     ) -> Result<(), PluginError> {
         match registry
@@ -485,7 +548,7 @@ impl WakeDeliveryDriver {
                 delivery.claim_token()?,
                 clock
                     .timestamp_ms()
-                    .saturating_add(retry_delay_ms(delivery.attempts)),
+                    .saturating_add(retry_delay_ms(delivery.attempts, work_cadence)),
             )
             .await
         {
@@ -498,15 +561,19 @@ impl WakeDeliveryDriver {
     }
 
     async fn run_loop(inner: Arc<WakeDeliveryDriverInner>, shutdown: CancellationToken) {
-        let mut poll = POLL_INITIAL;
+        let mut poll = inner.work_cadence.poll_initial;
         loop {
-            let report = match Self::drive_pending_once_with_delivery_policy(
+            let Some(queued_work) = inner.queued_work.upgrade() else {
+                return;
+            };
+            let report = match Self::drive_pending_once_with_delivery_policy_and_work_cadence(
                 Arc::clone(&inner.registry),
                 Arc::clone(&inner.session_store_factory),
-                inner.queued_work_driver.clone(),
+                queued_work,
                 Arc::clone(&inner.clock),
                 inner.delivery_policy,
-                DELIVERY_BATCH_SIZE,
+                inner.work_cadence.delivery_batch.get(),
+                &inner.work_cadence,
             )
             .await
             {
@@ -526,21 +593,21 @@ impl WakeDeliveryDriver {
                 > 0;
             let delay = if made_progress
                 && report.retryable_failures == 0
-                && report.inspected >= DELIVERY_BATCH_SIZE
+                && report.inspected >= inner.work_cadence.delivery_batch.get()
             {
-                poll = POLL_INITIAL;
+                poll = inner.work_cadence.poll_initial;
                 Duration::ZERO
             } else {
                 poll
             };
             if made_progress && report.retryable_failures == 0 {
-                poll = POLL_INITIAL;
+                poll = inner.work_cadence.poll_initial;
             }
             tokio::select! {
                 () = shutdown.cancelled() => return,
-                () = inner.notify.notified() => poll = POLL_INITIAL,
+                () = inner.notify.notified() => poll = inner.work_cadence.poll_initial,
                 () = tokio::time::sleep(delay) => {
-                    poll = poll.saturating_mul(2).min(POLL_MAX);
+                    poll = poll.saturating_mul(2).min(inner.work_cadence.poll_max);
                 }
             }
         }
@@ -549,15 +616,45 @@ impl WakeDeliveryDriver {
 
 #[cfg(test)]
 mod tests {
-    use super::{RETRY_INITIAL_MS, RETRY_MAX_MS, retry_delay_ms};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use super::{WakeDeliveryDriver, WorkCadencePolicy, retry_delay_ms};
+
+    #[test]
+    fn terminal_constructor_rejects_zero_poll_delay_directly() {
+        let work_cadence = WorkCadencePolicy {
+            poll_initial: Duration::ZERO,
+            ..WorkCadencePolicy::default()
+        };
+
+        let Err(error) = WakeDeliveryDriver::with_work_cadence(
+            Arc::new(crate::TestLocalProcessRegistry::default()),
+            Arc::new(crate::InMemorySessionStoreFactory::new()),
+            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::SystemClock),
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            work_cadence,
+        ) else {
+            panic!("terminal wake-delivery construction must reject zero-delay polling");
+        };
+        assert!(
+            error.to_string().contains("work_cadence.poll_initial"),
+            "error must identify the rejected poll field: {error}"
+        );
+    }
 
     #[test]
     fn retry_delay_is_bounded_for_every_attempt_count() {
-        assert_eq!(retry_delay_ms(0), RETRY_INITIAL_MS);
-        assert_eq!(retry_delay_ms(1), RETRY_INITIAL_MS);
-        assert_eq!(retry_delay_ms(2), RETRY_INITIAL_MS * 2);
-        assert_eq!(retry_delay_ms(14), RETRY_MAX_MS);
-        assert_eq!(retry_delay_ms(64), RETRY_MAX_MS);
-        assert_eq!(retry_delay_ms(u64::MAX), RETRY_MAX_MS);
+        let work_cadence = WorkCadencePolicy::default();
+        let initial_ms = work_cadence.delivery_retry_initial.as_millis() as u64;
+        let max_ms = work_cadence.delivery_retry_max.as_millis() as u64;
+
+        assert_eq!(retry_delay_ms(0, &work_cadence), initial_ms);
+        assert_eq!(retry_delay_ms(1, &work_cadence), initial_ms);
+        assert_eq!(retry_delay_ms(2, &work_cadence), initial_ms * 2);
+        assert_eq!(retry_delay_ms(14, &work_cadence), max_ms);
+        assert_eq!(retry_delay_ms(64, &work_cadence), max_ms);
+        assert_eq!(retry_delay_ms(u64::MAX, &work_cadence), max_ms);
     }
 }

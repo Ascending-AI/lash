@@ -1150,14 +1150,23 @@ mod tests {
         }
     }
 
-    impl lash_core::AwaitEventResolver for CountingEffectController {
-        fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-            lash_core::EffectReplayOwnership::Controller
-        }
-    }
+    impl lash_core::AwaitEventResolver for CountingEffectController {}
 
     #[async_trait::async_trait]
     impl lash_core::RuntimeEffectController for CountingEffectController {
+        async fn runtime_effect_failure_disposition(
+            &self,
+            _code: lash_core::RuntimeErrorCode,
+        ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+            Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+        }
+
+        async fn turn_control_participation(
+            &self,
+        ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+            Ok(lash_core::TurnControlParticipation::Local)
+        }
+
         async fn execute_effect(
             &self,
             envelope: lash_core::RuntimeEffectEnvelope,

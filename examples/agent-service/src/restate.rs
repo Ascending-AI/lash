@@ -1,3 +1,7 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
 #![cfg(feature = "restate")]
 
 use lash::sync::MutexExt;
@@ -417,7 +421,7 @@ mod restate_tests {
         });
         harness
             .process_deployment
-            .process_work_driver()
+            .process_work()
             .claim_and_run_pending("agent_service_e2e_startup")
             .await
             .expect("drive startup recovery");
@@ -580,6 +584,7 @@ finish "done via Restate E2E"
             artifact_store,
         );
         let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("mock-model")
@@ -596,7 +601,7 @@ finish "done via Restate E2E"
             .process_env_store(process_env_store)
             .trigger_store(trigger_store)
             .effect_host(turn_deployment.effect_host())
-            .process_work_driver(process_deployment.process_work_driver())
+            .process_work(process_deployment.process_work())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test",
                 "test",
@@ -608,7 +613,8 @@ finish "done via Restate E2E"
         let process_worker = lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config_with_plugins([demo_factory])
                 .expect("process worker config"),
-        );
+        )
+        .expect("valid test native substrate config");
         let state = AppStateData::from_shared_db(
             core,
             turn_deployment.turn_work_driver(),

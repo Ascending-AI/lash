@@ -112,14 +112,14 @@ impl RuntimeEffectController for SerialOnlyEffectController {
 
 #[derive(Default)]
 pub(in crate::runtime::tests) struct RejectingEffectController {
-    inline: InlineRuntimeEffectController,
-    controller_owned_replay: bool,
+    native: NativeRuntimeEffectController,
+    abort_invocation_on_failure: bool,
     mismatch_summary: Option<RuntimeEffectReplayMismatchReport>,
 }
 
 impl RejectingEffectController {
     pub(in crate::runtime::tests) fn with_replay_mismatch(mut self) -> Self {
-        self.controller_owned_replay = true;
+        self.abort_invocation_on_failure = true;
         self.mismatch_summary = Some(RuntimeEffectReplayMismatchReport {
             divergent_path_count: 1,
             first_divergent_paths: vec!["command.request.model".to_string()],
@@ -130,20 +130,12 @@ impl RejectingEffectController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for RejectingEffectController {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        if self.controller_owned_replay {
-            crate::EffectReplayOwnership::Controller
-        } else {
-            crate::EffectReplayOwnership::Runtime
-        }
-    }
-
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        self.native.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -151,14 +143,14 @@ impl crate::AwaitEventResolver for RejectingEffectController {
         key: &AwaitEventKey,
         resolution: Resolution,
     ) -> Result<ResolveOutcome, RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        self.native.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        self.inline.peek_await_event(key).await
+        self.native.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -167,17 +159,17 @@ impl crate::AwaitEventResolver for RejectingEffectController {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+        self.native.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .cancel_await_events_for_session(session_id)
             .await
     }
@@ -185,6 +177,27 @@ impl crate::AwaitEventResolver for RejectingEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for RejectingEffectController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(if self.abort_invocation_on_failure {
+            crate::RuntimeEffectFailureDisposition::AbortInvocation
+        } else {
+            crate::RuntimeEffectFailureDisposition::RecordTurnFailure
+        })
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, RuntimeError> {
+        Ok(if self.abort_invocation_on_failure {
+            crate::TurnControlParticipation::DurableJournaled
+        } else {
+            crate::TurnControlParticipation::Local
+        })
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -212,7 +225,7 @@ impl RuntimeEffectController for RejectingEffectController {
 
 #[derive(Default)]
 pub(super) struct WrongOutcomeEffectController {
-    inline: InlineRuntimeEffectController,
+    native: NativeRuntimeEffectController,
 }
 
 #[async_trait::async_trait]
@@ -222,7 +235,7 @@ impl crate::AwaitEventResolver for WrongOutcomeEffectController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        self.native.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -230,14 +243,14 @@ impl crate::AwaitEventResolver for WrongOutcomeEffectController {
         key: &AwaitEventKey,
         resolution: Resolution,
     ) -> Result<ResolveOutcome, RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        self.native.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        self.inline.peek_await_event(key).await
+        self.native.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -246,17 +259,17 @@ impl crate::AwaitEventResolver for WrongOutcomeEffectController {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+        self.native.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .cancel_await_events_for_session(session_id)
             .await
     }

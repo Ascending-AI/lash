@@ -22,7 +22,7 @@ use lash_core::{
     Resolution, ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     ScopedEffectController, SessionStoreFactory, TurnInputCheckpointBoundary, TurnInputIngress,
-    facade_support::InlineRuntimeEffectController,
+    facade_support::NativeRuntimeEffectController,
 };
 use lash_sim::ProviderWireScript;
 use lash_sim::ScriptedLlmHttpTransport;
@@ -48,7 +48,7 @@ async fn build_core(
         process_env_store,
         attachment_store,
         scripts,
-        Arc::new(lash::durability::InlineEffectHost::default()),
+        Arc::new(lash::durability::NativeEffectHost::default()),
     )
     .await
 }
@@ -66,6 +66,7 @@ async fn build_core_with_effect_host(
     let (provider_handle, model, _kind) =
         runtime_provider_components(PROVIDER_KIND, &transport).expect("provider components");
     let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .effect_host(effect_host)
         .attachment_store(attachment_store)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -84,7 +85,7 @@ async fn build_core_with_effect_host(
 
 #[derive(Clone)]
 struct YieldBeforeCancelWatchController {
-    inner: InlineRuntimeEffectController,
+    inner: NativeRuntimeEffectController,
 }
 
 #[async_trait]
@@ -594,7 +595,7 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
         &sqlite_dir,
         1,
         Arc::new(YieldBeforeCancelWatchController {
-            inner: InlineRuntimeEffectController::default(),
+            inner: NativeRuntimeEffectController::default(),
         }),
     )
     .await;

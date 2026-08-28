@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use lash_core::facade_support::{
-    InMemorySessionStoreFactory, InlineRuntimeEffectController, LashRuntime, LlmTransportError,
+    InMemorySessionStoreFactory, LashRuntime, LlmTransportError, NativeRuntimeEffectController,
     Provider, ProviderComponents, ProviderHandle, ProviderOptions, SessionTurnRequest,
     SingleProviderResolver, TurnFinish, TurnOutcome, shared_parts,
 };
@@ -36,7 +36,7 @@ static PANIC_MODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Default)]
 struct RecordingEffectController {
-    inner: InlineRuntimeEffectController,
+    inner: NativeRuntimeEffectController,
     outcomes: std::sync::Mutex<Vec<RuntimeEffectOutcome>>,
 }
 
@@ -441,7 +441,7 @@ fn text_response(text: &str) -> LlmResponse {
 
 fn turn_scope(session_id: &str, turn_id: &str) -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
-        Arc::new(InlineRuntimeEffectController::default()),
+        Arc::new(NativeRuntimeEffectController::default()),
         ExecutionScope::turn(session_id, turn_id),
     )
     .expect("turn scope")

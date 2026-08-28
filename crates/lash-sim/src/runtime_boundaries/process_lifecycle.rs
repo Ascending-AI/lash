@@ -67,6 +67,7 @@ pub(super) fn lifecycle_worker(
     policy: lash_core::SessionPolicy,
     fault_sink: &RecordingWorkerFaultSink,
 ) -> lash_core::facade_support::DurableProcessWorker {
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(vec![Arc::new(
@@ -74,12 +75,14 @@ pub(super) fn lifecycle_worker(
             )])),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            registry,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             owner,
         )
         .with_session_policy(policy)
         .with_process_event_sink(Arc::new(fault_sink.clone())),
     )
+    .expect("simulation worker uses valid native substrate defaults")
 }
 
 pub(super) async fn register_lifecycle_row(
@@ -152,7 +155,7 @@ pub(super) async fn record_lifecycle_started(
 /// against ground truth rather than trusting it.
 pub(super) async fn lifecycle_process_fact(
     registry: &Arc<dyn ProcessRegistry>,
-    awaiter: &lash_core::facade_support::ProcessAwaiter,
+    awaiter: &lash_core::NativeProcessWork,
     id: &str,
     disposition: RecoveryContract,
     expected_holder: Option<&LeaseOwnerIdentity>,

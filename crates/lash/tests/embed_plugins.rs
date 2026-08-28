@@ -207,6 +207,7 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
     // process registry (and thus no store factory) and run non-persistent turns
     // — which the live `TurnContext` plugin input path requires.
     LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("mock-model")
@@ -214,7 +215,7 @@ fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
                 .build()
                 .expect("valid model spec"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

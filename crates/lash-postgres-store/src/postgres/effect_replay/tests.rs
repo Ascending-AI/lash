@@ -1,6 +1,6 @@
 //! Store-side contract tests for the durable effect-group journal.
 //!
-//! These exercise [`PostgresEffectReplayPersistence`] directly rather than
+//! These exercise [`PostgresEffectReplayRowStore`] directly rather than
 //! through a host: what is under test is the *allocation* discipline — which
 //! transaction may move a group's settlement counter, and what a fenced-out
 //! finalize is allowed to leave behind — and a host would only obscure which
@@ -43,7 +43,7 @@ struct GroupFixture {
     /// other Postgres suite, and an unlocked fixture would provision or truncate
     /// underneath them.
     _database_lock: postgres_test_support::SharedDatabaseLock,
-    store: PostgresEffectReplayPersistence,
+    store: PostgresEffectReplayRowStore,
     scope_id: String,
     session_id: String,
     group_key: String,
@@ -60,7 +60,7 @@ impl GroupFixture {
         let session_id = format!("effect-group-{label}-{unique}");
         let fixture = Self {
             _database_lock: database_lock,
-            store: PostgresEffectReplayPersistence {
+            store: PostgresEffectReplayRowStore {
                 pool: storage.pool().clone(),
             },
             scope_id: format!("session:{session_id}"),

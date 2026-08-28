@@ -42,6 +42,7 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         .expect("register the PostgreSQL host-ingress target");
 
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(lash::provider::ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("pg-tool-intent-ingress-model")

@@ -3,7 +3,7 @@ use crate::support::*;
 use lash_core::facade_support;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 
-pub(crate) struct InlineQueuedWorkRunConfig {
+pub(crate) struct NativeQueuedWorkRunConfig {
     pub(super) session_execution_owner: lash_core::LeaseOwnerIdentity,
     pub(super) env: RuntimeEnvironment,
     pub(super) policy: SessionPolicy,
@@ -14,12 +14,12 @@ pub(crate) struct InlineQueuedWorkRunConfig {
     pub(super) process_lifecycle_available: bool,
 }
 
-pub(super) struct InlineQueuedWorkRunHandle {
-    config: Arc<InlineQueuedWorkRunConfig>,
+pub(super) struct NativeQueuedWorkRunHandle {
+    config: Arc<NativeQueuedWorkRunConfig>,
 }
 
-impl InlineQueuedWorkRunHandle {
-    pub(super) fn new(config: Arc<InlineQueuedWorkRunConfig>) -> Self {
+impl NativeQueuedWorkRunHandle {
+    pub(super) fn new(config: Arc<NativeQueuedWorkRunConfig>) -> Self {
         Self { config }
     }
 
@@ -145,7 +145,7 @@ impl InlineQueuedWorkRunHandle {
                     session_id = %session_id,
                     reason = empty_reason.as_str(),
                     claimed,
-                    "inline queued-work run stopped on an empty drain"
+                    "native queued-work run stopped on an empty drain"
                 );
                 return Ok(if claimed {
                     facade_support::QueuedWorkRunProgress::Claimed
@@ -159,7 +159,7 @@ impl InlineQueuedWorkRunHandle {
 }
 
 #[async_trait]
-impl QueuedWorkRunHandle for InlineQueuedWorkRunHandle {
+impl QueuedWorkRunHandle for NativeQueuedWorkRunHandle {
     async fn peek_claimable_queued_work(
         &self,
         session_id: Option<&str>,

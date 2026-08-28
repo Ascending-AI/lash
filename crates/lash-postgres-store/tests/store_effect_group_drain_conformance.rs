@@ -64,6 +64,6 @@ async fn postgres_effect_host_satisfies_the_loser_drain_contract_when_configured
         let url = url.clone();
         Box::pin(async move { world(url, spec).await })
     });
-    lash_core::testing::conformance::effect_group_drain_conformance(make).await;
+    lash_core::testing::conformance::store_effect_group_drain_conformance(make).await;
     drop(database_lock);
 }

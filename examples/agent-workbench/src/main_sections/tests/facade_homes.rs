@@ -214,7 +214,7 @@
                 .plugin(plugin)
                 .store_factory(store_factory)
                 .process_registry(Arc::clone(&process_registry))
-                .disable_queued_work_driver()
+                .without_queued_work()
                 .build(crate::test_core_owner())
                 .expect("build config change workbench core");
             let session = core
@@ -303,7 +303,7 @@
                 .plugin(plugin)
                 .store_factory(store_factory)
                 .process_registry(Arc::clone(&process_registry))
-                .disable_queued_work_driver()
+                .without_queued_work()
                 .build(crate::test_core_owner())
                 .expect("build context transform workbench core");
             let session = core
@@ -443,7 +443,7 @@
                 session_graph: manager,
                 scoped_effect_controller: lash::runtime::ScopedEffectController::shared(
                     Arc::new(
-                        lash::runtime::InlineRuntimeEffectController::default(),
+                        lash::runtime::NativeRuntimeEffectController::default(),
                     ),
                     lash::runtime::ExecutionScope::turn(
                         "workbench-rolling-history-session",

@@ -37,6 +37,26 @@
 //!   waited out.
 //! * A fully drained group has nothing unsettled, which is what makes it
 //!   reclaimable.
+//!
+//! # Why this suite is store-tier-scoped (FIG-2272)
+//!
+//! Not a wiring gap, and the `store_` in its name is the point. The laws are
+//! typed on [`StoreEffectGroupDrain`], which exists once over the store-backed
+//! effect-replay driver, and five of them turn on a lease window. The Restate
+//! tier holds no Lash lease and no Lash replay ledger — its
+//! `retire_effect_journal` is `Ok(0)` by design — so it has nothing for a drain
+//! pass to reclaim, and its retirement saga cancels children where these laws
+//! re-execute them. Pointing this suite at an engine substrate would mean
+//! asserting the reverse of what the engine does.
+//!
+//! The engine-owed half of this behavior is discharged live instead, by
+//! [`effect_group_host_conformance`](super::effect_group_host_conformance)
+//! running against a real Restate deployment: the loser-settlement guarantee
+//! is `run_to_completion_losers_settle_after_the_caller_is_gone`, and the
+//! routing and exactly-once guarantees the drain rows also imply are covered
+//! by that suite's own rows plus
+//! `effect_group_cancelled_child_terminal_is_durable`. Nothing is exempted;
+//! the obligation moves to the seam that can express it.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -49,7 +69,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::runtime::effect::group_drain::{
-    ChildDrainOutcome, EffectGroupDrain, GroupDrainReport, GroupExecutors,
+    ChildDrainOutcome, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
 };
 use crate::{EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 
@@ -62,7 +82,7 @@ pub struct DrainWorld {
     pub host: Arc<dyn EffectHost>,
     /// The drain over the same journal, resolving children through the same
     /// registered resolver the host does.
-    pub drain: Arc<dyn EffectGroupDrain>,
+    pub drain: Arc<dyn StoreEffectGroupDrain>,
 }
 
 /// What a law needs the next host to be built with.
@@ -96,7 +116,7 @@ pub type DrainWorldFactory =
     Arc<dyn Fn(DrainWorldSpec) -> Pin<Box<dyn Future<Output = DrainWorld> + Send>> + Send + Sync>;
 
 /// Run the effect-group drain suite.
-pub async fn effect_group_drain_conformance(make: DrainWorldFactory) {
+pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     let prefix = format!("drain-conformance-{}", uuid::Uuid::new_v4().simple());
     a_group_this_process_is_still_working_is_refused(&make, &prefix).await;
     a_group_the_journal_does_not_hold_is_refused(&make, &prefix).await;

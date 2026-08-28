@@ -5,22 +5,27 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     #[derive(Clone, Default)]
     struct ControllerOwnedTriggerEmitter {
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
-        inline: InlineRuntimeEffectController,
+        native: NativeRuntimeEffectController,
     }
 
     #[async_trait::async_trait]
-    impl crate::AwaitEventResolver for ControllerOwnedTriggerEmitter {
-        fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-            crate::EffectReplayOwnership::Controller
-        }
-
-        fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-            crate::EffectJournalAddressing::OrdinalAddressed
-        }
-    }
+    impl crate::AwaitEventResolver for ControllerOwnedTriggerEmitter {}
 
     #[async_trait::async_trait]
     impl RuntimeEffectController for ControllerOwnedTriggerEmitter {
+        async fn runtime_effect_failure_disposition(
+            &self,
+            _code: crate::RuntimeErrorCode,
+        ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+            Ok(crate::RuntimeEffectFailureDisposition::AbortInvocation)
+        }
+
+        async fn turn_control_participation(
+            &self,
+        ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+            Ok(crate::TurnControlParticipation::DurableJournaled)
+        }
+
         async fn execute_effect(
             &self,
             envelope: RuntimeEffectEnvelope,
@@ -31,7 +36,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
                 "non-tool trigger emission issues only its reserved process start"
             );
             self.process_starts.fetch_add(1, Ordering::SeqCst);
-            self.inline.execute_effect(envelope, local_executor).await
+            self.native.execute_effect(envelope, local_executor).await
         }
     }
 
@@ -70,8 +75,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
 
     let router = crate::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn crate::TriggerStore>,
-        Some(Arc::clone(&registry)),
-        None,
+        crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
     );
     let controller = ControllerOwnedTriggerEmitter::default();
     let occurrence = || {

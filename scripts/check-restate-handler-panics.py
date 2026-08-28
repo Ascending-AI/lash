@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Reject panic-capable operations from production Restate handler code."""
+"""Reject panic-capable operations from production Restate handler code.
+
+Two families. The explicit ones -- `unwrap`, `expect`, the `panic!`/`assert!`
+macros -- announce themselves. Raw indexing does not: `shape.replay_keys[i]`
+reads like a field access and panics exactly like `unwrap`, and a panic inside a
+Restate handler is a retryable error, so the invocation retries forever and
+wedges its object key until an operator cancels it by hand. Handlers work on
+wire-deserialized data with public fields, so "the index is obviously in range"
+is a statement about the caller, not about the type.
+
+The index rule fires on a `[` that directly follows a value -- an identifier, a
+call, another index -- which is what distinguishes `keys[i]` from an array type,
+an array literal, a slice pattern, or an attribute. Sites that are safe by
+construction are listed in `ALLOWED_RAW_INDEXES` with their reason, keyed by the
+exact source line so the exemption dies when the line it justifies changes.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +30,25 @@ PANIC_CAPABLE = re.compile(
     r"\b(?:panic|unreachable|todo|unimplemented|assert|assert_eq|assert_ne|debug_assert(?:_eq|_ne)?)\s*!\s*\("
     r"|\.\s*(?:expect|expect_err|unwrap)\s*\("
 )
+RAW_INDEX = re.compile(r"(?<=[\w)\]?])\s*\[")
+
+# Raw indexes whose index cannot leave the bounds of what it indexes, with the
+# argument for each. Keyed by source path and the exact stripped line, so an
+# edit to the line loses the exemption instead of inheriting it.
+ALLOWED_RAW_INDEXES = {
+    # `HEX` is a `&[u8; 16]` and both indexes are a single nibble of a byte --
+    # `byte >> 4` and `byte & 0x0f` are each 0..=15 -- so neither can address
+    # outside the table. Bounds are a property of the expression here, not of a
+    # caller.
+    (
+        "crates/lash-restate/src/ingress.rs",
+        "encoded.push(char::from(HEX[(byte >> 4) as usize]));",
+    ),
+    (
+        "crates/lash-restate/src/ingress.rs",
+        "encoded.push(char::from(HEX[(byte & 0x0f) as usize]));",
+    ),
+}
 
 
 def mask_non_code(source: str) -> str:
@@ -151,17 +185,34 @@ def production_sources() -> list[Path]:
 
 def main() -> int:
     findings: list[str] = []
+    used_exemptions: set[tuple[str, str]] = set()
     for path in production_sources():
         source = path.read_text(encoding="utf-8")
+        lines = source.splitlines()
         code = mask_cfg_test_items(mask_non_code(source))
+        relative = path.relative_to(ROOT)
         for match in PANIC_CAPABLE.finditer(code):
             line = code.count("\n", 0, match.start()) + 1
-            relative = path.relative_to(ROOT)
-            findings.append(f"{relative}:{line}: {source.splitlines()[line - 1].strip()}")
+            findings.append(f"{relative}:{line}: {lines[line - 1].strip()}")
+        for match in RAW_INDEX.finditer(code):
+            line = code.count("\n", 0, match.start()) + 1
+            text = lines[line - 1].strip()
+            exemption = (str(relative), text)
+            if exemption in ALLOWED_RAW_INDEXES:
+                used_exemptions.add(exemption)
+                continue
+            findings.append(f"{relative}:{line}: {text}")
+
+    for path, text in sorted(ALLOWED_RAW_INDEXES - used_exemptions):
+        findings.append(
+            f"{path}: allowlisted raw index no longer present: {text}"
+            " (remove the entry rather than leaving an exemption nothing uses)"
+        )
 
     if findings:
         print(
-            "Restate handler panic boundary failed; use typed terminal errors or make the state unrepresentable:",
+            "Restate handler panic boundary failed; use typed terminal errors (`.get(..).ok_or_else(..)`)"
+            " or make the state unrepresentable:",
             file=sys.stderr,
         )
         for finding in findings:

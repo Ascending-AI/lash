@@ -10,20 +10,23 @@ pub(crate) mod context;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    PluginError, ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord,
-    ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
+    EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, PluginError,
+    ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord, ProcessRegistry,
+    QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
-    RuntimeInvocation, ScopedEffectController, facade_support::CanonicalRuntimeEffectEnvelope,
-    facade_support::RuntimeAwaitEventOptions, facade_support::RuntimeSleepOptions,
-    facade_support::refuse_unhonored_group_membership,
+    RuntimeInvocation, ScopedEffectController, TurnControlParticipation,
+    facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
+    facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
 };
 use restate_sdk::context::RunRetryPolicy;
@@ -34,6 +37,14 @@ use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
     RestateTurnCancelRaceOutcome, restate_await_event_key, restate_await_event_key_is_valid,
     restate_durable_wait_request, restate_unknown_or_revoked,
+};
+use crate::effect_group::{
+    EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
+    EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
+    EffectGroupReadRankResponse, EffectGroupSettlementTerminal, EffectGroupShape,
+    EffectGroupWaitResolution, decode_wait_resolution, group_shape_error, payload_key,
+    rank_wait_request, ready_wait_request, settlement_from_payload,
 };
 use crate::process::RestateProcessCancelRequest;
 
@@ -154,15 +165,8 @@ pub enum RestateEffectError {
         effect: String,
         terminal: TerminalError,
     },
-    #[error("Restate background scheduler error: {0}")]
-    BackgroundScheduler(String),
 }
 
-impl RestateEffectError {
-    pub(crate) fn into_plugin_error(self) -> PluginError {
-        PluginError::Session(self.to_string())
-    }
-}
 async fn resolve_restate_await_event<'ctx, C>(
     context: &C,
     key: &AwaitEventKey,
@@ -267,6 +271,7 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     context: C,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
+    closed_effect_groups: Mutex<HashSet<String>>,
     _ctx: PhantomData<&'ctx ()>,
 }
 
@@ -280,6 +285,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             context,
             options,
             trace: None,
+            closed_effect_groups: Mutex::new(HashSet::new()),
             _ctx: PhantomData,
         }
     }
@@ -434,26 +440,32 @@ impl<'ctx, C> AwaitEventResolver for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx>,
 {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
     /// Restate re-drives this handler invocation, so its retry policy - not a
     /// sleep inside one invocation - is the right place to pace a queued drain
     /// that found the session execution lane held by a live foreign executor.
     /// The deployment-level [`RestateEffectHost`](crate::RestateEffectHost)
     /// deliberately does not opt in: it serves requests from outside a handler,
     /// where nothing re-drives the caller.
-    fn durable_workflow_controller(&self) -> bool {
-        true
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        self.wait_out_crashed_lane_holder(lane, cancel).await
     }
 
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::OrdinalAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -542,6 +554,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<'ctx, C> EffectHost for RestateRuntimeEffectController<'ctx, C>
 where
     C: RestateControllerContext<'ctx> + Sync,
@@ -552,6 +565,25 @@ where
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
         self.scoped_effect_controller(scope)
     }
+
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> Result<lash_core::ToolIntentPreparation, RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -561,6 +593,285 @@ where
 {
     fn supports_concurrent_effects(&self) -> bool {
         false
+    }
+
+    fn supports_effect_groups(&self) -> bool {
+        true
+    }
+
+    async fn open_effect_group(
+        &self,
+        group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        let group_key = group.group_key().to_string();
+        let handle = EffectGroupHandle::new(&group);
+        let shape = EffectGroupShape::from_group(&group)?;
+        let probe = self
+            .context
+            .effect_group_probe(group_key.clone())
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/probe", error))?;
+        if matches!(probe, EffectGroupProbeResponse::Absent)
+            && let Some(position) = self
+                .context
+                .effect_group_preflight(group_key.clone(), group.children().to_vec())
+                .await
+                .map_err(|error| {
+                    effect_group_engine_error("EffectGroupDispatch/preflight", error)
+                })?
+        {
+            let replay_key = shape.replay_keys.get(position).ok_or_else(|| {
+                group_shape_error(format!(
+                    "effect group {group_key} preflight named child {position}, outside the {} children its shape carries",
+                    shape.replay_keys.len()
+                ))
+            })?;
+            return Err(group_shape_error(format!(
+                "effect group {group_key} child {position} ({replay_key}) has no registered executor; refusing before group state is created"
+            )));
+        }
+        let opened = self
+            .context
+            .effect_group_open(
+                group_key.clone(),
+                EffectGroupOpenRequest {
+                    shape: shape.clone(),
+                },
+            )
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/open", error))?;
+        match opened {
+            EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
+                self.context
+                    .effect_group_submit(EffectGroupDispatchRequest {
+                        group_key: group_key.clone(),
+                        shape: shape.clone(),
+                        children: group.children().to_vec(),
+                    })
+                    .await
+                    .map_err(|error| effect_group_engine_error("EffectGroupDispatch/run", error))?;
+                let request = ready_wait_request(&shape.wait_scope, &group_key)?;
+                let resolution = self
+                    .context
+                    .await_effect_group_wait(request, tokio_util::sync::CancellationToken::new())
+                    .await
+                    .map_err(|error| {
+                        effect_group_engine_error(
+                            "LashDurableWaitWorkflow/await_resolution(READY)",
+                            error,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        group_shape_error(format!(
+                            "opening effect group {group_key} was cancelled while awaiting READY"
+                        ))
+                    })?;
+                match decode_wait_resolution(resolution)? {
+                    EffectGroupWaitResolution::Ready => Ok(handle),
+                    EffectGroupWaitResolution::Refused { reason } => Err(group_shape_error(
+                        format!("effect group {group_key} routing was refused: {reason:?}"),
+                    )),
+                    EffectGroupWaitResolution::Retired => Err(group_shape_error(format!(
+                        "effect group {group_key} was retired before it became ready"
+                    ))),
+                    other => Err(group_shape_error(format!(
+                        "effect group {group_key} READY wait resolved as {other:?}"
+                    ))),
+                }
+            }
+            EffectGroupOpenResponse::ReopenedReady => Ok(handle),
+            EffectGroupOpenResponse::ReopenedClosed { effective } => match effective {
+                EffectGroupCloseDisposition::Refused { reason } => Err(group_shape_error(format!(
+                    "effect group {group_key} routing was refused: {reason:?}"
+                ))),
+                EffectGroupCloseDisposition::RunToCompletion
+                | EffectGroupCloseDisposition::Cancel => Ok(handle),
+            },
+            EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
+                "effect group {group_key} is retired"
+            ))),
+            EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(
+                "effect group {group_key} was reopened with a different durable shape"
+            ))),
+        }
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut EffectGroupHandle,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        if handle.is_exhausted() {
+            return Err(group_shape_error(format!(
+                "effect group {} has no settlement after its {} children",
+                handle.group_key(),
+                handle.children()
+            )));
+        }
+        if self
+            .closed_effect_groups
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(handle.group_key())
+        {
+            return Err(group_shape_error(format!(
+                "effect group {} is closed to this caller",
+                handle.group_key()
+            )));
+        }
+        let rank = u64::try_from(handle.consumed() + 1).map_err(|error| {
+            group_shape_error(format!("effect group rank does not fit u64: {error}"))
+        })?;
+        let mut read = self
+            .context
+            .effect_group_read_rank(
+                handle.group_key().to_string(),
+                EffectGroupReadRankRequest { rank },
+            )
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
+        if matches!(read, EffectGroupReadRankResponse::NotSettled) {
+            let scope = ExecutionScope::runtime_operation(handle.group_key());
+            let request = rank_wait_request(&scope, handle.group_key(), rank)?;
+            let Some(resolution) = self
+                .context
+                .await_effect_group_wait(request, cancel)
+                .await
+                .map_err(|error| {
+                    effect_group_engine_error(
+                        "LashDurableWaitWorkflow/await_resolution(RANK)",
+                        error,
+                    )
+                })?
+            else {
+                return Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+                    format!(
+                        "awaiting effect group {} rank {rank} was cancelled",
+                        handle.group_key()
+                    ),
+                ));
+            };
+            match decode_wait_resolution(resolution)? {
+                EffectGroupWaitResolution::Rank => {}
+                EffectGroupWaitResolution::Retired => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} was retired while awaiting rank {rank}",
+                        handle.group_key()
+                    )));
+                }
+                other => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} rank {rank} wait resolved as {other:?}",
+                        handle.group_key()
+                    )));
+                }
+            }
+            read = self
+                .context
+                .effect_group_read_rank(
+                    handle.group_key().to_string(),
+                    EffectGroupReadRankRequest { rank },
+                )
+                .await
+                .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
+        }
+        let record = match read {
+            EffectGroupReadRankResponse::Settled { settlement } => settlement,
+            EffectGroupReadRankResponse::NotSettled => {
+                return Err(group_shape_error(format!(
+                    "effect group {} rank {rank} remained unsettled after its notification",
+                    handle.group_key()
+                )));
+            }
+            EffectGroupReadRankResponse::UnknownGroup => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is unknown",
+                    handle.group_key()
+                )));
+            }
+            EffectGroupReadRankResponse::Retired => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is retired",
+                    handle.group_key()
+                )));
+            }
+        };
+        let payload = if matches!(
+            record.terminal,
+            EffectGroupSettlementTerminal::StoredPayload
+        ) {
+            match self
+                .context
+                .effect_group_payload_get(payload_key(handle.group_key(), record.position))
+                .await
+                .map_err(|error| effect_group_engine_error("EffectGroupPayload/get", error))?
+            {
+                EffectGroupPayloadGetResponse::Stored { bytes } => Some(bytes),
+                EffectGroupPayloadGetResponse::Missing => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} rank {rank} refers to a missing payload",
+                        handle.group_key()
+                    )));
+                }
+                EffectGroupPayloadGetResponse::Retired => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} payload was retired",
+                        handle.group_key()
+                    )));
+                }
+            }
+        } else {
+            None
+        };
+        let settlement = settlement_from_payload(record, payload)?;
+        handle.advance()?;
+        Ok(settlement)
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: EffectGroupHandle,
+        disposition: LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let group_key = handle.group_key().to_string();
+        let response = self
+            .context
+            .effect_group_close(group_key.clone(), EffectGroupCloseRequest { disposition })
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/close", error))?;
+        match response {
+            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => {
+                self.closed_effect_groups
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(group_key);
+                Ok(())
+            }
+            EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
+                "effect group {group_key} close attempted to widen its declared loser disposition"
+            ))),
+            EffectGroupCloseResponse::NotReady => Err(group_shape_error(format!(
+                "effect group {group_key} cannot close before registration"
+            ))),
+            EffectGroupCloseResponse::UnknownGroup => Err(group_shape_error(format!(
+                "effect group {group_key} is unknown"
+            ))),
+            EffectGroupCloseResponse::Retired => Err(group_shape_error(format!(
+                "effect group {group_key} is retired"
+            ))),
+        }
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: RuntimeErrorCode,
+    ) -> Result<RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(&self) -> Result<TurnControlParticipation, RuntimeError> {
+        Ok(TurnControlParticipation::DurableJournaled)
     }
 
     fn wants_segment_boundary(
@@ -894,6 +1205,15 @@ where
     }
 }
 
+fn effect_group_engine_error(
+    operation: &str,
+    error: TerminalError,
+) -> RuntimeEffectControllerError {
+    group_shape_error(format!(
+        "Restate effect-group operation {operation} failed (verify the required services are registered): {error}"
+    ))
+}
+
 fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWaitResolution {
     use lash_trace::TraceDurableWaitResolution as Resolved;
     match resolution {
@@ -935,341 +1255,7 @@ async fn execute_restate_journaled_effect(
     }
 }
 
-async fn execute_restate_process_command<'ctx, C>(
-    context: &C,
-    invocation: &RuntimeInvocation,
-    command: ProcessCommand,
-    local_executor: RuntimeEffectLocalExecutor<'_>,
-    trace_park: impl Fn(&'static str),
-    trace_resolve: impl Fn(&'static str, lash_trace::TraceDurableWaitResolution),
-) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError>
-where
-    C: RestateControllerContext<'ctx> + ?Sized,
-{
-    let mut local_executor = local_executor;
-    let outcome_observer = local_executor.take_process_outcome_observer();
-    let execution = local_executor.into_process()?;
-    let registry = execution.registry;
-    let process_env_store = execution.process_env_store;
-    let turn_cancellation = execution.turn_cancellation;
-    let outcome = match command {
-        ProcessCommand::Start {
-            mut registration,
-            observers,
-            env_spec,
-            execution_context,
-        } => {
-            if let Some(env_spec) = env_spec.as_ref() {
-                let env_store = process_env_store.as_ref().ok_or_else(|| {
-                    RuntimeEffectControllerError::foreign(
-                        "process_env_store_unavailable",
-                        "admitted Restate process start carries an execution environment but the executor has no environment store",
-                    )
-                })?;
-                let env_ref =
-                    lash_core::runtime::persist_process_execution_env(env_store.as_ref(), env_spec)
-                        .await?;
-                registration = registration.with_execution_env_ref(Some(env_ref));
-            }
-            let record = schedule_restate_process(
-                registry,
-                registration,
-                observers,
-                *execution_context,
-                context,
-            )
-            .await?;
-            Ok(ProcessEffectOutcome::Start {
-                record: Box::new(record),
-            })
-        }
-        ProcessCommand::List {
-            session_scope,
-            mode,
-        } => {
-            let entries = match mode {
-                lash_core::ProcessListMode::Live => {
-                    registry
-                        .list_live_observed_by(&session_scope.session_id)
-                        .await?
-                }
-                lash_core::ProcessListMode::All => {
-                    registry.list_observed_by(&session_scope.session_id).await?
-                }
-            };
-            Ok(ProcessEffectOutcome::List { entries })
-        }
-        ProcessCommand::Transfer {
-            from_scope,
-            to_scope,
-            process_ids,
-        } => {
-            registry
-                .transfer_observers(
-                    &from_scope.session_id,
-                    &to_scope.session_id,
-                    &process_ids,
-                    lash_core::ProcessObserverBy::host("restate-transfer"),
-                )
-                .await?;
-            Ok(ProcessEffectOutcome::Transfer)
-        }
-        ProcessCommand::DeleteSession { session_id } => {
-            let report = registry.delete_session_process_state(&session_id).await?;
-            Ok(ProcessEffectOutcome::DeleteSession { report })
-        }
-        ProcessCommand::Await { process_id } => {
-            // Replay-determinism class inventory: PR #166 removed the process
-            // start gate. FIG-788 always redrives the process runner, retains
-            // ordinal handovers until terminal delivery resolves, and schedules
-            // each segment successor before reading cancellation. FIG-790 emits
-            // Process::Await before observing state. FIG-793 emits LlmCall
-            // before its durable cancel peek. FIG-806 makes TriggerRouter emit
-            // the deterministic process start before consulting reservation
-            // status. FIG-1126 keeps await-event key minting pure and performs
-            // the revocation observation at the unconditional await boundary.
-            //
-            // FIG-1488 adds a pre-journal engine-admission gate on the start
-            // routes that hold a live session: engine kind, payload validation,
-            // and the identity stamp all resolve before the Start command is
-            // emitted, so an admitted entry is always one whose engine this host
-            // accepted. The gate reads no mutable state, but it is not free of
-            // this class: it runs ahead of the journal, so on a redrive it runs
-            // again before the recorded Start replays, and an engine whose
-            // `validate_start` touches infrastructure can therefore fail a
-            // command that already committed. Kind resolution and the identity
-            // stamp are pure and cannot; `validate_start` is the open edge, and
-            // the host front door (`ToolIntentIngress`) deliberately runs only
-            // the pure part for that reason.
-            //
-            // This existence guard remains an explicit retention exposure, not
-            // a proof: registration precedes the effect, and terminal events
-            // plus weak-observer removal retain the row, but a host can prune a
-            // terminal row while this invocation is still replayable. There is
-            // no finite waiter-lifetime bound against which the raw prune cutoff
-            // can be validated. In that case `get_process` returns
-            // `Err(ProcessNoLongerRetained)` at `?`, not `Ok(None)` at this
-            // branch. Hosts must retain terminal rows beyond every such waiter.
-            if registry.get_process(&process_id).await?.is_none() {
-                return Err(
-                    lash_core::runtime::registry_transitions::unknown_process(&process_id).into(),
-                );
-            }
-            let turn_cancel = restate_process_turn_cancel_wait_request(
-                invocation,
-                turn_cancellation.is_some(),
-                turn_cancellation
-                    .as_ref()
-                    .map(|turn_cancellation| &turn_cancellation.scope),
-            )?;
-            trace_park("process");
-            let first_wait = context
-                .await_process_terminal_or_turn_cancel(process_id.clone(), turn_cancel)
-                .await;
-            let first_wait = match first_wait {
-                Ok(outcome) => outcome,
-                Err(err) => {
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Failed);
-                    return Err(RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::RestateProcessAwait,
-                        err.to_string(),
-                    ));
-                }
-            };
-            let output = match first_wait {
-                RestateTurnCancelRaceOutcome::Completed(output) => {
-                    trace_resolve("process", lash_trace::TraceDurableWaitResolution::Resolved);
-                    *output
-                }
-                RestateTurnCancelRaceOutcome::TurnCancelled => {
-                    trace_resolve(
-                        "process",
-                        lash_trace::TraceDurableWaitResolution::TurnCancelled,
-                    );
-                    let Some(turn_cancellation) = turn_cancellation.as_ref() else {
-                        return Err(RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
-                            "process-await cancellation won without turn-cancellation context",
-                        ));
-                    };
-                    turn_cancellation.cancellation.cancel();
-                    context
-                        .request_process_workflow_cancel(RestateProcessCancelRequest {
-                            process_id: process_id.clone(),
-                            reason: Some("turn cancelled while awaiting process".to_string()),
-                        })
-                        .await
-                        .map_err(|err| {
-                            RestateEffectError::BackgroundScheduler(err.to_string())
-                                .into_plugin_error()
-                        })?;
-                    trace_park("process_after_turn_cancel");
-                    match context.await_process_terminal(process_id.clone()).await {
-                        Ok(output) => {
-                            trace_resolve(
-                                "process_after_turn_cancel",
-                                lash_trace::TraceDurableWaitResolution::Resolved,
-                            );
-                            output
-                        }
-                        Err(err) => {
-                            trace_resolve(
-                                "process_after_turn_cancel",
-                                lash_trace::TraceDurableWaitResolution::Failed,
-                            );
-                            return Err(RuntimeEffectControllerError::new(
-                                RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
-                                err.to_string(),
-                            ));
-                        }
-                    }
-                }
-                RestateTurnCancelRaceOutcome::SessionRevoked { session_id } => {
-                    trace_resolve(
-                        "process",
-                        lash_trace::TraceDurableWaitResolution::SessionRevoked,
-                    );
-                    return Err(lash_core::StoreError::SessionDeleted { session_id }.into());
-                }
-            };
-            Ok(ProcessEffectOutcome::Await {
-                output: Box::new(output),
-            })
-        }
-        ProcessCommand::Cancel {
-            process_id,
-            reason,
-            replay,
-        } => {
-            let record = registry.get_process(&process_id).await?.ok_or_else(|| {
-                lash_core::runtime::registry_transitions::unknown_process(&process_id)
-            })?;
-            let mut request =
-                lash_core::ProcessEventAppendRequest::cancel_requested(&process_id, reason.clone());
-            if let Some(replay) = replay {
-                request = request.with_optional_replay(Some(replay));
-            }
-            registry.append_event(&process_id, request).await?;
-            context
-                .request_process_workflow_cancel(RestateProcessCancelRequest { process_id, reason })
-                .await
-                .map_err(|err| {
-                    RestateEffectError::BackgroundScheduler(err.to_string()).into_plugin_error()
-                })?;
-            Ok(ProcessEffectOutcome::Cancel {
-                record: Box::new(record),
-            })
-        }
-        ProcessCommand::ParentEnd {
-            identity,
-            process_id,
-            policy,
-            reason,
-        } => {
-            let outcome = match policy {
-                lash_core::ProcessParentEndPolicy::Abandon => {
-                    lash_core::ToolIntentParentEndOutcome::Abandoned {
-                        identity,
-                        process_id,
-                    }
-                }
-                lash_core::ProcessParentEndPolicy::Cancel => {
-                    let result: Result<(), lash_core::PluginError> = async {
-                        registry.get_process(&process_id).await?.ok_or_else(|| {
-                            lash_core::runtime::registry_transitions::unknown_process(&process_id)
-                        })?;
-                        registry
-                            .append_event(
-                                &process_id,
-                                lash_core::ProcessEventAppendRequest::cancel_requested(
-                                    &process_id,
-                                    Some(reason.clone()),
-                                ),
-                            )
-                            .await?;
-                        context
-                            .request_process_workflow_cancel(RestateProcessCancelRequest {
-                                process_id: process_id.clone(),
-                                reason: Some(reason),
-                            })
-                            .await
-                            .map_err(|err| {
-                                RestateEffectError::BackgroundScheduler(err.to_string())
-                                    .into_plugin_error()
-                            })?;
-                        Ok(())
-                    }
-                    .await;
-                    match result {
-                        Ok(()) => lash_core::ToolIntentParentEndOutcome::Cancelled {
-                            identity,
-                            process_id,
-                        },
-                        Err(error) => {
-                            let error = RuntimeEffectControllerError::from(error);
-                            lash_core::ToolIntentParentEndOutcome::Refused {
-                                identity,
-                                process_id,
-                                code: error.code.as_str().to_string(),
-                                message: error.message,
-                            }
-                        }
-                    }
-                }
-            };
-            Ok(ProcessEffectOutcome::ParentEnd {
-                outcome: Box::new(outcome),
-            })
-        }
-        ProcessCommand::Signal {
-            process_id,
-            signal_name,
-            request,
-            ..
-        } => {
-            let result = registry.append_event(&process_id, request).await?;
-            let ordinal = signal_ordinal_for_event(
-                registry.as_ref(),
-                &process_id,
-                result.event.event_type.as_str(),
-                result.event.sequence,
-            )
-            .await?;
-            let key = restate_await_event_key(
-                &ExecutionScope::process(process_id.clone()),
-                AwaitEventWaitIdentity::process_signal(process_id.clone(), signal_name, ordinal),
-            )
-            .map_err(|err| PluginError::Session(err.to_string()))?;
-            context
-                .resolve_event(RestateDurableWaitResolveRequest {
-                    key,
-                    resolution: Resolution::Ok(result.event.payload.clone()),
-                })
-                .await
-                .map_err(|err| {
-                    RestateEffectError::BackgroundScheduler(err.to_string()).into_plugin_error()
-                })?;
-            Ok(ProcessEffectOutcome::Signal {
-                event: Box::new(result.event),
-            })
-        }
-        ProcessCommand::EmitEvent {
-            process_id,
-            request,
-        } => {
-            let result = registry.append_event(&process_id, request).await?;
-            Ok(ProcessEffectOutcome::EmitEvent {
-                event: Box::new(result.event),
-                wake_delivery: result.wake_delivery.map(Box::new),
-            })
-        }
-    };
-    if let (Ok(outcome), Some(observer)) = (&outcome, outcome_observer) {
-        observer(outcome);
-    }
-    outcome
-}
-
+include!("process_command.rs");
 async fn signal_ordinal_for_event(
     registry: &dyn ProcessRegistry,
     process_id: &str,
@@ -1301,7 +1287,10 @@ where
         .start_process_workflow(registration, execution_context)
         .await
         .map_err(|err| {
-            RestateEffectError::BackgroundScheduler(err.to_string()).into_plugin_error()
+            PluginError::Runtime(RuntimeError::new(
+                RuntimeErrorCode::RestateProcessIngressSubmit,
+                format!("Restate process workflow start failed: {err}"),
+            ))
         })?;
     registry
         .set_external_ref(

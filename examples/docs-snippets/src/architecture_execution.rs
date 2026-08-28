@@ -19,6 +19,7 @@ async fn facade_turn(
     let events = NoopTurnActivitySink;
     // docs:start:facade-turn
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -28,7 +29,7 @@ async fn facade_turn(
         )
         .store_factory(store_factory)
         .effect_host(std::sync::Arc::new(
-            lash::durability::InlineEffectHost::default(),
+            lash::durability::NativeEffectHost::default(),
         ))
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),

@@ -39,6 +39,7 @@ fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
 
 fn websocket_core(provider: ProviderHandle) -> LashCore {
     LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -46,7 +47,7 @@ fn websocket_core(provider: ProviderHandle) -> LashCore {
                 .build()
                 .expect("valid model spec"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -160,6 +161,7 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
     .await;
     let seen = Arc::new(Mutex::new(Vec::new()));
     let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(websocket_provider(&server))
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -173,7 +175,7 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
                 seen: Arc::clone(&seen),
             },
         )))
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

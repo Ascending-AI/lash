@@ -194,7 +194,7 @@ impl EffectGroupColumn for LoserPolicy {
     }
 }
 
-/// What a guarded [`finalize`](super::effect_replay_driver::EffectReplayPersistence::finalize)
+/// What a guarded [`finalize`](super::effect_replay_driver::EffectReplayRowStore::finalize)
 /// did.
 ///
 /// A richer answer than the `bool` it replaces, because N1's defect is
@@ -246,7 +246,7 @@ pub struct StoredGroupSettlement {
 }
 
 /// A child of a group whose settlement rank has **not** been allocated, read
-/// back by [`read_unsettled_group_children`](super::effect_replay_driver::EffectReplayPersistence::read_unsettled_group_children).
+/// back by [`read_unsettled_group_children`](super::effect_replay_driver::EffectReplayRowStore::read_unsettled_group_children).
 ///
 /// "Unsettled" is `settlement_seq IS NULL`, which for a grouped child is the
 /// same set as "non-terminal": a rank is allocated in the same transaction that

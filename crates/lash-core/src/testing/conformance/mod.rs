@@ -569,15 +569,18 @@ mod tests {
         let substrates = Arc::new(Mutex::new(
             BTreeMap::<String, Arc<dyn RuntimePersistence>>::new(),
         ));
-        Box::pin(turn_crash_matrix_level_1(move |scenario| {
-            let mut substrates = substrates.lock_recover();
-            let substrate = Arc::clone(
-                substrates
-                    .entry(scenario.to_string())
-                    .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
-            );
-            crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
-        }))
+        Box::pin(turn_crash_matrix_level_1(
+            move |scenario| {
+                let mut substrates = substrates.lock_recover();
+                let substrate = Arc::clone(
+                    substrates
+                        .entry(scenario.to_string())
+                        .or_insert_with(|| Arc::new(crate::InMemorySessionStore::default())),
+                );
+                crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
+            },
+            |_| ConformanceInvocation::native(),
+        ))
         .await;
     }
 
@@ -606,15 +609,22 @@ mod tests {
         let factory = Arc::new(crate::InMemorySessionStoreFactory::with_clock(
             Arc::clone(&clock) as Arc<dyn crate::Clock>,
         )) as Arc<dyn crate::SessionStoreFactory>;
-        wake_delivery_crash_matrix(factory, registry, clock).await;
+        let process_work = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+            &registry,
+        )));
+        wake_delivery_crash_matrix(factory, registry, clock, process_work).await;
     }
 
     #[tokio::test]
     async fn in_memory_wake_delivery_ordering_group_conformance() {
         let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+        let process_work = Arc::new(crate::NativeProcessWork::for_registry(
+            Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+        ));
         wake_delivery_ordering_group_conformance(
             Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
             registry as Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
+            process_work,
         )
         .await;
     }
@@ -704,10 +714,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inline_effect_host_satisfies_conformance() {
-        effect_host(|| Arc::new(crate::InlineEffectHost::default())).await;
-        effect_host_await_events(|| Arc::new(crate::InlineEffectHost::default())).await;
-        turn_work_driver(Arc::new(crate::InlineEffectHost::default())).await;
+    async fn native_effect_host_satisfies_conformance() {
+        effect_host(|| Arc::new(crate::NativeEffectHost::default())).await;
+        effect_host_await_events(|| Arc::new(crate::NativeEffectHost::default())).await;
+        turn_work_driver(Arc::new(crate::NativeEffectHost::default())).await;
     }
 
     #[tokio::test]

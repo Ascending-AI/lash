@@ -81,6 +81,10 @@ async fn execute_code_unbounded_for_tests(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    dead_code,
+    reason = "the bounded entrypoint is consumed by test and testing-feature harnesses"
+)]
 pub(crate) async fn execute_code_with_bounds(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
@@ -2151,7 +2155,7 @@ mod tests {
             _scope: lash_core::ProcessOpScope<'_>,
         ) -> Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
             let registry: Arc<dyn lash_core::ProcessRegistry> = self.registry.clone();
-            lash_core::facade_support::ProcessAwaiter::polling(registry)
+            lash_core::NativeProcessWork::for_registry(registry)
                 .await_terminal(process_id)
                 .await
         }
@@ -2280,7 +2284,7 @@ mod tests {
         let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
             Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
         let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-            lash_core::facade_support::InlineRuntimeEffectController::default()
+            lash_core::facade_support::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         );
         let surface = LashlangSurface::new(
@@ -2299,7 +2303,7 @@ mod tests {
         };
         let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::new(controller.clone())
+                lash_core::facade_support::NativeEffectHost::new(controller.clone())
                     .allow_process_lifetime_completion_keys(),
             ),
             Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
@@ -2312,6 +2316,7 @@ mod tests {
             surface.clone(),
         )));
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+        let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
         let worker = lash_core::facade_support::DurableProcessWorker::new(
             lash_core::facade_support::DurableProcessWorkerConfig::new(
                 Arc::new(lash_core::facade_support::PluginHost::new(
@@ -2319,11 +2324,13 @@ mod tests {
                 )),
                 runtime_host,
                 Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-                registry_dyn,
+                lash_core::WorkerProcessWork::SelfNative(watched),
+                Arc::new(lash_core::NoQueuedWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy.clone()),
-        );
+        )
+        .expect("valid test native substrate config");
         let processes: Arc<dyn lash_core::ProcessService> =
             Arc::new(TypeScriptSignalProcessService {
                 registry: registry.clone(),
@@ -2387,8 +2394,7 @@ mod tests {
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
         let terminal = match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            lash_core::facade_support::ProcessAwaiter::polling(registry_dyn)
-                .await_terminal(&record.id),
+            lash_core::NativeProcessWork::for_registry(registry_dyn).await_terminal(&record.id),
         )
         .await
         {
@@ -2414,7 +2420,7 @@ mod tests {
         let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
             Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
         let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-            lash_core::facade_support::InlineRuntimeEffectController::default()
+            lash_core::facade_support::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         );
         let inspected = Arc::new(std::sync::Mutex::new(None));
@@ -2439,7 +2445,7 @@ mod tests {
         };
         let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::new(controller.clone())
+                lash_core::facade_support::NativeEffectHost::new(controller.clone())
                     .allow_process_lifetime_completion_keys(),
             ),
             Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
@@ -2452,6 +2458,7 @@ mod tests {
             surface.clone(),
         )));
         let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+        let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
         let _worker = lash_core::facade_support::DurableProcessWorker::new(
             lash_core::facade_support::DurableProcessWorkerConfig::new(
                 Arc::new(lash_core::facade_support::PluginHost::new(
@@ -2459,11 +2466,13 @@ mod tests {
                 )),
                 runtime_host,
                 Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-                registry_dyn,
+                lash_core::WorkerProcessWork::SelfNative(watched),
+                Arc::new(lash_core::NoQueuedWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy.clone()),
-        );
+        )
+        .expect("valid test native substrate config");
         let processes: Arc<dyn lash_core::ProcessService> =
             Arc::new(TypeScriptSignalProcessService {
                 registry: registry.clone(),

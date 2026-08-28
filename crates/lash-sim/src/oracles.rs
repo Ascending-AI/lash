@@ -1589,7 +1589,7 @@ fn is_started_owner_bound(process: &Value) -> bool {
         && process_field_bool(process, "started") == Some(true)
 }
 
-/// An Abandoned terminal is licensed by a live owner's inline drain or an
+/// An Abandoned terminal is licensed by a live owner's native drain or an
 /// operator-authorized request reconciled after the lease lapsed. Elapsed time
 /// or a missing/unknown writer is never licensing evidence.
 fn abandoned_evidence_is_licensed(process: &Value) -> bool {

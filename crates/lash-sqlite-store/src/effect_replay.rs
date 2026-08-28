@@ -1,8 +1,10 @@
 //! SQLite-backed runtime effect replay host.
 //!
 //! The claim/execute/renew/finalize state machine lives in
-//! [`EffectReplayDriver`]; this module is the SQLite half of its persistence
-//! port plus the host and controller types that expose it. Every atom runs
+//! [`StoreEffectReplayDriver`]; this module is the SQLite half of its
+//! [`EffectReplayRowStore`] plug-in plus the host and controller types that
+//! expose it. Row storage is all this module owns: the driver decides every
+//! claim, replay, and drain. Every atom runs
 //! inside `SqliteConnection::write` (`BEGIN IMMEDIATE`), so the read, the
 //! transition decision, and the write it guards take the cross-process write
 //! lock up front and cannot interleave with a competing claimant.
@@ -18,15 +20,15 @@ use std::time::Instant;
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectFinalizeOutcome,
-    EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayDriver,
-    EffectReplayPersistence, EffectReplayVocabulary, EffectRowStatus, EffectTerminal,
+    EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayRowStore,
+    EffectReplayVocabulary, EffectRowStatus, EffectTerminal, StoreEffectReplayDriver,
     StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild, decide_effect_claim,
 };
 use lash_core::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectGroupDrain, EffectHost,
-    EffectJournalRetirement, ExecutionScope, GroupExecutors, Resolution, ResolveOutcome,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, ScopedEffectController,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
+    ExecutionScope, GroupExecutors, Resolution, ResolveOutcome, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
+    RuntimeEffectOutcome, RuntimeError, ScopedEffectController, StoreEffectGroupDrain,
     facade_support::LeaseTimings,
 };
 use tokio_util::sync::CancellationToken;
@@ -37,9 +39,9 @@ use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events};
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
 /// The SQLite effect-replay driver: one shared state machine over
-/// [`SqliteEffectReplayPersistence`].
+/// [`SqliteEffectReplayRowStore`].
 type SqliteEffectReplay =
-    EffectReplayDriver<SqliteEffectReplayPersistence, SqliteAwaitEventBackend>;
+    StoreEffectReplayDriver<SqliteEffectReplayRowStore, SqliteAwaitEventBackend>;
 
 /// Options for SQLite-backed runtime effect replay.
 #[derive(Clone, Debug, Default)]
@@ -65,7 +67,7 @@ pub struct SqliteEffectHost {
 pub struct SqliteRuntimeEffectController {
     inner: Arc<SqliteEffectReplay>,
     scope: ExecutionScope,
-    allows_process_lifetime_completion_keys: bool,
+    process_lifetime_completion_keys_enabled: bool,
 }
 
 impl SqliteEffectHost {
@@ -135,23 +137,25 @@ impl SqliteEffectHost {
     /// The drain shares this host's driver, so it claims under the same owner
     /// identity, over the same journal, and resolves children through the same
     /// registered resolver.
-    pub fn group_drain(&self) -> Arc<dyn EffectGroupDrain> {
+    pub fn group_drain(&self) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::clone(&self.inner).into_group_drain()
     }
 }
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for SqliteEffectHost {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -205,7 +209,7 @@ impl EffectHost for SqliteEffectHost {
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
-            allows_process_lifetime_completion_keys: true,
+            process_lifetime_completion_keys_enabled: true,
         };
         ScopedEffectController::shared(Arc::new(controller), scope)
     }
@@ -218,12 +222,31 @@ impl EffectHost for SqliteEffectHost {
         let controller = SqliteRuntimeEffectController {
             inner: Arc::clone(&self.inner),
             scope: scope.clone(),
-            allows_process_lifetime_completion_keys: true,
+            process_lifetime_completion_keys_enabled: true,
         };
         Ok(Some(ScopedEffectController::shared(
             Arc::new(controller),
             scope,
         )?))
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> Result<lash_core::ToolIntentPreparation, RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
     }
 
     async fn retire_effect_journal(
@@ -272,7 +295,7 @@ impl SqliteRuntimeEffectController {
         Ok(Self {
             inner: open_effect_replay_driver(path, StoreBacking::File, options, clock).await?,
             scope,
-            allows_process_lifetime_completion_keys: true,
+            process_lifetime_completion_keys_enabled: true,
         })
     }
 
@@ -312,7 +335,7 @@ impl SqliteRuntimeEffectController {
         Ok(Self {
             inner: open_effect_replay_memory_driver(options, clock).await?,
             scope,
-            allows_process_lifetime_completion_keys: false,
+            process_lifetime_completion_keys_enabled: false,
         })
     }
 
@@ -325,16 +348,21 @@ impl SqliteRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for SqliteRuntimeEffectController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.allows_process_lifetime_completion_keys
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        if !self.process_lifetime_completion_keys_enabled {
+            return Ok(lash_core::CompletionKeyPreparation::Unsupported);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -380,6 +408,19 @@ impl AwaitEventResolver for SqliteRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for SqliteRuntimeEffectController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -408,7 +449,7 @@ impl RuntimeEffectController for SqliteRuntimeEffectController {
 
     /// Delegated to the shared driver exactly as `execute_effect` is: the group
     /// host is one implementation over
-    /// [`EffectReplayPersistence`](lash_core::facade_support::effect_replay_driver::EffectReplayPersistence),
+    /// [`EffectReplayRowStore`](lash_core::facade_support::effect_replay_driver::EffectReplayRowStore),
     /// and this store contributes the substrate half of it rather than a second
     /// copy of the state machine.
     async fn open_effect_group(
@@ -490,8 +531,8 @@ fn build_effect_replay_driver(
     signing_secret: Vec<u8>,
 ) -> SqliteEffectReplay {
     let await_events = sqlite_await_events(conn.clone(), signing_secret, Arc::clone(&clock));
-    EffectReplayDriver::new(
-        SqliteEffectReplayPersistence {
+    StoreEffectReplayDriver::new(
+        SqliteEffectReplayRowStore {
             conn,
             clock: Arc::clone(&clock),
         },
@@ -502,17 +543,17 @@ fn build_effect_replay_driver(
 }
 
 /// SQLite storage atoms for the durable effect journal.
-struct SqliteEffectReplayPersistence {
+struct SqliteEffectReplayRowStore {
     conn: SqliteConnection,
     /// SQLite's authoritative lease clock, shared with the driver's sleep clock
     /// because the store and its host share one clock domain.
     clock: Arc<dyn lash_core::Clock>,
 }
 
-impl effect_replay_driver::sealed::EffectReplayBackend for SqliteEffectReplayPersistence {}
+impl effect_replay_driver::sealed::EffectReplayBackend for SqliteEffectReplayRowStore {}
 
 #[async_trait::async_trait]
-impl EffectReplayPersistence for SqliteEffectReplayPersistence {
+impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     fn vocabulary(&self) -> EffectReplayVocabulary {
         VOCABULARY
     }

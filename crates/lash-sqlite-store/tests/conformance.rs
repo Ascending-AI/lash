@@ -38,6 +38,37 @@ mod trigger_occurrence_retention;
 #[path = "conformance/wake_delivery.rs"]
 mod wake_delivery;
 
+fn sqlite_conformance_invocation(
+    controller: SqliteRuntimeEffectController,
+) -> lash_core::testing::conformance::ConformanceInvocation {
+    let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
+    lash_core::testing::conformance::ConformanceInvocation::new(
+        live,
+        lash_core::testing::conformance::ConformanceEffectRedrive::ReplaysJournal,
+        || {},
+        move || {
+            controller.start_replay();
+            Arc::new(controller.clone()) as Arc<dyn RuntimeEffectController>
+        },
+    )
+}
+
+#[test]
+fn conformance_invocation_lifecycle_control_is_consumable_cross_crate() {
+    use lash_core::testing::conformance::{ConformanceEffectRedrive, ConformanceInvocation};
+
+    let invocation = ConformanceInvocation::native();
+    assert_eq!(
+        ConformanceInvocation::effect_redrive(&invocation),
+        ConformanceEffectRedrive::ReexecutesUncommitted
+    );
+    let _journaled_redrive = ConformanceEffectRedrive::ReplaysJournal;
+    let _controller = ConformanceInvocation::controller(&invocation);
+    let _controller_handle = ConformanceInvocation::controller_handle(&invocation);
+    let successor = ConformanceInvocation::redrive(invocation);
+    ConformanceInvocation::end(successor);
+}
+
 struct SqliteLineageConformanceInjector {
     path: PathBuf,
     _dir: TempDir,
@@ -1286,6 +1317,7 @@ async fn sqlite_real_turn_crash_matrix() {
     let dir = tempfile::tempdir().expect("real-turn crash matrix tempdir");
     Box::pin(lash_core::testing::conformance::turn_crash_matrix_level_1(
         |scenario| open_store(&dir.path().join(format!("turn-crash-matrix-{scenario}.db"))),
+        |_| lash_core::testing::conformance::ConformanceInvocation::native(),
     ))
     .await;
 }
@@ -1547,10 +1579,14 @@ async fn sqlite_public_signal_intent_wakes_a_parked_process() {
         .await
         .expect("open SQLite signal-intent process registry"),
     ) as Arc<dyn ProcessRegistry>;
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    )));
     lash_core::testing::conformance::public_signal_intent_wakes_parked_process(
         "sqlite-public-signal-intent",
         effect_host,
         registry,
+        process_work,
     )
     .await;
 }
@@ -1594,24 +1630,35 @@ async fn sqlite_effect_host_and_controller_reject_non_file_backed_path_spellings
 
 #[cfg(feature = "testing")]
 #[tokio::test]
-async fn sqlite_completion_key_permission_tracks_backing_not_replay_ownership() {
-    let memory =
-        SqliteRuntimeEffectController::memory(durable_turn_scope("memory-session", "memory-turn"))
+async fn sqlite_completion_key_preparation_tracks_backing() {
+    let memory_scope = durable_turn_scope("memory-session", "memory-turn");
+    let memory = SqliteRuntimeEffectController::memory(memory_scope.clone())
+        .await
+        .expect("testing-only memory controller");
+    assert!(matches!(
+        memory
+            .prepare_completion_key(
+                &memory_scope,
+                lash_core::AwaitEventWaitIdentity::tool_completion("memory-call"),
+                true,
+            )
             .await
-            .expect("testing-only memory controller");
-    assert_eq!(
-        memory.replay_ownership(),
-        lash_core::EffectReplayOwnership::Controller
-    );
-    assert!(!memory.allows_process_lifetime_completion_keys());
+            .expect("memory preparation"),
+        lash_core::CompletionKeyPreparation::Unsupported
+    ));
 
-    let (_file_dir, file) =
-        open_ephemeral_effect_controller(durable_turn_scope("file-session", "file-turn")).await;
-    assert_eq!(
-        file.replay_ownership(),
-        lash_core::EffectReplayOwnership::Controller
-    );
-    assert!(file.allows_process_lifetime_completion_keys());
+    let file_scope = durable_turn_scope("file-session", "file-turn");
+    let (_file_dir, file) = open_ephemeral_effect_controller(file_scope.clone()).await;
+    assert!(matches!(
+        file.prepare_completion_key(
+            &file_scope,
+            lash_core::AwaitEventWaitIdentity::tool_completion("file-call"),
+            true,
+        )
+        .await
+        .expect("file preparation"),
+        lash_core::CompletionKeyPreparation::Issued(_)
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1766,7 +1813,7 @@ async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
 
 /// SQLite's authoritative effect-lease clock is the host's injected `Clock`,
 /// because this store shares its host's clock domain. PostgreSQL — the other
-/// implementor of the same shared `EffectReplayDriver` — deliberately reads the
+/// implementor of the same shared `StoreEffectReplayDriver` — deliberately reads the
 /// *server* clock instead (the `Clock` contract's database-authoritative lease
 /// boundary, fenced by `postgres_clock_contract`), so
 /// each half of that split needs its own referee now that one driver drives
@@ -2060,10 +2107,9 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
     ))
     .await;
 
-    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(
-        &controller,
-        || controller.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(|| {
+        sqlite_conformance_invocation(controller.clone())
+    })
     .await;
 
     let (_tool_controller_dir, tool_controller) =
@@ -2073,8 +2119,7 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
         ))
         .await;
     lash_core::testing::conformance::effect_controller_tool_attempt_fanout_replay_deterministic(
-        &tool_controller,
-        || tool_controller.start_replay(),
+        || sqlite_conformance_invocation(tool_controller.clone()),
     )
     .await;
 
@@ -2082,10 +2127,9 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
         durable_turn_scope("durable-step-session", "durable-step-turn"),
     )
     .await;
-    lash_core::testing::conformance::effect_controller_journaled_effect_replay(
-        &durable_controller,
-        || durable_controller.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_journaled_effect_replay(|| {
+        sqlite_conformance_invocation(durable_controller.clone())
+    })
     .await;
 }
 
@@ -2231,7 +2275,7 @@ async fn sqlite_effect_controller_reports_envelope_divergent_paths() {
     let (_controller_dir, controller) =
         open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
     lash_core::testing::conformance::effect_controller_replay_mismatch_diagnostics(
-        &controller,
+        || sqlite_conformance_invocation(controller.clone()),
         "sqlite_effect_replay_hash_conflict",
     )
     .await;

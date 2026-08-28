@@ -43,13 +43,13 @@ impl ToolAttemptInvariantRecorder {
     }
 }
 
-struct RecordingInlineEffectController {
+struct RecordingNativeEffectController {
     recorder: Arc<ToolAttemptInvariantRecorder>,
-    delegate: lash_core::facade_support::InlineRuntimeEffectController,
+    delegate: lash_core::facade_support::NativeRuntimeEffectController,
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for RecordingInlineEffectController {
+impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
     async fn await_event_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -102,7 +102,7 @@ impl lash_core::AwaitEventResolver for RecordingInlineEffectController {
 }
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for RecordingInlineEffectController {
+impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -152,10 +152,10 @@ fn recording_effect_host(
     recorder: Arc<ToolAttemptInvariantRecorder>,
 ) -> Arc<dyn lash_core::EffectHost> {
     Arc::new(
-        lash_core::facade_support::InlineEffectHost::new(Arc::new(
-            RecordingInlineEffectController {
+        lash_core::facade_support::NativeEffectHost::new(Arc::new(
+            RecordingNativeEffectController {
                 recorder,
-                delegate: lash_core::facade_support::InlineRuntimeEffectController::default(),
+                delegate: lash_core::facade_support::NativeRuntimeEffectController::default(),
             },
         ))
         .allow_process_lifetime_completion_keys(),

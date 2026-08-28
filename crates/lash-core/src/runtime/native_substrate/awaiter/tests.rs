@@ -1,12 +1,19 @@
 //! Unit tests for the process awaiter, watched registry, and work driver.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::{
-    ProcessInput, ProcessProvenance, ProcessRegistration, TestLocalProcessRegistry,
-    TestProcessRegistryWriteExt,
+    AbandonRequest, ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef, ProcessInput,
+    ProcessProvenance, ProcessRegistration, ProcessStarted, ProjectionWatermark,
+    TestLocalProcessRegistry, TestProcessRegistryWriteExt, WaitState, WatchedRegistry,
+    watch_process_registry, watch_process_registry_with_sink,
 };
+use lash_sansio::sync::MutexExt;
+
+fn watched_parts(watched: WatchedRegistry) -> (Arc<dyn ProcessRegistry>, ProcessChangeHub) {
+    (Arc::clone(watched.registry()), watched.hub().clone())
+}
 
 fn registration(process_id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
@@ -92,7 +99,7 @@ fn backoff_schedule_has_25ms_floor_doubling_to_1s_cap() {
 #[tokio::test]
 async fn prune_through_decorator_does_not_bump_the_hub() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc-terminal"))
         .await
@@ -151,7 +158,7 @@ async fn hub_subscribe_then_notify_wakes_and_gc_drops_empty_entry() {
 #[tokio::test]
 async fn await_event_returns_historical_event_immediately() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc"))
         .await
@@ -164,7 +171,7 @@ async fn await_event_returns_historical_event_immediately() {
         .await
         .expect("append");
 
-    let event = ProcessAwaiter::new(Arc::clone(&registry), hub)
+    let event = NativeProcessAwaiter::new(Arc::clone(&registry), hub)
         .await_event("proc", "process.cancel_requested", 0)
         .await
         .expect("await event");
@@ -174,7 +181,7 @@ async fn await_event_returns_historical_event_immediately() {
 #[tokio::test]
 async fn await_terminal_unknown_process_errors() {
     let registry = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let err = ProcessAwaiter::polling(registry)
+    let err = NativeProcessAwaiter::for_registry(registry)
         .await_terminal("missing")
         .await
         .expect_err("unknown process should error");
@@ -195,7 +202,7 @@ async fn await_terminal_propagates_process_store_read_errors() {
             "process store read failed".to_string(),
         )))
         .await;
-    let err = ProcessAwaiter::polling(registry)
+    let err = NativeProcessAwaiter::for_registry(registry)
         .await_terminal("unreadable")
         .await
         .expect_err("store read failure should surface");
@@ -230,7 +237,7 @@ async fn polling_awaiter_resolves_via_backoff() {
 
     let output = tokio::time::timeout(
         Duration::from_secs(1),
-        ProcessAwaiter::polling(registry).await_terminal("proc"),
+        NativeProcessAwaiter::for_registry(registry).await_terminal("proc"),
     )
     .await
     .expect("polling await timeout")
@@ -241,12 +248,12 @@ async fn polling_awaiter_resolves_via_backoff() {
 #[tokio::test]
 async fn watched_awaiter_observes_terminal_without_lost_wakeup() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc"))
         .await
         .expect("register");
-    let awaiter = ProcessAwaiter::new(Arc::clone(&registry), hub);
+    let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
     let waiter = crate::task::spawn(async move { awaiter.await_terminal("proc").await });
     registry
         .complete_process(
@@ -268,7 +275,7 @@ async fn watched_awaiter_observes_terminal_without_lost_wakeup() {
 #[tokio::test]
 async fn watched_registry_bumps_on_mutations() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     let mut rx = hub.subscribe("proc");
     registry
         .register_process(registration("proc"))
@@ -296,7 +303,10 @@ async fn watched_registry_bumps_on_mutations() {
 async fn sink_receives_appended_events_in_order() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     registry
         .register_process(registration_with_events(
             "proc",
@@ -334,7 +344,7 @@ async fn sink_receives_appended_events_in_order() {
 #[tokio::test]
 async fn sink_absent_leaves_appends_unchanged() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, _hub) = watch_process_registry_with_sink(raw, None);
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(raw, None));
     registry
         .register_process(registration_with_events("proc", &["producer.a"]))
         .await
@@ -353,7 +363,10 @@ async fn sink_absent_leaves_appends_unchanged() {
 async fn sink_receives_complete_process_terminal_append() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     registry
         .register_process(registration_with_events("proc", &["producer.a"]))
         .await
@@ -393,7 +406,10 @@ async fn sink_receives_complete_process_terminal_append() {
 async fn sink_receives_runtime_lifecycle_events_in_order() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     let mut lifecycle_registration = ProcessRegistration::new(
         "proc",
         ProcessInput::Engine {
@@ -485,7 +501,8 @@ async fn sink_receives_runtime_lifecycle_events_in_order() {
 async fn sink_present_still_bumps_hub_on_append() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = CollectingSink::default();
-    let (registry, hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink)));
+    let (registry, hub) =
+        watched_parts(watch_process_registry_with_sink(raw, Some(Arc::new(sink))));
     let mut rx = hub.subscribe("proc");
     registry
         .register_process(registration_with_events("proc", &["producer.a"]))
@@ -508,38 +525,11 @@ async fn sink_present_still_bumps_hub_on_append() {
         .expect("sender remains open");
 }
 
-struct NoopRunHandle;
-#[async_trait::async_trait]
-impl crate::ProcessRunHandle for NoopRunHandle {
-    async fn claim_and_run_pending(
-        &self,
-    ) -> Result<crate::runtime::ProcessAdmissionReport, PluginError> {
-        Ok(crate::runtime::ProcessAdmissionReport::default())
-    }
-}
-struct PanicAttach;
-#[async_trait::async_trait]
-impl ProcessAttach for PanicAttach {
-    async fn await_terminal(&self, _process_id: &str) -> Result<ProcessAwaitOutput, PluginError> {
-        panic!("attach should not be called for already-terminal process")
-    }
-}
-
-struct ErrorAttach;
-
-#[async_trait::async_trait]
-impl ProcessAttach for ErrorAttach {
-    async fn await_terminal(&self, _process_id: &str) -> Result<ProcessAwaitOutput, PluginError> {
-        Err(PluginError::Session("attach failed".to_string()))
-    }
-}
-
 #[tokio::test]
-async fn driver_short_circuits_terminal_before_attach() {
+async fn native_awaiter_returns_an_already_terminal_process() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let driver = crate::ProcessWorkDriver::new(raw, Arc::new(NoopRunHandle))
-        .with_attach(Arc::new(PanicAttach));
-    let registry = driver.process_registry();
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
+    let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
     registry
         .register_process(registration("proc"))
         .await
@@ -553,18 +543,19 @@ async fn driver_short_circuits_terminal_before_attach() {
         .await
         .expect("complete");
 
-    let output = driver.await_terminal("proc").await.expect("await terminal");
+    let output = awaiter
+        .await_terminal("proc")
+        .await
+        .expect("await terminal");
     assert_eq!(output, success(serde_json::json!("ready")));
 }
 
-/// A caller-departed row is refused before the driver ever attaches: no
-/// writer can terminalize it, so attaching would park forever (FIG-1383).
+/// A caller-departed row is refused because no writer can terminalize it.
 #[tokio::test]
-async fn driver_refuses_await_on_caller_departed_row_before_attach() {
+async fn native_awaiter_refuses_await_on_caller_departed_row() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let driver = crate::ProcessWorkDriver::new(raw, Arc::new(NoopRunHandle))
-        .with_attach(Arc::new(PanicAttach));
-    let registry = driver.process_registry();
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
+    let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
     registry
         .register_process(registration("proc"))
         .await
@@ -574,7 +565,7 @@ async fn driver_refuses_await_on_caller_departed_row_before_attach() {
         .await
         .expect("record caller departure");
 
-    let error = driver
+    let error = awaiter
         .await_terminal("proc")
         .await
         .expect_err("awaiting a caller-departed row must be refused, not parked");
@@ -587,15 +578,15 @@ async fn driver_refuses_await_on_caller_departed_row_before_attach() {
     );
 }
 
-/// FIG-1744 / ADR 0019: CallerDeparted refusal must win over a recorded
-/// terminal outcome on BOTH entry points (awaiter and work driver).
+/// FIG-1744 / ADR 0019: CallerDeparted refusal wins over a recorded terminal
+/// outcome.
 #[tokio::test]
-async fn caller_departed_refuses_before_terminal_outcome_on_both_entry_points() {
+async fn caller_departed_refuses_before_terminal_outcome() {
     let raw = Arc::new(TestLocalProcessRegistry::default());
-    let (registry, hub) = watch_process_registry(Arc::clone(&raw) as Arc<dyn ProcessRegistry>);
-    let awaiter = ProcessAwaiter::new(Arc::clone(&registry), hub.clone());
-    let driver =
-        crate::ProcessWorkDriver::from_watched(Arc::clone(&registry), hub, Arc::new(NoopRunHandle));
+    let (registry, hub) = watched_parts(watch_process_registry(
+        Arc::clone(&raw) as Arc<dyn ProcessRegistry>
+    ));
+    let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
 
     registry
         .register_process(registration("proc-departed"))
@@ -610,8 +601,7 @@ async fn caller_departed_refuses_before_terminal_outcome_on_both_entry_points() 
     record.status = crate::ProcessStatus::CallerDeparted;
     record.outcome = Some(success(serde_json::json!("completed-value")));
 
-    // Entry point 1: ProcessAwaiter::await_terminal
-    raw.set_process_read_override(record.clone()).await;
+    raw.set_process_read_override(record).await;
     let awaiter_err = awaiter
         .await_terminal("proc-departed")
         .await
@@ -623,74 +613,6 @@ async fn caller_departed_refuses_before_terminal_outcome_on_both_entry_points() 
         ),
         "awaiter expected ProcessCallerDeparted refusal, got: {awaiter_err:?}"
     );
-
-    // Entry point 2: ProcessWorkDriver::await_terminal
-    raw.set_process_read_override(record).await;
-    let driver_err = driver
-        .await_terminal("proc-departed")
-        .await
-        .expect_err("driver must refuse CallerDeparted even if outcome is present");
-    assert!(
-        matches!(
-            driver_err,
-            PluginError::ProcessCallerDeparted { ref process_id } if process_id == "proc-departed"
-        ),
-        "driver expected ProcessCallerDeparted refusal, got: {driver_err:?}"
-    );
-}
-
-#[tokio::test]
-async fn driver_propagates_process_store_read_errors() {
-    let raw = Arc::new(TestLocalProcessRegistry::default());
-    raw.set_process_read_error(Some(PluginError::Session(
-        "process store read failed".to_string(),
-    )))
-    .await;
-    let driver = crate::ProcessWorkDriver::new(raw, Arc::new(NoopRunHandle));
-
-    let err = driver
-        .await_terminal("unreadable")
-        .await
-        .expect_err("store read failure should surface");
-    assert!(
-        matches!(
-            err,
-            PluginError::Session(ref message) if message == "process store read failed"
-        ),
-        "store read failure should remain a session error, got: {err:?}"
-    );
-}
-
-#[tokio::test]
-async fn driver_attach_errors_propagate_without_poll_fallback() {
-    let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let driver = crate::ProcessWorkDriver::new(raw, Arc::new(NoopRunHandle))
-        .with_attach(Arc::new(ErrorAttach));
-    driver
-        .process_registry()
-        .register_process(registration("proc"))
-        .await
-        .expect("register");
-
-    let err = driver
-        .await_terminal("proc")
-        .await
-        .expect_err("attach error should propagate");
-    assert!(err.to_string().contains("attach failed"));
-}
-
-struct CountingAttach {
-    calls: Arc<std::sync::atomic::AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl ProcessAttach for CountingAttach {
-    async fn await_terminal(&self, _process_id: &str) -> Result<ProcessAwaitOutput, PluginError> {
-        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Err(PluginError::Session(
-            "attach must not be consulted for a terminal process".to_string(),
-        ))
-    }
 }
 
 /// Sim-style race: many waiters attach to one process and completion fires
@@ -700,7 +622,7 @@ impl ProcessAttach for CountingAttach {
 #[tokio::test]
 async fn concurrent_waiters_all_resolve_with_identical_output_on_completion() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let (registry, hub) = watch_process_registry(raw);
+    let (registry, hub) = watched_parts(watch_process_registry(raw));
     registry
         .register_process(registration("proc"))
         .await
@@ -710,7 +632,7 @@ async fn concurrent_waiters_all_resolve_with_identical_output_on_completion() {
     let barrier = Arc::new(tokio::sync::Barrier::new(WAITERS + 1));
     let mut waiters = Vec::with_capacity(WAITERS);
     for _ in 0..WAITERS {
-        let awaiter = ProcessAwaiter::new(Arc::clone(&registry), hub.clone());
+        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub.clone());
         let barrier = Arc::clone(&barrier);
         waiters.push(crate::task::spawn(async move {
             barrier.wait().await;
@@ -743,52 +665,6 @@ async fn concurrent_waiters_all_resolve_with_identical_output_on_completion() {
     }
 }
 
-/// Sim-style restart/re-attach: a process completes while no waiter is
-/// attached; a later `await_terminal` resolves instantly through the
-/// registry short-circuit and never consults the engine attach (ADR 0016 —
-/// the terminal point-read precedes any attach hand-off).
-#[tokio::test]
-async fn driver_reattach_after_terminal_short_circuits_without_engine_call() {
-    use std::sync::atomic::Ordering;
-
-    let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let driver = crate::ProcessWorkDriver::new(raw, Arc::new(NoopRunHandle)).with_attach(Arc::new(
-        CountingAttach {
-            calls: Arc::clone(&calls),
-        },
-    ));
-    let registry = driver.process_registry();
-    registry
-        .register_process(registration("proc"))
-        .await
-        .expect("register");
-    // Process reaches terminal with no waiter attached.
-    let output = success(serde_json::json!("reattached"));
-    registry
-        .complete_process(
-            "proc",
-            output.clone(),
-            crate::ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete");
-
-    // A later await resolves via the registry short-circuit, instantly.
-    let start = std::time::Instant::now();
-    let resolved = driver.await_terminal("proc").await.expect("await terminal");
-    assert_eq!(resolved, output);
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        0,
-        "a terminal short-circuit must never call the engine attach"
-    );
-    assert!(
-        start.elapsed() < Duration::from_millis(500),
-        "a short-circuit resolves without any backoff wait"
-    );
-}
-
 /// Records seen vs. dropped emit sequences, dropping even sequences to model
 /// best-effort push loss.
 #[derive(Clone, Default)]
@@ -816,7 +692,10 @@ impl ProcessEventSink for LossySink {
 async fn lossy_sink_still_reconciles_complete_log_from_events_after() {
     let raw = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
     let sink = LossySink::default();
-    let (registry, _hub) = watch_process_registry_with_sink(raw, Some(Arc::new(sink.clone())));
+    let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+        raw,
+        Some(Arc::new(sink.clone())),
+    ));
     registry
         .register_process(registration_with_events("proc", &["producer.step"]))
         .await

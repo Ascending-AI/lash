@@ -593,10 +593,9 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
     let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tool_provider, transport).await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("runtime scenario process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("runtime scenario process registry");
     registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(
@@ -695,7 +694,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
             .any(|record| matches!(
                 record.input.as_ref(),
                 crate::ProcessInput::External { metadata }
-                    if metadata == &serde_json::json!({"kind": "start"})
+                    if *metadata == serde_json::json!({"kind": "start"})
             )),
         "the StartProcess declaration must realize through the runtime"
     );

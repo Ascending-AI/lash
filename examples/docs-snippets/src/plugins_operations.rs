@@ -280,7 +280,7 @@ fn core() -> lash::Result<lash::LashCore> {
                 .build()
                 .expect("valid plugin-operations model"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -290,7 +290,7 @@ fn core() -> lash::Result<lash::LashCore> {
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .disable_queued_work_driver()
+        .without_queued_work()
         .plugin(Arc::new(PlanPluginFactory))
         .build(crate::example_process_owner())
 }

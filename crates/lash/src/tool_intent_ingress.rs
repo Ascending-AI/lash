@@ -179,6 +179,96 @@ impl RuntimeSubmissionGates {
     }
 }
 
+fn ingress_runtime_error(error: crate::EmbedError) -> lash_core::RuntimeError {
+    match error {
+        crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)) => error,
+        crate::EmbedError::Plugin(lash_core::PluginError::RuntimeEffectController(error)) => {
+            let mut runtime = lash_core::RuntimeError::new(error.code, error.message);
+            runtime.summary = error.summary;
+            match error.cause {
+                Some(cause) => runtime.with_cause(cause),
+                None => runtime,
+            }
+        }
+        error => {
+            lash_core::RuntimeError::new(lash_core::RuntimeErrorCode::Plugin, error.to_string())
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolIntentOutcomeSink for ToolIntentIngress {
+    async fn lock_submission_gate(&self, replay_key: &str) -> lash_core::ToolIntentSubmissionGuard {
+        lash_core::ToolIntentSubmissionGuard::from_owned_mutex_guard(
+            self.core
+                .tool_intent_submission_gates
+                .lock(replay_key)
+                .await,
+        )
+    }
+
+    async fn admit(
+        &self,
+        record: lash_core::ToolIntentSubmissionRecord,
+    ) -> Result<lash_core::ToolIntentSubmissionAdmission, lash_core::RuntimeError> {
+        self.process_registry()
+            .map_err(ingress_runtime_error)?
+            .admit_tool_intent_submission(record)
+            .await
+            .map_err(|error| ingress_runtime_error(error.into()))
+    }
+
+    async fn complete_submission(
+        &self,
+        identity: &lash_core::ToolIntentIdentity,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.process_registry()
+            .map_err(ingress_runtime_error)?
+            .complete_tool_intent_submission(&identity.replay_key, outcome)
+            .await
+            .map(|_| ())
+            .map_err(|error| ingress_runtime_error(error.into()))
+    }
+
+    async fn retain_in_journal(
+        &self,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash_core::RuntimeError> {
+        let registry = self.process_registry().map_err(ingress_runtime_error)?;
+        let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), submitted)
+            .map_err(|error| {
+                lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                    format!("failed to hash admitted tool-intent submission: {error}"),
+                )
+            })?;
+        match registry
+            .admit_tool_intent_submission(submission)
+            .await
+            .map_err(|error| ingress_runtime_error(error.into()))?
+        {
+            lash_core::ToolIntentSubmissionAdmission::Admitted => {
+                registry
+                    .complete_tool_intent_submission(&identity.replay_key, outcome)
+                    .await
+                    .map_err(|error| ingress_runtime_error(error.into()))?;
+            }
+            lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
+                if existing.outcome.is_none() {
+                    registry
+                        .complete_tool_intent_submission(&identity.replay_key, outcome)
+                        .await
+                        .map_err(|error| ingress_runtime_error(error.into()))?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 enum RealizationFailure {
     Refused(ToolIntentIngressRefusal),
     Command(lash_core::ToolIntentKind, crate::EmbedError),
@@ -318,12 +408,19 @@ impl ToolIntentIngress {
                         message: error.to_string(),
                     },
                 };
-                if self.core.env.core.control.effect_host.replay_ownership()
-                    == lash_core::EffectReplayOwnership::Runtime
-                    && let Ok(registry) = self.process_registry()
-                    && let Err(store_error) = registry
-                        .complete_tool_intent_submission(&identity.replay_key, outcome.clone())
-                        .await
+                if let Err(store_error) = self
+                    .core
+                    .env
+                    .core
+                    .control
+                    .effect_host
+                    .record_tool_intent_outcome(
+                        self,
+                        &identity,
+                        submitted_intent.clone(),
+                        outcome.clone(),
+                    )
+                    .await
                 {
                     outcome = lash_core::ToolIntentExecutionOutcome::Refused {
                         identity: Some(identity.clone()),
@@ -338,31 +435,6 @@ impl ToolIntentIngress {
                 (outcome, false)
             }
         };
-        if self.core.env.core.control.effect_host.replay_ownership()
-            == lash_core::EffectReplayOwnership::Controller
-            && let Err(error) = self
-                .retain_controller_owned_outcome(
-                    identity.clone(),
-                    submitted_intent,
-                    outcome.clone(),
-                )
-                .await
-        {
-            return ToolIntentIngressOutcome::Admitted {
-                outcome: lash_core::ToolIntentExecutionOutcome::Refused {
-                    identity: Some(identity.clone()),
-                    intent_index: identity.intent_index,
-                    kind: outcome
-                        .kind()
-                        .unwrap_or(lash_core::ToolIntentKind::StartProcess),
-                    refusal: lash_core::ToolIntentRefusalReason::CommandFailed {
-                        code: "tool_intent_ingress_retention_failed".to_string(),
-                        message: error.to_string(),
-                    },
-                },
-                replayed,
-            };
-        }
         ToolIntentIngressOutcome::Admitted { outcome, replayed }
     }
 
@@ -408,36 +480,6 @@ impl ToolIntentIngress {
                 "recorded_outcome_outside_intent_protocol"
             }
         }
-    }
-
-    async fn retain_controller_owned_outcome(
-        &self,
-        identity: lash_core::ToolIntentIdentity,
-        intent: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> crate::Result<()> {
-        let registry = self.process_registry()?;
-        let submission = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent)
-            .map_err(|error| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
-                    "failed to hash admitted tool-intent submission: {error}"
-                )))
-            })?;
-        match registry.admit_tool_intent_submission(submission).await? {
-            lash_core::ToolIntentSubmissionAdmission::Admitted => {
-                registry
-                    .complete_tool_intent_submission(&identity.replay_key, outcome)
-                    .await?;
-            }
-            lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
-                if existing.outcome.is_none() {
-                    registry
-                        .complete_tool_intent_submission(&identity.replay_key, outcome)
-                        .await?;
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Apply and settle every durable parent-end action retained for this
@@ -565,61 +607,62 @@ impl ToolIntentIngress {
         RealizationFailure,
     > {
         let kind = intent.kind();
-        let runtime_owned = self.core.env.core.control.effect_host.replay_ownership()
-            == lash_core::EffectReplayOwnership::Runtime;
-        let _runtime_submission_guard = if runtime_owned {
-            Some(
-                self.core
-                    .tool_intent_submission_gates
-                    .lock(&identity.replay_key)
-                    .await,
-            )
-        } else {
-            None
-        };
-        let intent = if runtime_owned {
-            let submitted =
-                lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
-                    .map_err(|error| {
-                        RealizationFailure::Command(
-                            kind,
-                            crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
-                                "failed to hash tool-intent submission: {error}"
-                            ))),
-                        )
-                    })?;
-            match self
-                .process_registry()
-                .map_err(|error| RealizationFailure::Command(kind, error))?
-                .admit_tool_intent_submission(submitted.clone())
-                .await
-                .map_err(|error| RealizationFailure::Command(kind, error.into()))?
-            {
-                lash_core::ToolIntentSubmissionAdmission::Admitted => intent,
-                lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
-                    if existing.kind != kind {
-                        return Err(RealizationFailure::Refused(
-                            ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
-                                recorded_kind: existing.kind,
-                                submitted_kind: kind,
-                            },
-                        ));
+        let submitted_intent = intent.clone();
+        let preparation = self
+            .core
+            .env
+            .core
+            .control
+            .effect_host
+            .prepare_tool_intent(self, identity, intent.clone())
+            .await
+            .map_err(|error| {
+                RealizationFailure::Command(
+                    kind,
+                    crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
+                )
+            })?;
+        let intent = match &preparation {
+            lash_core::ToolIntentPreparation::ControllerOwned => intent,
+            lash_core::ToolIntentPreparation::RuntimeOwned {
+                admission,
+                _guard: _,
+            } => {
+                let submitted =
+                    lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
+                        .map_err(|error| {
+                            RealizationFailure::Command(
+                                kind,
+                                crate::EmbedError::Plugin(lash_core::PluginError::Session(
+                                    format!("failed to hash tool-intent submission: {error}"),
+                                )),
+                            )
+                        })?;
+                match admission {
+                    lash_core::ToolIntentSubmissionAdmission::Admitted => intent,
+                    lash_core::ToolIntentSubmissionAdmission::Existing(existing) => {
+                        if existing.kind != kind {
+                            return Err(RealizationFailure::Refused(
+                                ToolIntentIngressRefusal::IdentityBoundToDifferentIntent {
+                                    recorded_kind: existing.kind,
+                                    submitted_kind: kind,
+                                },
+                            ));
+                        }
+                        if existing.payload_hash != submitted.payload_hash {
+                            return Err(RealizationFailure::Refused(
+                                ToolIntentIngressRefusal::DuplicateIdentity { kind },
+                            ));
+                        }
+                        if existing.outcome.is_some() {
+                            return Err(RealizationFailure::Refused(
+                                ToolIntentIngressRefusal::DuplicateIdentity { kind },
+                            ));
+                        }
+                        existing.intent.clone()
                     }
-                    if existing.payload_hash != submitted.payload_hash {
-                        return Err(RealizationFailure::Refused(
-                            ToolIntentIngressRefusal::DuplicateIdentity { kind },
-                        ));
-                    }
-                    if existing.outcome.is_some() {
-                        return Err(RealizationFailure::Refused(
-                            ToolIntentIngressRefusal::DuplicateIdentity { kind },
-                        ));
-                    }
-                    existing.intent
                 }
             }
-        } else {
-            intent
         };
         let (result, parent_end_policy, replayed) = self
             .realize_inner(identity, intent)
@@ -642,8 +685,25 @@ impl ToolIntentIngress {
                         },
                     ));
                 }
-                self.complete_runtime_owned_submission(identity, kind, &value, None)
-                    .await?;
+                let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
+                    identity: identity.clone(),
+                    kind,
+                    result: value.clone(),
+                    parent_end: None,
+                };
+                self.core
+                    .env
+                    .core
+                    .control
+                    .effect_host
+                    .record_tool_intent_outcome(self, identity, submitted_intent.clone(), outcome)
+                    .await
+                    .map_err(|error| {
+                        RealizationFailure::Command(
+                            kind,
+                            crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
+                        )
+                    })?;
                 return Ok(((kind, value), None, replayed));
             }
             RealizedIntent::Process(result) => result,
@@ -736,38 +796,26 @@ impl ToolIntentIngress {
                 return Err(Self::outside_protocol_outcome("parent_end"));
             }
         };
-        self.complete_runtime_owned_submission(identity, kind, &value, parent_end.clone())
-            .await?;
-        Ok(((kind, value), parent_end, replayed))
-    }
-
-    /// Record the first typed outcome for a runtime-owned submission. Every
-    /// realized intent kind lands here so the durable submission row and the
-    /// returned outcome never disagree.
-    async fn complete_runtime_owned_submission(
-        &self,
-        identity: &lash_core::ToolIntentIdentity,
-        kind: lash_core::ToolIntentKind,
-        value: &serde_json::Value,
-        parent_end: Option<lash_core::ToolIntentParentEnd>,
-    ) -> std::result::Result<(), RealizationFailure> {
-        if self.core.env.core.control.effect_host.replay_ownership()
-            != lash_core::EffectReplayOwnership::Runtime
-        {
-            return Ok(());
-        }
         let outcome = lash_core::ToolIntentExecutionOutcome::Executed {
             identity: identity.clone(),
             kind,
             result: value.clone(),
-            parent_end,
+            parent_end: parent_end.clone(),
         };
-        self.process_registry()
-            .map_err(|error| RealizationFailure::Command(kind, error))?
-            .complete_tool_intent_submission(&identity.replay_key, outcome)
+        self.core
+            .env
+            .core
+            .control
+            .effect_host
+            .record_tool_intent_outcome(self, identity, submitted_intent, outcome)
             .await
-            .map_err(|error| RealizationFailure::Command(kind, error.into()))?;
-        Ok(())
+            .map_err(|error| {
+                RealizationFailure::Command(
+                    kind,
+                    crate::EmbedError::Plugin(lash_core::PluginError::Runtime(error)),
+                )
+            })?;
+        Ok(((kind, value), parent_end, replayed))
     }
 
     fn outside_protocol_outcome(recorded: &str) -> RealizationFailure {
@@ -866,12 +914,11 @@ impl ToolIntentIngress {
                     "trigger store is unavailable in this runtime".to_string(),
                 ))
             })?;
-        let drivers = self.core.work_driver.drivers().await;
-        let router = lash_core::facade_support::TriggerRouter::new(
-            store,
-            self.core.env.process_registry.clone(),
-            drivers.process,
-        );
+        let ports = self.core.substrate_slot.ports().await;
+        let process_work = ports
+            .process
+            .ok_or(crate::EmbedError::MissingProcessRegistry)?;
+        let router = lash_core::facade_support::TriggerRouter::new(store, process_work);
         let scoped = self
             .core
             .env
@@ -997,10 +1044,15 @@ impl ToolIntentIngress {
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
-                lash_core::RuntimeEffectLocalExecutor::processes(
-                    registry,
-                    self.core.env.process_work_driver.clone(),
-                )
+                lash_core::RuntimeEffectLocalExecutor::processes(registry, {
+                    let ports = self.core.substrate_slot.ports().await;
+                    self.core
+                        .env
+                        .clone()
+                        .with_work_ports(ports.process.clone(), ports.queued_port())
+                        .process_work()
+                        .ok_or(crate::EmbedError::MissingProcessRegistry)?
+                })
                 .with_process_env_store(std::sync::Arc::clone(
                     &self.core.env.core.durability.process_env_store,
                 ))

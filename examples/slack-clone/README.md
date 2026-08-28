@@ -580,7 +580,7 @@ What the bot uses today:
 - **Per-boot session-execution leases** (`LeaseOwnerIdentity::opaque` with a fresh
   incarnation), so a new boot reclaims what a crashed boot held instead of
   deadlocking against its own ghost.
-- **`InlineEffectHost`** — process-local effect journalling.
+- **`NativeEffectHost`** — process-local effect journalling.
 
 ### What a crash costs, stage by stage
 
@@ -666,7 +666,7 @@ untouched by a failed attempt, so only the deadline ends the loop.
 
 ### The Restate upgrade, precisely
 
-Replacing `InlineEffectHost` with a Restate-backed effect host is **half** the
+Replacing `NativeEffectHost` with a Restate-backed effect host is **half** the
 change, and it is worth being exact about which half:
 
 - **`bot/runtime.rs::build_core` — the drain.** The queued drain becomes a

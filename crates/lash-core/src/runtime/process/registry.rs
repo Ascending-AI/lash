@@ -528,8 +528,8 @@ pub trait ProcessContinuationStore: Send + Sync {
 /// Durability-neutral process registry.
 ///
 /// Process waits are coordination behavior and live on
-/// [`ProcessWorkDriver`](crate::ProcessWorkDriver) /
-/// [`ProcessAwaiter`](crate::ProcessAwaiter), not on persistence
+/// [`ProcessWorkSubstrate`](crate::ProcessWorkSubstrate) and native awaiter,
+/// not on persistence
 /// implementations. Registry methods are point reads and writes only. See
 /// `docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`.
 #[async_trait::async_trait]

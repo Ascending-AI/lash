@@ -1,17 +1,48 @@
 //! The durable effect-replay state machine shared by every SQL backend.
 //!
+//! # Where this sits: one contract, two implementations
+//!
+//! The outer seam is the *substrate contract* — the ports
+//! [`EffectHost`](super::executor::EffectHost),
+//! the effect-group surface it hands out
+//! ([`EffectGroupHandle`](super::group::EffectGroupHandle)),
+//! [`QueuedWorkSubstrate`](crate::runtime::QueuedWorkSubstrate) and
+//! [`ProcessWorkSubstrate`](crate::runtime::ProcessWorkSubstrate). Every
+//! substrate answers those ports, and the conformance laws that say what an
+//! answer must mean live at that level, not here.
+//!
+//! There are two implementations of that contract:
+//!
+//! * the **store-backed driver** — this module. It absorbs *all* of the
+//!   semantics: leases, claim arbitration, replay decisions, journal payload
+//!   encoding, group membership, and the loser drain. Backends plug into it
+//!   through [`EffectReplayRowStore`], which is dumb row storage and nothing
+//!   more; PostgreSQL and SQLite are two sets of rows under one state machine.
+//! * the **engine-backed host** — `lash-restate`, which implements the same
+//!   ports directly against the engine's own journal. It has no replay ledger,
+//!   no Lash lease, and no drain, because the engine already owns retention and
+//!   exactly-once execution; it proves the same substrate laws live.
+//!
+//! Everything store-scoped in this module is therefore *driver-internal
+//! machinery*, not part of the substrate contract, and its names say so:
+//! [`StoreEffectReplayDriver`], [`EffectReplayRowStore`],
+//! [`StoreEffectGroupDrain`](super::group_drain::StoreEffectGroupDrain), and
+//! the `store_effect_group_drain_conformance` laws. A reader who wants "what
+//! must every substrate do" should be reading the ports; a reader who wants
+//! "how does the SQL tier do it" is in the right file.
+//!
 //! Runtime effects are journaled: the first worker to reach a
 //! `(scope_id, replay_key)` pair claims it under a fenced lease, executes it
 //! once, and records the terminal outcome; every later arrival replays that
 //! record instead of executing again. That is the exactly-once contract, and
 //! the two SQL stores were each carrying a full copy of it.
 //!
-//! This module owns the copy. [`EffectReplayDriver`] runs the whole
+//! This module owns the copy. [`StoreEffectReplayDriver`] runs the whole
 //! claim/execute/renew/finalize loop, decodes and encodes the journal payloads,
 //! maps controller errors, sleeps for `Sleep` effects and busy retries, and
 //! forwards the [`AwaitEventResolver`](super::executor::AwaitEventResolver)
 //! surface to the shared [`AwaitEventCoordinator`]. Backends implement only
-//! [`EffectReplayPersistence`]: four atomic row operations plus whatever
+//! [`EffectReplayRowStore`]: four atomic row operations plus whatever
 //! transaction and locking mechanics their substrate needs to make each one
 //! atomic.
 //!
@@ -29,7 +60,7 @@
 //! Effect leases fence work across hosts, so the instant that stamps and
 //! compares a lease must be authoritative for the substrate, not for whichever
 //! host happens to run the claim. That instant is
-//! [`EffectReplayPersistence::claim`]'s to read, and each backend reads its own
+//! [`EffectReplayRowStore::claim`]'s to read, and each backend reads its own
 //! (SQLite: the host's injected [`Clock`](crate::Clock), the same domain its
 //! rows already live in; PostgreSQL: `transaction_timestamp()`, per the
 //! [`Clock`](crate::Clock) contract's database-authoritative lease boundary,
@@ -336,7 +367,7 @@ pub enum EffectClaimDecision {
 }
 
 /// What a claim attempt observed. Backends return this from
-/// [`EffectReplayPersistence::claim`].
+/// [`EffectReplayRowStore::claim`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EffectClaimObservation {
     /// This driver now holds the lease.
@@ -615,7 +646,7 @@ pub fn decide_effect_claim(
     }
 }
 
-/// The seal on [`EffectReplayPersistence`].
+/// The seal on [`EffectReplayRowStore`].
 ///
 /// Effect journaling is not an extension point. lash's own SQL stores are the
 /// only intended implementors of the port; a durable substrate that owns its
@@ -633,12 +664,22 @@ pub fn decide_effect_claim(
 /// is in the type system instead of only in prose.
 #[doc(hidden)]
 pub mod sealed {
-    /// Marker every [`EffectReplayPersistence`](super::EffectReplayPersistence)
+    /// Marker every [`EffectReplayRowStore`](super::EffectReplayRowStore)
     /// implementation must also carry. See [the seal](super::sealed).
     pub trait EffectReplayBackend {}
 }
 
 /// Atomic row operations a durable substrate must provide to journal effects.
+///
+/// # Implementing this trait inherits the whole driver
+///
+/// This is the plug-in seam of the store-backed tier, not a second place to
+/// write effect semantics. A backend that supplies these row operations gets
+/// claim/execute/renew/finalize, payload encoding, group membership, and the
+/// loser drain from [`StoreEffectReplayDriver`] for free — and gets no say in
+/// any of them. Nobody hand-rolls replay or drain: there is one copy, above
+/// this trait, and adding a SQL tier means answering these rows and nothing
+/// else.
 ///
 /// Each method is one atomic unit: the backend takes whatever transaction and
 /// lock it needs (SQLite's `BEGIN IMMEDIATE` write lock, PostgreSQL's
@@ -651,7 +692,7 @@ pub mod sealed {
 /// The trait is sealed behind [`sealed::EffectReplayBackend`]: only lash's own
 /// SQL stores implement it, and the seal says so.
 #[async_trait]
-pub trait EffectReplayPersistence: sealed::EffectReplayBackend + Send + Sync {
+pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// The error vocabulary hosts already match on for this backend.
     fn vocabulary(&self) -> EffectReplayVocabulary;
 
@@ -785,7 +826,7 @@ pub trait EffectReplayPersistence: sealed::EffectReplayBackend + Send + Sync {
 
     /// Extend the lease by `lease_ttl_ms`, guarded by `fence`.
     ///
-    /// Same guard as [`finalize`](EffectReplayPersistence::finalize); the new
+    /// Same guard as [`finalize`](EffectReplayRowStore::finalize); the new
     /// expiry is the substrate's lease clock plus `lease_ttl_ms`. Report
     /// `false` when the guarded write matched no row.
     async fn renew(
@@ -839,8 +880,8 @@ enum PreparedEffect {
 /// resolve promises through. Stores wrap it in an `Arc` and hand the same
 /// driver to their effect host and to every scoped controller the host mints,
 /// so all of them share one lease identity.
-pub struct EffectReplayDriver<P, A> {
-    persistence: P,
+pub struct StoreEffectReplayDriver<P, A> {
+    row_store: P,
     await_events: AwaitEventCoordinator<A>,
     clock: Arc<dyn crate::Clock>,
     owner_id: String,
@@ -859,23 +900,23 @@ pub struct EffectReplayDriver<P, A> {
     /// path that has to execute a child: the open, a retry, and the loser drain.
     /// Absent until a host registers one, which is the same thing as this host
     /// not supporting effect groups — see
-    /// [`register_group_executors`](EffectReplayDriver::register_group_executors).
+    /// [`register_group_executors`](StoreEffectReplayDriver::register_group_executors).
     group_executors: OnceLock<Arc<dyn GroupExecutors>>,
 }
 
-impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> {
-    /// Build a driver over `persistence`.
+impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A> {
+    /// Build a driver over `row_store`.
     ///
     /// `clock` is the driver's *sleep* clock: it times `Sleep` effects, the
     /// busy-retry backoff, and the lease renewal interval, and it never stamps
     /// a row or decides a lease — the substrate's own lease clock does that
-    /// inside [`EffectReplayPersistence::claim`]. Pass the host's injected
+    /// inside [`EffectReplayRowStore::claim`]. Pass the host's injected
     /// clock when the substrate shares the host's clock domain (SQLite), and an
     /// explicit [`SystemClock`](crate::facade_support::SystemClock) when it does
     /// not (PostgreSQL, whose lease decisions are server-side per the
     /// [`Clock`](crate::Clock) contract, pinned by `postgres_clock_contract`).
     pub fn new(
-        persistence: P,
+        row_store: P,
         await_events: AwaitEventCoordinator<A>,
         clock: Arc<dyn crate::Clock>,
         lease_timings: LeaseTimings,
@@ -887,7 +928,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             clock.timestamp_ms()
         );
         Self {
-            persistence,
+            row_store,
             await_events,
             clock,
             owner_id,
@@ -912,7 +953,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
     /// Until it is called, this host does not support effect groups — the
     /// `'static` executors a grouped child needs to outlive its caller have
     /// nowhere to come from — so
-    /// [`supports_effect_groups`](EffectReplayDriver::supports_effect_groups)
+    /// [`supports_effect_groups`](StoreEffectReplayDriver::supports_effect_groups)
     /// answers `false` and all three group methods refuse with
     /// [`EffectGroupUnsupported`](crate::RuntimeErrorCode::EffectGroupUnsupported)
     /// rather than journaling a group nothing can run.
@@ -985,7 +1026,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
     }
 
     fn vocabulary(&self) -> EffectReplayVocabulary {
-        self.persistence.vocabulary()
+        self.row_store.vocabulary()
     }
 
     fn next_lease_token(&self) -> String {
@@ -1056,7 +1097,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
         &self,
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
-        self.persistence.retire_journal(&retirement).await
+        self.row_store.retire_journal(&retirement).await
     }
 
     /// Run `envelope` for `scope` exactly once, replaying any recorded terminal.
@@ -1276,7 +1317,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             strict_replay: self.replay_mode.load(Ordering::SeqCst),
         };
 
-        match self.persistence.claim(&request).await? {
+        match self.row_store.claim(&request).await? {
             EffectClaimObservation::Claimed { due_at_ms } => {
                 Ok(PreparedEffect::Claimed(ClaimedEffect {
                     fence: EffectLeaseFence {
@@ -1349,7 +1390,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
             },
         };
         if matches!(
-            self.persistence.finalize(fence, &terminal).await?,
+            self.row_store.finalize(fence, &terminal).await?,
             EffectFinalizeOutcome::Written { .. }
         ) {
             return Ok(());
@@ -1368,7 +1409,7 @@ impl<P: EffectReplayPersistence, A: AwaitEventBackend> EffectReplayDriver<P, A> 
         fence: &EffectLeaseFence,
     ) -> Result<(), RuntimeEffectControllerError> {
         if self
-            .persistence
+            .row_store
             .renew(fence, self.lease_timings.ttl_ms())
             .await?
         {

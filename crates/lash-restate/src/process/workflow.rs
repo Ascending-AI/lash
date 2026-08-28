@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
 //! The `LashProcessWorkflow` segment executor.
 //!
 //! One responsibility: run exactly one process segment inside a Restate
@@ -15,7 +20,7 @@ use lash_core::{
     ProcessExecutionContext, ProcessRegistration, ProcessRegistry, ScopedEffectController,
 };
 use restate_sdk::context::{
-    ContextClient, ContextPromises, InvocationHandle, SharedWorkflowContext, WorkflowContext,
+    ContextClient, ContextPromises, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -24,10 +29,10 @@ use super::{
     PROCESS_CANCEL_CONFIRM_RETRIES, PROCESS_CANCEL_CONFIRM_RETRY_DELAY, PROCESS_CANCEL_PROMISE_KEY,
     RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessCancelSignal,
     RestateProcessCompleteRequest, RestateProcessRunner, RestateProcessWorkflowInput,
-    RestateProcessWorkflowOutput, boundary_must_be_declined, missing_segment_is_superseded,
-    process_segment_workflow_key, resolve_process_cancel_signal, resolve_process_terminal_promise,
-    restate_now_ms, restate_process_terminal_await_key, restate_process_terminal_output,
-    retryable_registry_error, segment_execution_authority, terminal_completion_workflow_key,
+    RestateProcessWorkflowOutput, boundary_must_be_declined, handler_error_from_plugin,
+    missing_segment_is_superseded, process_segment_workflow_key, resolve_process_cancel_signal,
+    resolve_process_terminal_promise, restate_now_ms, restate_process_terminal_await_key,
+    restate_process_terminal_output, segment_execution_authority, terminal_completion_workflow_key,
     workflow_key_authority,
 };
 use crate::controller::{RestateEffectControllerOptions, RestateRuntimeEffectController};
@@ -220,7 +225,7 @@ where
                 actions.clone(),
             )
             .await
-            .map_err(retryable_registry_error)?;
+            .map_err(handler_error_from_plugin)?;
         if !actions.is_empty() {
             self.runner
                 .finish_process_parent_end(
@@ -231,7 +236,7 @@ where
                     parent_end_controller,
                 )
                 .await
-                .map_err(retryable_registry_error)?;
+                .map_err(handler_error_from_plugin)?;
         }
         Ok(lash_core::ProcessRunOutcome::Terminal {
             output: Box::new(stored),
@@ -349,7 +354,7 @@ where
                         },
                     )
                     .await
-                    .map_err(retryable_registry_error)?;
+                    .map_err(handler_error_from_plugin)?;
                 Ok(output.into())
             }
             Err(PluginError::ProcessAttemptsExhausted { .. }) => {
@@ -357,7 +362,7 @@ where
                     .registry
                     .get_process(&process_id)
                     .await
-                    .map_err(retryable_registry_error)?
+                    .map_err(handler_error_from_plugin)?
                     .and_then(|record| record.first_started.map(|started| started.owner.clone()));
                 let output = self
                     .complete_with_stored_outcome(
@@ -372,10 +377,10 @@ where
                         },
                     )
                     .await
-                    .map_err(retryable_registry_error)?;
+                    .map_err(handler_error_from_plugin)?;
                 Ok(output.into())
             }
-            Err(err) => Err(retryable_registry_error(err)),
+            Err(err) => Err(handler_error_from_plugin(err)),
         }
     }
 
@@ -393,9 +398,10 @@ where
             )
             .is_ok()
         {
-            return Err(PluginError::Session(
-                "simulated transient cancel registry read failure".to_string(),
-            ));
+            return Err(PluginError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::RuntimeStore,
+                "simulated transient cancel registry read failure",
+            )));
         }
         Ok(self
             .registry
@@ -424,10 +430,7 @@ where
                         attempt += 1;
                         tokio::time::sleep(PROCESS_CANCEL_CONFIRM_RETRY_DELAY).await;
                     } else {
-                        return Err(retryable_registry_error(PluginError::Session(format!(
-                            "process `{process_id}` cancellation confirmation failed after {} attempts: {error}",
-                            PROCESS_CANCEL_CONFIRM_RETRIES + 1
-                        ))));
+                        return Err(handler_error_from_plugin(error));
                     }
                 }
             }
@@ -608,7 +611,7 @@ where
                     .registry
                     .get_process(&process_id)
                     .await
-                    .map_err(retryable_registry_error)?;
+                    .map_err(handler_error_from_plugin)?;
                 if boundary_must_be_declined(current.as_ref()) {
                     handover = Some(boundary.clone());
                     continue;
@@ -669,7 +672,7 @@ where
                         segment_ordinal: next_segment_ordinal,
                         execution_id: Some(execution_id),
                     }));
-                let _ = request.send().invocation_id().await?;
+                let _ = request.send().await?;
                 if self
                     .process_cancel_requested(&process_id)
                     .await
@@ -711,14 +714,14 @@ where
     ) -> HandlerResult<Json<()>> {
         self.record_cancel_requested(&request)
             .await
-            .map_err(retryable_registry_error)?;
+            .map_err(handler_error_from_plugin)?;
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
 
         if let Some(handover) = self
             .continuations
             .latest_segment_handover(&request.process_id)
             .await
-            .map_err(retryable_registry_error)?
+            .map_err(handler_error_from_plugin)?
             && handover.segment_ordinal > 0
         {
             let deliver = ctx
@@ -732,7 +735,7 @@ where
         self.runner
             .request_process_cancel(request)
             .await
-            .map_err(retryable_registry_error)?;
+            .map_err(handler_error_from_plugin)?;
         Ok(Json(()))
     }
 

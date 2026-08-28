@@ -515,6 +515,49 @@ fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
 }
 
 #[derive(Debug)]
+struct CancelWatchTestClock {
+    inner: crate::testing::TestClock,
+    sleeps: AtomicUsize,
+}
+
+impl CancelWatchTestClock {
+    fn new(epoch_ms: u64) -> Self {
+        Self {
+            inner: crate::testing::TestClock::new(epoch_ms),
+            sleeps: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for CancelWatchTestClock {
+    fn now(&self) -> std::time::Instant {
+        self.inner.now()
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        self.inner.timestamp_ms()
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.inner.timestamp_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        self.inner.timestamp_datetime()
+    }
+
+    async fn sleep(&self, _duration: std::time::Duration) {
+        self.sleeps.fetch_add(1, Ordering::SeqCst);
+        tokio::task::yield_now().await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        self.inner.sleep_until(deadline).await;
+    }
+}
+
+#[derive(Debug)]
 struct ManualClock {
     epoch_ms: std::sync::atomic::AtomicU64,
 }
@@ -3630,6 +3673,32 @@ async fn command_only_queued_work_drain_completes_without_turn() {
     );
 }
 
+#[tokio::test]
+async fn no_queued_work_submit_defers_without_refreshing_resident_state() {
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+    let full_loads_before = store.load_session_count();
+    let head_reads_before = store.load_session_head_meta_count();
+
+    let receipt = runtime
+        .submit_session_command(
+            crate::SessionCommand::RefreshToolCatalog {
+                reason: "deferred queued lane".to_string(),
+            },
+            "deferred-queued-command",
+        )
+        .await
+        .expect("NoQueuedWork leaves the durable command pending");
+
+    assert_eq!(store.load_session_count(), full_loads_before);
+    assert_eq!(store.load_session_head_meta_count(), head_reads_before);
+    let pending = crate::store::QueuedWorkStore::list_queued_work(store.as_ref(), "root")
+        .await
+        .expect("inspect deferred durable command");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].batch_id, receipt.batch_id);
+}
+
 // Boundary: these process-wake and active-checkpoint steering tests stay in
 // `turns.rs` because they verify the full `LashRuntime` scheduler, provider
 // prompt contents, cancellation path, and selected queued-work APIs. Runtime
@@ -3674,10 +3743,9 @@ async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
     let queued_input = enqueue_idle_turn_input(store.as_ref(), "root", "queued user input").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -3766,10 +3834,9 @@ async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
     let queued_input = enqueue_idle_turn_input(store.as_ref(), "root", "still pending user").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -3891,10 +3958,9 @@ async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled(
         enqueue_idle_turn_input(store.as_ref(), "root", "cancel with wake pending").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -4076,10 +4142,9 @@ async fn long_turn_keeps_claims_live_across_session_lease_renewals() {
     // active-turn checkpoint.
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -5824,10 +5889,9 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     let process_caused_by = crate::CausalRef::SessionNode {
         session_id: "root".to_string(),
@@ -5975,6 +6039,67 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
             .await
             .expect("queued work after commit")
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn cancellation_watch_exhaustion_does_not_block_turn_completion() {
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default().with_always_failing_cancel_watch(),
+    );
+    let controller_for_provider = Arc::clone(&controller);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .complete(move |_| {
+            let controller = Arc::clone(&controller_for_provider);
+            async move {
+                controller.wait_for_cancel_watch_exhaustion().await;
+                // Give an unbounded watcher a deterministic chance to enter a
+                // ninth resolver attempt before the turn ends and aborts it.
+                tokio::task::yield_now().await;
+                tokio::task::yield_now().await;
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "turn completed after cancel-watch exhaustion".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let clock = Arc::new(CancelWatchTestClock::new(0));
+    let host_clock: Arc<dyn crate::Clock> = clock.clone();
+    let host = EmbeddedRuntimeHost::new(
+        super::effect::runtime_host_config_with_native_controller(controller.clone())
+            .with_clock(host_clock),
+    );
+    let mut runtime = standard_runtime_with_transport_and_host(transport, host).await;
+
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("complete despite a failed cancellation resolver"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "bounded-cancel-watch"),
+            ),
+        )
+        .await
+        .expect("cancel-watch exhaustion must not block turn completion");
+
+    assert_eq!(
+        turn.assistant_output.safe_text,
+        "turn completed after cancel-watch exhaustion"
+    );
+    assert_eq!(
+        controller.cancel_watch_attempts(),
+        crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS
+    );
+    assert_eq!(
+        clock.sleeps.load(Ordering::SeqCst),
+        crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1,
+        "every retry backoff before exhaustion must use the injected TestClock"
     );
 }
 
@@ -6742,7 +6867,7 @@ async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_i
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -6809,7 +6934,7 @@ async fn durable_controller_reports_a_retryable_busy_lane_when_the_holder_is_ali
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -6904,7 +7029,7 @@ async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pending() {
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -6987,7 +7112,7 @@ async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait_budget() {
     let controller = Arc::new(
         super::effect::RecordingEffectController::default()
             .with_controller_owned_replay()
-            .with_durable_workflow_controller(),
+            .with_engine_paced_lane(),
     );
     let scope = crate::ScopedEffectController::shared(
         controller,
@@ -7750,10 +7875,9 @@ async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
     enqueue_idle_turn_input(store.as_ref(), "root", "input held when the lease is lost").await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     registry
         .register_process(
@@ -7898,7 +8022,7 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
 
     let turn_id = "cancel-before-renewal-failure";
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = inline_scope(persisted_state.turn_scope(turn_id));
+    let turn_scope = native_scope(persisted_state.turn_scope(turn_id));
     let turn_address = crate::TurnAddress::new(&persisted_state.session_id, turn_id);
     let turn = crate::task::spawn(async move {
         runtime
@@ -8121,10 +8245,9 @@ async fn durable_process_wake_drains_as_committed_event_history_and_acknowledges
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     let target_scope = crate::SessionScope::new("root");
     let process_caused_by = crate::CausalRef::SessionNode {
         session_id: "root".to_string(),
@@ -8328,10 +8451,9 @@ async fn a_selected_queued_wake_drains_under_a_small_window_with_retained_histor
 
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     registry
         .register_process(
             crate::ProcessRegistration::new(
@@ -8431,10 +8553,9 @@ async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_default() {
     );
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     registry
         .register_process(
             crate::ProcessRegistration::new(
@@ -8532,10 +8653,9 @@ async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
 
     let registry = runtime
         .host
-        .process_registry
-        .as_ref()
-        .expect("process registry")
-        .clone();
+        .process_registry()
+        .cloned()
+        .expect("process registry");
     registry
         .register_process(
             crate::ProcessRegistration::new(
@@ -8837,7 +8957,7 @@ async fn session_manager_can_run_child_session_turn() {
         .expect("child session");
     let turn_id = "child-lifecycle-turn";
     let scoped_effect_controller = crate::ScopedEffectController::shared(
-        Arc::new(crate::InlineRuntimeEffectController::default()),
+        Arc::new(crate::NativeRuntimeEffectController::default()),
         crate::ExecutionScope::turn(&handle.session_id, turn_id),
     )
     .expect("scoped child turn");
@@ -8860,6 +8980,89 @@ async fn session_manager_can_run_child_session_turn() {
     assert_eq!(handle.session_id, "child");
     assert_eq!(handle.policy.model.id, "mock-model");
     assert_eq!(assembled.state.session_id, "child");
+}
+
+#[tokio::test]
+async fn session_manager_preserves_runtime_error_from_child_session_turn() {
+    let factory = RecordingSessionStoreFactory::default();
+    let host = test_host_config().with_session_store_factory(Arc::new(factory.clone()));
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host,
+    )
+    .await;
+    let lifecycle = runtime
+        .session_lifecycle_service()
+        .expect("session lifecycle");
+    let handle = lifecycle
+        .create_session(
+            crate::SessionCreateRequest::root(
+                crate::SessionStartPoint::Empty,
+                crate::PluginOptions::default(),
+            )
+            .with_session_id("busy-child")
+            .with_plugin_source(crate::SessionPluginSource::CurrentSessionFork),
+        )
+        .await
+        .expect("child session");
+    let store = factory
+        .stores()
+        .into_iter()
+        .find(|store| {
+            store
+                .session_meta
+                .lock_recover()
+                .as_ref()
+                .is_some_and(|meta| meta.session_id == handle.session_id)
+        })
+        .expect("child session store");
+    let held_lease = crate::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+        store.as_ref(),
+        &handle.session_id,
+        &lease_owner("other-child-runtime"),
+        "session-manager-runtime-error-boundary-executor",
+        60_000,
+    )
+    .await
+    .expect("claim child session execution lease")
+    .acquired()
+    .expect("child session execution lease");
+    let turn_id = "busy-child-turn";
+    let controller = crate::ScopedEffectController::shared(
+        Arc::new(crate::NativeRuntimeEffectController::default()),
+        crate::ExecutionScope::turn(&handle.session_id, turn_id),
+    )
+    .expect("child turn controller");
+
+    let error = lifecycle
+        .start_turn(
+            crate::SessionTurnRequest::new(
+                &handle.session_id,
+                turn_id,
+                TurnInput::text("preserve the runtime error"),
+                controller,
+            )
+            .expect("child turn request"),
+        )
+        .await
+        .expect_err("the held child session lane must refuse the turn");
+
+    assert!(
+        matches!(
+            error,
+            crate::PluginError::Runtime(ref runtime_error)
+                if runtime_error.code == crate::RuntimeErrorCode::SessionExecutionLaneBusy
+        ),
+        "managed turn boundary must preserve the typed runtime error, got {error:?}"
+    );
+    crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
+        store.as_ref(),
+        &held_lease.completion(),
+    )
+    .await
+    .expect("release child session execution lease");
 }
 
 #[tokio::test]
@@ -9063,7 +9266,7 @@ async fn runtime_can_activate_managed_child_session() {
             turn_context: crate::TurnContext::default(),
         },
         crate::ScopedEffectController::shared(
-            Arc::new(crate::InlineRuntimeEffectController::default()),
+            Arc::new(crate::NativeRuntimeEffectController::default()),
             crate::ExecutionScope::turn("child", "activated-child-turn"),
         )
         .expect("scoped activated child turn"),

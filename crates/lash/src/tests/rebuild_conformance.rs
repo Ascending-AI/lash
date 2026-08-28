@@ -79,7 +79,7 @@ fn fresh_in_memory_backend() -> (
 
 #[test]
 fn runtime_rebuild_and_worker_recovery_with_inline_stores() {
-    run_async_test_on_stack_budget("runtime-rebuild-inline-stores", || async {
+    run_async_test_on_stack_budget("runtime-rebuild-in-memory-stores", || async {
         runtime_rebuild_and_worker_recovery(move || {
             let (store_factory, registry, trigger_store) = fresh_in_memory_backend();
             RuntimeRebuildBackend {
@@ -87,6 +87,7 @@ fn runtime_rebuild_and_worker_recovery_with_inline_stores() {
                 artifact_store: Arc::new(crate::persistence::InMemoryLashlangArtifactStore::new()),
                 build_core: Box::new(move |builder| {
                     explicit_ephemeral_facets(builder)
+                        .with_native_queued_work()
                         .store_factory(Arc::clone(&store_factory))
                         .trigger_store(Arc::clone(&trigger_store))
                         .build(crate::testing::runtime_lease_owner())
@@ -130,7 +131,7 @@ fn runtime_rebuild_and_worker_recovery_with_durable_stores() {
                         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
                         .process_env_store(Arc::clone(&process_env_store))
                         .trigger_store(Arc::clone(&trigger_store))
-                        .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+                        .effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
                         .build(crate::testing::runtime_lease_owner())
                         .expect("build core")
                 }),

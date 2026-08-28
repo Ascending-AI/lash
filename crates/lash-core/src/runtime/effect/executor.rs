@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) mod control;
 mod controller_error;
-mod inline_controller;
+mod native_controller;
 mod process_local;
 
 mod language_runtime;
@@ -20,16 +20,20 @@ mod task_panic;
 mod trigger;
 
 pub use control::{
-    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, ExecutionScope, ExternalCompletionError,
-    Resolution, ResolveOutcome, RuntimeEffectController, ScopedEffectController, SegmentProgress,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
+    ExecutionScope, ExternalCompletionError, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
+    RuntimeEffectController, RuntimeEffectFailureDisposition, ScopedEffectController,
+    SegmentProgress, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TurnControlBinding, TurnControlParticipation,
 };
 pub(crate) use control::{
     EffectControllerTaskRequest, EffectTaskController, RuntimeEffectControllerHandle,
     drive_effect_controller_task,
 };
 pub use controller_error::RuntimeEffectControllerError;
-pub use inline_controller::InlineRuntimeEffectController;
+pub use native_controller::NativeRuntimeEffectController;
 pub use trigger::TriggerLocalExecution;
 
 use crate::LlmRequest as CoreLlmRequest;
@@ -176,7 +180,7 @@ pub type ProcessOutcomeObserver = Arc<dyn Fn(&ProcessEffectOutcome) + Send + Syn
 
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
-    pub process_work_driver: Option<crate::ProcessWorkDriver>,
+    pub process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
     pub effect_controller: Option<Arc<dyn RuntimeEffectController>>,
@@ -275,7 +279,7 @@ enum RuntimeEffectLocalExecutorState<'run> {
 /// Scoped local executor provided to a [`RuntimeEffectController`] for one effect.
 ///
 /// Durable controllers may ignore it and replay their own recorded result. The
-/// default inline controller delegates to it, so local provider/tool/checkpoint
+/// default native controller delegates to it, so local provider/tool/checkpoint
 /// work still crosses the same `execute_effect` boundary as durable controllers.
 pub struct RuntimeEffectLocalExecutor<'run> {
     state: RuntimeEffectLocalExecutorState<'run>,
@@ -309,7 +313,7 @@ impl Drop for AbortEffectTaskOnDrop {
 }
 
 impl<'run> RuntimeEffectLocalExecutor<'run> {
-    /// Constructs a local path that rejects unavailable inline execution.
+    /// Constructs a local path that rejects unavailable native execution.
     pub fn unavailable() -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Unavailable),
@@ -317,12 +321,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the cancellable inline sleep path using the system clock.
+    /// Builds the cancellable native sleep path using the system clock.
     pub fn sleep(cancellation: CancellationToken) -> Self {
         Self::sleep_with_clock(cancellation, Arc::new(crate::SystemClock))
     }
 
-    /// Builds the inline sleep path with an injected clock for effect-host and conformance
+    /// Builds the native sleep path with an injected clock for effect-host and conformance
     /// implementors testing deterministic deadline behavior.
     pub fn sleep_with_clock(cancellation: CancellationToken, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
@@ -338,13 +342,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the inline durable-wait path for effect-host implementors using the system clock and
+    /// Builds the native durable-wait path for effect-host implementors using the system clock and
     /// the supplied optional deadline.
     pub fn await_event(cancellation: CancellationToken, deadline: Option<Instant>) -> Self {
         Self::await_event_with_clock(cancellation, deadline, Arc::new(crate::SystemClock))
     }
 
-    /// Builds the inline durable-wait path with an injected clock for effect-host and conformance
+    /// Builds the native durable-wait path with an injected clock for effect-host and conformance
     /// implementors testing deterministic deadline behavior.
     pub fn await_event_with_clock(
         cancellation: CancellationToken,
@@ -365,7 +369,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the inline sleep path from the complete turn-cancel trio, so an
+    /// Builds the native sleep path from the complete turn-cancel trio, so an
     /// in-workspace sleep cannot be journaled with a half-stamped one.
     pub(crate) fn sleep_under(wait: &TurnCancelWait, clock: Arc<dyn crate::Clock>) -> Self {
         Self {
@@ -377,7 +381,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Builds the inline durable-wait path from the complete turn-cancel trio,
+    /// Builds the native durable-wait path from the complete turn-cancel trio,
     /// so an in-workspace wait cannot be journaled with a half-stamped one.
     pub(crate) fn await_event_under(
         wait: &TurnCancelWait,
@@ -498,17 +502,17 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Binds process registry and optional work-driver services for effect-host implementors
-    /// executing process effects inline.
+    /// Binds process registry and required process-work services for effect-host implementors
+    /// executing process effects natively.
     pub fn processes(
         registry: Arc<dyn ProcessRegistry>,
-        process_work_driver: Option<crate::ProcessWorkDriver>,
+        process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     ) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(
                 ProcessLocalExecution {
                     registry,
-                    process_work_driver,
+                    process_work,
                     process_env_store: None,
                     turn_cancellation: None,
                     effect_controller: None,
@@ -520,7 +524,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     }
 
     /// Binds a turn-input store for effect-host implementors executing the
-    /// durable turn-acceptance effect (ADR 0069 §6) inline.
+    /// durable turn-acceptance effect (ADR 0069 §6) natively.
     ///
     /// The acceptance write is the one store call a replaying engine must not
     /// repeat, so it crosses the runtime-effect envelope like every other
@@ -532,7 +536,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Binds a trigger store for effect-host implementors executing trigger effects inline without
+    /// Binds a trigger store for effect-host implementors executing trigger effects natively without
     /// bypassing the runtime-effect envelope.
     pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
         Self {
@@ -1523,7 +1527,7 @@ mod task_boundary_tests {
             local_executed.store(true, Ordering::SeqCst);
             Ok(RuntimeEffectOutcome::Sleep)
         });
-        let controller = InlineRuntimeEffectController::default();
+        let controller = NativeRuntimeEffectController::default();
         let (proxy, mut requests) = EffectTaskController::scoped(
             &controller,
             ExecutionScope::runtime_operation("replay-skips-local"),

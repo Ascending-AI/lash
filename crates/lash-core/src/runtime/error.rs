@@ -124,9 +124,6 @@ pub enum RuntimeErrorCode {
     ProcessSignalWaitTimeout,
     RestateAwaitEventAwait,
     RestateAwaitEventCancel,
-    /// The local observer was cancelled while the durable promise stayed live;
-    /// its disposition is unknown until another observer attaches.
-    RestateAwaitEventCancelled,
     RestateAwaitEventPeek,
     RestateAwaitEventResolve,
     RestateAwaitEventRevocationRead,
@@ -140,6 +137,12 @@ pub enum RuntimeErrorCode {
     /// failing every redrive of the enclosing turn.
     RestateJournaledEffectPoisoned,
     RestateProcessAwait,
+    RestateProcessCancel,
+    RestateProcessIngressSubmit,
+    /// The ingress target names a service no deployment has bound. A
+    /// deployment fact, not a busy engine: retrying cannot make an unbound
+    /// service appear, so this code is terminal by construction.
+    RestateServiceUnregistered,
     RestateProcessAwaitAfterTurnCancel,
     RestateProcessTurnCancelContextMissing,
     RestateProcessTerminalEncode,
@@ -519,7 +522,6 @@ impl RuntimeErrorCode {
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
             Self::RestateAwaitEventAwait => "restate_await_event_await",
             Self::RestateAwaitEventCancel => "restate_await_event_cancel",
-            Self::RestateAwaitEventCancelled => "restate_await_event_cancelled",
             Self::RestateAwaitEventPeek => "restate_await_event_peek",
             Self::RestateAwaitEventResolve => "restate_await_event_resolve",
             Self::RestateAwaitEventRevocationRead => "restate_await_event_revocation_read",
@@ -532,6 +534,9 @@ impl RuntimeErrorCode {
                 "restate_effect_host_requires_handler_scope"
             }
             Self::RestateProcessAwait => "restate_process_await",
+            Self::RestateProcessCancel => "restate_process_cancel",
+            Self::RestateProcessIngressSubmit => "restate_process_ingress_submit",
+            Self::RestateServiceUnregistered => "restate_service_unregistered",
             Self::RestateProcessAwaitAfterTurnCancel => "restate_process_await_after_turn_cancel",
             Self::RestateProcessTurnCancelContextMissing => {
                 "restate_process_turn_cancel_context_missing"
@@ -663,6 +668,8 @@ impl RuntimeErrorCode {
                 | Self::RestateAwaitEventRevocationRead
                 | Self::RestateAwaitEventRevoke
                 | Self::RestateAwaitEventSessionUpdate
+                | Self::RestateProcessCancel
+                | Self::RestateProcessIngressSubmit
                 | Self::RestateTurnTerminalAttach
                 | Self::RestateTurnTerminalAttachCeilingElapsed
                 | Self::RuntimeEffectAssistantResponseHook
@@ -731,6 +738,7 @@ impl RuntimeErrorCode {
                 | Self::RestateEffectHostRequiresHandlerScope
                 | Self::RestateJournaledEffectPoisoned
                 | Self::RestateProcessAwait
+                | Self::RestateServiceUnregistered
                 | Self::RestateProcessAwaitAfterTurnCancel
                 | Self::RestateProcessTurnCancelContextMissing
                 | Self::RestateProcessTerminalEncode
@@ -871,7 +879,6 @@ impl RuntimeErrorCode {
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
             "restate_await_event_await" => Self::RestateAwaitEventAwait,
             "restate_await_event_cancel" => Self::RestateAwaitEventCancel,
-            "restate_await_event_cancelled" => Self::RestateAwaitEventCancelled,
             "restate_await_event_peek" => Self::RestateAwaitEventPeek,
             "restate_await_event_resolve" => Self::RestateAwaitEventResolve,
             "restate_await_event_revocation_read" => Self::RestateAwaitEventRevocationRead,
@@ -884,6 +891,9 @@ impl RuntimeErrorCode {
             }
             "restate_journaled_effect_poisoned" => Self::RestateJournaledEffectPoisoned,
             "restate_process_await" => Self::RestateProcessAwait,
+            "restate_process_cancel" => Self::RestateProcessCancel,
+            "restate_process_ingress_submit" => Self::RestateProcessIngressSubmit,
+            "restate_service_unregistered" => Self::RestateServiceUnregistered,
             "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,
             "restate_process_turn_cancel_context_missing" => {
                 Self::RestateProcessTurnCancelContextMissing
@@ -1182,6 +1192,8 @@ mod tests {
             | RuntimeErrorCode::RestateAwaitEventRevocationRead
             | RuntimeErrorCode::RestateAwaitEventRevoke
             | RuntimeErrorCode::RestateAwaitEventSessionUpdate
+            | RuntimeErrorCode::RestateProcessCancel
+            | RuntimeErrorCode::RestateProcessIngressSubmit
             | RuntimeErrorCode::RestateTurnTerminalAttach
             | RuntimeErrorCode::RestateTurnTerminalAttachCeilingElapsed
             | RuntimeErrorCode::RuntimePerfStartGateRetry
@@ -1241,6 +1253,7 @@ mod tests {
             | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
             | RuntimeErrorCode::RestateJournaledEffectPoisoned
             | RuntimeErrorCode::RestateProcessAwait
+            | RuntimeErrorCode::RestateServiceUnregistered
             | RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel
             | RuntimeErrorCode::RestateProcessTurnCancelContextMissing
             | RuntimeErrorCode::RestateProcessTerminalEncode
@@ -1319,7 +1332,6 @@ mod tests {
             | RuntimeErrorCode::LiveReplay
             | RuntimeErrorCode::PostgresAwaitEventNotify
             | RuntimeErrorCode::QueuedWork
-            | RuntimeErrorCode::RestateAwaitEventCancelled
             | RuntimeErrorCode::RuntimeEffectControllerTaskClosed
             | RuntimeErrorCode::SessionHeadRefresh
             | RuntimeErrorCode::SqliteAwaitEventNotify
@@ -1397,7 +1409,6 @@ mod tests {
             RuntimeErrorCode::ProcessSignalWaitTimeout,
             RuntimeErrorCode::RestateAwaitEventAwait,
             RuntimeErrorCode::RestateAwaitEventCancel,
-            RuntimeErrorCode::RestateAwaitEventCancelled,
             RuntimeErrorCode::RestateAwaitEventPeek,
             RuntimeErrorCode::RestateAwaitEventResolve,
             RuntimeErrorCode::RestateAwaitEventRevocationRead,
@@ -1408,6 +1419,9 @@ mod tests {
             RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
             RuntimeErrorCode::RestateJournaledEffectPoisoned,
             RuntimeErrorCode::RestateProcessAwait,
+            RuntimeErrorCode::RestateProcessCancel,
+            RuntimeErrorCode::RestateProcessIngressSubmit,
+            RuntimeErrorCode::RestateServiceUnregistered,
             RuntimeErrorCode::RestateProcessAwaitAfterTurnCancel,
             RuntimeErrorCode::RestateProcessTurnCancelContextMissing,
             RuntimeErrorCode::RestateProcessTerminalEncode,

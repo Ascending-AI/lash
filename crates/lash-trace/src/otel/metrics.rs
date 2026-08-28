@@ -49,7 +49,7 @@ impl ToolIntentMetrics {
     }
 }
 
-/// Runtime-facing OpenTelemetry instruments for inline worker saturation.
+/// Runtime-facing OpenTelemetry instruments for native worker saturation.
 #[doc(hidden)]
 #[derive(Clone)]
 pub struct WorkerCapacityMetrics {
@@ -67,16 +67,16 @@ impl WorkerCapacityMetrics {
         Self {
             slots_in_use: meter
                 .u64_gauge("lash.worker.slots.in_use")
-                .with_description("Inline worker slots currently held")
+                .with_description("native worker slots currently held")
                 .build(),
             slots_available: meter
                 .u64_gauge("lash.worker.slots.available")
-                .with_description("Inline worker slots immediately available")
+                .with_description("native worker slots immediately available")
                 .build(),
             intake_depth: meter
                 .u64_gauge("lash.worker.intake.depth")
                 .with_description(
-                    "Coalesced inline work held in the local intake buffer; not durable backlog",
+                    "Coalesced native work held in the local intake buffer; not durable backlog",
                 )
                 .build(),
         }

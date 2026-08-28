@@ -60,7 +60,7 @@ observation.
 ## Where a durability test stands
 
 A test about durability enters above the emission point, through the public API,
-against a host that actually replays. `InlineEffectHost` never replays; it is
+against a host that actually replays. `NativeEffectHost` never replays; it is
 the right choice for tests about something else and the wrong choice for tests
 about durability. It is currently the overwhelming default, and changing that is
 a migration, not a preference — see Consequences.

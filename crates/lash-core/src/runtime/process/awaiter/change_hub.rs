@@ -46,7 +46,7 @@ impl ProcessChangeHub {
     }
 
     #[cfg(test)]
-    pub(super) fn tracked_processes(&self) -> usize {
+    pub(crate) fn tracked_processes(&self) -> usize {
         self.inner.lock_recover().len()
     }
 }

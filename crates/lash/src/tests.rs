@@ -2321,16 +2321,16 @@ fn rlm_core_builder() -> crate::core::LashCoreBuilder {
     LashCore::rlm_builder(crate::TurnBudget::Unbounded, rlm_factory())
 }
 
-fn inline_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectController<'static> {
+fn native_scope(scope: lash_core::ExecutionScope) -> lash_core::ScopedEffectController<'static> {
     lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
         scope,
     )
-    .expect("inline execution scope")
+    .expect("native execution scope")
 }
 
 fn turn_scope(session_id: &str) -> lash_core::ScopedEffectController<'static> {
-    inline_scope(lash_core::ExecutionScope::turn(
+    native_scope(lash_core::ExecutionScope::turn(
         session_id,
         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
             .0
@@ -2352,7 +2352,7 @@ async fn session_delete_scope(
     core: &LashCore,
     session_id: &str,
 ) -> lash_core::ScopedEffectController<'static> {
-    inline_scope(
+    native_scope(
         core.session_delete_scope(session_id)
             .await
             .expect("session delete execution scope"),
@@ -2373,12 +2373,13 @@ fn explicit_ephemeral_facets_with_budget(
         .commit_budget(commit_budget)
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .effect_host(Arc::new(
-            crate::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             crate::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
+        .without_queued_work()
 }
 
 fn text_message(role: lash_core::MessageRole, text: &str) -> lash_core::Message {

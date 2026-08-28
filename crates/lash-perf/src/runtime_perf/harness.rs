@@ -67,7 +67,7 @@ trait ExplicitEphemeralFacets: Sized {
 impl ExplicitEphemeralFacets for lash::LashCoreBuilder {
     fn with_explicit_ephemeral_facets(self) -> Self {
         self.effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -672,11 +672,12 @@ pub(crate) fn build_embed_core(
     store: Arc<RuntimePerfStore>,
 ) -> anyhow::Result<BenchmarkCore> {
     let effect_host = Arc::new(
-        lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+        lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
     );
     match scenario {
         RuntimePerfScenario::EmbedStandard => {
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(effect_host.clone())
                 .provider(benchmark_provider(scenario).into_handle())
@@ -696,6 +697,7 @@ pub(crate) fn build_embed_core(
                 Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
             );
             lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(effect_host.clone())
                 .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
@@ -748,14 +750,14 @@ pub(crate) async fn build_runtime_with_store(
     let effect_host: Arc<dyn lash_core::EffectHost> =
         if matches!(scenario, RuntimePerfScenario::TurnStartGate) {
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::new(Arc::new(
+                lash_core::facade_support::NativeEffectHost::new(Arc::new(
                     RetryingStartGateController::default(),
                 ))
                 .allow_process_lifetime_completion_keys(),
             )
         } else {
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::default()
+                lash_core::facade_support::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             )
         };
@@ -844,6 +846,7 @@ pub(crate) async fn build_runtime_with_store(
     let core = match execution_mode {
         ExecutionMode::Standard => {
             let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
                 .provider(provider)
@@ -862,6 +865,10 @@ pub(crate) async fn build_runtime_with_store(
             if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
                 builder = builder
                     .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
+            } else {
+                // The globals benchmark runs storeless; native queued work
+                // requires a store factory, so the choice is made explicit.
+                builder = builder.without_queued_work();
             }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
@@ -881,6 +888,7 @@ pub(crate) async fn build_runtime_with_store(
                 factory = factory.with_lashlang_execution_jsonl_path(path);
             }
             let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                .with_native_queued_work()
                 .with_explicit_ephemeral_facets()
                 .effect_host(Arc::clone(&effect_host))
                 .provider(provider)
@@ -900,6 +908,10 @@ pub(crate) async fn build_runtime_with_store(
             if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
                 builder = builder
                     .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
+            } else {
+                // The globals benchmark runs storeless; native queued work
+                // requires a store factory, so the choice is made explicit.
+                builder = builder.without_queued_work();
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
@@ -922,14 +934,14 @@ pub(crate) async fn build_runtime_with_store(
 
 struct RetryingStartGateController {
     attempts_by_key: Mutex<HashMap<String, usize>>,
-    delegate: lash_core::facade_support::InlineRuntimeEffectController,
+    delegate: lash_core::facade_support::NativeRuntimeEffectController,
 }
 
 impl Default for RetryingStartGateController {
     fn default() -> Self {
         Self {
             attempts_by_key: Mutex::new(HashMap::new()),
-            delegate: lash_core::facade_support::InlineRuntimeEffectController::default(),
+            delegate: lash_core::facade_support::NativeRuntimeEffectController::default(),
         }
     }
 }
@@ -1107,7 +1119,7 @@ trait RuntimePerfCoreBuilderExt {
 impl RuntimePerfCoreBuilderExt for lash::LashCoreBuilder {
     fn with_manual_queue_drain(self, scenario: RuntimePerfScenario) -> Self {
         if scenario.is_high_traffic() || scenario.is_queued_work_contention() {
-            self.disable_queued_work_driver()
+            self.without_queued_work()
         } else {
             self
         }
@@ -1283,6 +1295,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let core = match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .provider(provider)
                 .model(benchmark_model_spec())
                 .effect_host(effect_host.clone())
@@ -1313,6 +1326,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             );
             BenchmarkCore::Rlm(
                 lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                    .with_native_queued_work()
                     .provider(provider)
                     .model(benchmark_model_spec())
                     .effect_host(effect_host.clone())
@@ -1402,6 +1416,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let core = match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(
             lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+                .with_native_queued_work()
                 .provider(provider)
                 .model(benchmark_model_spec())
                 .effect_host(effect_host.clone())
@@ -1427,6 +1442,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
             );
             BenchmarkCore::Rlm(
                 lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+                    .with_native_queued_work()
                     .provider(provider)
                     .model(benchmark_model_spec())
                     .effect_host(effect_host.clone())

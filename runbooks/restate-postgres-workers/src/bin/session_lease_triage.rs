@@ -319,6 +319,7 @@ impl Backend {
             artifacts,
         );
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("session-lease-triage-mock")
@@ -337,7 +338,7 @@ impl Backend {
                 None => Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::default()),
             })
             .lease_timings(timings)
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .build(owner)
             .context("build a session-lease-triage core")?;
         Ok(TurnCore {

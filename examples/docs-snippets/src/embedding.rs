@@ -86,6 +86,7 @@ async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> an
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -96,7 +97,7 @@ async fn full_core(provider: ProviderHandle, data_dir: std::path::PathBuf) -> an
         .plugins(runtime_plugin_stack())
         .tools(Arc::new(AppTools) as Arc<dyn ToolProvider>)
         .store_factory(store_factory)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
@@ -149,8 +150,9 @@ async fn preset_core(provider: ProviderHandle) -> anyhow::Result<()> {
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .session_spec(root_spec)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -185,9 +187,10 @@ async fn custom_stack(root_spec: SessionSpec) -> anyhow::Result<()> {
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .session_spec(root_spec)
         .plugins(plugins)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),

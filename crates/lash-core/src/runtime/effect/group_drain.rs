@@ -12,7 +12,7 @@
 //! # The queue is the journal
 //!
 //! Nothing is enqueued. The drain's work list is
-//! [`EffectReplayPersistence::read_unsettled_group_children`](super::effect_replay_driver::EffectReplayPersistence::read_unsettled_group_children)
+//! [`EffectReplayRowStore::read_unsettled_group_children`](super::effect_replay_driver::EffectReplayRowStore::read_unsettled_group_children)
 //! — the children of one group that hold no settlement rank, which for a
 //! grouped child is the same set as "no terminal", because N1 writes the rank
 //! and the terminal in one transaction. No synthetic queued-work item, no
@@ -23,7 +23,7 @@
 //! # Three guards, in the order they apply
 //!
 //! **The claim fence is the authority.** A drained child goes through
-//! [`execute_effect`](super::effect_replay_driver::EffectReplayDriver::execute_effect)
+//! [`execute_effect`](super::effect_replay_driver::StoreEffectReplayDriver::execute_effect)
 //! like any other effect, so a child whose terminal is already recorded is
 //! replayed, a child under a live lease is waited for and then replayed, and
 //! only a child nobody owns is executed. Exactly-once across a crash is not a
@@ -155,7 +155,7 @@ pub trait GroupExecutors: Send + Sync {
 /// not hold gets, so a host can tell "come back" from "never" without reading
 /// prose.
 #[async_trait::async_trait]
-pub trait EffectGroupDrain: Send + Sync {
+pub trait StoreEffectGroupDrain: Send + Sync {
     /// Run one drain pass over `group_key` and report what it did.
     ///
     /// Idempotent by construction: a second pass over a fully drained group

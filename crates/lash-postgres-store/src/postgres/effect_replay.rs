@@ -1,8 +1,10 @@
 //! PostgreSQL-backed runtime effect replay host.
 //!
 //! The claim/execute/renew/finalize state machine lives in
-//! [`EffectReplayDriver`]; this module is the PostgreSQL half of its
-//! persistence port plus the host and controller types that expose it. Every
+//! [`StoreEffectReplayDriver`]; this module is the PostgreSQL half of its
+//! [`EffectReplayRowStore`] plug-in plus the host and controller types that
+//! expose it. Row storage is all this module owns: the driver decides every
+//! claim, replay, and drain. Every
 //! atom runs in a server transaction that takes the row's write lock
 //! (`SELECT … FOR UPDATE`, or a guarded `UPDATE`), so the read, the transition
 //! decision, and the write it guards cannot interleave with a competing
@@ -19,13 +21,13 @@ use crate::*;
 use lash_core::facade_support::effect_replay_driver;
 use lash_core::facade_support::effect_replay_driver::{
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectFinalizeOutcome,
-    EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayDriver,
-    EffectReplayPersistence, EffectReplayVocabulary, EffectRowDefect, EffectRowStatus,
-    EffectTerminal, StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild,
+    EffectGroupColumn, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp, EffectReplayRowStore,
+    EffectReplayVocabulary, EffectRowDefect, EffectRowStatus, EffectTerminal,
+    StoreEffectReplayDriver, StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild,
     decide_effect_claim,
 };
 
-use lash_core::{EffectGroupDrain, GroupExecutors};
+use lash_core::{GroupExecutors, StoreEffectGroupDrain};
 
 use crate::await_event::{PostgresAwaitEventBackend, postgres_await_events};
 use tokio_util::sync::CancellationToken;
@@ -33,9 +35,9 @@ use tokio_util::sync::CancellationToken;
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::postgres();
 
 /// The PostgreSQL effect-replay driver: one shared state machine over
-/// [`PostgresEffectReplayPersistence`].
+/// [`PostgresEffectReplayRowStore`].
 type PostgresEffectReplay =
-    EffectReplayDriver<PostgresEffectReplayPersistence, PostgresAwaitEventBackend>;
+    StoreEffectReplayDriver<PostgresEffectReplayRowStore, PostgresAwaitEventBackend>;
 
 #[derive(Clone, Debug, Default)]
 pub struct PostgresEffectReplayOptions {
@@ -104,23 +106,25 @@ impl PostgresEffectHost {
     /// The drain shares this host's driver, so it claims under the same owner
     /// identity, over the same journal, and resolves children through the same
     /// registered resolver.
-    pub fn group_drain(&self) -> Arc<dyn EffectGroupDrain> {
+    pub fn group_drain(&self) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::clone(&self.inner).into_group_drain()
     }
 }
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for PostgresEffectHost {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -193,6 +197,25 @@ impl EffectHost for PostgresEffectHost {
         )?))
     }
 
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> Result<lash_core::ToolIntentPreparation, RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
+
     async fn retire_effect_journal(
         &self,
         retirement: lash_core::EffectJournalRetirement,
@@ -228,16 +251,18 @@ impl PostgresRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for PostgresRuntimeEffectController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        self.await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 
     async fn await_event_key(
@@ -283,6 +308,19 @@ impl AwaitEventResolver for PostgresRuntimeEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for PostgresRuntimeEffectController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, RuntimeError> {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -327,7 +365,7 @@ impl RuntimeEffectController for PostgresRuntimeEffectController {
 
     /// Delegated to the shared driver exactly as `execute_effect` is: the group
     /// host is one implementation over
-    /// [`EffectReplayPersistence`](lash_core::facade_support::effect_replay_driver::EffectReplayPersistence),
+    /// [`EffectReplayRowStore`](lash_core::facade_support::effect_replay_driver::EffectReplayRowStore),
     /// and this store contributes the substrate half of it rather than a second
     /// copy of the state machine.
     async fn open_effect_group(
@@ -369,8 +407,8 @@ fn build_effect_replay_driver(
         Arc::clone(&storage.await_event_signing_secret),
         Arc::clone(&clock),
     );
-    EffectReplayDriver::new(
-        PostgresEffectReplayPersistence {
+    StoreEffectReplayDriver::new(
+        PostgresEffectReplayRowStore {
             pool: storage.pool.clone(),
         },
         await_events,
@@ -380,14 +418,14 @@ fn build_effect_replay_driver(
 }
 
 /// PostgreSQL storage atoms for the durable effect journal.
-struct PostgresEffectReplayPersistence {
+struct PostgresEffectReplayRowStore {
     pool: PgPool,
 }
 
-impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayPersistence {}
+impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayRowStore {}
 
 #[async_trait::async_trait]
-impl EffectReplayPersistence for PostgresEffectReplayPersistence {
+impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     fn vocabulary(&self) -> EffectReplayVocabulary {
         VOCABULARY
     }
@@ -723,7 +761,7 @@ impl EffectReplayPersistence for PostgresEffectReplayPersistence {
     }
 }
 
-impl PostgresEffectReplayPersistence {
+impl PostgresEffectReplayRowStore {
     /// Read the row under its write lock, ask the transition table, and apply
     /// whatever write it prescribes.
     ///

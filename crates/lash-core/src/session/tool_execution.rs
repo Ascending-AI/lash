@@ -529,11 +529,10 @@ impl RuntimeExecutionContext<'_> {
             tool_context = tool_context.process_events(
                 self.process_id().unwrap(),
                 process_events.execution_write_authority.clone(),
-                std::sync::Arc::clone(&process_events.registry),
-                process_events.awaiter.clone(),
+                process_events.process_work.clone(),
                 process_events.store.clone(),
                 process_events.session_store_factory.clone(),
-                process_events.queued_work_driver.clone(),
+                std::sync::Arc::clone(&process_events.queued_work),
                 process_events.process_wake_delivery_policy,
                 std::sync::Arc::clone(&process_events.clock),
             );
@@ -568,6 +567,7 @@ impl RuntimeExecutionContext<'_> {
         let projection_args = outcome.record.args.clone();
         let projection_duration_ms = outcome.record.duration_ms;
         let projection_call_id = call_id.clone();
+        // clock-exempt: cooperative scheduler yield, no time decision
         tokio::task::yield_now().await;
         let plugins = std::sync::Arc::clone(&self.dispatch.plugins);
         let projection_context = crate::plugin::ToolResultProjectionContext {

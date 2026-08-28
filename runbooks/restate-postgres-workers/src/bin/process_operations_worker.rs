@@ -180,7 +180,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     let drive = WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
         Arc::new(factory) as Arc<dyn lash_core::SessionStoreFactory>,
-        None,
+        Arc::new(lash::runtime::NoQueuedWork::new()),
         Arc::new(lash_core::facade_support::SystemClock),
         32,
     )
@@ -324,7 +324,7 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
             let report = WakeDeliveryDriver::drive_pending_once(
                 Arc::clone(&registry),
                 Arc::clone(&factory),
-                None,
+                Arc::new(lash::runtime::NoQueuedWork::new()),
                 Arc::new(lash_core::facade_support::SystemClock),
                 32,
             )

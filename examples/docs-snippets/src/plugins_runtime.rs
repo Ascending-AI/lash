@@ -35,6 +35,7 @@ async fn plugin_install(provider: ProviderHandle) -> anyhow::Result<()> {
     use std::sync::Arc;
 
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -42,7 +43,7 @@ async fn plugin_install(provider: ProviderHandle) -> anyhow::Result<()> {
                 .build()
                 .expect("valid model metadata"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),

@@ -62,7 +62,7 @@ async fn burst_for_one_session_drains_ordered_batches_with_coalesced_hydrations(
         reasons: Mutex::new(Vec::new()),
         completed: tokio::sync::Notify::new(),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     for index in 0..SIGNALS {
         let reason = if index % 2 == 0 {
             "queued_turn_input"
@@ -141,7 +141,7 @@ async fn default_slot_supplier_releases_permits_and_preserves_admission_bound() 
         changed: tokio::sync::Notify::new(),
         release: tokio::sync::Semaphore::new(0),
     });
-    let driver = QueuedWorkDriver::with_execution_concurrency(handle.clone(), CONCURRENCY)
+    let driver = NativeQueuedWork::with_execution_concurrency(handle.clone(), CONCURRENCY)
         .expect("valid concurrency");
     for index in 0..SIGNALS {
         driver.notify_pending_work(Some(&format!("session-{index}")), "queued_turn_input");
@@ -180,7 +180,7 @@ async fn default_slot_supplier_releases_permits_and_preserves_admission_bound() 
 }
 
 #[tokio::test]
-async fn external_engine_submitters_do_not_inherit_the_inline_admission_bound() {
+async fn external_engine_submitters_do_not_inherit_the_native_admission_bound() {
     const SIGNALS: usize = 8;
     let handle = Arc::new(AdmissionRunHandle {
         active: AtomicUsize::new(0),
@@ -190,7 +190,7 @@ async fn external_engine_submitters_do_not_inherit_the_inline_admission_bound() 
         changed: tokio::sync::Notify::new(),
         release: tokio::sync::Semaphore::new(0),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     for index in 0..SIGNALS {
         driver.notify_pending_work(Some(&format!("engine-session-{index}")), "engine_submit");
     }
@@ -226,7 +226,7 @@ impl QueuedWorkRunHandle for ParkAwareRunHandle {
         match request.session_id.as_deref() {
             Some("session-parked") => {
                 self.first_parked.notify_one();
-                super::super::process_worker::release_process_execution_permit_while(async {
+                crate::runtime::process_worker::release_process_execution_permit_while(async {
                     self.resume_first
                         .acquire()
                         .await
@@ -244,7 +244,7 @@ impl QueuedWorkRunHandle for ParkAwareRunHandle {
 }
 
 #[tokio::test]
-async fn inline_admission_slot_is_released_while_a_turn_is_parked() {
+async fn native_admission_slot_is_released_while_a_turn_is_parked() {
     let handle = Arc::new(ParkAwareRunHandle {
         first_parked: tokio::sync::Notify::new(),
         second_entered: tokio::sync::Notify::new(),
@@ -252,14 +252,14 @@ async fn inline_admission_slot_is_released_while_a_turn_is_parked() {
         completed: AtomicUsize::new(0),
     });
     let driver =
-        QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
+        NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
     driver.notify_pending_work(Some("session-parked"), "queued_turn_input");
     handle.first_parked.notified().await;
 
     driver.notify_pending_work(Some("session-runnable"), "queued_turn_input");
     tokio::time::timeout(Duration::from_secs(1), handle.second_entered.notified())
         .await
-        .expect("a parked inline turn releases its queued-work slot");
+        .expect("a parked native turn releases its queued-work slot");
     handle.resume_first.add_permits(1);
     tokio::time::timeout(Duration::from_secs(1), async {
         while handle.completed.load(Ordering::SeqCst) != 2 {
@@ -321,7 +321,7 @@ async fn signal_during_an_inflight_run_schedules_exactly_one_rerun() {
         release_first: tokio::sync::Semaphore::new(0),
         completed: tokio::sync::Notify::new(),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     driver.notify_pending_work(Some("session-rerun"), "first");
     handle.first_entered.notified().await;
 
@@ -382,7 +382,7 @@ async fn empty_claimable_peek_skips_hydration() {
         hydrations: AtomicUsize::new(0),
         peeked: tokio::sync::Notify::new(),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     driver.notify_pending_work(Some("session-empty"), "queued_turn_input");
     handle.peeked.notified().await;
     for _ in 0..10 {
@@ -487,7 +487,7 @@ async fn public_single_pass_handle_never_eagerly_rehydrates_a_positive_peek() {
         peeks: AtomicUsize::new(0),
         hydrations: AtomicUsize::new(0),
     });
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
 
     driver.notify_pending_work(Some("session-public-probe"), "queued_turn_input");
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -536,7 +536,7 @@ async fn one_notification_during_live_lease_contention_has_bounded_hydrations() 
         hydrations: AtomicUsize::new(0),
     });
     let driver =
-        QueuedWorkDriver::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
+        NativeQueuedWork::with_execution_concurrency(handle.clone(), 1).expect("valid concurrency");
 
     driver.notify_pending_work(Some("session-contended"), "queued_turn_input");
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -580,7 +580,7 @@ async fn best_effort_wake_reenters_pending_claim_without_an_external_event() {
         accepted: tokio::sync::Notify::new(),
     });
     let accepted = handle.accepted.notified();
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
 
     driver.notify_pending_work(Some("session-1"), "queued_turn_input");
 
@@ -593,6 +593,30 @@ async fn best_effort_wake_reenters_pending_claim_without_an_external_event() {
 struct AlwaysFailRunHandle {
     attempts: Arc<AtomicUsize>,
     class: QueuedWorkRunErrorClass,
+}
+
+#[test]
+fn terminal_constructor_rejects_zero_retry_delay_directly() {
+    let work_cadence = WorkCadencePolicy {
+        retry_initial: Duration::ZERO,
+        ..WorkCadencePolicy::default()
+    };
+
+    let Err(error) = NativeQueuedWork::from_parts_with_work_cadence(
+        Arc::new(AlwaysFailRunHandle {
+            attempts: Arc::new(AtomicUsize::new(0)),
+            class: QueuedWorkRunErrorClass::Transient,
+        }),
+        CancellationToken::new(),
+        None,
+        work_cadence,
+    ) else {
+        panic!("terminal queued-work construction must reject zero-delay retries");
+    };
+    assert!(
+        error.to_string().contains("work_cadence.retry_initial"),
+        "error must identify the rejected retry field: {error}"
+    );
 }
 
 #[async_trait::async_trait]
@@ -613,7 +637,7 @@ impl QueuedWorkRunHandle for AlwaysFailRunHandle {
 #[tokio::test]
 async fn terminal_wake_error_stops_after_one_attempt() {
     let attempts = Arc::new(AtomicUsize::new(0));
-    let driver = QueuedWorkDriver::new(Arc::new(AlwaysFailRunHandle {
+    let driver = NativeQueuedWork::new(Arc::new(AlwaysFailRunHandle {
         attempts: Arc::clone(&attempts),
         class: QueuedWorkRunErrorClass::Terminal,
     }));
@@ -632,22 +656,61 @@ async fn terminal_wake_error_stops_after_one_attempt() {
 
 #[tokio::test]
 async fn transient_wake_error_stops_at_the_attempt_limit() {
+    let max_attempts = WorkCadencePolicy::default().max_transient_attempts.get() as usize;
     let attempts = Arc::new(AtomicUsize::new(0));
-    let driver = QueuedWorkDriver::new(Arc::new(AlwaysFailRunHandle {
+    let driver = NativeQueuedWork::new(Arc::new(AlwaysFailRunHandle {
         attempts: Arc::clone(&attempts),
         class: QueuedWorkRunErrorClass::Transient,
     }));
 
     driver.notify_pending_work(Some("session-exhausted"), "queued_turn_input");
     tokio::time::timeout(Duration::from_secs(5), async {
-        while attempts.load(Ordering::SeqCst) < WAKE_MAX_ATTEMPTS as usize {
+        while attempts.load(Ordering::SeqCst) < max_attempts {
             tokio::task::yield_now().await;
         }
     })
     .await
     .expect("transient wake reaches the attempt limit");
 
-    assert_eq!(attempts.load(Ordering::SeqCst), WAKE_MAX_ATTEMPTS as usize);
+    assert_eq!(attempts.load(Ordering::SeqCst), max_attempts);
+}
+
+#[tokio::test]
+async fn work_cadence_policy_limits_transient_wake_attempts() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let work_cadence = WorkCadencePolicy {
+        max_transient_attempts: std::num::NonZeroU32::MIN,
+        ..WorkCadencePolicy::default()
+    };
+    let driver = NativeQueuedWork::from_parts_with_work_cadence(
+        Arc::new(AlwaysFailRunHandle {
+            attempts: Arc::clone(&attempts),
+            class: QueuedWorkRunErrorClass::Transient,
+        }),
+        CancellationToken::new(),
+        None,
+        work_cadence,
+    )
+    .expect("configured work cadence is valid");
+
+    driver.notify_pending_work(Some("session-configured-limit"), "queued_turn_input");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let dispatcher_running = driver.inner.scheduler.lock_state().dispatcher_running;
+            if attempts.load(Ordering::SeqCst) > 0 && !dispatcher_running {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the configured retry budget terminates the wake");
+
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        1,
+        "max_transient_attempts=1 must stop after the first failure"
+    );
 }
 
 struct BlockingRunHandle {
@@ -681,7 +744,7 @@ async fn dropping_the_driver_cancels_an_inflight_wake() {
         dropped: Arc::clone(&dropped),
     });
     let entered = handle.entered.notified();
-    let driver = QueuedWorkDriver::new(handle.clone());
+    let driver = NativeQueuedWork::new(handle.clone());
     driver.notify_pending_work(Some("session-shutdown"), "queued_turn_input");
     entered.await;
 

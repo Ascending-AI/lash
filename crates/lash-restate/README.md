@@ -71,31 +71,41 @@ surface that failure and clear their running state rather than leaving the
 invocation to back off forever.
 
 Background tasks are scheduled through the first-party
-`LashProcessWorkflow`. Durable waits additionally require the exact-address
-`LashDurableWaitWorkflow` and session index `LashDurableWaitIndex`; bind all
-three services on every endpoint that constructs a
-`RestateRuntimeEffectController`:
+`LashProcessWorkflow`. Effect groups require their index, payload, dispatcher,
+and durable-wait service bundle; the same exact-address wait workflow and
+session index also serve ordinary durable waits. Bind the complete set on every
+endpoint that enables groups:
 
 ```rust,no_run
 use std::sync::Arc;
 
 use lash_restate::{
-    LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
-    LashDurableWaitWorkflowImpl, LashProcessWorkflow, LashProcessWorkflowImpl,
-    RestateCoreProcessRunner,
+    LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow,
+    LashProcessWorkflowImpl, RestateCoreProcessRunner, RestateEffectGroupRetryPolicy,
+    RestateEffectGroupServices,
 };
 use restate_sdk::prelude::Endpoint;
 
 fn endpoint(
     worker: lash_core::DurableProcessWorker,
     registry: Arc<dyn lash_core::ProcessRegistry>,
+    group_executors: Arc<dyn lash_core::GroupExecutors>,
+    ingress: lash_restate::RestateIngressClient,
 ) -> restate_sdk::endpoint::Endpoint
 {
     let runner = Arc::new(RestateCoreProcessRunner::new(worker));
+    let groups = RestateEffectGroupServices::new(
+        group_executors,
+        ingress,
+        RestateEffectGroupRetryPolicy::infinite(),
+    );
     Endpoint::builder()
         .bind(LashProcessWorkflowImpl::new(runner, registry).serve())
-        .bind(LashDurableWaitWorkflowImpl.serve())
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(groups.index)
+        .bind(groups.payload)
+        .bind(groups.dispatch)
+        .bind(groups.wait.workflow.serve())
+        .bind(groups.wait.index.serve())
         .build()
 }
 ```
@@ -106,6 +116,28 @@ as one: Restate answers an invocation of a service no deployment binds with
 and raises the engine's own `404`-class terminal naming the address nothing
 binds. A retryable 404 would turn a forgotten `bind` into an invocation backing
 off forever with no operator told what is wrong.
+
+## Stuck effect-group dispatcher retirement
+
+Effect-group retirement tombstones the index before it cancels and durably
+joins the adopted `EffectGroupDispatch` invocation. If that dispatcher's
+endpoint is gone, the join deliberately remains pending: the tombstone prevents
+new child execution, while the saga waits for a terminal it can prove.
+
+Inspect the retired index cleanup and copy its exact `dispatcher.id`. Confirm
+that the invocation is the `EffectGroupDispatch/run` execution for the affected
+group key. Then terminate only that recorded invocation:
+
+```text
+restate invocation kill <dispatcher-invocation-id>
+```
+
+Do not kill by service name, wildcard, or process match. Once the exact
+invocation is terminal, the saga's durable attach completes and engine redrive
+continues child cancellation, all `3N+1` retained wait fences, payload-byte
+deletion, and the final tombstone-only reduction. Verify that the index reports
+`Retired`, a late READY or RANK registration resolves as `Retired`, and a late
+payload put returns `Retired`.
 
 The wait workflow owns Restate promises and durable deadline timers for every
 Lash execution scope. The virtual-object index serializes wait registration,

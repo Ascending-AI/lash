@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
@@ -17,8 +22,7 @@ use lash_restate::{
     LashDurableWaitWorkflowImpl, LashProcessWorkflow,
 };
 use restate_sdk::context::{
-    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, InvocationHandle,
-    RunFuture,
+    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, RunFuture,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::{Endpoint, ObjectContext, SharedObjectContext, WorkflowContext};
@@ -205,7 +209,7 @@ impl WorkbenchTurnWorkflow for WorkbenchTurnWorkflowImpl {
             .await?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "user_turn_completed")
+            .drain_session(&session_id, "user_turn_completed")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -244,7 +248,7 @@ impl WorkbenchQueuedTurnWorkflow for WorkbenchQueuedTurnWorkflowImpl {
         .await?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "queued_turn_completed")
+            .drain_session(&session_id, "queued_turn_completed")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -287,7 +291,7 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
             .map_err(terminal_handler_error)?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "button_trigger")
+            .drain_session(&session_id, "button_trigger")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -323,7 +327,7 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
             .map_err(terminal_handler_error)?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&session_id), "mail_received")
+            .drain_session(&session_id, "mail_received")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -528,7 +532,7 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
         .await?;
         self.state
             .queued_work_driver
-            .claim_and_run_pending(Some(&state.request.session_id), "cron_tick")
+            .drain_session(&state.request.session_id, "cron_tick")
             .await
             // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
             .map_err(classified_plugin_handler_error)?;
@@ -1426,7 +1430,7 @@ async fn schedule_next(
         .object_client::<WorkbenchCronJobClient>(ctx.key())
         .run()
         .send_after(delay);
-    let next_execution_id = handle.invocation_id().await?;
+    let next_execution_id = handle.await?.invocation_id().to_owned();
     let state = WorkbenchCronState {
         request,
         next_execution_time: next.to_rfc3339(),
@@ -1439,10 +1443,7 @@ async fn schedule_next(
 
 async fn cancel_stored_execution(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
     if let Some(Json(existing)) = ctx.get::<Json<WorkbenchCronState>>(CRON_STATE_KEY).await? {
-        let _ = ctx
-            .invocation_handle(existing.next_execution_id)
-            .cancel()
-            .await;
+        ctx.invocation_handle(existing.next_execution_id).cancel();
     }
     Ok(())
 }
@@ -1562,3 +1563,30 @@ fn classified_plugin_handler_error(error: lash::plugins::PluginError) -> Handler
 #[cfg(test)]
 #[path = "restate_tests.rs"]
 mod tests;
+
+#[async_trait::async_trait]
+trait QueuedWorkExt {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError>;
+}
+
+#[async_trait::async_trait]
+impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError> {
+        use lash::runtime::QueuedWorkSubstrate as _;
+
+        self.drain_session_work(
+            lash::runtime::SessionWorkTarget::Session(session_id.to_string()),
+            reason,
+        )
+        .await
+        .map(|_| ())
+    }
+}

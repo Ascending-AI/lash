@@ -17,7 +17,7 @@ use anyhow::{Context, Result, bail, ensure};
 use lash::persistence::SessionStoreFactory as _;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::runtime::{
-    AwaitEventResolver, ExecutionScope, InlineRuntimeEffectController, RuntimeEffectController,
+    AwaitEventResolver, ExecutionScope, NativeRuntimeEffectController, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeError,
 };
@@ -140,6 +140,7 @@ fn process_worker(
     lease_owner: LeaseOwnerIdentity,
     fault_sink: &RecordingWorkerFaultSink,
 ) -> lash::durability::DurableProcessWorker {
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     let config = lash::durability::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
         lash::durability::RuntimeHostConfig::in_memory(
@@ -147,12 +148,14 @@ fn process_worker(
             lash::QueuedWorkBatchingConfig::new(1024),
         ),
         Arc::new(storage.session_store_factory_with_shared_process_registry()),
-        registry,
+        lash::durability::WorkerProcessWork::SelfNative(watched),
+        Arc::new(lash::runtime::NoQueuedWork::new()),
         lease_owner,
     )
     .with_trigger_store(Arc::new(storage.trigger_store()))
     .with_process_event_sink(Arc::new(fault_sink.clone()));
     lash::durability::DurableProcessWorker::new(config)
+        .expect("runbook worker uses valid native substrate defaults")
 }
 
 fn process_json(record: &ProcessRecord) -> Value {
@@ -264,7 +267,7 @@ impl StallingProvider {
 /// for the in-flight effect it admitted before declaring the journal empty.
 #[derive(Default)]
 struct JournalController {
-    inline: InlineRuntimeEffectController,
+    inline: NativeRuntimeEffectController,
     active: Mutex<BTreeSet<String>>,
     completed: Mutex<BTreeSet<String>>,
 }
@@ -281,10 +284,6 @@ impl JournalController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for JournalController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
@@ -338,6 +337,20 @@ impl AwaitEventResolver for JournalController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for JournalController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -372,6 +385,7 @@ fn core(
         Arc::new(storage.lashlang_artifact_store()),
     );
     lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, protocol)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("process-operator-flow-mock")
@@ -390,7 +404,7 @@ fn core(
         .process_env_store(Arc::new(storage.process_env_store()))
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "process-operator-flow-worker",
             uuid::Uuid::new_v4().to_string(),

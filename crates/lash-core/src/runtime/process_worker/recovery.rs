@@ -207,7 +207,7 @@ impl ProcessRecoveryOperation {
     /// Stable snake_case label for this operation.
     ///
     /// The one spelling used in structured records, so a fault logged by the
-    /// inline worker and one logged by an out-of-crate tier (the Restate
+    /// native worker and one logged by an out-of-crate tier (the Restate
     /// ingress sweep) carry the same `operation` value rather than two
     /// dialects of the same vocabulary.
     pub fn label(self) -> &'static str {
@@ -323,7 +323,7 @@ impl DurableProcessWorker {
     ) -> RecoveryClaimDisposition {
         match self
             .config
-            .process_registry
+            .process_registry()
             .claim_process_lease(process_id, owner, lease_ttl_ms)
             .await
         {
@@ -340,7 +340,7 @@ impl DurableProcessWorker {
     }
 
     pub(super) async fn read_for_recovery(&self, process_id: &str) -> RecoveryReadDisposition {
-        match self.config.process_registry.get_process(process_id).await {
+        match self.config.process_registry().get_process(process_id).await {
             Ok(Some(record)) => RecoveryReadDisposition::Found(Box::new(record)),
             Ok(None) => RecoveryReadDisposition::Absent,
             Err(error) => RecoveryReadDisposition::BackendError(self.recovery_backend_error(
@@ -372,7 +372,7 @@ impl DurableProcessWorker {
     ) -> RecoveryCompletionDisposition {
         let fenced = match self
             .config
-            .process_registry
+            .process_registry()
             .renew_process_lease(lease, self.lease_timings().ttl_ms())
             .await
         {
@@ -403,7 +403,7 @@ impl DurableProcessWorker {
         };
         match self
             .config
-            .process_registry
+            .process_registry()
             .complete_process_with_lease_and_parent_end(&fenced, output, actions)
             .await
         {
@@ -619,7 +619,7 @@ impl DurableProcessWorker {
 
     async fn release_process_lease(&self, lease: &ProcessLease) -> Result<(), PluginError> {
         self.config
-            .process_registry
+            .process_registry()
             .complete_process_lease(&ProcessLeaseCompletion::from_lease(lease))
             .await
     }

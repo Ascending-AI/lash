@@ -225,7 +225,7 @@ async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<(
     use lash_core::TriggerStore as _;
 
     let (core, store, _subscription) =
-        ingress_core_with_trigger_store(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-owned-trigger-call", 0);
@@ -304,25 +304,49 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
 
 #[derive(Default)]
 struct KeyJournalController {
-    inner: lash_core::facade_support::InlineRuntimeEffectController,
+    inner: lash_core::facade_support::NativeRuntimeEffectController,
     recorded: std::sync::Mutex<std::collections::HashMap<String, lash_core::RuntimeEffectOutcome>>,
 }
 
+#[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for KeyJournalController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        true
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> std::result::Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        if !may_defer {
+            return Ok(lash_core::CompletionKeyPreparation::NotNeeded);
+        }
+        self.inner
+            .await_event_key(scope, wait)
+            .await
+            .map(lash_core::CompletionKeyPreparation::Issued)
     }
 }
 
+#[async_trait::async_trait]
 impl lash_core::EffectHost for KeyJournalController {
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> std::result::Result<(), lash_core::RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: lash_core::ExecutionScope,
@@ -333,6 +357,20 @@ impl lash_core::EffectHost for KeyJournalController {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for KeyJournalController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -371,7 +409,7 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
 
 #[derive(Default)]
 struct AdmissionCrashController {
-    inner: lash_core::facade_support::InlineRuntimeEffectController,
+    inner: lash_core::facade_support::NativeRuntimeEffectController,
     admitted: tokio::sync::Notify,
     admission: std::sync::Mutex<Option<MockEffectAdmission>>,
     realizations: std::sync::atomic::AtomicUsize,
@@ -384,17 +422,29 @@ struct MockEffectAdmission {
     envelope_hash: String,
 }
 
-impl lash_core::AwaitEventResolver for AdmissionCrashController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        lash_core::EffectReplayOwnership::Controller
-    }
+impl lash_core::AwaitEventResolver for AdmissionCrashController {}
 
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        lash_core::EffectJournalAddressing::KeyAddressed
-    }
-}
-
+#[async_trait::async_trait]
 impl lash_core::EffectHost for AdmissionCrashController {
+    async fn prepare_tool_intent(
+        &self,
+        _sink: &dyn lash_core::ToolIntentOutcomeSink,
+        _identity: &lash_core::ToolIntentIdentity,
+        _intent: lash_core::ToolIntent,
+    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        Ok(lash_core::ToolIntentPreparation::ControllerOwned)
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> std::result::Result<(), lash_core::RuntimeError> {
+        sink.retain_in_journal(identity, submitted, outcome).await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: lash_core::ExecutionScope,
@@ -405,6 +455,20 @@ impl lash_core::EffectHost for AdmissionCrashController {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for AdmissionCrashController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        _code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        Ok(lash_core::RuntimeEffectFailureDisposition::AbortInvocation)
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        Ok(lash_core::TurnControlParticipation::DurableJournaled)
+    }
+
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -727,7 +791,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 #[tokio::test]
 async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-owned-duplicate", 0);
@@ -769,7 +833,7 @@ async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result
 #[tokio::test]
 async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
@@ -868,7 +932,7 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
 #[tokio::test]
 async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-cross-target-kind", 0);
@@ -911,7 +975,7 @@ async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted(
 #[tokio::test]
 async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handles() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let left = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let right = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1310,7 +1374,7 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     let env_store = Arc::new(ProbeProcessEnvStore::default());
     env_store.fail_put.store(true, Ordering::SeqCst);
     let (core, registry) = ingress_core_with_effect_host_and_env_store(
-        Arc::new(crate::durability::InlineEffectHost::default()),
+        Arc::new(crate::durability::NativeEffectHost::default()),
         Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>,
     )
     .await?;

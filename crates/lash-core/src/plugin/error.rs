@@ -126,12 +126,6 @@ pub enum PluginError {
         "process `{process_id}` recorded a caller departure before any outcome; awaiting it would never resolve"
     )]
     ProcessCallerDeparted { process_id: String },
-    /// One bounded transport attachment elapsed while the durable process wait
-    /// remained live. Hosts must re-attach using the same process id.
-    #[error(
-        "process `{process_id}` terminal attach ceiling elapsed; re-attach to continue waiting"
-    )]
-    ProcessAttachCeilingElapsed { process_id: String },
     #[error("process `{process_id}` is already terminal in state `{status:?}`")]
     ProcessAlreadyTerminal {
         process_id: String,

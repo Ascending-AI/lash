@@ -962,16 +962,16 @@ const RECLAMATION_FENCE_BACKOFF_MIN: std::time::Duration = std::time::Duration::
 const RECLAMATION_FENCE_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Wait before the `attempt`-th re-acquire of the write fence.
-async fn reclamation_fence_backoff(attempt: u32) {
+async fn reclamation_fence_backoff(clock: &dyn crate::Clock, attempt: u32) {
     if attempt <= RECLAMATION_FENCE_YIELD_ATTEMPTS {
-        tokio::task::yield_now().await;
+        clock.sleep(std::time::Duration::ZERO).await;
         return;
     }
     let doublings = (attempt - RECLAMATION_FENCE_YIELD_ATTEMPTS - 1).min(16);
     let delay = RECLAMATION_FENCE_BACKOFF_MIN
         .saturating_mul(1u32 << doublings)
         .min(RECLAMATION_FENCE_BACKOFF_MAX);
-    tokio::time::sleep(delay).await;
+    clock.sleep(delay).await;
 }
 
 pub fn content_id(bytes: &[u8]) -> AttachmentId {
@@ -1188,7 +1188,7 @@ impl SessionAttachmentStore {
                             attempts,
                         });
                     }
-                    reclamation_fence_backoff(attempts).await;
+                    reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
                 }
             }
         }

@@ -262,6 +262,16 @@ run_e2e_suite() {
   AGENT_WORKBENCH_E2E_ENDPOINT_URL="${AGENT_WORKBENCH_E2E_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 33))}" \
     just agent-workbench-restate-e2e
 
+  step "Restate e2e: effect-group conformance"
+  EFFECT_GROUP_RESTATE_ADMIN_PORT="${EFFECT_GROUP_RESTATE_ADMIN_PORT:-$((port_base + 35))}" \
+  EFFECT_GROUP_RESTATE_INGRESS_PORT="${EFFECT_GROUP_RESTATE_INGRESS_PORT:-$((port_base + 36))}" \
+  EFFECT_GROUP_RESTATE_NODE_PORT="${EFFECT_GROUP_RESTATE_NODE_PORT:-$((port_base + 37))}" \
+  EG_RESTATE_ENDPOINT_BIND="${EG_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((port_base + 38))}" \
+  EG_RESTATE_ENDPOINT_URL="${EG_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 38))}" \
+  EG0_RESTATE_ENDPOINT_BIND="${EG0_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((port_base + 39))}" \
+  EG0_RESTATE_ENDPOINT_URL="${EG0_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((port_base + 39))}" \
+    just effect-group-conformance-e2e
+
   step "Restate/Postgres/MinIO workers e2e"
   LASH_E2E_MINIO_PORT="${LASH_E2E_MINIO_PORT:-$((port_base + 40))}" \
     bash scripts/restate-postgres-workers-e2e.sh

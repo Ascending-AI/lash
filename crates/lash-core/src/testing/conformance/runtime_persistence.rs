@@ -577,7 +577,7 @@ where
     ))
     .await;
     session_execution_lease_expires_by_ttl_contract(&|| make("ttl-expiry"), lease_timing).await;
-    crate::testing::conformance::durable_queued_drain_wait_contract(
+    super::durable_queued_drain_wait::durable_queued_drain_wait_store_laws(
         make("durable-queued-drain"),
         lease_timing,
     )

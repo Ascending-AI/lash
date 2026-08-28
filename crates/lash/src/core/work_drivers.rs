@@ -1,96 +1,98 @@
-use super::queued_work::{InlineQueuedWorkRunConfig, InlineQueuedWorkRunHandle};
+use super::queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
 use crate::support::*;
 use lash_core::facade_support;
 
-/// How a [`LashCore`] resolves its process work driver, decided at `build()`
+/// How a [`LashCore`] resolves its process-work port, decided at `build()`
 /// and shared across clones.
-pub(super) enum ProcessWorkDriverSetup {
+pub(super) enum ProcessPortSetup {
     /// No process registry is wired; there is nothing to run.
     None,
-    /// Lazily construct the default inline process driver on first
+    /// Lazily construct the native process-work port on first
     /// `session().open()`. A store factory is required to build the config (the
     /// worker rebuilds a session runtime per process); a registry with no store
     /// factory is rejected at build with
     /// [`EmbedError::ProcessRegistryRequiresStoreFactory`].
-    LazyDefault {
-        config: Box<DurableProcessWorkerConfig>,
+    /// Lazily builds the native substrate on first use.
+    NativeDefault {
+        config: Box<super::NativeProcessWorkerSetup>,
+        watched: facade_support::WatchedRegistry,
     },
-    /// The host wired an external driver.
-    External { driver: ProcessWorkDriver },
+    /// The host wired an external process-work port.
+    External { wiring: ProcessWorkWiring },
 }
 
 #[derive(Clone, Default)]
-pub(super) enum ProcessWorkSource {
+pub(super) enum ProcessWorkSelection {
     #[default]
     None,
-    Inline {
-        registry: Arc<dyn ProcessRegistry>,
-        hub: Option<facade_support::ProcessChangeHub>,
-    },
-    External(ProcessWorkDriver),
+    Native(Arc<dyn ProcessRegistry>),
+    External(ProcessWorkWiring),
+}
+
+impl ProcessWorkSelection {
+    pub(super) fn resolve(
+        self,
+        clock: Arc<dyn lash_core::Clock>,
+        sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
+    ) -> ProcessWorkSource {
+        match self {
+            Self::None => ProcessWorkSource::None,
+            Self::Native(registry) => {
+                let registry = registry.with_runtime_clock(clock).unwrap_or(registry);
+                ProcessWorkSource::Native(facade_support::watch_process_registry_with_sink(
+                    registry, sink,
+                ))
+            }
+            Self::External(wiring) => ProcessWorkSource::External(wiring),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) enum ProcessWorkSource {
+    None,
+    Native(facade_support::WatchedRegistry),
+    External(ProcessWorkWiring),
 }
 
 impl ProcessWorkSource {
-    pub(super) fn with_runtime_clock(self, clock: Arc<dyn lash_core::Clock>) -> Self {
-        match self {
-            Self::Inline { registry, hub } => Self::Inline {
-                registry: registry.with_runtime_clock(clock).unwrap_or(registry),
-                hub,
-            },
-            other => other,
-        }
-    }
-
     pub(super) fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
         match self {
             Self::None => None,
-            Self::Inline { registry, .. } => Some(Arc::clone(registry)),
-            Self::External(driver) => Some(driver.process_registry()),
+            Self::Native(watched) => Some(Arc::clone(watched.registry())),
+            Self::External(_) => None,
+        }
+    }
+
+    pub(super) fn external_wiring(&self) -> Option<ProcessWorkWiring> {
+        match self {
+            Self::External(wiring) => Some(wiring.clone()),
+            Self::None | Self::Native(_) => None,
         }
     }
 
     pub(super) fn has_registry(&self) -> bool {
         !matches!(self, Self::None)
     }
-
-    pub(super) fn watched(self, sink: Option<Arc<dyn facade_support::ProcessEventSink>>) -> Self {
-        match self {
-            Self::Inline {
-                registry,
-                hub: None,
-            } => {
-                let (registry, hub) =
-                    facade_support::watch_process_registry_with_sink(registry, sink);
-                Self::Inline {
-                    registry,
-                    hub: Some(hub),
-                }
-            }
-            // An external driver was wrapped by its host, which installs any
-            // sink through the driver constructor; the inline sink does not
-            // apply here. Already-watched inline sources keep their wrap.
-            other => other,
-        }
-    }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(super) enum QueuedWorkSource {
-    None,
-    #[default]
-    LazyDefault,
-    External(QueuedWorkDriver),
+    Unset,
+    Disabled,
+    Native,
+    External(Arc<dyn QueuedWorkSubstrate>),
 }
 
-pub(super) enum QueuedWorkDriverSetup {
-    None,
-    LazyDefault {
-        config: Arc<InlineQueuedWorkRunConfig>,
+pub(super) enum QueuedPortSetup {
+    Disabled,
+    Native {
+        config: Arc<NativeQueuedWorkRunConfig>,
         slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         execution_concurrency: usize,
     },
     External {
-        driver: QueuedWorkDriver,
+        port: Arc<dyn QueuedWorkSubstrate>,
     },
 }
 
@@ -101,38 +103,109 @@ pub(super) struct WakeDeliveryDriverSetup {
     pub(super) delivery_policy: lash_core::DeliveryPolicy,
 }
 
-pub(super) struct InlineWorkDriverSetup {
-    pub(super) process: ProcessWorkDriverSetup,
-    pub(super) queued: QueuedWorkDriverSetup,
+pub(super) struct NativeSubstrateSetup {
+    pub(super) config: NativeSubstrateConfig,
+    pub(super) process: ProcessPortSetup,
+    pub(super) queued: QueuedPortSetup,
     pub(super) wake: Option<WakeDeliveryDriverSetup>,
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct ResolvedWorkDrivers {
-    pub(crate) process: Option<ProcessWorkDriver>,
-    pub(crate) queued: Option<QueuedWorkDriver>,
-    pub(crate) _wake: Option<facade_support::WakeDeliveryDriver>,
+#[derive(Clone)]
+pub(crate) struct ResolvedPorts {
+    pub(crate) process: Option<ProcessWorkWiring>,
+    pub(crate) queued: Arc<ResolvedQueuedWork>,
     pub(crate) drive_process_on_open: bool,
+}
+
+impl ResolvedPorts {
+    pub(crate) fn queued_port(&self) -> Arc<dyn QueuedWorkSubstrate> {
+        self.queued.clone()
+    }
+}
+
+pub(crate) struct ResolvedQueuedWork {
+    port: Arc<dyn QueuedWorkSubstrate>,
+    wake: std::sync::Mutex<Option<facade_support::WakeDeliveryDriver>>,
+}
+
+impl ResolvedQueuedWork {
+    fn new(port: Arc<dyn QueuedWorkSubstrate>) -> Self {
+        Self {
+            port,
+            wake: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn install_wake(&self, wake: facade_support::WakeDeliveryDriver) {
+        *self
+            .wake
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(wake);
+    }
+
+    pub(crate) async fn drive_wake(
+        &self,
+    ) -> std::result::Result<facade_support::WakeDeliveryDriveReport, lash_core::PluginError> {
+        let wake = self
+            .wake
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let Some(wake) = wake else {
+            return Err(lash_core::PluginError::Session(
+                "wake delivery driver is unavailable in this runtime".to_string(),
+            ));
+        };
+        wake.drive_pending().await
+    }
+}
+
+impl Drop for ResolvedQueuedWork {
+    fn drop(&mut self) {
+        if let Some(wake) = self
+            .wake
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            wake.request_shutdown();
+        }
+    }
+}
+
+#[async_trait]
+impl QueuedWorkSubstrate for ResolvedQueuedWork {
+    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str) {
+        self.port.notify_session_work(target, reason);
+    }
+
+    async fn drain_session_work(
+        &self,
+        target: SessionWorkTarget,
+        reason: &str,
+    ) -> std::result::Result<lash_core::SessionDrainOutcome, lash_core::PluginError> {
+        self.port.drain_session_work(target, reason).await
+    }
 }
 
 /// Shared, lazily-initialized host-work state for a [`LashCore`].
 ///
-/// The once-guard ([`tokio::sync::OnceCell`]) constructs inline drivers exactly
+/// The once-guard ([`tokio::sync::OnceCell`]) constructs native ports exactly
 /// once across `LashCore` clones, on the first `session().open()` or admin path
 /// that needs them.
-pub(crate) struct InlineWorkDriverSlot {
-    setup: InlineWorkDriverSetup,
-    drivers: tokio::sync::OnceCell<ResolvedWorkDrivers>,
+pub(crate) struct NativeSubstrateSlot {
+    pub(super) setup: NativeSubstrateSetup,
+    drivers: tokio::sync::OnceCell<ResolvedPorts>,
     phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
 }
 
-impl InlineWorkDriverSlot {
-    pub(super) fn new(setup: InlineWorkDriverSetup) -> Self {
+impl NativeSubstrateSlot {
+    pub(super) fn new(setup: NativeSubstrateSetup) -> Self {
         let phase_probe_slot = match &setup.process {
-            ProcessWorkDriverSetup::LazyDefault { config } => {
+            ProcessPortSetup::NativeDefault { config, .. } => {
                 Some(config.turn_phase_probe_slot.clone())
             }
-            ProcessWorkDriverSetup::None | ProcessWorkDriverSetup::External { .. } => None,
+            ProcessPortSetup::None | ProcessPortSetup::External { .. } => None,
         };
         Self {
             setup,
@@ -141,70 +214,74 @@ impl InlineWorkDriverSlot {
         }
     }
 
-    /// Resolve host work drivers for a session host. Idempotent: the once-guard
-    /// ensures inline drivers are constructed once.
-    pub(crate) async fn drivers(&self) -> ResolvedWorkDrivers {
+    /// Resolve host work ports for a session host. Idempotent: the once-guard
+    /// ensures native ports are constructed once.
+    pub(crate) async fn ports(&self) -> ResolvedPorts {
         self.drivers
             .get_or_init(|| async {
-                let queued = match &self.setup.queued {
-                    QueuedWorkDriverSetup::None => None,
-                    QueuedWorkDriverSetup::External { driver } => Some(driver.clone()),
-                    QueuedWorkDriverSetup::LazyDefault {
+                let queued_port: Arc<dyn QueuedWorkSubstrate> = match &self.setup.queued {
+                    QueuedPortSetup::Disabled => Arc::new(NoQueuedWork::new()),
+                    QueuedPortSetup::External { port } => Arc::clone(port),
+                    QueuedPortSetup::Native {
                         config,
                         slot_supplier,
                         execution_concurrency,
                     } => {
                         let run_handle =
-                            Arc::new(InlineQueuedWorkRunHandle::new(Arc::clone(config)));
-                        Some(match slot_supplier {
-                            Some(slot_supplier) => QueuedWorkDriver::with_worker_slot_supplier(
-                                run_handle,
-                                Arc::clone(slot_supplier),
-                            ),
-                            None => QueuedWorkDriver::with_execution_concurrency(
+                            Arc::new(NativeQueuedWorkRunHandle::new(Arc::clone(config)));
+                        let work_cadence = self.setup.config.work_cadence.clone();
+                        Arc::new(match slot_supplier {
+                            Some(slot_supplier) => {
+                                facade_support::native_queued_work_with_worker_slot_supplier_and_work_cadence(
+                                    run_handle,
+                                    Arc::clone(slot_supplier),
+                                    work_cadence,
+                                )
+                                .expect("native work cadence was validated at build")
+                            }
+                            None => facade_support::native_queued_work_with_execution_concurrency_and_work_cadence(
                                 run_handle,
                                 *execution_concurrency,
+                                work_cadence,
                             )
                             .expect("queued-work concurrency was validated at build"),
                         })
                     }
                 };
                 let (process, drive_process_on_open) = match &self.setup.process {
-                    ProcessWorkDriverSetup::None => (None, false),
-                    ProcessWorkDriverSetup::External { driver } => (Some(driver.clone()), false),
-                    ProcessWorkDriverSetup::LazyDefault { config } => {
-                        let mut config = (**config).clone();
-                        if let Some(driver) = queued.clone() {
-                            config = config.with_queued_work_driver(driver);
-                        }
-                        let registry = Arc::clone(&config.process_registry);
-                        let hub = config.process_change_hub.clone();
-                        let worker = DurableProcessWorker::new(config);
-                        let driver = if let Some(hub) = hub {
-                            ProcessWorkDriver::from_watched(
-                                registry,
-                                hub,
-                                Arc::new(facade_support::InlineProcessRunHandle::new(worker)),
-                            )
-                        } else {
-                            ProcessWorkDriver::inline(registry, worker)
-                        };
-                        (Some(driver), true)
+                    ProcessPortSetup::None => (None, false),
+                    ProcessPortSetup::External { wiring } => (Some(wiring.clone()), false),
+                    ProcessPortSetup::NativeDefault { config, watched } => {
+                        // The worker only forwards notifications through this port;
+                        // the outer dispatcher remains the sole native-lane owner.
+                        let config = config
+                            .build(Arc::clone(&queued_port))
+                            .expect("native process-worker assembly was validated at build");
+                        let watched = watched.clone();
+                        let worker = DurableProcessWorker::new(config)
+                            .expect("native substrate config was validated at build");
+                        let port: Arc<dyn ProcessWorkSubstrate> =
+                            Arc::new(NativeProcessWork::new(&watched, worker));
+                        (Some(ProcessWorkWiring::new(watched, port)), true)
                     }
                 };
-                let wake = self.setup.wake.as_ref().map(|setup| {
-                    facade_support::WakeDeliveryDriver::new(
+                let queued = Arc::new(ResolvedQueuedWork::new(queued_port));
+                if let Some(setup) = self.setup.wake.as_ref() {
+                    let queued_for_wake: Arc<dyn QueuedWorkSubstrate> = queued.clone();
+                    let wake = facade_support::wake_delivery_driver_with_work_cadence(
                         Arc::clone(&setup.registry),
                         Arc::clone(&setup.factory),
-                        queued.clone(),
+                        queued_for_wake,
                         Arc::clone(&setup.clock),
                         setup.delivery_policy,
+                        self.setup.config.work_cadence.clone(),
                     )
-                });
-                ResolvedWorkDrivers {
+                    .expect("native work cadence was validated at build");
+                    queued.install_wake(wake);
+                }
+                ResolvedPorts {
                     process,
                     queued,
-                    _wake: wake,
                     drive_process_on_open,
                 }
             })
@@ -217,34 +294,34 @@ impl InlineWorkDriverSlot {
     }
 
     #[cfg(test)]
-    pub(crate) fn process_worker_config(&self) -> Option<&DurableProcessWorkerConfig> {
+    pub(crate) fn process_worker_config(&self) -> Option<DurableProcessWorkerConfig> {
         match &self.setup.process {
-            ProcessWorkDriverSetup::LazyDefault { config } => Some(config),
-            ProcessWorkDriverSetup::None | ProcessWorkDriverSetup::External { .. } => None,
+            ProcessPortSetup::NativeDefault { config, .. } => Some(
+                config
+                    .build(Arc::new(NoQueuedWork::new()))
+                    .expect("native process-worker assembly was validated at build"),
+            ),
+            ProcessPortSetup::None | ProcessPortSetup::External { .. } => None,
         }
     }
 
-    pub(super) fn configured_process_work_driver(&self) -> Option<ProcessWorkDriver> {
+    #[cfg(test)]
+    pub(crate) fn native_process_change_hub(&self) -> Option<facade_support::ProcessChangeHub> {
         match &self.setup.process {
-            ProcessWorkDriverSetup::External { driver } => Some(driver.clone()),
-            ProcessWorkDriverSetup::None | ProcessWorkDriverSetup::LazyDefault { .. } => None,
+            ProcessPortSetup::NativeDefault { watched, .. } => Some(watched.hub().clone()),
+            ProcessPortSetup::None | ProcessPortSetup::External { .. } => None,
         }
     }
 
-    pub(super) fn configured_queued_work_driver(&self) -> Option<QueuedWorkDriver> {
-        match &self.setup.queued {
-            QueuedWorkDriverSetup::External { driver } => Some(driver.clone()),
-            QueuedWorkDriverSetup::None | QueuedWorkDriverSetup::LazyDefault { .. } => None,
-        }
-    }
-}
-
-impl Drop for InlineWorkDriverSlot {
-    fn drop(&mut self) {
-        if let Some(drivers) = self.drivers.get()
-            && let Some(wake) = drivers._wake.as_ref()
-        {
-            wake.request_shutdown();
+    pub(super) fn configured_worker_process_work(&self) -> Option<WorkerProcessWork> {
+        match &self.setup.process {
+            ProcessPortSetup::None => None,
+            ProcessPortSetup::NativeDefault { watched, .. } => {
+                Some(WorkerProcessWork::SelfNative(watched.clone()))
+            }
+            ProcessPortSetup::External { wiring } => {
+                Some(WorkerProcessWork::External(wiring.clone()))
+            }
         }
     }
 }

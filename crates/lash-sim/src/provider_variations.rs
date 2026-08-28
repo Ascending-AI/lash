@@ -464,12 +464,13 @@ mod tests {
             Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
         );
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .generation(GenerationOptions {
                 stop_sequences: vec![LASHLANG_CLOSE_DELIMITER.to_string()],
                 ..GenerationOptions::default()
             })
             .effect_host(Arc::new(
-                lash::durability::InlineEffectHost::default()
+                lash::durability::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
             .lease_timings(crate::lease::sim_runtime_lease_timings())

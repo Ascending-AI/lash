@@ -61,7 +61,7 @@ pub struct ProcessEventSemantics {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbandonWriter {
-    /// The owner abandoned its own OwnerBound work inline at graceful drain,
+    /// The owner abandoned its own OwnerBound work during native graceful drain,
     /// under its own live lease.
     OwnerDrain,
     /// The recovery substrate abandoned an OwnerBound, started row after

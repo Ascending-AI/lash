@@ -161,12 +161,12 @@ impl GroupExecutors for DocsGroupExecutors {
 /// to outlive its caller, so it answers `supports_effect_groups` `false` and
 /// refuses every group method with `EffectGroupUnsupported` rather than
 /// journaling a group nothing can run.
-fn inline_host() -> (
-    lash::runtime::InlineRuntimeEffectController,
+fn native_host() -> (
+    lash::runtime::NativeRuntimeEffectController,
     Arc<DocsGroupExecutors>,
 ) {
     let executors = Arc::new(DocsGroupExecutors::default());
-    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    let controller = lash::runtime::NativeRuntimeEffectController::default();
     controller
         .register_group_executors(Arc::clone(&executors) as Arc<dyn GroupExecutors>)
         .expect("a fresh controller has no resolver yet");
@@ -257,7 +257,7 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
     // the capability code, which is the same answer deployment validation gets
     // before anything is opened. A *child* this host cannot route is the other
     // fact and carries the routing refusal instead.
-    let unwired = lash::runtime::InlineRuntimeEffectController::default();
+    let unwired = lash::runtime::NativeRuntimeEffectController::default();
     assert!(!unwired.supports_effect_groups());
     let unwired_refusal = unwired
         .open_effect_group(all)
@@ -277,7 +277,7 @@ async fn a_group_stamps_its_children_with_the_identity_they_belong_to() {
 /// position and a durable sequence rather than "whichever future woke us".
 #[tokio::test]
 async fn a_race_resumes_on_the_first_settlement_and_leaves_the_loser_running() {
-    let (controller, executors) = inline_host();
+    let (controller, executors) = native_host();
     assert!(
         controller.supports_effect_groups(),
         "a host must answer this before a group is opened against it; it gates \
@@ -341,7 +341,7 @@ async fn a_race_resumes_on_the_first_settlement_and_leaves_the_loser_running() {
 /// consumed, so the caller's cursor is the one that wins.
 #[tokio::test]
 async fn a_restored_cursor_re_reads_the_same_settlement() {
-    let (controller, executors) = inline_host();
+    let (controller, executors) = native_host();
     let group_key = "docs:all:0";
     let group = two_arm_group(
         group_key,
@@ -401,7 +401,7 @@ async fn a_restored_cursor_re_reads_the_same_settlement() {
 /// take is still the next one served.
 #[tokio::test]
 async fn a_cancelled_await_leaves_the_rank_owed() {
-    let (controller, executors) = inline_host();
+    let (controller, executors) = native_host();
     let group_key = "docs:await-cancel:0";
     let (slow, release, _) = gated();
     let group = two_arm_group(
@@ -442,7 +442,7 @@ async fn a_cancelled_await_leaves_the_rank_owed() {
 /// caller declared, rather than under one the drain path invented.
 #[tokio::test]
 async fn a_deadline_arm_cancels_its_losers_and_journals_the_cancellation() {
-    let (controller, executors) = inline_host();
+    let (controller, executors) = native_host();
     let group_key = "docs:deadline:0";
     let (slow, release, loser_completions) = gated();
     let group = two_arm_group(group_key, GroupWakePolicy::First, LoserPolicy::Cancel);
@@ -481,7 +481,7 @@ async fn a_deadline_arm_cancels_its_losers_and_journals_the_cancellation() {
 /// failed settlement is delivered at its rank with its own error.
 #[tokio::test]
 async fn a_first_success_group_still_reports_the_failures_before_it() {
-    let (controller, executors) = inline_host();
+    let (controller, executors) = native_host();
     let group_key = "docs:any:0";
     let (slow, release, _) = gated();
     let rejects = RuntimeEffectLocalExecutor::testing(|_| async {

@@ -484,13 +484,14 @@ mod tests {
         registry: Arc<dyn lash::process::ProcessRegistry>,
     ) -> lash::process::ProcessWorkObserver {
         let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .with_native_queued_work()
             .model(
                 lash::ModelSpec::builder("test-model")
                     .context_window_tokens(4096)
                     .build()
                     .expect("model spec"),
             )
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .store_factory(Arc::new(
                 lash::persistence::InMemorySessionStoreFactory::new(),

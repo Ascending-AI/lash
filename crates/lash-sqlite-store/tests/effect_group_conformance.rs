@@ -90,7 +90,7 @@ async fn sqlite_journals_a_cancelled_child_as_its_terminal() {
 /// and the losers are refused rather than silently dropped (FIG-1578).
 ///
 /// The durable driver's registration site, where the same `OnceLock` race lives
-/// as on the inline tier. A `get`-then-`set` pair would hand a loser `Ok` while
+/// as on the native substrate. A `get`-then-`set` pair would hand a loser `Ok` while
 /// its resolver went nowhere, so a host would answer a journaled child's routing
 /// question through a resolver its wiring code did not think was registered.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

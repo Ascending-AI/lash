@@ -14,6 +14,15 @@
 //! terminals byte-for-byte without re-executing either body.
 
 use std::sync::Arc;
+
+fn registry_local_executor(
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+) -> lash_core::RuntimeEffectLocalExecutor<'static> {
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    )));
+    lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
+}
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -58,14 +67,15 @@ struct CrashingEffectHost {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for CrashingEffectHost {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.journal_addressing()
-    }
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
     async fn await_event_key(
         &self,
@@ -111,6 +121,34 @@ impl lash_core::AwaitEventResolver for CrashingEffectHost {
 
 #[async_trait::async_trait]
 impl EffectHost for CrashingEffectHost {
+    async fn turn_control_binding<'a>(
+        &'a self,
+        scoped: &'a lash_core::ScopedEffectController<'_>,
+    ) -> Result<lash_core::TurnControlBinding<'a>, lash_core::RuntimeError> {
+        self.inner.turn_control_binding(scoped).await
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        intent: lash_core::ToolIntent,
+    ) -> Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        self.inner.prepare_tool_intent(sink, identity, intent).await
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .record_tool_intent_outcome(sink, identity, submitted, outcome)
+            .await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,
@@ -160,16 +198,16 @@ struct ScopedControllerAdapter(lash_core::ScopedEffectController<'static>);
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.0.controller().replay_ownership()
-    }
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.0.controller().journal_addressing()
-    }
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
         self.0
             .controller()
-            .allows_process_lifetime_completion_keys()
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
     async fn await_event_key(
         &self,
@@ -230,6 +268,20 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
     fn supports_concurrent_effects(&self) -> bool {
         self.0.controller().supports_concurrent_effects()
     }
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+        self.0
+            .controller()
+            .runtime_effect_failure_disposition(code)
+            .await
+    }
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        self.0.controller().turn_control_participation().await
+    }
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -244,16 +296,15 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for CrossingController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.journal_addressing()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 
     async fn await_event_key(
@@ -307,6 +358,19 @@ impl lash_core::AwaitEventResolver for CrossingController {
 impl lash_core::RuntimeEffectController for CrossingController {
     fn supports_concurrent_effects(&self) -> bool {
         !self.force_serial && self.inner.supports_concurrent_effects()
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: lash_core::RuntimeErrorCode,
+    ) -> Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError> {
+        self.inner.runtime_effect_failure_disposition(code).await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        self.inner.turn_control_participation().await
     }
 
     async fn execute_effect(
@@ -551,6 +615,8 @@ async fn public_signal_runtime(
     let policy = public_runtime_policy();
     let store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let registry = Arc::clone(watched.registry());
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -568,7 +634,11 @@ async fn public_signal_runtime(
                 .collect(),
         )
         .with_store(store)
-        .with_process_registry(registry)
+        .with_process_work(lash_core::ProcessWorkWiring::new(
+            watched,
+            Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+        ))
+        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
         .build(),
     )
     .await
@@ -839,6 +909,7 @@ async fn fig1293_runtime(
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
 ) -> lash_core::facade_support::LashRuntime {
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     let factories = fig1293_factories();
     let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -855,12 +926,16 @@ async fn fig1293_runtime(
             )),
             host.clone(),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            Arc::clone(&registry),
+            lash_core::WorkerProcessWork::SelfNative(watched.clone()),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         ),
+    )
+    .expect("valid test native substrate config");
+    let process_work = lash_core::ProcessWorkWiring::new(
+        watched.clone(),
+        Arc::new(lash_core::NativeProcessWork::new(&watched, worker)),
     );
-    let process_work_driver =
-        lash_core::facade_support::ProcessWorkDriver::inline(Arc::clone(&registry), worker);
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -873,8 +948,7 @@ async fn fig1293_runtime(
         .with_runtime_host(host)
         .with_plugin_factories(factories)
         .with_store(store)
-        .with_process_registry(registry)
-        .with_process_work_driver(process_work_driver)
+        .with_process_work(process_work)
         .build(),
     )
     .await
@@ -1126,11 +1200,11 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
         Arc::new(lash_core::TestLocalProcessRegistry::default());
     fig1293_seed_control_target(&inline_registry).await;
     let (inline_model, inline_model_calls) = fig1293_model();
-    let inline_effect_host: Arc<dyn EffectHost> =
-        Arc::new(lash_core::facade_support::InlineEffectHost::default());
+    let native_effect_host: Arc<dyn EffectHost> =
+        Arc::new(lash_core::facade_support::NativeEffectHost::default());
     let inline_policy = fig1293_policy();
-    let mut inline = fig1293_runtime(
-        Arc::clone(&inline_effect_host),
+    let mut native = fig1293_runtime(
+        Arc::clone(&native_effect_host),
         inline_registry,
         inline_model,
         Arc::new(lash_core::facade_support::InMemorySessionStore::new()),
@@ -1140,10 +1214,10 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     .await;
     let inline_turn = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        run_fig1293_turn(&mut inline, inline_effect_host.as_ref()),
+        run_fig1293_turn(&mut native, native_effect_host.as_ref()),
     )
     .await
-    .expect("inline FIG-1293 tier turn timed out");
+    .expect("native FIG-1293 substrate turn timed out");
     assert_fig1293_literal_outputs(&inline_turn, 2);
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 
@@ -2036,10 +2110,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         .expect("scope first PostgreSQL intent host");
     let first = first_scoped
         .controller()
-        .execute_effect(
-            envelope.clone(),
-            RuntimeEffectLocalExecutor::processes(registry.clone(), None),
-        )
+        .execute_effect(envelope.clone(), registry_local_executor(registry.clone()))
         .await
         .expect("execute recorded intent command");
     registry
@@ -2076,10 +2147,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         .controller()
         .execute_effect(
             envelope,
-            RuntimeEffectLocalExecutor::processes(
-                Arc::new(second_storage.process_registry()),
-                None,
-            ),
+            registry_local_executor(Arc::new(second_storage.process_registry())),
         )
         .await
         .expect("replay recorded intent command after live mutation");

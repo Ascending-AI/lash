@@ -642,8 +642,9 @@ async fn facade_final_value_execution_inner(
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -810,7 +811,7 @@ async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunn
         Arc::clone(&tools),
         tools as Arc<dyn lash_core::ToolProvider>,
         Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ),
         &mut key_rx,
     )
@@ -942,7 +943,7 @@ fn agent_process_contract_core_with_options(
         install_subagents,
         max_turns,
         Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ),
     )
 }
@@ -971,6 +972,7 @@ fn agent_process_contract_core_with_options_and_effect_host(
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
     let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .effect_host(effect_host)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))

@@ -350,13 +350,14 @@ mod dialect_pin_tests {
             ),
         );
         LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(mock_model_spec())
             .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
                 data_dir.join("lash-sessions"),
             )))
             .effect_host(Arc::new(
-                lash::durability::InlineEffectHost::default()
+                lash::durability::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

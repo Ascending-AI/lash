@@ -397,6 +397,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         Arc::new(storage.lashlang_artifact_store()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder("version-bump-mock")
@@ -416,7 +417,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         // A boot UUID, not the PID: the contract is that the incarnation changes
         // on every process boot, and PIDs are reused.
@@ -1015,7 +1016,7 @@ async fn health(database_url: &str) -> Result<()> {
         Arc::clone(&registry),
         Arc::new(storage.session_store_factory_with_shared_process_registry())
             as Arc<dyn lash_core::SessionStoreFactory>,
-        None,
+        Arc::new(lash::runtime::NoQueuedWork::new()),
         Arc::new(lash_core::facade_support::SystemClock),
         32,
     )

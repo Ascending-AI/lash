@@ -77,24 +77,40 @@ struct ParentEndFaultController {
     state: Arc<ParentEndFaultState>,
 }
 
+#[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for ParentEndFaultController {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.controller().replay_ownership()
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.controller().journal_addressing()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> std::result::Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
         self.inner
             .controller()
-            .allows_process_lifetime_completion_keys()
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for ParentEndFaultController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: lash_core::RuntimeErrorCode,
+    ) -> std::result::Result<lash_core::RuntimeEffectFailureDisposition, lash_core::RuntimeError>
+    {
+        self.inner
+            .controller()
+            .runtime_effect_failure_disposition(code)
+            .await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> std::result::Result<lash_core::TurnControlParticipation, lash_core::RuntimeError> {
+        self.inner.controller().turn_control_participation().await
+    }
+
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,
@@ -236,22 +252,50 @@ impl ParentEndFaultHost {
     }
 }
 
+#[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for ParentEndFaultHost {
-    fn replay_ownership(&self) -> lash_core::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-
-    fn journal_addressing(&self) -> lash_core::EffectJournalAddressing {
-        self.inner.journal_addressing()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> std::result::Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl EffectHost for ParentEndFaultHost {
+    async fn turn_control_binding<'a>(
+        &'a self,
+        scoped: &'a lash_core::ScopedEffectController<'_>,
+    ) -> std::result::Result<lash_core::TurnControlBinding<'a>, lash_core::RuntimeError> {
+        self.inner.turn_control_binding(scoped).await
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        intent: lash_core::ToolIntent,
+    ) -> std::result::Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        self.inner.prepare_tool_intent(sink, identity, intent).await
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> std::result::Result<(), lash_core::RuntimeError> {
+        self.inner
+            .record_tool_intent_outcome(sink, identity, submitted, outcome)
+            .await
+    }
+
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,
@@ -436,6 +480,7 @@ fn process_worker(
         ),
     ));
     runtime_host.control.effect_host = effect_host;
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(vec![
@@ -445,11 +490,13 @@ fn process_worker(
             ])),
             runtime_host,
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            registry,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(lash_core::testing::mock_session_policy()),
     )
+    .expect("valid test native substrate config")
 }
 
 async fn reset(storage: &PostgresStorage) {
@@ -550,7 +597,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .drive_pending_processes()
         .await
         .expect("drive PostgreSQL segmented parent through public worker path");
-    let terminal = lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+    let terminal = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
         .await_terminal(SEGMENTED_PARENT)
         .await
         .expect("await PostgreSQL segmented parent terminal");
@@ -874,7 +921,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         .await
         .expect("drive PostgreSQL ToolCall parent through public worker path");
     assert_eq!(
-        lash_core::facade_support::ProcessAwaiter::polling(Arc::clone(&registry))
+        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
             .await_terminal(TOOL_PARENT)
             .await
             .expect("await PostgreSQL ToolCall parent"),

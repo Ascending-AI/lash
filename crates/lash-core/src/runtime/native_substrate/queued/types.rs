@@ -3,10 +3,6 @@ use std::time::Duration;
 
 use crate::PluginError;
 
-pub(super) const WAKE_RETRY_INITIAL: Duration = Duration::from_millis(25);
-pub(super) const WAKE_RETRY_MAX: Duration = Duration::from_secs(1);
-pub(super) const WAKE_MAX_ATTEMPTS: u32 = 8;
-
 static RETRY_JITTER_SEQUENCE: AtomicU64 = AtomicU64::new(0x9e37_79b9_7f4a_7c15);
 
 /// Apply 80-120% multiplicative jitter inside an explicit retry envelope.
@@ -33,16 +29,13 @@ pub fn bounded_multiplicative_jitter(
     Duration::from_nanos(bounded_nanos.min(u64::MAX.into()) as u64)
 }
 
-pub(super) fn jittered_wake_retry(base: Duration) -> Duration {
-    bounded_multiplicative_jitter(base, WAKE_RETRY_INITIAL, WAKE_RETRY_MAX)
-}
-
 #[cfg(test)]
 mod jitter_tests {
     use super::*;
 
     #[test]
     fn retry_jitter_stays_inside_the_production_envelope() {
+        let policy = WorkCadencePolicy::DEFAULT;
         for base in [
             Duration::from_millis(25),
             Duration::from_millis(100),
@@ -50,10 +43,11 @@ mod jitter_tests {
             Duration::from_secs(1),
         ] {
             for _ in 0..128 {
-                let delay = jittered_wake_retry(base);
-                assert!(delay >= WAKE_RETRY_INITIAL);
-                assert!(delay <= WAKE_RETRY_MAX);
-                if base < WAKE_RETRY_MAX {
+                let delay =
+                    bounded_multiplicative_jitter(base, policy.retry_initial, policy.retry_max);
+                assert!(delay >= policy.retry_initial);
+                assert!(delay <= policy.retry_max);
+                if base < policy.retry_max {
                     assert!(delay >= base.mul_f64(0.8));
                     assert!(delay <= base.mul_f64(1.2));
                 }
@@ -61,15 +55,17 @@ mod jitter_tests {
         }
     }
 }
-
 #[cfg(any(test, feature = "testing"))]
-pub const QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS: usize = WAKE_MAX_ATTEMPTS as usize;
+use crate::WorkCadencePolicy;
+
+/// Compatibility view of the default policy's transient-attempt budget.
+/// Runtime loops read their configured [`WorkCadencePolicy`] instead.
+#[cfg(any(test, feature = "testing"))]
+pub const QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS: usize =
+    WorkCadencePolicy::DEFAULT.max_transient_attempts.get() as usize;
 
 /// Default maximum number of queued-work wake executions admitted at once.
 pub const DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY: usize = 64;
-
-/// Elapsed time after which an unfinished queued-work wake emits warning telemetry.
-pub const QUEUED_WORK_SLOW_WAKE_THRESHOLD: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub struct QueuedWorkRunRequest {
@@ -169,7 +165,7 @@ pub struct QueuedWorkSlowWake {
 /// Repeating operational evidence that queued work is blocked by a live
 /// session execution lease.
 ///
-/// This event is observational only. The inline driver must fully hydrate the
+/// This event is observational only. The native driver must fully hydrate the
 /// runtime before it can distinguish a blocked claim from an idle queue, so
 /// one hydration per bounded contention poll is the current floor. The cheap
 /// pre-hydration peek deliberately remains a conservative queue predicate; it
@@ -187,7 +183,7 @@ pub struct QueuedWorkWakeContended {
 
 /// Whether one queued-work pass actually claimed durable work.
 ///
-/// The inline reference driver reports this so a positive conservative peek
+/// The native reference driver reports this so a positive conservative peek
 /// followed by a live session-lease conflict backs off instead of rehydrating
 /// eagerly. External engine submitters may retain the default `Unknown` result;
 /// Lash never re-drives engine-owned work.
@@ -221,7 +217,7 @@ pub trait QueuedWorkRunHandle: Send + Sync {
 
     /// Host-driven single pass: claim and submit ready queued work, optionally
     /// narrowed to one session. The symmetric counterpart to
-    /// [`ProcessRunHandle::claim_and_run_pending`](super::super::ProcessRunHandle::claim_and_run_pending).
+    /// [`ProcessWorkSubstrate::admit_pending_processes`](crate::ProcessWorkSubstrate::admit_pending_processes).
     ///
     /// Idempotency is the store scheduler's job, not a same-process memory
     /// guard. Hosts call this on an event (enqueue, process wake, turn
@@ -238,7 +234,7 @@ pub trait QueuedWorkRunHandle: Send + Sync {
 
     /// Run one pass and report whether the pass claimed durable work.
     ///
-    /// External handles keep the single-pass default. The inline reference
+    /// External handles keep the single-pass default. The native reference
     /// handle overrides this to distinguish progress from lease contention.
     async fn claim_and_run_pending_with_progress(
         &self,

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+#[cfg(test)]
 use std::time::Duration;
 
 use tokio::sync::Semaphore;
@@ -6,6 +7,9 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::PluginError;
+use crate::runtime::{NativeSubstrateConfigError, WorkerSlotKind, WorkerSlotSupplier};
+
+use super::{QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget, WorkCadencePolicy};
 
 mod scheduler;
 mod task;
@@ -44,49 +48,75 @@ pub struct QueuedWorkExecutionConcurrencyError {
     concurrency: usize,
 }
 
-#[derive(Clone)]
-pub struct QueuedWorkDriver {
-    inner: Arc<QueuedWorkDriverInner>,
-    _lifetime: Arc<QueuedWorkDriverLifetime>,
+/// Invalid configuration supplied to an explicit-cadence native queued-work
+/// constructor.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum NativeQueuedWorkConfigError {
+    /// The requested native execution bound is outside Tokio's semaphore range.
+    #[error("invalid queued-work execution configuration: {0}")]
+    ExecutionConcurrency(#[from] QueuedWorkExecutionConcurrencyError),
+    /// The requested scheduler cadence would create an incoherent native loop.
+    #[error("invalid native substrate configuration: {0}")]
+    NativeSubstrateConfig(#[from] NativeSubstrateConfigError),
 }
 
-pub(crate) struct QueuedWorkDriverInner {
+#[derive(Clone)]
+pub struct NativeQueuedWork {
+    inner: Arc<NativeQueuedWorkInner>,
+    _lifetime: Arc<NativeQueuedWorkLifetime>,
+}
+
+pub(crate) struct NativeQueuedWorkInner {
     pub(super) run_handle: Arc<dyn QueuedWorkRunHandle>,
     pub(super) shutdown: CancellationToken,
     pub(super) wake_tasks: TaskTracker,
     pub(super) scheduler: Arc<QueuedWorkExecutionScheduler>,
-    pub(super) slow_wake_threshold: Duration,
+    pub(super) work_cadence: WorkCadencePolicy,
 }
 
-pub(crate) struct QueuedWorkDriverLifetime {
+pub(crate) struct NativeQueuedWorkLifetime {
     pub(super) shutdown: CancellationToken,
     pub(super) wake_tasks: TaskTracker,
 }
 
-impl Drop for QueuedWorkDriverLifetime {
+impl Drop for NativeQueuedWorkLifetime {
     fn drop(&mut self) {
         self.shutdown.cancel();
         self.wake_tasks.close();
     }
 }
 
-impl QueuedWorkDriver {
+impl NativeQueuedWork {
+    /// Check a host-selected admission bound without constructing a driver.
+    ///
+    /// Rejects the same values [`Self::with_execution_concurrency`] would,
+    /// so a host composing configuration ahead of wiring can refuse an
+    /// incoherent bound at read time instead of first surfacing it when the
+    /// substrate is built.
     pub fn validate_execution_concurrency(
         concurrency: usize,
     ) -> Result<(), QueuedWorkExecutionConcurrencyError> {
         QueuedWorkExecutionConcurrency::new(concurrency).map(drop)
     }
 
+    /// Construct a native reference-substrate driver with unbounded
+    /// admission and the default work cadence.
+    ///
+    /// This is the constructor for engine-backed submitters: their substrate
+    /// owns backpressure, and Lash only coalesces same-session
+    /// notifications. A host that wants Lash to bound admission uses
+    /// [`Self::with_execution_concurrency`] instead.
     pub fn new(run_handle: Arc<dyn QueuedWorkRunHandle>) -> Self {
-        Self::from_parts(
+        Self::from_parts_with_work_cadence(
             run_handle,
             CancellationToken::new(),
             None,
-            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+            WorkCadencePolicy::default(),
         )
+        .expect("default work cadence is valid")
     }
 
-    /// Construct an inline reference-substrate driver with a host-selected
+    /// Construct an native reference-substrate driver with a host-selected
     /// admission bound.
     ///
     /// Engine-backed submitters should use [`Self::new`]: their substrate owns
@@ -95,56 +125,95 @@ impl QueuedWorkDriver {
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         concurrency: usize,
     ) -> Result<Self, QueuedWorkExecutionConcurrencyError> {
-        Ok(Self::from_parts(
+        let concurrency = QueuedWorkExecutionConcurrency::new(concurrency)?;
+        Ok(Self::from_parts_with_work_cadence(
             run_handle,
             CancellationToken::new(),
-            Some(QueuedWorkExecutionConcurrency::new(concurrency)?),
-            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
-        ))
+            Some(concurrency),
+            WorkCadencePolicy::default(),
+        )
+        .expect("default work cadence is valid"))
     }
 
-    /// Construct an inline reference-substrate driver admitted by `supplier`.
+    pub(crate) fn with_execution_concurrency_and_work_cadence(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        concurrency: usize,
+        work_cadence: WorkCadencePolicy,
+    ) -> Result<Self, NativeQueuedWorkConfigError> {
+        let concurrency = QueuedWorkExecutionConcurrency::new(concurrency)?;
+        Self::from_parts_with_work_cadence(
+            run_handle,
+            CancellationToken::new(),
+            Some(concurrency),
+            work_cadence,
+        )
+        .map_err(Into::into)
+    }
+
+    /// Construct an native reference-substrate driver admitted by `supplier`.
     #[doc(hidden)]
     pub fn with_worker_slot_supplier(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
-        supplier: Arc<dyn super::WorkerSlotSupplier>,
+        supplier: Arc<dyn WorkerSlotSupplier>,
     ) -> Self {
+        Self::with_worker_slot_supplier_and_work_cadence(
+            run_handle,
+            supplier,
+            WorkCadencePolicy::default(),
+        )
+        .expect("default work cadence is valid")
+    }
+
+    pub(crate) fn with_worker_slot_supplier_and_work_cadence(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        supplier: Arc<dyn WorkerSlotSupplier>,
+        work_cadence: WorkCadencePolicy,
+    ) -> Result<Self, NativeSubstrateConfigError> {
         Self::from_parts_with_supplier(
             run_handle,
             CancellationToken::new(),
             None,
             Some(supplier),
-            QUEUED_WORK_SLOW_WAKE_THRESHOLD,
+            work_cadence,
         )
     }
 
-    pub fn with_shutdown_token(
-        run_handle: Arc<dyn QueuedWorkRunHandle>,
-        shutdown: CancellationToken,
-    ) -> Self {
-        Self::from_parts(run_handle, shutdown, None, QUEUED_WORK_SLOW_WAKE_THRESHOLD)
-    }
-
+    #[cfg(test)]
     pub(crate) fn from_parts(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         shutdown: CancellationToken,
         concurrency: Option<QueuedWorkExecutionConcurrency>,
         slow_wake_threshold: Duration,
     ) -> Self {
-        Self::from_parts_with_supplier(run_handle, shutdown, concurrency, None, slow_wake_threshold)
+        let work_cadence = WorkCadencePolicy {
+            slow_wake_threshold,
+            ..WorkCadencePolicy::default()
+        };
+        Self::from_parts_with_work_cadence(run_handle, shutdown, concurrency, work_cadence)
+            .expect("test work cadence is valid")
+    }
+
+    pub(crate) fn from_parts_with_work_cadence(
+        run_handle: Arc<dyn QueuedWorkRunHandle>,
+        shutdown: CancellationToken,
+        concurrency: Option<QueuedWorkExecutionConcurrency>,
+        work_cadence: WorkCadencePolicy,
+    ) -> Result<Self, NativeSubstrateConfigError> {
+        Self::from_parts_with_supplier(run_handle, shutdown, concurrency, None, work_cadence)
     }
 
     pub(crate) fn from_parts_with_supplier(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         shutdown: CancellationToken,
         concurrency: Option<QueuedWorkExecutionConcurrency>,
-        supplier: Option<Arc<dyn super::WorkerSlotSupplier>>,
-        slow_wake_threshold: Duration,
-    ) -> Self {
+        supplier: Option<Arc<dyn WorkerSlotSupplier>>,
+        work_cadence: WorkCadencePolicy,
+    ) -> Result<Self, NativeSubstrateConfigError> {
+        work_cadence.validate()?;
         let shutdown = shutdown.child_token();
         let wake_tasks = TaskTracker::new();
-        Self {
-            inner: Arc::new(QueuedWorkDriverInner {
+        Ok(Self {
+            inner: Arc::new(NativeQueuedWorkInner {
                 run_handle,
                 shutdown: shutdown.clone(),
                 wake_tasks: wake_tasks.clone(),
@@ -152,19 +221,19 @@ impl QueuedWorkDriver {
                     (Some(supplier), _) => {
                         QueuedWorkExecutionScheduler::with_supplier(supplier, None)
                     }
-                    (None, Some(concurrency)) => QueuedWorkExecutionScheduler::inline(concurrency),
+                    (None, Some(concurrency)) => QueuedWorkExecutionScheduler::native(concurrency),
                     (None, None) => QueuedWorkExecutionScheduler::unbounded(),
                 }),
-                slow_wake_threshold,
+                work_cadence,
             }),
-            _lifetime: Arc::new(QueuedWorkDriverLifetime {
+            _lifetime: Arc::new(NativeQueuedWorkLifetime {
                 shutdown,
                 wake_tasks,
             }),
-        }
+        })
     }
 
-    pub async fn claim_and_run_pending(
+    pub(crate) async fn claim_and_run_pending(
         &self,
         session_id: Option<&str>,
         reason: &str,
@@ -188,7 +257,7 @@ impl QueuedWorkDriver {
     /// semaphore bounds admitted executions across sessions. Callers therefore
     /// return their durable acceptance receipt without creating one task per
     /// signal.
-    pub fn notify_pending_work(&self, session_id: Option<&str>, reason: &str) {
+    pub(crate) fn notify_pending_work(&self, session_id: Option<&str>, reason: &str) {
         let session_id = session_id.map(str::to_string);
         let reason = reason.to_string();
         let should_start_dispatcher = {
@@ -213,7 +282,7 @@ impl QueuedWorkDriver {
         {
             let state = self.inner.scheduler.lock_state();
             self.inner.scheduler.metrics.intake_depth(
-                super::WorkerSlotKind::QueuedWork,
+                WorkerSlotKind::QueuedWork,
                 state.pending.len() + state.rerun.len(),
             );
         }
@@ -226,5 +295,22 @@ impl QueuedWorkDriver {
                 .wake_tasks
                 .spawn(async move { driver.run_dispatcher().await });
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl QueuedWorkSubstrate for NativeQueuedWork {
+    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str) {
+        self.notify_pending_work(target.as_session_id(), reason);
+    }
+
+    async fn drain_session_work(
+        &self,
+        target: SessionWorkTarget,
+        reason: &str,
+    ) -> Result<SessionDrainOutcome, PluginError> {
+        self.claim_and_run_pending(target.as_session_id(), reason)
+            .await?;
+        Ok(SessionDrainOutcome::Ran)
     }
 }

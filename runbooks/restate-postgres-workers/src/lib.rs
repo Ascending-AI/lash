@@ -8,7 +8,7 @@ use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
     SessionPlugin,
 };
-use lash::process::{ProcessRegistry, ProcessWorkDriver};
+use lash::process::ProcessRegistry;
 use lash::rlm::{
     InstructionBound, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
     LashlangLanguageFeatures, LashlangSurfaceContribution, MemoryBound, NamedDataType,
@@ -606,7 +606,7 @@ pub struct E2eCoreConfig {
     pub worker_id: String,
     pub storage: lash_postgres_store::PostgresStorage,
     pub attachment_store: Arc<dyn AttachmentStore>,
-    pub process_work_driver: ProcessWorkDriver,
+    pub process_work_driver: lash::process::ProcessWorkWiring,
     pub restate_ingress_url: String,
     pub mock_provider_base_url: String,
     pub trace_dir: Option<PathBuf>,
@@ -671,12 +671,12 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
                 as Arc<dyn EffectHost>,
         )
         .trigger_store(trigger_store)
-        .process_work_driver(config.process_work_driver)
+        .process_work(config.process_work_driver)
         // Restate turns must enter through an explicit handler-scoped effect
         // controller. The harness drains durable ingress from its workflow
         // handlers, so an ambient local queue pump would race those handlers
         // and cannot legally execute their effects.
-        .disable_queued_work_driver()
+        .without_queued_work()
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
         .plugin(Arc::new(E2ePluginFactory {
             pool: config.storage.pool().clone(),

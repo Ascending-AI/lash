@@ -298,12 +298,98 @@ pub async fn effect_controller_segmentation_vector(controller: &dyn RuntimeEffec
     );
 }
 
-/// Run journaled-effect replay checks for controllers with an explicit replay mode.
+/// How a substrate treats completed effects when an invocation is redriven.
 #[cfg(any(test, feature = "testing"))]
-pub async fn effect_controller_journaled_effect_replay(
-    controller: &dyn RuntimeEffectController,
-    start_replay: impl FnOnce(),
-) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConformanceEffectRedrive {
+    /// The successor reads completed effects from the engine journal.
+    ReplaysJournal,
+    /// An uncommitted effect is executed again by the successor invocation.
+    ReexecutesUncommitted,
+}
+
+/// One live engine invocation used by controller conformance contracts.
+///
+/// Redrive consumes the current invocation, runs its explicit end control, and
+/// returns a controller bound to the successor invocation. There is no ended
+/// state that can still expose a controller.
+#[cfg(any(test, feature = "testing"))]
+pub struct ConformanceInvocation {
+    controller: Arc<dyn RuntimeEffectController>,
+    effect_redrive: ConformanceEffectRedrive,
+    end: Arc<dyn Fn() + Send + Sync>,
+    redrive: Arc<dyn Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync>,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl ConformanceInvocation {
+    /// Build an invocation from its scoped controller and lifecycle controls.
+    pub fn new(
+        controller: Arc<dyn RuntimeEffectController>,
+        effect_redrive: ConformanceEffectRedrive,
+        end: impl Fn() + Send + Sync + 'static,
+        redrive: impl Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            controller,
+            effect_redrive,
+            end: Arc::new(end),
+            redrive: Arc::new(redrive),
+        }
+    }
+
+    /// Borrow the controller bound to the live invocation.
+    pub fn controller(&self) -> &dyn RuntimeEffectController {
+        self.controller.as_ref()
+    }
+
+    /// Clone the live controller handle for an in-flight task.
+    pub fn controller_handle(&self) -> Arc<dyn RuntimeEffectController> {
+        Arc::clone(&self.controller)
+    }
+
+    /// Describe what a successor does with a completed pre-crash effect.
+    pub fn effect_redrive(&self) -> ConformanceEffectRedrive {
+        self.effect_redrive
+    }
+
+    /// Construct an invocation for the receipt-less native controller.
+    pub fn native() -> Self {
+        Self::new(
+            Arc::new(crate::NativeRuntimeEffectController::default()),
+            ConformanceEffectRedrive::ReexecutesUncommitted,
+            || {},
+            || Arc::new(crate::NativeRuntimeEffectController::default()),
+        )
+    }
+
+    #[must_use]
+    /// End this invocation and construct its successor.
+    pub fn redrive(self) -> Self {
+        (self.end)();
+        let controller = (self.redrive)();
+        Self {
+            controller,
+            effect_redrive: self.effect_redrive,
+            end: self.end,
+            redrive: self.redrive,
+        }
+    }
+
+    /// End the live invocation without constructing a successor.
+    pub fn end(self) {
+        (self.end)();
+    }
+}
+
+/// Run journaled-effect replay checks across an explicitly scoped invocation.
+#[cfg(any(test, feature = "testing"))]
+pub async fn effect_controller_journaled_effect_replay<F>(make: F)
+where
+    F: FnOnce() -> ConformanceInvocation,
+{
+    let invocation = make();
+    let controller = invocation.controller();
     effect_controller_segmentation_vector(controller).await;
     let success = replay_conformance_tool_attempt_envelope(
         "replay-success",
@@ -479,7 +565,8 @@ pub async fn effect_controller_journaled_effect_replay(
         );
     }
 
-    start_replay();
+    let invocation = invocation.redrive();
+    let controller = invocation.controller();
     let local_calls = Arc::new(Mutex::new(Vec::new()));
     let replay_success = controller
         .execute_effect(
@@ -534,6 +621,7 @@ pub async fn effect_controller_journaled_effect_replay(
         local_calls.lock_recover().is_empty(),
         "journaled-effect replay must not invoke local closures"
     );
+    invocation.end();
 }
 
 /// Prove that retiring one session removes every journal scope it owns.
@@ -610,31 +698,41 @@ pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
 /// Assert that a durable effect controller surfaces the same structural replay
 /// mismatch detail as the shared canonical-envelope validator.
 #[cfg(any(test, feature = "testing"))]
-pub async fn effect_controller_replay_mismatch_diagnostics(
-    controller: &dyn RuntimeEffectController,
-    mismatch_code: &str,
-) {
-    let envelope = |duration_ms| {
-        RuntimeEffectEnvelope::new(
-            RuntimeInvocation::effect(
-                RuntimeScope::for_turn("replay-mismatch-session", "replay-mismatch-turn", 0, 0),
-                "replay-mismatch-sleep",
-                RuntimeEffectKind::Sleep,
-                "replay-mismatch-sleep",
-            ),
-            RuntimeEffectCommand::Sleep { duration_ms },
+pub async fn effect_controller_replay_mismatch_diagnostics<F>(make: F, mismatch_code: &str)
+where
+    F: FnOnce() -> ConformanceInvocation,
+{
+    let invocation = make();
+    let controller = invocation.controller();
+    let envelope = |tool_name| {
+        replay_conformance_tool_attempt_envelope(
+            "replay-mismatch-tool-attempt",
+            "replay-mismatch-call",
+            tool_name,
         )
     };
     controller
         .execute_effect(
-            envelope(0),
-            RuntimeEffectLocalExecutor::testing(|_| async { Ok(RuntimeEffectOutcome::Sleep) }),
+            envelope("first_tool"),
+            replay_conformance_tool_attempt_recording_executor(
+                ReplayConformanceToolAttempt::new(
+                    "replay-mismatch-tool-attempt",
+                    "replay-mismatch-call",
+                    "first_tool",
+                ),
+                None,
+            ),
         )
         .await
         .expect("record mismatch-vector envelope");
 
+    let invocation = invocation.redrive();
+    let controller = invocation.controller();
     let error = controller
-        .execute_effect(envelope(1), RuntimeEffectLocalExecutor::unavailable())
+        .execute_effect(
+            envelope("divergent_tool"),
+            RuntimeEffectLocalExecutor::unavailable(),
+        )
         .await
         .expect_err("reusing a replay key with a divergent envelope must fail");
     assert_eq!(error.code.as_str(), mismatch_code);
@@ -645,18 +743,22 @@ pub async fn effect_controller_replay_mismatch_diagnostics(
     assert_eq!(
         error.summary,
         Some(crate::RuntimeEffectReplayMismatchReport {
-            divergent_path_count: 1,
-            first_divergent_paths: vec!["command.duration_ms".to_string()],
+            divergent_path_count: 2,
+            first_divergent_paths: vec![
+                "command.call.tool_id".to_string(),
+                "command.call.tool_name".to_string(),
+            ],
         }),
         "replay mismatch must surface its divergent structural path"
     );
     assert!(
         error
             .message
-            .contains("divergent_paths=[command.duration_ms]"),
+            .contains("divergent_paths=[command.call.tool_id, command.call.tool_name]"),
         "replay mismatch message must surface its divergent structural path: {}",
         error.message
     );
+    invocation.end();
 }
 
 async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
@@ -964,10 +1066,12 @@ async fn effect_host_await_event_rejects_tampered_keys(host: Arc<dyn EffectHost>
 /// if called. A compliant controller returns the recorded outcomes by
 /// `replay.key`, independent of local completion/request ordering.
 #[cfg(any(test, feature = "testing"))]
-pub async fn effect_controller_concurrent_replay_deterministic(
-    controller: &dyn RuntimeEffectController,
-    start_replay: impl FnOnce(),
-) {
+pub async fn effect_controller_concurrent_replay_deterministic<F>(make: F)
+where
+    F: FnOnce() -> ConformanceInvocation,
+{
+    let invocation = make();
+    let controller = invocation.controller();
     let slow = replay_conformance_tool_attempt_envelope("effect-slow", "call-slow", "slow_tool");
     let fast = replay_conformance_tool_attempt_envelope("effect-fast", "call-fast", "fast_tool");
     let first_pass = replay_conformance_concurrent_first_pass(
@@ -983,7 +1087,8 @@ pub async fn effect_controller_concurrent_replay_deterministic(
     assert_replay_conformance_tool_attempt_marker(slow_first, "call-slow", "slow_tool");
     assert_replay_conformance_tool_attempt_marker(fast_first, "call-fast", "fast_tool");
 
-    start_replay();
+    let invocation = invocation.redrive();
+    let controller = invocation.controller();
     let replay_local_calls = Arc::new(Mutex::new(Vec::new()));
     let replay_pass = tokio::time::timeout(REPLAY_CONFORMANCE_DEADLOCK_TIMEOUT, async {
         tokio::join!(
@@ -1007,6 +1112,7 @@ pub async fn effect_controller_concurrent_replay_deterministic(
         replay_local_calls.lock_recover().is_empty(),
         "replay must return recorded outcomes without invoking local executors"
     );
+    invocation.end();
 }
 
 /// Run the tool-attempt replay conformance case for a handler-scoped durable
@@ -1018,10 +1124,12 @@ pub async fn effect_controller_concurrent_replay_deterministic(
 /// reverse order. In both modes, outcomes must resolve by stable `replay.key`
 /// rather than request position, completion order, or source order.
 #[cfg(any(test, feature = "testing"))]
-pub async fn effect_controller_tool_attempt_fanout_replay_deterministic(
-    controller: &dyn RuntimeEffectController,
-    start_replay: impl FnOnce(),
-) {
+pub async fn effect_controller_tool_attempt_fanout_replay_deterministic<F>(make: F)
+where
+    F: FnOnce() -> ConformanceInvocation,
+{
+    let invocation = make();
+    let controller = invocation.controller();
     let slow =
         replay_conformance_tool_attempt_envelope("tool-attempt-slow", "call-slow", "slow_tool");
     let fast =
@@ -1071,7 +1179,8 @@ pub async fn effect_controller_tool_attempt_fanout_replay_deterministic(
     assert_replay_conformance_tool_attempt_marker(slow_first, "call-slow", "slow_tool");
     assert_replay_conformance_tool_attempt_marker(fast_first, "call-fast", "fast_tool");
 
-    start_replay();
+    let invocation = invocation.redrive();
+    let controller = invocation.controller();
     let replay_local_calls = Arc::new(Mutex::new(Vec::new()));
     let replay_pass = if controller.supports_concurrent_effects() {
         tokio::time::timeout(REPLAY_CONFORMANCE_DEADLOCK_TIMEOUT, async {
@@ -1111,6 +1220,7 @@ pub async fn effect_controller_tool_attempt_fanout_replay_deterministic(
         replay_local_calls.lock_recover().is_empty(),
         "tool-attempt replay must return recorded outcomes without invoking local executors"
     );
+    invocation.end();
 }
 
 #[cfg(any(test, feature = "testing"))]

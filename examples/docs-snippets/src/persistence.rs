@@ -30,6 +30,7 @@ async fn sqlite_core(
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -38,7 +39,7 @@ async fn sqlite_core(
                 .expect("valid model metadata"),
         )
         .store_factory(store_factory)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
@@ -121,6 +122,7 @@ fn build_persistent_core(
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
 ) -> lash::Result<LashCore> {
     lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
@@ -267,6 +269,7 @@ async fn shared_factory(
         artifact_store.clone(),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .with_native_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model.clone())
@@ -279,7 +282,7 @@ async fn shared_factory(
                 .with_capability(adaptive_reasoning_capability()),
         )
         .store_factory(store_factory)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
@@ -414,6 +417,7 @@ async fn enumerate_sessions() -> anyhow::Result<()> {
     use lash::{SessionListFilter, SessionRelationKind, SessionSummary};
 
     let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("docs-session-enumeration")
@@ -423,7 +427,7 @@ async fn enumerate_sessions() -> anyhow::Result<()> {
         .store_factory(Arc::new(
             lash::persistence::InMemorySessionStoreFactory::new(),
         ))
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -564,7 +568,7 @@ mod tests {
                     .expect("in-memory process registry"),
             ),
             Arc::new(lash::triggers::InMemoryTriggerStore::default()),
-            Arc::new(lash::durability::InlineEffectHost::default()),
+            Arc::new(lash::durability::NativeEffectHost::default()),
             Arc::new(lash::persistence::InMemoryAttachmentStore::new()),
             Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
         )

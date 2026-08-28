@@ -148,7 +148,7 @@ Gates, in order:
    forwarded copy, one **or two** process runs are all healthy; a second **copy** is not.
 4. Take a concierge run's `process_id` from `/api/work` and call
    `GET /api/work/{process_id}/await`. This is the wait-on-work-item seam
-   (`ProcessWorkDriver::await_terminal`, ADR 0016) — prefer it over re-polling
+   (`ProcessWorkSubstrate::await_process_terminal`, ADR 0016) — prefer it over re-polling
    `/api/work` for a terminal row. It returns the terminal outcome plus the event
    log reconciled from the durable store (ADR 0017); an already-terminal run
    returns immediately. Gate: a `success` outcome for the forwarding run. The

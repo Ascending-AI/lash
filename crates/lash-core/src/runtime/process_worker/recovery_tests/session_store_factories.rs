@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) struct TestSessionStoreFactory;
-pub(super) struct InlineSessionStoreFactory;
+pub(super) struct InMemorySessionStoreFactory;
 pub(super) struct SegmentBoundarySessionStoreFactory;
 
 // These factories create attachment-aware stores but do not retain them, so
@@ -29,7 +29,7 @@ impl crate::AttachmentRootSet for TestSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl crate::AttachmentRootSet for InlineSessionStoreFactory {
+impl crate::AttachmentRootSet for InMemorySessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         _intent_grace_cutoff_epoch_ms: u64,
@@ -96,7 +96,7 @@ impl SessionStoreFactory for TestSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for InlineSessionStoreFactory {
+impl SessionStoreFactory for InMemorySessionStoreFactory {
     async fn create_store(
         &self,
         _request: &crate::SessionStoreCreateRequest,
@@ -146,7 +146,7 @@ async fn attachment_untracked_process_worker_factories_fail_closed() {
     let id = crate::attachments::content_id(b"untracked-factory-root-probe");
     let factories: [(&str, &dyn crate::AttachmentRootSet); 3] = [
         ("test", &TestSessionStoreFactory),
-        ("inline", &InlineSessionStoreFactory),
+        ("in-memory", &InMemorySessionStoreFactory),
         ("segment-boundary", &SegmentBoundarySessionStoreFactory),
     ];
 

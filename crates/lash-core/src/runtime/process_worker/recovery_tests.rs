@@ -87,12 +87,12 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
 }
 
 #[derive(Default)]
-struct LateBoundProcessRunHandle {
+struct LateBoundProcessWork {
     worker: OnceLock<DurableProcessWorker>,
     enabled: AtomicBool,
 }
 
-impl LateBoundProcessRunHandle {
+impl LateBoundProcessWork {
     async fn enable_and_drive(&self) -> Result<ProcessAdmissionReport, PluginError> {
         self.enabled.store(true, Ordering::SeqCst);
         self.worker
@@ -104,8 +104,11 @@ impl LateBoundProcessRunHandle {
 }
 
 #[async_trait::async_trait]
-impl crate::ProcessRunHandle for LateBoundProcessRunHandle {
-    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
+impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
+    async fn admit_pending_processes(
+        &self,
+        _reason: &str,
+    ) -> Result<ProcessAdmissionReport, PluginError> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(ProcessAdmissionReport::default());
         }
@@ -115,6 +118,38 @@ impl crate::ProcessRunHandle for LateBoundProcessRunHandle {
             .drive_pending_processes()
             .await
     }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &str,
+    ) -> Result<crate::ProcessTerminalWait, PluginError> {
+        crate::NativeProcessWork::for_registry(Arc::clone(
+            self.worker
+                .get()
+                .expect("test process worker is bound before execution")
+                .config
+                .process_registry(),
+        ))
+        .await_terminal(process_id)
+        .await
+        .map(crate::ProcessTerminalWait::Terminal)
+    }
+}
+
+fn late_bound_process_work_wiring(
+    registry: Arc<dyn ProcessRegistry>,
+    process_work: Arc<LateBoundProcessWork>,
+) -> (
+    Arc<dyn ProcessRegistry>,
+    crate::ProcessChangeHub,
+    crate::ProcessWorkWiring,
+) {
+    let watched = crate::watch_process_registry(registry);
+    let registry = Arc::clone(watched.registry());
+    let hub = watched.hub().clone();
+    let port: Arc<dyn crate::ProcessWorkSubstrate> = process_work;
+    let wiring = crate::ProcessWorkWiring::new(watched, port);
+    (registry, hub, wiring)
 }
 
 fn engine_registration(
@@ -178,22 +213,23 @@ async fn wait_for_terminal_count(
     }
 }
 
-fn inline_worker(
+fn native_worker(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
 ) -> DurableProcessWorker {
-    inline_worker_with_trigger_store(
+    native_worker_with_trigger_store(
         registry,
         lease_owner,
         Arc::new(crate::InMemoryTriggerStore::default()),
     )
 }
 
-fn inline_worker_with_trigger_store(
+fn native_worker_with_trigger_store(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
+    let watched = crate::watch_process_registry(registry);
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
@@ -201,12 +237,14 @@ fn inline_worker_with_trigger_store(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
-            Arc::new(InlineSessionStoreFactory),
-            registry,
+            Arc::new(InMemorySessionStoreFactory),
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
             lease_owner,
         )
         .with_trigger_store(trigger_store),
     )
+    .expect("valid test native substrate config")
 }
 
 /// A worker whose trigger-delivery reconcile can re-enter the work driver: the
@@ -217,12 +255,10 @@ fn reentrant_worker_with_trigger_store(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
 ) -> DurableProcessWorker {
-    let driver = crate::ProcessWorkDriver::new(
-        Arc::clone(&registry),
-        Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
-    );
+    let (_driver_registry, _driver_hub, process_work) =
+        late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
@@ -230,14 +266,14 @@ fn reentrant_worker_with_trigger_store(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
-            Arc::new(InlineSessionStoreFactory),
-            driver.process_registry(),
+            Arc::new(InMemorySessionStoreFactory),
+            crate::WorkerProcessWork::External(process_work),
+            Arc::new(crate::NoQueuedWork::new()),
             lease_owner,
         )
-        .with_trigger_store(trigger_store)
-        .with_change_hub(driver.change_hub())
-        .with_process_work_driver(driver),
-    );
+        .with_trigger_store(trigger_store),
+    )
+    .expect("valid test native substrate config");
     run_handle
         .worker
         .set(worker.clone())
@@ -254,7 +290,7 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     run_handle.enabled.store(true, Ordering::SeqCst);
     let worker = reentrant_worker_with_trigger_store(
         Arc::clone(&registry),
@@ -432,7 +468,7 @@ async fn process_count(registry: &Arc<dyn ProcessRegistry>, process_id: &str) ->
 }
 
 async fn await_terminal(registry: &Arc<dyn ProcessRegistry>, process_id: &str) {
-    let awaiter = crate::ProcessAwaiter::polling(Arc::clone(registry));
+    let awaiter = crate::NativeProcessWork::for_registry(Arc::clone(registry));
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         awaiter.await_terminal(process_id),
@@ -554,7 +590,7 @@ struct ProductionChainState {
     max_active_work: AtomicUsize,
     all_roots_running: tokio::sync::Notify,
     all_roots_ready_to_park: tokio::sync::Notify,
-    run_handle: Arc<LateBoundProcessRunHandle>,
+    run_handle: Arc<LateBoundProcessWork>,
 }
 
 struct ProductionChainEngine {
@@ -879,7 +915,7 @@ async fn run_production_chain(
     nodes: usize,
     nested_wait_task: bool,
 ) {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let state = Arc::new(ProductionChainState {
         roots,
         root_runs: AtomicUsize::new(0),
@@ -927,7 +963,7 @@ async fn run_production_chain(
     assert_eq!(state.root_runs.load(Ordering::SeqCst), roots);
     assert!(
         state.max_active_work.load(Ordering::SeqCst) <= concurrency,
-        "inline process execution exceeded its configured concurrency"
+        "native process execution exceeded its configured concurrency"
     );
     if nodes > 1 {
         assert_eq!(state.first_children_started.load(Ordering::SeqCst), roots);
@@ -1022,13 +1058,10 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     let nested_engine = Arc::new(NestedProcessEngine {
         runs: Arc::clone(&nested_runs),
     });
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let driver = crate::ProcessWorkDriver::new(
-        Arc::clone(&raw_registry),
-        Arc::clone(&run_handle) as Arc<dyn crate::ProcessRunHandle>,
-    );
-    let registry = driver.process_registry();
+    let (registry, _hub, process_work) =
+        late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
     let mut runtime_host = RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
@@ -1042,20 +1075,20 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         "nested-process-wait-tool",
         crate::PluginSpec::new().with_orchestrating_tool(NestedProcessWaitTool::orchestrating()),
     )));
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(plugin_factories)),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
-            Arc::clone(&registry),
+            crate::WorkerProcessWork::External(process_work),
+            Arc::new(crate::NoQueuedWork::new()),
             local_owner("session-turn-worker", "host-a", "session-turn-start"),
         )
         .with_session_policy(policy.clone())
         .with_process_execution_concurrency(1)
         .expect("valid test process execution concurrency")
-        .with_change_hub(driver.change_hub())
-        .with_process_work_driver(driver),
-    );
+    })
+    .expect("valid test native substrate config");
     run_handle
         .worker
         .set(worker)
@@ -1093,7 +1126,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     })
     .await
     .expect("production SessionTurn path completes without permit starvation");
-    let outer = crate::ProcessAwaiter::polling(Arc::clone(&registry))
+    let outer = crate::NativeProcessWork::for_registry(Arc::clone(&registry))
         .await_terminal(outer_process_id)
         .await
         .expect("outer session-turn process is terminal");
@@ -1129,16 +1162,20 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
     )
     .await
     .expect("persist process env");
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
+        let watched =
+            crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             Arc::new(SegmentBoundarySessionStoreFactory),
-            Arc::clone(&registry),
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
             local_owner("segment-worker", "host-a", "start-a"),
         )
-        .with_session_policy(policy),
-    );
+        .with_session_policy(policy)
+    })
+    .expect("valid test native substrate config");
     registry
         .register_process(
             ProcessRegistration::new(
@@ -1183,7 +1220,7 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
         "test starts in the reserve/start crash window"
     );
 
-    let worker = inline_worker_with_trigger_store(
+    let worker = native_worker_with_trigger_store(
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store),
@@ -1319,12 +1356,15 @@ async fn snapshot_recovery_fixture(
         .await
         .expect("post-reserve mutation command")
         .expect("post-reserve mutation");
-    let worker = DurableProcessWorker::new(
+    let worker = DurableProcessWorker::new({
+        let watched =
+            crate::watch_process_registry(Arc::clone(&registry) as Arc<dyn crate::ProcessRegistry>);
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(Vec::new())),
             runtime_host,
             Arc::new(TestSessionStoreFactory),
-            Arc::clone(&registry),
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
             local_owner(
                 "snapshot-recovery-worker",
                 "host-a",
@@ -1332,8 +1372,9 @@ async fn snapshot_recovery_fixture(
             ),
         )
         .with_session_policy(policy)
-        .with_trigger_store(Arc::clone(&trigger_store)),
-    );
+        .with_trigger_store(Arc::clone(&trigger_store))
+    })
+    .expect("valid test native substrate config");
     (registry, trigger_store, delivery, payloads, worker)
 }
 
@@ -1418,7 +1459,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         "test starts in the reserve/start crash window"
     );
 
-    let worker = inline_worker_with_trigger_store(
+    let worker = native_worker_with_trigger_store(
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store_dyn),
@@ -1516,7 +1557,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
         .await
         .expect("pre-register delivery process");
 
-    let worker = inline_worker_with_trigger_store(
+    let worker = native_worker_with_trigger_store(
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         trigger_store,
@@ -1552,7 +1593,7 @@ async fn sweep_never_claims_externally_owned_rows() {
         .await
         .expect("register");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1631,7 +1672,7 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
         .await
         .expect("record exhausted attempt");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("recovery-worker", "host-b", "recovery-start"),
     );
@@ -1674,7 +1715,7 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
         .await
         .expect("request abandon");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1728,7 +1769,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
         .acquired()
         .expect("live holder lease acquired");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1787,7 +1828,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         .expect("request abandon");
     // No live lease held: the row's owner lease has lapsed.
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1821,7 +1862,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
         .await
         .expect("register");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1883,7 +1924,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
 
 #[tokio::test]
 async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (worker, registry, run_handle, env_ref) = worker_with_engine(
         1,
         Arc::new(SnapshotRecordingEngine {
@@ -1947,7 +1988,7 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
 #[tokio::test]
 async fn transient_engine_artifact_read_retries_and_terminally_commits() {
     let reads = Arc::new(AtomicUsize::new(0));
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (_worker, registry, run_handle, env_ref) = worker_with_engine(
         1,
         Arc::new(FailOnceArtifactReadEngine {
@@ -2015,13 +2056,13 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
 }
 
 /// Owner drain (ADR 0019): a host closing gracefully terminalizes its own
-/// started OwnerBound work inline as `Abandoned{OwnerDrain}` under a live lease,
+/// started OwnerBound work natively as `Abandoned{OwnerDrain}` under a live lease,
 /// while leaving rerunnable, not-yet-started, and other-owner rows untouched.
 #[tokio::test]
 async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let owner = local_owner("drain-host", "host-a", "start-a");
-    let worker = inline_worker(Arc::clone(&registry), owner.clone());
+    let worker = native_worker(Arc::clone(&registry), owner.clone());
 
     // (a) OwnerBound row this worker started -> drained.
     registry
@@ -2118,10 +2159,10 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
 }
 
 #[tokio::test]
-async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
+async fn native_start_records_stable_owner_that_owner_drain_can_match() {
     let started = Arc::new(tokio::sync::Notify::new());
     let fail = Arc::new(tokio::sync::Notify::new());
-    let run_handle = Arc::new(LateBoundProcessRunHandle::default());
+    let run_handle = Arc::new(LateBoundProcessWork::default());
     let (worker, registry, run_handle, env_ref) = worker_with_engine(
         1,
         Arc::new(PausedInfraEngine {
@@ -2132,7 +2173,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     )
     .await;
     let mut registration = engine_registration(
-        "real-inline-owner-bound",
+        "real-native-owner-bound",
         "paused-infra",
         env_ref,
         serde_json::Value::Null,
@@ -2151,7 +2192,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
         .expect("engine starts");
 
     let record = registry
-        .get_process("real-inline-owner-bound")
+        .get_process("real-native-owner-bound")
         .await
         .expect("read process")
         .expect("started record");
@@ -2164,7 +2205,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     fail.notify_one();
     tokio::time::timeout(Duration::from_secs(1), async {
         while registry
-            .get_process_lease("real-inline-owner-bound")
+            .get_process_lease("real-native-owner-bound")
             .await
             .expect("lease read")
             .is_some()
@@ -2178,7 +2219,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     let report = worker.drain_owner_bound_work().await.expect("owner drain");
     assert_eq!(
         report.abandoned,
-        vec!["real-inline-owner-bound".to_string()]
+        vec!["real-native-owner-bound".to_string()]
     );
     assert!(report.deferred.is_empty());
 }
@@ -2213,7 +2254,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         )))
         .await;
 
-    let worker = inline_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner);
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 

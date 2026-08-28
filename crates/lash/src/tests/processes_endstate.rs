@@ -1099,13 +1099,13 @@ fn process_test_core_with_sink(
     .build(crate::testing::runtime_lease_owner())
 }
 
-/// Inline-tier end to end across the process wait, observation, and retention
-/// interfaces: a host starts a process, holds `ProcessWorkDriver::await_terminal`
+/// native-substrate end to end across the process wait, observation, and retention
+/// interfaces: a host starts a process, holds `ProcessWorkSubstrate::await_process_terminal`
 /// (through `core.processes().await_output`), signals it to completion, and
 /// observes its intermediate events through a wired `ProcessEventSink` — then
 /// prunes the terminal registry rows while the host's projected copies survive.
 #[tokio::test]
-async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
+async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
@@ -1266,6 +1266,7 @@ fn recovery_process_worker(
     registry: Arc<dyn lash_core::ProcessRegistry>,
     owner: lash_core::LeaseOwnerIdentity,
 ) -> lash_core::facade_support::DurableProcessWorker {
+    let watched = lash_core::facade_support::watch_process_registry(registry);
     lash_core::facade_support::DurableProcessWorker::new(
         lash_core::facade_support::DurableProcessWorkerConfig::new(
             Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
@@ -1274,10 +1275,12 @@ fn recovery_process_worker(
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),
             Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-            registry,
+            lash_core::WorkerProcessWork::SelfNative(watched),
+            Arc::new(lash_core::NoQueuedWork::new()),
             owner,
         ),
     )
+    .expect("valid test native substrate config")
 }
 
 fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration {
@@ -1336,7 +1339,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     let await_id = process_id.to_string();
     let waiter = tokio::spawn(async move { await_core.processes().await_output(&await_id).await });
 
-    // The host drains its own started OwnerBound work inline at close.
+    // The host drains its own started OwnerBound work natively at close.
     let report = worker.drain_owner_bound_work().await?;
     assert_eq!(
         report.abandoned,

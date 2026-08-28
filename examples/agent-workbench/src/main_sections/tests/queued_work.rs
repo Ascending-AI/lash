@@ -55,7 +55,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
                 .into_handle(),
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_driver()),
+            Some(inert_queued_work_port()),
         )
         .await;
         state.restate_ingress_url = restate_ingress_url;
@@ -192,7 +192,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
                 .into_handle(),
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_driver()),
+            Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged, refusing every selected
             // drain. It must now drain one row per wake.
@@ -312,7 +312,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .into_handle(),
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_driver()),
+            Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged, refusing every selected
             // drain. It must now drain one row per wake.
@@ -468,7 +468,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&store_factory),
-            None,
+            Arc::new(lash::runtime::NoQueuedWork::new()),
             Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -481,7 +481,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
             Arc::clone(&store_factory),
-            None,
+            Arc::new(lash::runtime::NoQueuedWork::new()),
             Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -562,7 +562,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let first_expiry_attempt = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&expiry_registry),
             Arc::clone(&store_factory),
-            None,
+            Arc::new(lash::runtime::NoQueuedWork::new()),
             Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -575,7 +575,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let before_expiry_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&expiry_registry),
             Arc::clone(&store_factory),
-            None,
+            Arc::new(lash::runtime::NoQueuedWork::new()),
             Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -586,7 +586,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let at_expiry_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             expiry_registry,
             Arc::clone(&store_factory),
-            None,
+            Arc::new(lash::runtime::NoQueuedWork::new()),
             expiry_clock as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -657,7 +657,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         let target_gone = lash::process::WakeDeliveryDriver::drive_pending_once(
             target_gone_registry,
             Arc::clone(&store_factory),
-            None,
+            Arc::new(lash::runtime::NoQueuedWork::new()),
             Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
             32,
         )
@@ -833,7 +833,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 .into_handle(),
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_driver()),
+            Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged, refusing every selected
             // drain. It must now drain one row per wake.
@@ -1021,7 +1021,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
                 .into_handle(),
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_driver()),
+            Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged, refusing every selected
             // drain. It must now drain one row per wake.
@@ -1134,7 +1134,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                 .into_handle(),
             in_memory_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_driver()),
+            Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
             // hardwired projected-request guard wedged, refusing every selected
             // drain. It must now drain one row per wake.

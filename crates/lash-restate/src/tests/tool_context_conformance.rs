@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 
-use lash_core::{EffectReplayOwnership, ToolCall, ToolProvider};
+use lash_core::{ToolCall, ToolProvider};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct CountingFirstPartyProvider {
@@ -70,11 +70,16 @@ struct ProductionToolCell {
     llm_provider_calls: Arc<AtomicUsize>,
 }
 
+enum ControllerMode {
+    Local,
+    Durable,
+}
+
 impl ProductionToolCell {
-    async fn new(replay_ownership: EffectReplayOwnership, tool_name: &str) -> Self {
-        let context_name = match replay_ownership {
-            EffectReplayOwnership::Runtime => "inline",
-            EffectReplayOwnership::Controller => "restate-durable",
+    async fn new(mode: ControllerMode, tool_name: &str) -> Self {
+        let context_name = match mode {
+            ControllerMode::Local => "local",
+            ControllerMode::Durable => "restate-durable",
         };
         let session_id = format!("tool-context-{context_name}-{tool_name}");
         let turn_id = format!("{session_id}-turn");
@@ -263,24 +268,23 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
     for manifest in manifests {
         let _ = args_for(&manifest.name);
 
-        let inline_cell =
-            ProductionToolCell::new(EffectReplayOwnership::Runtime, &manifest.name).await;
-        inline_cell
+        let local_cell = ProductionToolCell::new(ControllerMode::Local, &manifest.name).await;
+        local_cell
             .runtime_store
             .admit_and_bind_session(&lash_core::SessionBinding::root(
-                inline_cell.session_id.clone(),
+                local_cell.session_id.clone(),
             ))
             .await
-            .expect("bind inline session");
-        let inline = lash_sqlite_store::SqliteRuntimeEffectController::memory(
-            ExecutionScope::turn(&inline_cell.session_id, &inline_cell.turn_id),
-        )
+            .expect("bind local session");
+        let local = lash_sqlite_store::SqliteRuntimeEffectController::memory(ExecutionScope::turn(
+            &local_cell.session_id,
+            &local_cell.turn_id,
+        ))
         .await
         .expect("in-process production replay controller");
-        inline_cell.run(&inline, || inline.start_replay()).await;
+        local_cell.run(&local, || local.start_replay()).await;
 
-        let durable_cell =
-            ProductionToolCell::new(EffectReplayOwnership::Controller, &manifest.name).await;
+        let durable_cell = ProductionToolCell::new(ControllerMode::Durable, &manifest.name).await;
         let context = Arc::new(ReplayableRecordingContext::default());
         let durable = RestateRuntimeEffectController::new(Arc::clone(&context));
         durable_cell.run(&durable, || context.start_replay()).await;

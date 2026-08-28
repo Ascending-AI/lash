@@ -9,7 +9,7 @@ use axum::routing::get;
 #[cfg(feature = "restate")]
 use lash::PluginBinding;
 use lash::{
-    durability::InlineEffectHost,
+    durability::NativeEffectHost,
     provider::{ProviderHandle, ProviderOptions},
     tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink},
 };
@@ -279,6 +279,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     ));
     let core_builder =
         lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+            .with_native_queued_work()
             .provider(provider)
             .model(model_spec)
             .store_factory(
@@ -320,7 +321,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     let core = match durability {
         AgentServiceDurability::Local => core_builder
             .effect_host(Arc::new(
-                InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+                NativeEffectHost::default().allow_process_lifetime_completion_keys(),
             ))
             .process_registry(Arc::clone(&process_registry))
             .build(session_owner.clone())
@@ -341,11 +342,11 @@ async fn async_main() -> anyhow_like::Result<()> {
                             .expect("turn deployment configured for Restate")
                             .effect_host(),
                     )
-                    .process_work_driver(
+                    .process_work(
                         process_deployment
                             .as_ref()
                             .expect("process deployment configured for Restate")
-                            .process_work_driver(),
+                            .process_work(),
                     )
                     .build(session_owner.clone())
                     .map_err(|err| err.to_string())?
@@ -370,10 +371,13 @@ async fn async_main() -> anyhow_like::Result<()> {
         let demo_factory = DemoPlugin::factory(&DemoPluginConfig {
             db: Arc::clone(&shared_db),
         });
-        Some(DurableProcessWorker::new(
-            core.durable_process_worker_config_with_plugins([demo_factory])
-                .map_err(|err| err.to_string())?,
-        ))
+        Some(
+            DurableProcessWorker::new(
+                core.durable_process_worker_config_with_plugins([demo_factory])
+                    .map_err(|err| err.to_string())?,
+            )
+            .map_err(|err| err.to_string())?,
+        )
     } else {
         None
     };
@@ -432,7 +436,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                 .await;
         });
         process_deployment
-            .process_work_driver()
+            .process_work()
             .claim_and_run_pending("agent_service_startup")
             .await
             .map_err(|err| err.to_string())?;

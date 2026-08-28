@@ -126,9 +126,8 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
     );
 
     let crashed_context = context.clone();
-    let crashed = crate::task::spawn(async move {
-        run_fixed_intent_attempt(&crashed_context).await
-    });
+    let crashed =
+        crate::task::spawn(async move { run_fixed_intent_attempt(&crashed_context).await });
     controller.wait_until_paused().await;
     crashed.abort();
     assert!(
@@ -371,12 +370,12 @@ async fn concurrent_batch_drains_intents_in_call_order_then_intent_index() {
     );
 
     let outcome = Box::pin(execution.execute_prepared_tool_batch_launches(
-            batch,
-            intent_law_batch_parent("intent-order-parent"),
-            std::collections::HashMap::new(),
-        ))
-        .await
-        .expect("execute ordered intent batch");
+        batch,
+        intent_law_batch_parent("intent-order-parent"),
+        std::collections::HashMap::new(),
+    ))
+    .await
+    .expect("execute ordered intent batch");
     assert_eq!(outcome.launches.len(), 2);
     assert!(outcome.launches.iter().all(|launch| matches!(
         launch,
@@ -422,11 +421,11 @@ async fn cancellation_before_result_commit_executes_no_intents() {
     );
     let run = crate::task::spawn(async move {
         Box::pin(execution.execute_prepared_tool_batch_launches(
-                batch,
-                intent_law_batch_parent("pre-result-cancel-parent"),
-                std::collections::HashMap::new(),
-            ))
-            .await
+            batch,
+            intent_law_batch_parent("pre-result-cancel-parent"),
+            std::collections::HashMap::new(),
+        ))
+        .await
     });
     entered.notified().await;
     cancellation.cancel();
@@ -473,11 +472,11 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
     );
     let run = crate::task::spawn(async move {
         Box::pin(execution.execute_prepared_tool_batch_launches(
-                batch,
-                intent_law_batch_parent("post-result-cancel-parent"),
-                std::collections::HashMap::new(),
-            ))
-            .await
+            batch,
+            intent_law_batch_parent("post-result-cancel-parent"),
+            std::collections::HashMap::new(),
+        ))
+        .await
     });
     controller.wait_until_paused().await;
     cancellation.cancel();
@@ -608,13 +607,9 @@ async fn parent_end_cancel_refusal_is_typed_and_operator_visible() {
     context.processes = crate::testing::effect_backed_process_service(registry);
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(1);
     context.event_tx = event_tx;
-    let identity = crate::derive_tool_intent_identity(
-        "session",
-        "turn",
-        Some("missing-parent-end-call"),
-        0,
-    )
-    .expect("derive valid missing-child intent identity");
+    let identity =
+        crate::derive_tool_intent_identity("session", "turn", Some("missing-parent-end-call"), 0)
+            .expect("derive valid missing-child intent identity");
     context
         .recorded_intent_outcomes
         .record(&[crate::ToolIntentExecutionOutcome::Executed {
@@ -786,8 +781,9 @@ fn trigger_intent_dispatch_context(
     );
     context.trigger_router = Some(crate::TriggerRouter::new(
         Arc::clone(store) as Arc<dyn crate::TriggerStore>,
-        Some(registry as Arc<dyn crate::ProcessRegistry>),
-        None,
+        crate::testing::process_work_wiring_for_registry(
+            registry as Arc<dyn crate::ProcessRegistry>,
+        ),
     ));
     context
 }
@@ -837,11 +833,13 @@ async fn crashed_trigger_intent_redrive(
 fn executed_trigger_outcome(
     outcome: &crate::tool_dispatch::ToolDispatchOutcome,
 ) -> (&serde_json::Value, String) {
-    let [crate::ToolIntentExecutionOutcome::Executed {
-        kind: crate::ToolIntentKind::EmitTrigger,
-        result,
-        ..
-    }] = outcome.intent_outcomes.as_slice()
+    let [
+        crate::ToolIntentExecutionOutcome::Executed {
+            kind: crate::ToolIntentKind::EmitTrigger,
+            result,
+            ..
+        },
+    ] = outcome.intent_outcomes.as_slice()
     else {
         panic!(
             "the drain must execute the recorded trigger declaration: {:?}",
@@ -881,7 +879,11 @@ async fn crash_after_result_commit_emits_the_recorded_trigger_exactly_once() {
         .list_occurrences(crate::TriggerOccurrenceFilter::default())
         .await
         .expect("read occurrences after the redrive");
-    assert_eq!(occurrences.len(), 1, "redrive must not duplicate the emission");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "redrive must not duplicate the emission"
+    );
     assert_eq!(occurrences[0].occurrence_id, occurrence_id);
     let deliveries = store
         .list_deliveries_by_occurrence_id(&occurrence_id)
@@ -908,11 +910,8 @@ async fn recorded_trigger_refuses_when_a_delivery_does_not_start() {
     )
     .await;
     let controller = Arc::new(IntentReplayController::new(None));
-    let context = trigger_intent_dispatch_context(
-        controller,
-        &store,
-        Arc::new(AtomicUsize::new(0)),
-    );
+    let context =
+        trigger_intent_dispatch_context(controller, &store, Arc::new(AtomicUsize::new(0)));
 
     let outcome = run_fixed_intent_attempt(&context).await;
 
@@ -946,7 +945,8 @@ async fn public_coordinator_redrive_is_byte_stable_for_the_recorded_trigger_emis
     let subscription = register_trigger_intent_subscription(&store).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None));
-    let context = trigger_intent_dispatch_context(Arc::clone(&controller), &store, Arc::clone(&calls));
+    let context =
+        trigger_intent_dispatch_context(Arc::clone(&controller), &store, Arc::clone(&calls));
 
     let first = run_fixed_intent_attempt(&context).await;
     // Rendered rather than raw bytes: this is the same byte equality, with a

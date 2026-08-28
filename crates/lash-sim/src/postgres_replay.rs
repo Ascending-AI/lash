@@ -1031,8 +1031,9 @@ fn runtime_core_for_scripts(
     let process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore> =
         Arc::new(storage.process_env_store());
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
             attachment_root.to_path_buf(),

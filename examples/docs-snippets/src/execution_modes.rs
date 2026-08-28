@@ -9,9 +9,10 @@ async fn standard_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
     // docs:start:standard-core
     // `LashCore::standard_builder(lash::TurnBudget::Unbounded)` selects native provider tool-calling, the default mode.
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .without_queued_work()
         .provider(provider)
         .model(model)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -41,9 +42,10 @@ async fn rlm_mode(provider: ProviderHandle, model: ModelSpec) -> anyhow::Result<
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(model)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),

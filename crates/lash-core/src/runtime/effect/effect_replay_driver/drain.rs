@@ -2,7 +2,7 @@
 //!
 //! [`group_drain`](crate::runtime::effect::group_drain) states the contract and
 //! the three guards; this module is the one implementation of it, written over
-//! [`EffectReplayPersistence`] so sqlite and postgres are held to the same laws
+//! [`EffectReplayRowStore`] so sqlite and postgres are held to the same laws
 //! by the same code rather than by two copies.
 //!
 //! # Why a pass reads the journal twice
@@ -25,17 +25,17 @@ use super::groups::{LocalDrainConflict, drain_deferred_error, group_shape_error}
 use super::*;
 use crate::runtime::effect::group::LoserPolicy;
 use crate::runtime::effect::group_drain::{
-    ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainReport,
+    ChildDrainOutcome, DrainedChild, GroupDrainReport, StoreEffectGroupDrain,
 };
 
 /// The drain a durable effect host hands out: one effect-replay driver, which
 /// already holds the host wiring that says how a journaled child is run.
 struct DurableGroupDrain<P, A> {
-    driver: Arc<EffectReplayDriver<P, A>>,
+    driver: Arc<StoreEffectReplayDriver<P, A>>,
 }
 
 #[async_trait]
-impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static> EffectGroupDrain
+impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreEffectGroupDrain
     for DurableGroupDrain<P, A>
 {
     async fn drain_group(
@@ -47,8 +47,8 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static> Effec
     }
 }
 
-impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
-    EffectReplayDriver<P, A>
+impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
+    StoreEffectReplayDriver<P, A>
 {
     /// Hand back the drain over this driver's journal.
     ///
@@ -70,11 +70,11 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     ///
     /// Takes `Arc<Self>` because the drain executes children through this same
     /// driver: one lease identity, one owner id, one journal.
-    pub fn into_group_drain(self: Arc<Self>) -> Arc<dyn EffectGroupDrain> {
+    pub fn into_group_drain(self: Arc<Self>) -> Arc<dyn StoreEffectGroupDrain> {
         Arc::new(DurableGroupDrain { driver: self })
     }
 
-    /// One drain pass. See [`EffectGroupDrain::drain_group`].
+    /// One drain pass. See [`StoreEffectGroupDrain::drain_group`].
     async fn drain_effect_group(
         self: &Arc<Self>,
         group_key: &str,
@@ -100,7 +100,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
             }
             None => {}
         }
-        let Some(record) = self.persistence.read_group(group_key).await? else {
+        let Some(record) = self.row_store.read_group(group_key).await? else {
             return Err(group_shape_error(format!(
                 "no durable effect group is recorded under {group_key}; the drain \
                  applies the disposition the group declared and will not invent \
@@ -108,7 +108,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
             )));
         };
         let queued = self
-            .persistence
+            .row_store
             .read_unsettled_group_children(group_key)
             .await?;
         let now = self.clock.timestamp_ms();
@@ -240,7 +240,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
         children: &mut [DrainedChild],
     ) -> Result<(), RuntimeEffectControllerError> {
         let still_unsettled = self
-            .persistence
+            .row_store
             .read_unsettled_group_children(group_key)
             .await?
             .into_iter()

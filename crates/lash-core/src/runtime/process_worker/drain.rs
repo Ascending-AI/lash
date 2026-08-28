@@ -44,7 +44,7 @@ impl DurableProcessWorker {
         loop {
             let page = self
                 .config
-                .process_registry
+                .process_registry()
                 .list_non_terminal_page(limit, continuation)
                 .await?;
             let next = page.continuation;

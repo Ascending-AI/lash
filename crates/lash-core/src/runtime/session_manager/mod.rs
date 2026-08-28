@@ -347,12 +347,13 @@ impl RuntimeSessionServices {
     }
 
     pub(in crate::runtime) fn trigger_router(self: &Arc<Self>) -> Option<crate::TriggerRouter> {
-        self.current.host.trigger_store.as_ref().map(|store| {
-            crate::TriggerRouter::new(
-                Arc::clone(store),
-                self.current.host.process_registry.clone(),
-                self.current.host.process_work_driver.clone(),
-            )
+        self.current.host.trigger_store.as_ref().and_then(|store| {
+            self.current
+                .host
+                .work
+                .process_wiring()
+                .cloned()
+                .map(|wiring| crate::TriggerRouter::new(Arc::clone(store), wiring))
         })
     }
 
@@ -917,7 +918,10 @@ mod process_visibility_tests {
             crate::testing::test_standard_protocol_factories(),
         )))
         .with_runtime_host_config(core)
-        .with_process_registry(registry.clone())
+        .with_process_work(crate::testing::process_work_wiring_for_registry(
+            registry.clone(),
+        ))
+        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
         .build();
         let policy = standard_test_policy();
         let runtime = crate::LashRuntime::from_environment(

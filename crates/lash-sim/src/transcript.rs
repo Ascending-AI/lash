@@ -427,7 +427,6 @@ mod tests {
         ProcessRegistry as _, ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark,
         RecoveryContract, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
         SessionStoreFactory as _, ToolState, facade_support::InMemorySessionStoreFactory,
-        facade_support::ProcessChangeHub,
     };
 
     use super::*;
@@ -558,9 +557,8 @@ mod tests {
             )
             .await
             .expect("prune transcript process");
-        let output = lash_core::facade_support::ProcessAwaiter::new(
+        let output = lash_core::NativeProcessWork::for_registry(
             registry as Arc<dyn lash_core::ProcessRegistry>,
-            ProcessChangeHub::new(),
         )
         .await_terminal(process_id)
         .await

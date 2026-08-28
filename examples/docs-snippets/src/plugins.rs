@@ -44,6 +44,7 @@ async fn plugin_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+        .without_queued_work()
         .provider(provider)
         .model(
             lash::ModelSpec::builder(model_id)
@@ -51,7 +52,7 @@ async fn plugin_core(provider: ProviderHandle, model_id: &str) -> anyhow::Result
                 .build()
                 .expect("valid model metadata"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),

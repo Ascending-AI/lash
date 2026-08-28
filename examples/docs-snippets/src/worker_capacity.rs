@@ -78,6 +78,7 @@ fn builder_with_external_capacity_signal(
 ) -> (lash::LashCoreBuilder, Arc<ExternallyGatedSlots>) {
     let supplier = Arc::new(ExternallyGatedSlots::new(enabled, 1, 1));
     let builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+        .with_native_queued_work()
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .worker_slot_supplier(supplier.clone());
@@ -119,7 +120,7 @@ mod tests {
                 &store_root,
             )))
             .process_registry(registry.clone())
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),

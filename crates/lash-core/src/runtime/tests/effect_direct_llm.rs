@@ -24,7 +24,7 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         }),
     }]);
     let host = EmbeddedRuntimeHost::new({
-        let mut config = runtime_host_config_with_inline_controller(Arc::new(recorder.clone()));
+        let mut config = runtime_host_config_with_native_controller(Arc::new(recorder.clone()));
         config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
             trace_path.clone(),
         )));

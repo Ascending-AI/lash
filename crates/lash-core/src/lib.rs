@@ -333,11 +333,11 @@ pub mod facade_support {
     pub use crate::runtime::InMemoryProcessExecutionEnvStore;
     pub use crate::runtime::InMemorySessionStore;
     pub use crate::runtime::InMemorySessionStoreFactory;
-    pub use crate::runtime::InlineEffectHost;
-    pub use crate::runtime::InlineProcessRunHandle;
-    pub use crate::runtime::InlineRuntimeEffectController;
     pub use crate::runtime::LashRuntime;
     pub use crate::runtime::LiveReplayGap;
+    pub use crate::runtime::NativeEffectHost;
+    pub use crate::runtime::NativeQueuedWorkConfigError;
+    pub use crate::runtime::NativeRuntimeEffectController;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;
@@ -348,8 +348,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessAdmissionDeferred;
     pub use crate::runtime::ProcessAdmissionIntake;
     pub use crate::runtime::ProcessAdmissionReport;
-    pub use crate::runtime::ProcessAttach;
-    pub use crate::runtime::ProcessAwaiter;
     pub use crate::runtime::ProcessChangeHub;
     pub use crate::runtime::ProcessDrainDeferred;
     pub use crate::runtime::ProcessDrainReport;
@@ -360,7 +358,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessExecutionConcurrencyError;
     pub use crate::runtime::ProcessRecoveryAttemptOutcome;
     pub use crate::runtime::ProcessRecoveryOperation;
-    pub use crate::runtime::ProcessRunHandle;
     pub use crate::runtime::ProcessRuntimeHost;
     pub use crate::runtime::ProcessStartPlan;
     pub use crate::runtime::ProcessTerminalSemantics;
@@ -370,11 +367,9 @@ pub mod facade_support {
     pub use crate::runtime::ProcessTurnCancellation;
     pub use crate::runtime::ProcessWake;
     pub use crate::runtime::ProcessWakeDeliveryRequest;
-    pub use crate::runtime::ProcessWorkDriver;
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
     pub use crate::runtime::ProcessWorkerFault;
-    pub use crate::runtime::QUEUED_WORK_SLOW_WAKE_THRESHOLD;
     pub use crate::runtime::QueuedDrainCandidate;
     pub use crate::runtime::QueuedDrainPolicy;
     pub use crate::runtime::QueuedDrainRequest;
@@ -382,7 +377,6 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
     pub use crate::runtime::QueuedWorkClaimPolicy;
-    pub use crate::runtime::QueuedWorkDriver;
     pub use crate::runtime::QueuedWorkExecutionConcurrencyError;
     pub use crate::runtime::QueuedWorkKind;
     pub use crate::runtime::QueuedWorkRunError;
@@ -432,6 +426,7 @@ pub mod facade_support {
     pub use crate::runtime::UsageTotals;
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
+    pub use crate::runtime::WatchedRegistry;
     #[doc(hidden)]
     pub use crate::runtime::await_event_coordinator;
     pub use crate::runtime::current_epoch_ms;
@@ -453,6 +448,8 @@ pub mod facade_support {
     pub use crate::runtime::refuse_unhonored_group_membership;
     #[doc(hidden)]
     pub use crate::runtime::registry_transitions;
+    #[doc(hidden)]
+    pub use crate::runtime::release_process_execution_permit_while;
     pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::system_time_from_epoch_ms;
     pub use crate::runtime::terminal_append_request;
@@ -546,6 +543,52 @@ pub mod facade_support {
     pub use lash_trace::TraceSink;
     pub use lash_trace::TraceSinkError;
     pub use schemars::JsonSchema;
+
+    /// Construct the facade's native queued-work driver with explicit cadence.
+    pub fn native_queued_work_with_execution_concurrency_and_work_cadence(
+        run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
+        concurrency: usize,
+        work_cadence: crate::runtime::WorkCadencePolicy,
+    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeQueuedWorkConfigError> {
+        crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
+            run_handle,
+            concurrency,
+            work_cadence,
+        )
+    }
+
+    /// Construct the facade's supplied-slot native queued-work driver.
+    pub fn native_queued_work_with_worker_slot_supplier_and_work_cadence(
+        run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
+        supplier: std::sync::Arc<dyn crate::runtime::WorkerSlotSupplier>,
+        work_cadence: crate::runtime::WorkCadencePolicy,
+    ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeSubstrateConfigError> {
+        crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
+            run_handle,
+            supplier,
+            work_cadence,
+        )
+    }
+
+    /// Construct the facade's autonomous wake-delivery driver with explicit cadence.
+    pub fn wake_delivery_driver_with_work_cadence(
+        registry: std::sync::Arc<dyn crate::runtime::ProcessRegistry>,
+        session_store_factory: std::sync::Arc<dyn crate::runtime::SessionStoreFactory>,
+        queued_work: std::sync::Arc<dyn crate::runtime::QueuedWorkSubstrate>,
+        clock: std::sync::Arc<dyn crate::runtime::Clock>,
+        delivery_policy: crate::runtime::DeliveryPolicy,
+        work_cadence: crate::runtime::WorkCadencePolicy,
+    ) -> Result<crate::runtime::WakeDeliveryDriver, crate::runtime::NativeSubstrateConfigError>
+    {
+        crate::runtime::WakeDeliveryDriver::with_work_cadence(
+            registry,
+            session_store_factory,
+            queued_work,
+            clock,
+            delivery_policy,
+            work_cadence,
+        )
+    }
 }
 
 pub(crate) use facade_support::*;
@@ -574,33 +617,6 @@ pub mod sansio {
         ProtocolDriverHandle, Response, TurnCause, TurnMachine, WaitingExecState, WaitingLlmState,
         render_turn_causes_prompt,
     };
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-/// Which layer owns replay of runtime effects.
-///
-/// This is a mechanical property of an effect controller, not an end-to-end
-/// durability claim. Controller-owned replay means a controller journals or
-/// otherwise replays completed effects; runtime-owned execution means Lash
-/// invokes the local effect path directly on each turn attempt.
-pub enum EffectReplayOwnership {
-    #[default]
-    Runtime,
-    Controller,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-/// How an effect controller addresses entries in its durable journal.
-///
-/// This capability is intentionally separate from [`EffectReplayOwnership`]:
-/// both key-addressed and ordinal-addressed controllers own replay, but only an
-/// ordinal-addressed recorded body can shift later commands when it emits a
-/// nested command. Runtime-owned controllers have no durable effect journal.
-pub enum EffectJournalAddressing {
-    #[default]
-    Runtime,
-    KeyAddressed,
-    OrdinalAddressed,
 }
 
 // Re-exports
@@ -1031,17 +1047,19 @@ pub use runtime::drive_with_event_pump;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AssistantResponseHookEvents, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef, CheckpointClaimSet,
-    ChildDrainOutcome, Clock, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
-    EffectGroupDrain, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalRetirement, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    GroupDrainReport, GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem,
-    LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LoserPolicy, ObserverInheritance, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCommand,
+    ChildDrainOutcome, Clock, CompletionKeyPreparation, DeliveryPolicy, DrainMode, DrainModePolicy,
+    DrainedChild, EffectGroupHandle, EffectGroupMembership, EffectHost, EffectJournalRetirement,
+    ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupDrainReport,
+    GroupExecutors, GroupSettlement, GroupWakePolicy, InputItem, LiveReplayEventDraft,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
+    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
+    NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError, NativeSubstrateConfig,
+    NativeSubstrateConfigError, NoQueuedWork, ObserverInheritance,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
+    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessAwaitOutput,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCommand,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
     ProcessEffectOutcome, ProcessEngine, ProcessEngineRunContext, ProcessEngineValidationContext,
     ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventSemanticsSpec,
@@ -1054,29 +1072,35 @@ pub use runtime::{
     ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessRunOutcome, ProcessService,
     ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartOptions, ProcessStartOutcome,
     ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec,
-    ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec,
-    ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark, PromptUsage,
-    ProtocolSessionExtension, ProtocolSessionExtensionHandle, ProtocolTurnExtension,
-    ProtocolTurnExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
-    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy,
-    QueuedWorkKind, RecoveryContract, Resolution, ResolveOutcome, RuntimeCheckpointComponents,
+    ProcessTerminalWait, ProcessTombstone, ProcessValueSelector, ProcessWakeDelivery,
+    ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorklistCursor,
+    ProcessWorklistPage, ProjectionWatermark, PromptUsage, ProtocolSessionExtension,
+    ProtocolSessionExtensionHandle, ProtocolTurnExtension, ProtocolTurnExtensionHandle,
+    QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+    QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
+    QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
+    QueuedWorkSubstrate, RecoveryContract, Resolution, ResolveOutcome, RuntimeCheckpointComponents,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeScope,
-    RuntimeSessionState, ScopedEffectController, SegmentHandover, SegmentProgress, SessionCursor,
-    SessionCursorError, SessionId, SessionListFilter, SessionObservationEvent,
-    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRelationKind, SessionRevision, SessionScope, SessionStoreCreateRequest,
-    SessionStoreFactory, SessionSummary, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
-    TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition,
-    TurnCancelInputOutcome, TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnEvent,
-    TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
-    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
-    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnclaimedTurnInputs, WaitKind,
-    WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
+    RuntimeReplayAttribution, RuntimeScope, RuntimeSessionState, ScopedEffectController,
+    SegmentHandover, SegmentProgress, SessionCursor, SessionCursorError, SessionDrainOutcome,
+    SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
+    SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    SessionWorkTarget, StoreEffectGroupDrain, TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch,
+    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelDisposition, TurnCancelInputOutcome,
+    TurnCancelOriginHint, TurnCancelRequestRecord, TurnContext, TurnControlBinding,
+    TurnControlParticipation, TurnEvent, TurnInput, TurnInputApplication,
+    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
+    TurnInputState, UnclaimedTurnInputs, WaitKind, WaitState, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WorkCadencePolicy, WorkerProcessWork, WorkerSlotKind, WorkerSlotPermit,
+    WorkerSlotSupplier, WorkerSweepPolicy,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

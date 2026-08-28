@@ -175,16 +175,15 @@ fn effect_crossing_label(envelope: &RuntimeEffectEnvelope) -> String {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for AttemptAtomicitySentinel<'_> {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-
-    fn journal_addressing(&self) -> crate::EffectJournalAddressing {
-        self.inner.journal_addressing()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<crate::CompletionKeyPreparation, RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 
     async fn await_event_key(
@@ -248,6 +247,19 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
 
     fn supports_concurrent_effects(&self) -> bool {
         self.inner.supports_concurrent_effects()
+    }
+
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, RuntimeError> {
+        self.inner.runtime_effect_failure_disposition(code).await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, RuntimeError> {
+        self.inner.turn_control_participation().await
     }
 
     async fn execute_effect(

@@ -35,11 +35,12 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     let stores = Arc::new(InMemorySessionStoreFactory::new());
     let processes = Arc::new(lash::testing::TestLocalProcessRegistry::default());
     let core = LashCore::standard_builder(TurnBudget::Unbounded)
+        .with_native_queued_work()
         .provider(provider)
         .model(model.clone())
         .store_factory(Arc::clone(&stores) as Arc<dyn lash::persistence::SessionStoreFactory>)
         .process_registry(Arc::clone(&processes) as Arc<dyn lash::process::ProcessRegistry>)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(InMemoryProcessExecutionEnvStore::new()))
         .commit_budget(CommitBudget::bounded(1024 * 1024, 512))

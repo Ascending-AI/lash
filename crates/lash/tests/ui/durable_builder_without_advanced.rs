@@ -23,6 +23,7 @@ async fn durable_core_without_advanced(
                 .expect("sqlite artifact store"),
         ),
     ))
+    .with_native_queued_work()
     .provider(provider)
     .model(model)
     .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
@@ -31,7 +32,7 @@ async fn durable_core_without_advanced(
     .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )))
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .termination(lash::durability::TerminationPolicy::default())
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         "durable-builder-test-worker",

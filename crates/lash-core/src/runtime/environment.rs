@@ -25,9 +25,13 @@ use std::sync::Arc;
 use lash_trace::{TraceContext, TraceLevel, TraceSink};
 
 #[cfg(test)]
-use super::InlineEffectHost;
+use super::NativeEffectHost;
+use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
-use super::{EffectHost, RuntimeHostConfig, TerminationPolicy};
+use super::{
+    EffectHost, NoQueuedWork, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeHostConfig,
+    TerminationPolicy,
+};
 
 /// Shared runtime infrastructure an embedder builds once and reuses
 /// across every `LashRuntime` it constructs.
@@ -42,7 +46,13 @@ pub struct RuntimeEnvironment {
     // `PluginSession` is built from it via `PluginHost::build_session`.
     pub plugin_host: Option<Arc<crate::PluginHost>>,
 
-    // Host-owned process lifecycle and local execution support.
+    /// Host-owned process lifecycle support.
+    ///
+    /// This can be present while `work` is `RuntimeWork::SessionsOnly` in the
+    /// named registry-only state used by the facade's lazy native composition:
+    /// facade/admin/session consumers use the watched registry before the
+    /// native process port is resolved. Once process work is wired, this is the
+    /// registry carried by that same wiring.
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
 
     // Host-owned trigger subscription and trigger occurrence routing.
@@ -52,19 +62,24 @@ pub struct RuntimeEnvironment {
     // built with this environment.
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
 
-    // Host-owned process work driver. Threaded onto every `RuntimeHost` built
-    // from this environment (see `LashRuntime::from_environment`).
-    pub process_work_driver: Option<super::ProcessWorkDriver>,
-
-    // Host-owned queued work driver. Queue ingress sites call it directly so
-    // queued turn work, including process wakes, drains through the selected
-    // host without a core-owned poller.
-    pub queued_work_driver: Option<super::QueuedWorkDriver>,
+    pub(crate) work: RuntimeWork,
 
     pub core: RuntimeHostConfig,
 }
 
 impl RuntimeEnvironment {
+    #[doc(hidden)]
+    pub fn process_work(&self) -> Option<Arc<dyn super::ProcessWorkSubstrate>> {
+        self.work
+            .process_wiring()
+            .map(|wiring| Arc::clone(wiring.port()))
+    }
+
+    #[doc(hidden)]
+    pub fn queued_work(&self) -> Arc<dyn QueuedWorkSubstrate> {
+        Arc::clone(self.work.queued_arc())
+    }
+
     /// Construct an environment builder seeded with an in-memory host using
     /// `commit_budget`. A later
     /// [`with_runtime_host_config`](RuntimeEnvironmentBuilder::with_runtime_host_config)
@@ -116,8 +131,7 @@ impl RuntimeEnvironmentBuilder {
                 process_registry: None,
                 trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
                 session_store_factory: None,
-                process_work_driver: None,
-                queued_work_driver: None,
+                work: RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
                 core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
             },
         }
@@ -127,7 +141,15 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
+    /// Configure the registry-only state used when a host will resolve native
+    /// process work lazily. This is mutually exclusive with
+    /// [`Self::with_process_work`]; attempting to set both is a configuration
+    /// error and panics immediately.
     pub fn with_process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
+        assert!(
+            self.env.process_registry.is_none(),
+            "process registry is already configured; use either with_process_registry or with_process_work"
+        );
         self.env.process_registry = Some(process_registry);
         self
     }
@@ -146,14 +168,21 @@ impl RuntimeEnvironmentBuilder {
     }
 
     /// Set the host's process work driver. Every `RuntimeHost` built from this
-    /// environment carries it, so process starts can directly drive pending work.
-    pub fn with_process_work_driver(mut self, driver: super::ProcessWorkDriver) -> Self {
-        self.env.process_work_driver = Some(driver);
+    /// environment carries it, so process starts can directly drive pending
+    /// work. This is mutually exclusive with [`Self::with_process_registry`];
+    /// attempting to set both is a configuration error and panics immediately.
+    pub fn with_process_work(mut self, wiring: ProcessWorkWiring) -> Self {
+        assert!(
+            self.env.process_registry.is_none(),
+            "process registry is already configured; use either with_process_registry or with_process_work"
+        );
+        self.env.process_registry = Some(Arc::clone(wiring.registry()));
+        self.env.work = self.env.work.with_process_wiring(wiring);
         self
     }
 
-    pub fn with_queued_work_driver(mut self, driver: super::QueuedWorkDriver) -> Self {
-        self.env.queued_work_driver = Some(driver);
+    pub fn with_queued_work(mut self, queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+        self.env.work = self.env.work.with_queued(queued);
         self
     }
 
@@ -247,6 +276,27 @@ impl RuntimeEnvironmentBuilder {
     }
 }
 
+impl RuntimeEnvironment {
+    #[doc(hidden)]
+    pub fn with_work_ports(
+        mut self,
+        process: Option<ProcessWorkWiring>,
+        queued: Arc<dyn QueuedWorkSubstrate>,
+    ) -> Self {
+        self.work = match process {
+            Some(wiring) => {
+                self.process_registry = Some(Arc::clone(wiring.registry()));
+                RuntimeWork::processes(wiring, queued)
+            }
+            None => {
+                self.process_registry = None;
+                RuntimeWork::sessions_only(queued)
+            }
+        };
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,7 +305,7 @@ mod tests {
     fn builder_methods_configure_runtime_host() {
         let attachment_store: Arc<dyn crate::AttachmentStore> =
             Arc::new(crate::InMemoryAttachmentStore::new());
-        let effect_host: Arc<dyn EffectHost> = Arc::new(InlineEffectHost::default());
+        let effect_host: Arc<dyn EffectHost> = Arc::new(NativeEffectHost::default());
         let trace_context = TraceContext::default().for_session("session-1");
         let termination = TerminationPolicy {
             treat_missing_done_as_failure: false,

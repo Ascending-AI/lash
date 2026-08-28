@@ -1,18 +1,20 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::QueuedWorkDriverInner;
+use crate::runtime::{WorkerSlotKind, WorkerSlotPermit};
+
+use super::NativeQueuedWorkInner;
 use super::scheduler::{
     QueuedWorkDemand, QueuedWorkExecutionDispatcherGuard, QueuedWorkExecutionTaskCompletion,
 };
 use super::types::{
     QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunProgress, QueuedWorkSlowWake,
-    QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome, WAKE_MAX_ATTEMPTS,
-    WAKE_RETRY_INITIAL, WAKE_RETRY_MAX, jittered_wake_retry,
+    QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
+    bounded_multiplicative_jitter,
 };
 
 pub(super) struct QueuedWorkTaskDriver {
-    pub(super) inner: Arc<QueuedWorkDriverInner>,
+    pub(super) inner: Arc<NativeQueuedWorkInner>,
 }
 
 pub(super) enum QueuedWorkRunAttemptOutcome {
@@ -41,7 +43,7 @@ impl QueuedWorkTaskDriver {
                     let _completion = completion;
                     match (permit, scheduler.slots.as_ref()) {
                         (Some(permit), Some(slots)) => {
-                            super::super::process_worker::scope_queued_work_execution_permit(
+                            crate::runtime::process_worker::scope_queued_work_execution_permit(
                                 Arc::clone(slots),
                                 permit,
                                 Arc::clone(&scheduler.changed),
@@ -84,7 +86,7 @@ impl QueuedWorkTaskDriver {
                         state.scheduled.remove(&session_id);
                     }
                     self.inner.scheduler.metrics.intake_depth(
-                        super::super::WorkerSlotKind::QueuedWork,
+                        WorkerSlotKind::QueuedWork,
                         state.pending.len() + state.rerun.len(),
                     );
                 }
@@ -95,13 +97,13 @@ impl QueuedWorkTaskDriver {
 
     pub(super) async fn next_execution(
         &self,
-    ) -> Option<(QueuedWorkDemand, Option<super::super::WorkerSlotPermit>)> {
+    ) -> Option<(QueuedWorkDemand, Option<WorkerSlotPermit>)> {
         if self.inner.scheduler.lock_state().pending.is_empty() {
             return None;
         }
         let permit = match self.inner.scheduler.slots.as_ref() {
             Some(slots) => {
-                let reserve = slots.reserve_slot(super::super::WorkerSlotKind::QueuedWork);
+                let reserve = slots.reserve_slot(WorkerSlotKind::QueuedWork);
                 tokio::pin!(reserve);
                 Some(tokio::select! {
                     biased;
@@ -125,18 +127,19 @@ impl QueuedWorkTaskDriver {
         }
         state.active += 1;
         self.inner.scheduler.metrics.intake_depth(
-            super::super::WorkerSlotKind::QueuedWork,
+            WorkerSlotKind::QueuedWork,
             state.pending.len() + state.rerun.len(),
         );
         Some((demand, permit))
     }
 
     pub(super) async fn run_demand(&self, mut demand: QueuedWorkDemand) {
+        let work_cadence = self.inner.work_cadence.clone();
         let mut pass = 1_u32;
         let mut transient_attempt = 1_u32;
-        let mut transient_retry_after = WAKE_RETRY_INITIAL;
+        let mut transient_retry_after = work_cadence.retry_initial;
         let mut contended_passes = 0_u32;
-        let mut contended_retry_after = WAKE_RETRY_INITIAL;
+        let mut contended_retry_after = work_cadence.retry_initial;
         let mut contended_since = None;
         let mut next_contention_heartbeat = None;
         loop {
@@ -151,9 +154,9 @@ impl QueuedWorkTaskDriver {
                 }
                 Some(Ok(QueuedWorkRunAttemptOutcome::Progress)) => {
                     transient_attempt = 1;
-                    transient_retry_after = WAKE_RETRY_INITIAL;
+                    transient_retry_after = work_cadence.retry_initial;
                     contended_passes = 0;
-                    contended_retry_after = WAKE_RETRY_INITIAL;
+                    contended_retry_after = work_cadence.retry_initial;
                     contended_since = None;
                     next_contention_heartbeat = None;
                     self.merge_rerun(&mut demand);
@@ -166,19 +169,20 @@ impl QueuedWorkTaskDriver {
                     // while preserving an independent full error-retry budget
                     // for the commit race that commonly follows lease release.
                     transient_attempt = 1;
-                    transient_retry_after = WAKE_RETRY_INITIAL;
+                    transient_retry_after = work_cadence.retry_initial;
                     contended_passes = contended_passes.saturating_add(1);
                     let now = tokio::time::Instant::now();
                     let started = *contended_since.get_or_insert(now);
                     let heartbeat = next_contention_heartbeat
-                        .get_or_insert(started + self.inner.slow_wake_threshold);
+                        .get_or_insert(started + self.inner.work_cadence.slow_wake_threshold);
                     if now >= *heartbeat {
                         let event = QueuedWorkWakeContended {
                             session_id: demand.session_id.clone(),
                             reason: reason.clone(),
                             contended_passes,
                             contended_ms: now.duration_since(started).as_millis() as u64,
-                            threshold_ms: self.inner.slow_wake_threshold.as_millis() as u64,
+                            threshold_ms: self.inner.work_cadence.slow_wake_threshold.as_millis()
+                                as u64,
                             available_permits: self.inner.scheduler.available_permits(),
                             admission_limit: self.inner.scheduler.admission_limit,
                         };
@@ -194,36 +198,47 @@ impl QueuedWorkTaskDriver {
                             event = "queued_work.wake_contended",
                             "queued-work wake remains blocked by session execution contention"
                         );
-                        *heartbeat = now + self.inner.slow_wake_threshold;
+                        *heartbeat = now + self.inner.work_cadence.slow_wake_threshold;
                     }
                     if !self
-                        .wait_for_retry(jittered_wake_retry(contended_retry_after))
+                        .wait_for_retry(bounded_multiplicative_jitter(
+                            contended_retry_after,
+                            work_cadence.retry_initial,
+                            work_cadence.retry_max,
+                        ))
                         .await
                     {
                         return;
                     }
-                    contended_retry_after =
-                        contended_retry_after.saturating_mul(2).min(WAKE_RETRY_MAX);
+                    contended_retry_after = contended_retry_after
+                        .saturating_mul(2)
+                        .min(work_cadence.retry_max);
                     self.merge_rerun(&mut demand);
                     pass = pass.saturating_add(1);
                     continue;
                 }
                 Some(Err(err)) => {
                     contended_passes = 0;
-                    contended_retry_after = WAKE_RETRY_INITIAL;
+                    contended_retry_after = work_cadence.retry_initial;
                     contended_since = None;
                     next_contention_heartbeat = None;
                     let disposition = match err.class {
                         QueuedWorkRunErrorClass::Terminal => QueuedWorkWakeOutcome::Terminal,
                         QueuedWorkRunErrorClass::Transient
-                            if transient_attempt >= WAKE_MAX_ATTEMPTS =>
+                            if transient_attempt >= work_cadence.max_transient_attempts.get() =>
                         {
                             QueuedWorkWakeOutcome::Exhausted
                         }
                         QueuedWorkRunErrorClass::Transient => QueuedWorkWakeOutcome::Retrying,
                     };
-                    let retry_after = matches!(disposition, QueuedWorkWakeOutcome::Retrying)
-                        .then(|| jittered_wake_retry(transient_retry_after));
+                    let retry_after =
+                        matches!(disposition, QueuedWorkWakeOutcome::Retrying).then(|| {
+                            bounded_multiplicative_jitter(
+                                transient_retry_after,
+                                work_cadence.retry_initial,
+                                work_cadence.retry_max,
+                            )
+                        });
                     let failure = QueuedWorkWakeFailure {
                         session_id: demand.session_id.clone(),
                         reason: reason.clone(),
@@ -274,8 +289,9 @@ impl QueuedWorkTaskDriver {
                     {
                         return;
                     }
-                    transient_retry_after =
-                        transient_retry_after.saturating_mul(2).min(WAKE_RETRY_MAX);
+                    transient_retry_after = transient_retry_after
+                        .saturating_mul(2)
+                        .min(work_cadence.retry_max);
                     transient_attempt = transient_attempt.saturating_add(1);
                     self.merge_rerun(&mut demand);
                     pass = pass.saturating_add(1);
@@ -285,7 +301,7 @@ impl QueuedWorkTaskDriver {
     }
 
     async fn wait_for_retry(&self, retry_after: Duration) -> bool {
-        let backoff = super::super::process_worker::release_process_execution_permit_while(
+        let backoff = crate::runtime::process_worker::release_process_execution_permit_while(
             tokio::time::sleep(retry_after),
         );
         tokio::pin!(backoff);
@@ -347,12 +363,16 @@ impl QueuedWorkTaskDriver {
             tokio::select! {
                 () = self.inner.shutdown.cancelled() => return None,
                 result = &mut run => return Some(result),
-                () = tokio::time::sleep(self.inner.slow_wake_threshold) => {
+                () = tokio::time::sleep(self.inner.work_cadence.slow_wake_threshold) => {
                     let event = QueuedWorkSlowWake {
                         session_id: demand.session_id.clone(),
                         reason: reason.to_string(),
                         attempt,
-                        threshold_ms: self.inner.slow_wake_threshold.as_millis() as u64,
+                        threshold_ms: self
+                            .inner
+                            .work_cadence
+                            .slow_wake_threshold
+                            .as_millis() as u64,
                         available_permits: self.inner.scheduler.available_permits(),
                         admission_limit: self.inner.scheduler.admission_limit,
                     };

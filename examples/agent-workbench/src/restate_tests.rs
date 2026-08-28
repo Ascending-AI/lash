@@ -285,7 +285,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         .await
         .expect("retire queued-work session");
     let queued_work_driver =
-        lash::runtime::QueuedWorkDriver::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {
+        lash::runtime::NativeQueuedWork::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {
             sessions: crate::WorkbenchSessions::fresh(),
             store_factory,
             restate_ingress_url: "http://127.0.0.1:8080".to_string(),
@@ -294,7 +294,7 @@ async fn queued_work_wake_preserves_a_retired_session_terminal() {
         }));
 
     let error = queued_work_driver
-        .claim_and_run_pending(Some(session_id), "retired_session_regression")
+        .drain_session(session_id, "retired_session_regression")
         .await
         .expect_err("the queued-work wake must refuse the retired session");
     let classified = AppError::runtime(lash::EmbedError::Plugin(error.clone()));
@@ -492,28 +492,39 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 /// handler, but that refusal now comes from the scoped host controller rather
 /// than from a facade ownership preflight.
 #[tokio::test]
-async fn effect_replay_ownership_routes_foreground_turns_through_the_configured_host() {
-    let data_dir = tempfile::tempdir().expect("effect replay ownership tempdir");
+async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
+    let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
 
-    let inline_host: Arc<dyn lash::durability::EffectHost> =
-        Arc::new(lash::durability::InlineEffectHost::default());
+    let native_host: Arc<dyn lash::durability::EffectHost> =
+        Arc::new(lash::durability::NativeEffectHost::default());
     let durable_host: Arc<dyn lash::durability::EffectHost> =
         lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::new(
             "http://127.0.0.1:8080",
         ))
         .effect_host();
-    let inline_ownership = inline_host.replay_ownership();
-    assert_eq!(
-        inline_ownership,
-        lash::EffectReplayOwnership::Runtime,
-        "the workbench's foreground host executes effects itself"
-    );
-    let durable_ownership = durable_host.replay_ownership();
-    assert_eq!(
-        durable_ownership,
-        lash::EffectReplayOwnership::Controller,
-        "the Restate host hands effect replay to the controller"
-    );
+    let scope = lash::runtime::ExecutionScope::turn("routing-session", "routing-turn");
+    let native_scoped = native_host.scoped(scope.clone()).expect("inline scope");
+    assert!(matches!(
+        native_host
+            .turn_control_binding(&native_scoped)
+            .await
+            .expect("inline binding"),
+        lash::runtime::TurnControlBinding::HostOwned {
+            resolver: _,
+            peek: _,
+        }
+    ));
+    let durable_scoped = durable_host.scoped(scope).expect("durable scope");
+    assert!(matches!(
+        durable_host
+            .turn_control_binding(&durable_scoped)
+            .await
+            .expect("durable binding"),
+        lash::runtime::TurnControlBinding::RunScoped {
+            resolver: _,
+            durable_cancel_after_llm: true,
+        }
+    ));
 
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let ownership_core = |effect_host: Arc<dyn lash::durability::EffectHost>, name: &str| {
@@ -577,7 +588,7 @@ async fn effect_replay_ownership_routes_foreground_turns_through_the_configured_
 
     // A runtime-owned host uses the same facade entry point and executes the
     // local provider body instead.
-    let runtime_owned = ownership_core(Arc::clone(&inline_host), "runtime-owned");
+    let runtime_owned = ownership_core(Arc::clone(&native_host), "runtime-owned");
     let session = runtime_owned
         .session("workbench-runtime-owned-replay")
         .open()
@@ -724,3 +735,29 @@ fn settlement_reader_treats_ambiguous_errors_as_retryable() {
 }
 
 include!("restate_cron_tests.rs");
+
+#[async_trait::async_trait]
+trait QueuedWorkExt {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError>;
+}
+
+#[async_trait::async_trait]
+impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
+    async fn drain_session(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), lash::plugins::PluginError> {
+        lash::runtime::QueuedWorkSubstrate::drain_session_work(
+            self,
+            lash::runtime::SessionWorkTarget::Session(session_id.to_string()),
+            reason,
+        )
+        .await
+        .map(|_| ())
+    }
+}

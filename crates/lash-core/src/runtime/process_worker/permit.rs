@@ -3,8 +3,8 @@ use std::future::Future;
 use super::*;
 use crate::{WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier};
 
-/// Permit owned by one inline process execution. All clones refer to the same
-/// slot so child-turn and inline-effect task boundaries can park the outer run.
+/// Permit owned by one native process execution. All clones refer to the same
+/// slot so child-turn and native-effect task boundaries can park the outer run.
 ///
 /// This type assumes one logical thread of execution per process run. Clones
 /// may move that one thread across task boundaries, but must not be awaited by
@@ -169,7 +169,8 @@ pub(crate) async fn scope_queued_work_execution_permit<F: Future>(
     PROCESS_EXECUTION_PERMIT.scope(permit, future).await
 }
 
-pub(crate) async fn release_process_execution_permit_while<F: Future>(future: F) -> F::Output {
+#[doc(hidden)]
+pub async fn release_process_execution_permit_while<F: Future>(future: F) -> F::Output {
     let permit = PROCESS_EXECUTION_PERMIT.try_with(Arc::clone).ok();
     match permit {
         Some(permit) => permit.release_while(future).await,

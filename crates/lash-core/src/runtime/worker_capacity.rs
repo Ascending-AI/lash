@@ -7,9 +7,9 @@ use tokio::sync::Semaphore;
 /// The independent worker lane requesting admission from a slot supplier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorkerSlotKind {
-    /// Inline durable-process execution.
+    /// native durable-process execution.
     Process,
-    /// Inline queued-work wake execution.
+    /// native queued-work wake execution.
     QueuedWork,
 }
 
@@ -46,7 +46,7 @@ impl WorkerSlotPermit {
     }
 }
 
-/// Host-defined admission control for Lash's inline worker lanes.
+/// Host-defined admission control for Lash's native substrate lanes.
 ///
 /// The non-blocking method lets a dispatcher reserve capacity before it takes
 /// work from its intake buffer. A parked run uses the async method to reacquire

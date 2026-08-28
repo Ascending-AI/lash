@@ -925,12 +925,15 @@ struct SeamEffectController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for SeamEffectController {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 
     async fn await_event_key(
@@ -982,6 +985,19 @@ impl crate::AwaitEventResolver for SeamEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for SeamEffectController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+        self.inner.runtime_effect_failure_disposition(code).await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+        self.inner.turn_control_participation().await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -1035,12 +1051,15 @@ struct CrashAfterCheckpointExecutionController {
 
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
-    fn replay_ownership(&self) -> crate::EffectReplayOwnership {
-        self.inner.replay_ownership()
-    }
-
-    fn allows_process_lifetime_completion_keys(&self) -> bool {
-        self.inner.allows_process_lifetime_completion_keys()
+    async fn prepare_completion_key(
+        &self,
+        scope: &crate::ExecutionScope,
+        wait: crate::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
     }
 
     async fn await_event_key(
@@ -1092,6 +1111,19 @@ impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
+    async fn runtime_effect_failure_disposition(
+        &self,
+        code: crate::RuntimeErrorCode,
+    ) -> Result<crate::RuntimeEffectFailureDisposition, crate::RuntimeError> {
+        self.inner.runtime_effect_failure_disposition(code).await
+    }
+
+    async fn turn_control_participation(
+        &self,
+    ) -> Result<crate::TurnControlParticipation, crate::RuntimeError> {
+        self.inner.turn_control_participation().await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -1241,12 +1273,12 @@ async fn build_runtime_with_lease_timings(
 ) -> crate::LashRuntime {
     super::bind_conformance_session(&store, &identity.session_id).await;
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::InlineRuntimeEffectController::default()),
+        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
         control: control.clone(),
         executions,
     });
     let mut host = crate::RuntimeHostConfig::new(
-        Arc::new(crate::InlineEffectHost::new(Arc::clone(&effect_controller))),
+        Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller))),
         Arc::new(crate::InMemoryAttachmentStore::new()),
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1572,7 +1604,7 @@ where
     // is owned by a background timer rather than by the turn.
     control.pin_renewal_after_provider();
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::InlineRuntimeEffectController::default()),
+        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
         control: control.clone(),
         executions,
     });
@@ -1700,15 +1732,17 @@ fn pending_input_text(input: &PendingTurnInput) -> String {
 /// task deterministically starved, which pins the advisory checkpoint-skip
 /// path (lease lapsed by wall clock) that a loaded runner would otherwise
 /// reach only by luck.
-pub async fn turn_crash_matrix_level_1<F>(make: F)
+pub async fn turn_crash_matrix_level_1<F, I>(make: F, make_invocation: I)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    I: Fn(&str) -> super::ConformanceInvocation,
 {
     Box::pin(turn_crash_trace_drift_check(&make)).await;
     for entry in turn_crash_matrix_outcomes() {
         let scenario = point_key(&entry.point);
         Box::pin(run_crash_matrix_case(
             &make,
+            &make_invocation,
             &entry,
             &scenario,
             RenewalPressure::Nominal,
@@ -1728,6 +1762,7 @@ where
     let starved_scenario = format!("{}:starved-renewal", point_key(&renewal_boundary.point));
     Box::pin(run_crash_matrix_case(
         &make,
+        &make_invocation,
         &renewal_boundary,
         &starved_scenario,
         RenewalPressure::Starved,
@@ -1737,13 +1772,15 @@ where
 
 /// Crash one scripted turn at `entry`'s point, recover it with a successor
 /// turn under `pressure`, and assert the ruled durable end state.
-async fn run_crash_matrix_case<F>(
+async fn run_crash_matrix_case<F, I>(
     make: &F,
+    make_invocation: &I,
     entry: &TurnCrashOutcome,
     scenario: &str,
     pressure: RenewalPressure,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    I: Fn(&str) -> super::ConformanceInvocation,
 {
     let identity = ReferenceIdentity::for_scenario(scenario);
     let raw = make(scenario);
@@ -1760,8 +1797,10 @@ async fn run_crash_matrix_case<F>(
     ))
     .await;
     control.arm(entry.point.clone());
+    let invocation = make_invocation(scenario);
+    let effect_redrive = invocation.effect_redrive();
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::InlineRuntimeEffectController::default()),
+        inner: invocation.controller_handle(),
         control: control.clone(),
         executions: Arc::clone(&executions),
     });
@@ -1774,6 +1813,7 @@ async fn run_crash_matrix_case<F>(
     control.simulate_process_crash();
     task.abort();
     let _ = task.await;
+    let successor_invocation = invocation.redrive();
 
     let predecessor_claimed = !matches!(
         (&entry.point.operation, entry.point.placement),
@@ -1810,13 +1850,14 @@ async fn run_crash_matrix_case<F>(
     }
     let successor_effect_controller: Arc<dyn RuntimeEffectController> =
         Arc::new(SeamEffectController {
-            inner: Arc::new(crate::InlineRuntimeEffectController::default()),
+            inner: successor_invocation.controller_handle(),
             control: successor_control,
             executions: Arc::clone(&executions),
         });
     let _ = drive_turn(successor, successor_effect_controller, &identity)
         .await
         .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
+    successor_invocation.end();
 
     let reader = make(scenario);
     super::bind_conformance_session(&reader, &identity.session_id).await;
@@ -1863,7 +1904,14 @@ async fn run_crash_matrix_case<F>(
     };
     let drain_turns = usize::from(!deferred_texts.is_empty());
     if drain_turns == 1 {
-        Box::pin(drive_drain_turn(make, scenario, &identity, &executions)).await;
+        Box::pin(drive_drain_turn(
+            make,
+            make_invocation,
+            scenario,
+            &identity,
+            &executions,
+        ))
+        .await;
     }
 
     let state = crate::load_persisted_session_state(reader.as_ref())
@@ -1909,9 +1957,17 @@ async fn run_crash_matrix_case<F>(
     );
 
     let effect_count = executions.load(std::sync::atomic::Ordering::SeqCst);
+    let expected_effect_count = match effect_redrive {
+        super::ConformanceEffectRedrive::ReplaysJournal => {
+            usize::from(matches!(
+                entry.point.placement,
+                CrashPlacement::AfterExternalEffectBeforeOutcome
+            )) + 1
+        }
+        super::ConformanceEffectRedrive::ReexecutesUncommitted => entry.effect_executions_l1,
+    } + drain_turns * DRAIN_TURN_EFFECT_EXECUTIONS;
     assert_eq!(
-        effect_count,
-        entry.effect_executions_l1 + drain_turns * DRAIN_TURN_EFFECT_EXECUTIONS,
+        effect_count, expected_effect_count,
         "{scenario}: {}",
         entry.outcome
     );
@@ -1919,13 +1975,15 @@ async fn run_crash_matrix_case<F>(
 
 /// Drive one further clean turn to absorb inputs the recovered turn deferred to
 /// the next turn.
-async fn drive_drain_turn<F>(
+async fn drive_drain_turn<F, I>(
     make: &F,
+    make_invocation: &I,
     scenario: &str,
     identity: &ReferenceIdentity,
     executions: &Arc<std::sync::atomic::AtomicUsize>,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    I: Fn(&str) -> super::ConformanceInvocation,
 {
     // The drain turn is a new turn, not a recovery of the crashed one, so it
     // gets its own turn identity: reusing the recovered turn's id would collide
@@ -1947,14 +2005,16 @@ async fn drive_drain_turn<F>(
     ))
     .await;
     control.clear();
+    let invocation = make_invocation(&identity.turn_id);
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::InlineRuntimeEffectController::default()),
+        inner: invocation.controller_handle(),
         control,
         executions: Arc::clone(executions),
     });
     let _ = drive_turn(runtime, effect_controller, identity)
         .await
         .unwrap_or_else(|error| panic!("drain turn failed for {scenario}: {error}"));
+    invocation.end();
 }
 
 #[cfg(test)]

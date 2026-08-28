@@ -20,8 +20,8 @@ use lash_core::{
 };
 use lash_sansio::sync::MutexExt;
 use restate_sdk::context::{
-    Context as RestateContext, ContextAwakeables, ContextClient, InvocationHandle, ObjectContext,
-    RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+    Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext, RunRetryPolicy,
+    SharedObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, TerminalError};
 use restate_sdk::serde::Json;
@@ -32,6 +32,12 @@ use crate::durable_wait::{
     RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest, RestateTurnCancelGate,
     RestateTurnCancelRaceOutcome, RestateTurnCancelWake, durable_wait_index_object_key,
     register_turn_cancel_gate, retire_turn_cancel_gate,
+};
+use crate::effect_group::{
+    EffectGroupCloseRequest, EffectGroupCloseResponse, EffectGroupDispatchClient,
+    EffectGroupDispatchRequest, EffectGroupIndexClient, EffectGroupOpenRequest,
+    EffectGroupOpenResponse, EffectGroupPayloadClient, EffectGroupPayloadGetResponse,
+    EffectGroupProbeResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
 };
 use crate::process::{
     LashProcessWorkflowClient, RestateProcessAwaitRequest, RestateProcessCancelRequest,
@@ -444,6 +450,129 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async { Ok(false) })
     }
+
+    fn effect_group_probe<'run>(
+        &'run self,
+        _group_key: String,
+    ) -> Pin<Box<dyn Future<Output = Result<EffectGroupProbeResponse, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "EffectGroupIndex/probe is not registered",
+            ))
+        })
+    }
+
+    fn effect_group_preflight<'run>(
+        &'run self,
+        _group_key: String,
+        _children: Vec<lash_core::RuntimeEffectEnvelope>,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "EffectGroupDispatch/preflight is not registered",
+            ))
+        })
+    }
+
+    fn effect_group_open<'run>(
+        &'run self,
+        _group_key: String,
+        _request: EffectGroupOpenRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<EffectGroupOpenResponse, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "EffectGroupIndex/open is not registered",
+            ))
+        })
+    }
+
+    fn effect_group_submit<'run>(
+        &'run self,
+        _request: EffectGroupDispatchRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "EffectGroupDispatch/run is not registered",
+            ))
+        })
+    }
+
+    fn effect_group_read_rank<'run>(
+        &'run self,
+        _group_key: String,
+        _request: EffectGroupReadRankRequest,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>,
+    >
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "EffectGroupIndex/read_rank is not registered",
+            ))
+        })
+    }
+
+    fn effect_group_payload_get<'run>(
+        &'run self,
+        _payload_key: String,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run,
+        >,
+    >
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "EffectGroupPayload/get is not registered",
+            ))
+        })
+    }
+
+    fn effect_group_close<'run>(
+        &'run self,
+        _group_key: String,
+        _request: EffectGroupCloseRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<EffectGroupCloseResponse, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "EffectGroupIndex/close is not registered",
+            ))
+        })
+    }
+
+    fn await_effect_group_wait<'run>(
+        &'run self,
+        _request: RestateDurableWaitAwaitRequest,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        Box::pin(async {
+            Err(TerminalError::new(
+                "LashDurableWaitWorkflow/await_resolution is not registered",
+            ))
+        })
+    }
 }
 macro_rules! impl_restate_controller_context {
     ($($context:ident),+ $(,)?) => {
@@ -622,7 +751,10 @@ macro_rules! impl_restate_controller_context {
                             execution_id: None,
                         }));
                     let handle = request.send();
-                    Box::pin(async move { handle.invocation_id().await })
+                    Box::pin(async move {
+                        let handle = handle.await?;
+                        Ok(handle.invocation_id().to_owned())
+                    })
                 }
 
                 fn request_process_workflow_cancel<'run>(
@@ -969,6 +1101,161 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let Json(revoked) = call.await?;
                         Ok(revoked)
+                    })
+                }
+
+                fn effect_group_probe<'run>(
+                    &'run self,
+                    group_key: String,
+                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupProbeResponse, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .probe()
+                        .call();
+                    Box::pin(async move {
+                        let Json(response) = call.await?;
+                        Ok(response)
+                    })
+                }
+
+                fn effect_group_preflight<'run>(
+                    &'run self,
+                    group_key: String,
+                    children: Vec<lash_core::RuntimeEffectEnvelope>,
+                ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .workflow_client::<EffectGroupDispatchClient>(group_key)
+                        .preflight(Json(children))
+                        .call();
+                    Box::pin(async move {
+                        let Json(response) = call.await?;
+                        Ok(response)
+                    })
+                }
+
+                fn effect_group_open<'run>(
+                    &'run self,
+                    group_key: String,
+                    request: EffectGroupOpenRequest,
+                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupOpenResponse, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .open(Json(request))
+                        .call();
+                    Box::pin(async move {
+                        let Json(response) = call.await?;
+                        Ok(response)
+                    })
+                }
+
+                fn effect_group_submit<'run>(
+                    &'run self,
+                    request: EffectGroupDispatchRequest,
+                ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let handle = self
+                        .workflow_client::<EffectGroupDispatchClient>(request.group_key.clone())
+                        .run(Json(request))
+                        .send();
+                    Box::pin(async move {
+                        let handle = handle.await?;
+                        Ok(handle.invocation_id().to_owned())
+                    })
+                }
+
+                fn effect_group_read_rank<'run>(
+                    &'run self,
+                    group_key: String,
+                    request: EffectGroupReadRankRequest,
+                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .read_rank(Json(request))
+                        .call();
+                    Box::pin(async move {
+                        let Json(response) = call.await?;
+                        Ok(response)
+                    })
+                }
+
+                fn effect_group_payload_get<'run>(
+                    &'run self,
+                    payload_key: String,
+                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<EffectGroupPayloadClient>(payload_key)
+                        .get()
+                        .call();
+                    Box::pin(async move {
+                        let Json(response) = call.await?;
+                        Ok(response)
+                    })
+                }
+
+                fn effect_group_close<'run>(
+                    &'run self,
+                    group_key: String,
+                    request: EffectGroupCloseRequest,
+                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupCloseResponse, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    let call = self
+                        .object_client::<EffectGroupIndexClient>(group_key)
+                        .close(Json(request))
+                        .call();
+                    Box::pin(async move {
+                        let Json(response) = call.await?;
+                        Ok(response)
+                    })
+                }
+
+                fn await_effect_group_wait<'run>(
+                    &'run self,
+                    request: RestateDurableWaitAwaitRequest,
+                    cancellation: tokio_util::sync::CancellationToken,
+                ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+                where
+                    'ctx: 'run,
+                {
+                    Box::pin(async move {
+                        let address = RestateDurableWaitAddress::for_key(&request.key);
+                        let call = self
+                            .workflow_client::<LashDurableWaitWorkflowClient>(address.workflow_key)
+                            .await_resolution(Json(request))
+                            .call();
+                        let wait = guard_restate_context_future(call);
+                        let cancelled = cancellation.cancelled();
+                        tokio::pin!(wait);
+                        tokio::pin!(cancelled);
+                        std::future::poll_fn(|cx| {
+                            match wait.as_mut().poll(cx) {
+                                Poll::Ready(result) => Poll::Ready(result.map(|Json(value)| Some(value))),
+                                Poll::Pending if wait.as_ref().get_ref().is_fused() => Poll::Pending,
+                                Poll::Pending => match cancelled.as_mut().poll(cx) {
+                                    Poll::Ready(()) => Poll::Ready(Ok(None)),
+                                    Poll::Pending => Poll::Pending,
+                                },
+                            }
+                        })
+                        .await
                     })
                 }
             }

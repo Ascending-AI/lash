@@ -1147,6 +1147,9 @@ jobs:
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh
 
+      - name: Check substrate boundary
+        run: bash scripts/check-substrate-boundary.sh
+
       - name: Check workflow graph model
         run: bash scripts/check-workflow-graph-model.sh
 
@@ -1713,6 +1716,12 @@ jobs:
             runner: ubuntu-24.04
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
+            node: false
+            artifact: none
+            browser: false
+            runner: ubuntu-24.04
+          - name: effect-group-conformance
+            recipe: effect-group-conformance-e2e
             node: false
             artifact: none
             browser: false

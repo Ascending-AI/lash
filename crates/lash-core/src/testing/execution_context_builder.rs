@@ -57,7 +57,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             session_host_mode: TestSessionHostMode::Independent,
             session_lifecycle: None,
             effect_controller: TestEffectController::Shared(Arc::new(
-                crate::InlineRuntimeEffectController::default()
+                crate::NativeRuntimeEffectController::default()
                     .allow_process_lifetime_completion_keys(),
             )),
             dispatch_parent_invocation: None,

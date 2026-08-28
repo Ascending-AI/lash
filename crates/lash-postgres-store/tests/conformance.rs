@@ -9,7 +9,8 @@ use lash_core::testing::conformance::{
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, Resolution, ResolveOutcome,
-    RuntimePersistence, SessionExecutionLeaseStore, SessionStoreFactory, StoreError, TriggerStore,
+    RuntimeEffectController, RuntimePersistence, SessionExecutionLeaseStore, SessionStoreFactory,
+    StoreError, TriggerStore,
 };
 use lash_postgres_store::{
     PostgresEffectReplayOptions, PostgresRuntimeEffectController, PostgresStorage,
@@ -70,6 +71,21 @@ fn sync_await<T: Send + 'static>(
     // PoolTimedOut. `block_in_place` lets this worker block while tokio spins up a
     // replacement, so the conformance harness keeps making progress.
     tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
+}
+
+fn postgres_conformance_invocation(
+    controller: PostgresRuntimeEffectController,
+) -> lash_core::testing::conformance::ConformanceInvocation {
+    let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
+    lash_core::testing::conformance::ConformanceInvocation::new(
+        live,
+        lash_core::testing::conformance::ConformanceEffectRedrive::ReplaysJournal,
+        || {},
+        move || {
+            controller.start_replay();
+            Arc::new(controller.clone()) as Arc<dyn RuntimeEffectController>
+        },
+    )
 }
 
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
@@ -536,6 +552,7 @@ async fn postgres_real_turn_crash_matrix_when_configured() {
             Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
                 as Arc<dyn RuntimePersistence>
         },
+        |_| lash_core::testing::conformance::ConformanceInvocation::native(),
     ))
     .await;
 }
@@ -1971,8 +1988,8 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
     let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
         "postgres-effect-controller-conformance",
     ));
-    lash_core::testing::conformance::effect_controller_journaled_effect_replay(&controller, || {
-        controller.start_replay()
+    lash_core::testing::conformance::effect_controller_journaled_effect_replay(|| {
+        postgres_conformance_invocation(controller.clone())
     })
     .await;
 
@@ -1980,7 +1997,7 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
         "postgres-effect-controller-mismatch-conformance",
     ));
     lash_core::testing::conformance::effect_controller_replay_mismatch_diagnostics(
-        &controller,
+        || postgres_conformance_invocation(controller.clone()),
         "postgres_effect_replay_hash_conflict",
     )
     .await;
@@ -1988,18 +2005,16 @@ async fn postgres_runtime_effect_controller_satisfies_conformance_when_configure
     let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
         "postgres-effect-controller-concurrent-conformance",
     ));
-    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(
-        &controller,
-        || controller.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(|| {
+        postgres_conformance_invocation(controller.clone())
+    })
     .await;
 
     let controller = storage.runtime_effect_controller(ExecutionScope::runtime_operation(
         "postgres-effect-controller-tool-conformance",
     ));
     lash_core::testing::conformance::effect_controller_tool_attempt_fanout_replay_deterministic(
-        &controller,
-        || controller.start_replay(),
+        || postgres_conformance_invocation(controller.clone()),
     )
     .await;
 }
