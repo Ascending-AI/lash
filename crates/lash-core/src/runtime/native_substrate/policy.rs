@@ -90,6 +90,15 @@ impl WorkCadencePolicy {
             "work_cadence.poll_max",
             self.poll_max,
         )?;
+        // The threshold is both a `sleep` in the queued-work `select!` loop and
+        // a reported `threshold_ms`. Below a millisecond the sleep arm is ready
+        // on almost every poll -- at zero, on every one -- so the loop spins a
+        // core emitting a `queued_work.wake_slow` warning per iteration, and it
+        // reports the threshold it spun on as `0`.
+        validate_millisecond_duration(
+            "work_cadence.slow_wake_threshold",
+            self.slow_wake_threshold,
+        )?;
         validate_millisecond_duration(
             "work_cadence.delivery_retry_initial",
             self.delivery_retry_initial,

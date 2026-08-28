@@ -1400,7 +1400,7 @@ fn builder_rejects_invalid_queued_work_execution_concurrency() {
 #[test]
 fn builder_rejects_incoherent_native_pacing_durations() {
     type Edit = fn(&mut lash_core::NativeSubstrateConfig);
-    let cases: [(&str, Edit); 11] = [
+    let cases: [(&str, Edit); 13] = [
         ("worker_sweep.fetch_retry_base", |config| {
             config.worker_sweep.fetch_retry_base = std::time::Duration::ZERO;
         }),
@@ -1421,6 +1421,12 @@ fn builder_rejects_incoherent_native_pacing_durations() {
         }),
         ("work_cadence.poll_initial", |config| {
             config.work_cadence.poll_initial = std::time::Duration::from_secs(2);
+        }),
+        ("work_cadence.slow_wake_threshold", |config| {
+            config.work_cadence.slow_wake_threshold = std::time::Duration::ZERO;
+        }),
+        ("work_cadence.slow_wake_threshold", |config| {
+            config.work_cadence.slow_wake_threshold = std::time::Duration::from_micros(500);
         }),
         ("work_cadence.delivery_retry_initial", |config| {
             config.work_cadence.delivery_retry_initial = std::time::Duration::ZERO;
@@ -1526,14 +1532,16 @@ fn builder_allows_harmless_native_pacing_boundaries() {
     config.worker_sweep.fetch_attempts = std::num::NonZeroUsize::MIN;
     config.work_cadence.max_transient_attempts = std::num::NonZeroU32::MIN;
     config.work_cadence.delivery_batch = std::num::NonZeroUsize::MIN;
-    config.work_cadence.slow_wake_threshold = std::time::Duration::ZERO;
+    config.work_cadence.slow_wake_threshold = std::time::Duration::from_millis(1);
     config.work_cadence.delivery_retry_initial = std::time::Duration::from_secs(2);
     config.work_cadence.delivery_retry_max = std::time::Duration::from_secs(1);
 
     explicit_ephemeral_facets(peer_coherence_builder())
         .native_substrate_config(config)
         .build(crate::testing::runtime_lease_owner())
-        .expect("non-zero count minima, telemetry zero, and clamped delivery retry are valid");
+        .expect(
+            "non-zero count minima, a one-millisecond slow-wake threshold, and clamped delivery retry are valid",
+        );
 }
 
 #[tokio::test]
