@@ -57,7 +57,7 @@ fn sqlite_conformance_invocation(
 fn conformance_invocation_lifecycle_control_is_consumable_cross_crate() {
     use lash_core::testing::conformance::{ConformanceEffectRedrive, ConformanceInvocation};
 
-    let invocation = ConformanceInvocation::inline();
+    let invocation = ConformanceInvocation::native();
     assert_eq!(
         ConformanceInvocation::effect_redrive(&invocation),
         ConformanceEffectRedrive::ReexecutesUncommitted
@@ -1317,7 +1317,7 @@ async fn sqlite_real_turn_crash_matrix() {
     let dir = tempfile::tempdir().expect("real-turn crash matrix tempdir");
     Box::pin(lash_core::testing::conformance::turn_crash_matrix_level_1(
         |scenario| open_store(&dir.path().join(format!("turn-crash-matrix-{scenario}.db"))),
-        |_| lash_core::testing::conformance::ConformanceInvocation::inline(),
+        |_| lash_core::testing::conformance::ConformanceInvocation::native(),
     ))
     .await;
 }

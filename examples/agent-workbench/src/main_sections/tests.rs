@@ -71,7 +71,7 @@ mod tests {
         );
         lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
                 data_dir.join("attachments"),
             )))
@@ -1284,7 +1284,7 @@ finish initial
             .trigger_store(trigger_store)
             .advanced()
             .runtime_host_config(lash::durability::RuntimeHostConfig::new(
-                Arc::new(lash::durability::InlineEffectHost::default()),
+                Arc::new(lash::durability::NativeEffectHost::default()),
                 Arc::new(lash::persistence::FileAttachmentStore::new(
                     data_dir.join("attachments"),
                 )),
@@ -2279,7 +2279,7 @@ finish initial
             .trigger_store(trigger_store)
             .advanced()
             .runtime_host_config(lash::durability::RuntimeHostConfig::new(
-                Arc::new(lash::durability::InlineEffectHost::default()),
+                Arc::new(lash::durability::NativeEffectHost::default()),
                 attachment_store,
                 process_env_store,
                 lash::CommitBudget::bounded(1024 * 1024, 512),
@@ -2347,7 +2347,7 @@ finish initial
             uuid::Uuid::new_v4()
         );
         let scoped_effect_controller = lash::runtime::ScopedEffectController::shared(
-            Arc::new(lash::runtime::InlineRuntimeEffectController::default()),
+            Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
             lash::runtime::ExecutionScope::runtime_operation(format!("trigger:{idempotency_key}")),
         )
         .expect("inline trigger occurrence execution scope");

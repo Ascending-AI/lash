@@ -417,7 +417,7 @@ async fn commit_one_turn(storage: &PostgresStorage, session_id: &str, tag: &str)
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         // A boot UUID, not the PID: the contract is that the incarnation changes
         // on every process boot, and PIDs are reused.

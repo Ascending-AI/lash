@@ -2,7 +2,7 @@
 //!
 //! Backends own persistence, authentication, and compare-and-swap mechanics.
 //! This module owns the semantic decisions that must remain identical across
-//! the inline, SQLite, Postgres, and engine-backed implementations.
+//! the native, SQLite, Postgres, and engine-backed implementations.
 //!
 //! Promise-key family v3 is a reject-and-recreate cutover from the live-serde
 //! v2 preimage. SQLite/Postgres effect schemas are bumped with this change;

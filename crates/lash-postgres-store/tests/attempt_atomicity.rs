@@ -1200,11 +1200,11 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
         Arc::new(lash_core::TestLocalProcessRegistry::default());
     fig1293_seed_control_target(&inline_registry).await;
     let (inline_model, inline_model_calls) = fig1293_model();
-    let inline_effect_host: Arc<dyn EffectHost> =
-        Arc::new(lash_core::facade_support::InlineEffectHost::default());
+    let native_effect_host: Arc<dyn EffectHost> =
+        Arc::new(lash_core::facade_support::NativeEffectHost::default());
     let inline_policy = fig1293_policy();
-    let mut inline = fig1293_runtime(
-        Arc::clone(&inline_effect_host),
+    let mut native = fig1293_runtime(
+        Arc::clone(&native_effect_host),
         inline_registry,
         inline_model,
         Arc::new(lash_core::facade_support::InMemorySessionStore::new()),
@@ -1214,10 +1214,10 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     .await;
     let inline_turn = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        run_fig1293_turn(&mut inline, inline_effect_host.as_ref()),
+        run_fig1293_turn(&mut native, native_effect_host.as_ref()),
     )
     .await
-    .expect("inline FIG-1293 tier turn timed out");
+    .expect("native FIG-1293 substrate turn timed out");
     assert_fig1293_literal_outputs(&inline_turn, 2);
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 

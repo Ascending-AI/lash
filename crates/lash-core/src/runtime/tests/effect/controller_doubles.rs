@@ -112,7 +112,7 @@ impl RuntimeEffectController for SerialOnlyEffectController {
 
 #[derive(Default)]
 pub(in crate::runtime::tests) struct RejectingEffectController {
-    inline: InlineRuntimeEffectController,
+    native: NativeRuntimeEffectController,
     abort_invocation_on_failure: bool,
     mismatch_summary: Option<RuntimeEffectReplayMismatchReport>,
 }
@@ -135,7 +135,7 @@ impl crate::AwaitEventResolver for RejectingEffectController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        self.native.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -143,14 +143,14 @@ impl crate::AwaitEventResolver for RejectingEffectController {
         key: &AwaitEventKey,
         resolution: Resolution,
     ) -> Result<ResolveOutcome, RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        self.native.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        self.inline.peek_await_event(key).await
+        self.native.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -159,17 +159,17 @@ impl crate::AwaitEventResolver for RejectingEffectController {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+        self.native.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .cancel_await_events_for_session(session_id)
             .await
     }
@@ -225,7 +225,7 @@ impl RuntimeEffectController for RejectingEffectController {
 
 #[derive(Default)]
 pub(super) struct WrongOutcomeEffectController {
-    inline: InlineRuntimeEffectController,
+    native: NativeRuntimeEffectController,
 }
 
 #[async_trait::async_trait]
@@ -235,7 +235,7 @@ impl crate::AwaitEventResolver for WrongOutcomeEffectController {
         scope: &ExecutionScope,
         wait: AwaitEventWaitIdentity,
     ) -> Result<AwaitEventKey, RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        self.native.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -243,14 +243,14 @@ impl crate::AwaitEventResolver for WrongOutcomeEffectController {
         key: &AwaitEventKey,
         resolution: Resolution,
     ) -> Result<ResolveOutcome, RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        self.native.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &AwaitEventKey,
     ) -> Result<Option<Resolution>, RuntimeError> {
-        self.inline.peek_await_event(key).await
+        self.native.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -259,17 +259,17 @@ impl crate::AwaitEventResolver for WrongOutcomeEffectController {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+        self.native.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
 
     async fn cancel_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.inline
+        self.native
             .cancel_await_events_for_session(session_id)
             .await
     }

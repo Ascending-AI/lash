@@ -1,9 +1,9 @@
 //! The observable semantics of the durable effect-group contract, asserted
 //! against the in-memory reference host (FIG-1535, ADR 0065).
 //!
-//! Every test here is a statement about the *contract*, not about the inline
+//! Every test here is a statement about the *contract*, not about the native
 //! tier: a SQL or engine host that disagrees with one of these is wrong, and one
-//! that agrees and additionally survives a crash is conformant. The inline tier
+//! that agrees and additionally survives a crash is conformant. The native substrate
 //! is the right place to write them because it is the only one whose whole
 //! behaviour is observable without a substrate — what it cannot claim, and what
 //! is therefore deliberately absent here, is cross-process durability.
@@ -133,18 +133,18 @@ async fn until(mut condition: impl FnMut() -> bool) {
     .expect("the host reaches the awaited state");
 }
 
-fn controller() -> InlineRuntimeEffectController {
-    let controller = InlineRuntimeEffectController::default();
+fn controller() -> NativeRuntimeEffectController {
+    let controller = NativeRuntimeEffectController::default();
     controller
         .register_group_executors(executors() as Arc<dyn crate::GroupExecutors>)
         .expect("a fresh controller has no resolver yet");
     controller
 }
 
-/// An inline host whose controller resolves grouped children through this
+/// An native host whose controller resolves grouped children through this
 /// file's staging table.
-fn inline_host() -> crate::InlineEffectHost {
-    crate::InlineEffectHost::new(Arc::new(controller()))
+fn native_host() -> crate::NativeEffectHost {
+    crate::NativeEffectHost::new(Arc::new(controller()))
 }
 
 /// The capability flag is the admission gate, and the scoped view a host
@@ -154,10 +154,10 @@ fn inline_host() -> crate::InlineEffectHost {
 /// fail-closed defaults would advertise support and then refuse every group, so
 /// the flag is asserted through the same object that runs the group.
 #[tokio::test]
-async fn the_inline_tier_supports_groups_through_the_scoped_host_view() {
+async fn the_native_substrate_supports_groups_through_the_scoped_host_view() {
     use crate::EffectHost;
 
-    let host = inline_host();
+    let host = native_host();
     let scoped = host
         .scoped(crate::ExecutionScope::runtime_operation("fig1535-scoped"))
         .expect("scoped controller");
@@ -196,10 +196,10 @@ async fn the_inline_tier_supports_groups_through_the_scoped_host_view() {
 /// settlement record, which is how the *allocator* is asserted, and the shared
 /// suite deliberately cannot.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_inline_host_satisfies_the_shared_effect_group_suite() {
+async fn the_native_host_satisfies_the_shared_effect_group_suite() {
     // One host, handed out repeatedly: the suite's factory stands for "another
     // view of the same substrate", and on a tier whose substrate *is* the
-    // process, that is this object. A fresh `InlineEffectHost` per call would be
+    // process, that is this object. A fresh `NativeEffectHost` per call would be
     // a different substrate, which is the one thing the factory may not be.
     //
     // The suite hands its own resolver to every factory call, and registering it
@@ -211,14 +211,14 @@ async fn the_inline_host_satisfies_the_shared_effect_group_suite() {
     // unwired" does not exist. The cost is only to the second of those laws — "a
     // refused open journals nothing" — and it is no cost at all, because this
     // tier journals nothing to leave behind.
-    let controller = Arc::new(InlineRuntimeEffectController::default());
+    let controller = Arc::new(NativeRuntimeEffectController::default());
     let host: std::sync::Arc<dyn crate::EffectHost> = std::sync::Arc::new(
-        crate::InlineEffectHost::new(Arc::clone(&controller) as Arc<dyn RuntimeEffectController>),
+        crate::NativeEffectHost::new(Arc::clone(&controller) as Arc<dyn RuntimeEffectController>),
     );
     crate::testing::conformance::effect_group_host_conformance(move |suite_executors| {
         let Some(suite_executors) = suite_executors else {
-            return std::sync::Arc::new(crate::InlineEffectHost::new(Arc::new(
-                InlineRuntimeEffectController::default(),
+            return std::sync::Arc::new(crate::NativeEffectHost::new(Arc::new(
+                NativeRuntimeEffectController::default(),
             )
                 as Arc<dyn RuntimeEffectController>))
                 as std::sync::Arc<dyn crate::EffectHost>;

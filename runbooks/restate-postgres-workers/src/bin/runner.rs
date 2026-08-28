@@ -4,7 +4,7 @@ use lash::triggers::{TriggerOccurrenceRequest, empty_trigger_source_key};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, Resolution, ScopedEffectController,
-    SessionCommitStore, facade_support::InlineRuntimeEffectController, facade_support::TurnAddress,
+    SessionCommitStore, facade_support::NativeRuntimeEffectController, facade_support::TurnAddress,
     facade_support::TurnCancelOutcome, facade_support::TurnCancelRequest,
     facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
     facade_support::TurnWorkDriver,
@@ -3214,7 +3214,7 @@ async fn emit_button_event(
     })?;
     let source_key = empty_trigger_source_key(BUTTON_SOURCE_TYPE)?;
     let scoped = ScopedEffectController::shared(
-        Arc::new(InlineRuntimeEffectController::default()),
+        Arc::new(NativeRuntimeEffectController::default()),
         ExecutionScope::runtime_operation("e2e-button-trigger"),
     )?;
     let report = core

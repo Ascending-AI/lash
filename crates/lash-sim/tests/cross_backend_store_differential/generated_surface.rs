@@ -1789,7 +1789,7 @@ async fn surface_runners(
     let memory_registry =
         Arc::new(TestLocalProcessRegistry::default().with_clock(Arc::clone(&clock)));
     let memory_triggers = Arc::new(InMemoryTriggerStore::with_clock(Arc::clone(&clock)));
-    let memory_effect = Arc::new(lash_core::facade_support::InlineEffectHost::default());
+    let memory_effect = Arc::new(lash_core::facade_support::NativeEffectHost::default());
 
     let sqlite_runtime_path = root.join("runtime.db");
     let sqlite_process_path = root.join("process.db");

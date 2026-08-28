@@ -437,7 +437,7 @@ async fn durable_managed_child_writes_to_its_own_attachment_namespace() {
         .expect("durable child session");
     let turn_id = "attachment-child-turn";
     let controller = crate::ScopedEffectController::shared(
-        Arc::new(crate::InlineRuntimeEffectController::default()),
+        Arc::new(crate::NativeRuntimeEffectController::default()),
         crate::ExecutionScope::turn(&child.session_id, turn_id),
     )
     .expect("child effect controller");
@@ -562,7 +562,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     assert!(child_is_bound, "managed child must bind its store");
     let turn_id = "process-child-first-turn";
     let controller = crate::ScopedEffectController::shared(
-        Arc::new(crate::InlineRuntimeEffectController::default()),
+        Arc::new(crate::NativeRuntimeEffectController::default()),
         crate::ExecutionScope::turn(&child.session_id, turn_id),
     )
     .expect("child effect controller");

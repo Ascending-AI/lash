@@ -481,7 +481,7 @@ async fn run_managed_session_turn(
 ) -> Result<AssembledTurn, crate::PluginError> {
     // This mutex is the managed runtime's single-writer boundary. Hold it for
     // the complete turn and publish from the guarded post-turn state before
-    // releasing it, exactly as the former inline path did.
+    // releasing it, exactly as the former native path did.
     let mut runtime_guard = runtime.runtime.lock().await;
     let scoped_effect_controller = scoped_effect_controller
         .rescope(
@@ -931,7 +931,7 @@ mod tests {
 
     #[test]
     fn session_turn_request_requires_matching_scope_and_sets_trace_turn_id() {
-        let controller = crate::InlineRuntimeEffectController::default();
+        let controller = crate::NativeRuntimeEffectController::default();
         let scoped_effect_controller = crate::ScopedEffectController::borrowed(
             &controller,
             crate::ExecutionScope::turn("child", "child-turn"),
@@ -952,7 +952,7 @@ mod tests {
 
     #[test]
     fn session_turn_request_rejects_mismatched_execution_scope() {
-        let controller = crate::InlineRuntimeEffectController::default();
+        let controller = crate::NativeRuntimeEffectController::default();
         let scoped_effect_controller = crate::ScopedEffectController::borrowed(
             &controller,
             crate::ExecutionScope::turn("child", "other-turn"),

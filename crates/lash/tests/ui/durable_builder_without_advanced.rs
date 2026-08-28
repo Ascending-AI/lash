@@ -32,7 +32,7 @@ async fn durable_core_without_advanced(
     .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )))
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .termination(lash::durability::TerminationPolicy::default())
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         "durable-builder-test-worker",

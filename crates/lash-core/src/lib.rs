@@ -333,11 +333,11 @@ pub mod facade_support {
     pub use crate::runtime::InMemoryProcessExecutionEnvStore;
     pub use crate::runtime::InMemorySessionStore;
     pub use crate::runtime::InMemorySessionStoreFactory;
-    pub use crate::runtime::InlineEffectHost;
-    pub use crate::runtime::InlineRuntimeEffectController;
     pub use crate::runtime::LashRuntime;
     pub use crate::runtime::LiveReplayGap;
+    pub use crate::runtime::NativeEffectHost;
     pub use crate::runtime::NativeQueuedWorkConfigError;
+    pub use crate::runtime::NativeRuntimeEffectController;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
     pub use crate::runtime::ObservedProcessEvent;

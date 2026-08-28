@@ -1402,7 +1402,7 @@ impl BackendRunner {
         .expect("build differential lifecycle provider");
         lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .with_native_queued_work()
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -1861,7 +1861,7 @@ impl BackendRunner {
                 let scoped = effect_host
                     .scoped_static(scope)
                     .expect("scope the differential delete")
-                    .expect("inline effect host must provide a static delete scope");
+                    .expect("native effect host must provide a static delete scope");
                 core.delete_session(&self.session_id, scoped)
                     .await
                     .expect("delete the materialized session through LashCore");

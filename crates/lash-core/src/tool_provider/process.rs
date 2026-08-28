@@ -375,7 +375,7 @@ mod tests {
             agent_frame_id: crate::session_graph::frame_node_id("session", "frame"),
             processes,
             effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default(),
+                crate::NativeRuntimeEffectController::default(),
             )),
             parent_invocation: None,
             tool_call_id: None,

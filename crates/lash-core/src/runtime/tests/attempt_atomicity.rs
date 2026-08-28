@@ -37,19 +37,19 @@ const FOLLOW_ON_EFFECT_ID: &str = "attempt-atomicity-follow-on";
 
 /// A controller-owned tier stand-in.
 struct ControllerOwnedTier {
-    inner: crate::InlineRuntimeEffectController,
+    inner: crate::NativeRuntimeEffectController,
 }
 
 impl ControllerOwnedTier {
     fn ordinal_addressed() -> Self {
         Self {
-            inner: crate::InlineRuntimeEffectController::default(),
+            inner: crate::NativeRuntimeEffectController::default(),
         }
     }
 
     fn key_addressed() -> Self {
         Self {
-            inner: crate::InlineRuntimeEffectController::default(),
+            inner: crate::NativeRuntimeEffectController::default(),
         }
     }
 }
@@ -997,7 +997,7 @@ struct JournalEntry {
 /// and a command that meets a different recorded entry at its ordinal is
 /// refused the way an ordinal-addressed engine refuses it (Restate `RT0016`).
 struct OrdinalJournaledTier {
-    inner: crate::InlineRuntimeEffectController,
+    inner: crate::NativeRuntimeEffectController,
     journal: std::sync::Mutex<Vec<JournalEntry>>,
     replaying: std::sync::atomic::AtomicBool,
     cursor: AtomicUsize,
@@ -1006,7 +1006,7 @@ struct OrdinalJournaledTier {
 impl OrdinalJournaledTier {
     fn recording() -> Self {
         Self {
-            inner: crate::InlineRuntimeEffectController::default(),
+            inner: crate::NativeRuntimeEffectController::default(),
             journal: std::sync::Mutex::new(Vec::new()),
             replaying: std::sync::atomic::AtomicBool::new(false),
             cursor: AtomicUsize::new(0),

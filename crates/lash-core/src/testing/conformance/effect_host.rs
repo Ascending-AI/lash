@@ -353,13 +353,13 @@ impl ConformanceInvocation {
         self.effect_redrive
     }
 
-    /// Construct an invocation for the receipt-less inline controller.
-    pub fn inline() -> Self {
+    /// Construct an invocation for the receipt-less native controller.
+    pub fn native() -> Self {
         Self::new(
-            Arc::new(crate::InlineRuntimeEffectController::default()),
+            Arc::new(crate::NativeRuntimeEffectController::default()),
             ConformanceEffectRedrive::ReexecutesUncommitted,
             || {},
-            || Arc::new(crate::InlineRuntimeEffectController::default()),
+            || Arc::new(crate::NativeRuntimeEffectController::default()),
         )
     }
 

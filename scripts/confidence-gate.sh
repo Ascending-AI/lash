@@ -799,8 +799,8 @@ run_state_machine_and_fault_matrix() {
   fi
 
   if area_selected effect-host; then
-    step "Inline effect-host await-event session-cancel conformance"
-    run_cargo_tests -p lash-internal-core --locked inline_effect_host_satisfies_conformance
+    step "Native effect-host await-event session-cancel conformance"
+    run_cargo_tests -p lash-internal-core --locked native_effect_host_satisfies_conformance
   fi
 
   if area_selected trigger; then

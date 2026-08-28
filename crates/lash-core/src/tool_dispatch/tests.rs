@@ -240,7 +240,7 @@ enum IntentPausePoint {
 }
 
 struct IntentReplayController {
-    inline: crate::InlineRuntimeEffectController,
+    native: crate::NativeRuntimeEffectController,
     recorded: std::sync::Mutex<
         BTreeMap<String, Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError>>,
     >,
@@ -295,7 +295,7 @@ impl crate::Clock for FrozenIntentLawClock {
 impl IntentReplayController {
     fn new(pause: Option<IntentPausePoint>) -> Self {
         Self {
-            inline: crate::InlineRuntimeEffectController::default(),
+            native: crate::NativeRuntimeEffectController::default(),
             recorded: std::sync::Mutex::new(BTreeMap::new()),
             frame_sightings: std::sync::Mutex::new(BTreeMap::new()),
             process_commands: AtomicUsize::new(0),
@@ -342,7 +342,7 @@ impl crate::AwaitEventResolver for IntentReplayController {
         scope: &crate::ExecutionScope,
         wait: crate::AwaitEventWaitIdentity,
     ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        self.native.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -350,14 +350,14 @@ impl crate::AwaitEventResolver for IntentReplayController {
         key: &crate::AwaitEventKey,
         resolution: crate::Resolution,
     ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        self.native.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &crate::AwaitEventKey,
     ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
-        self.inline.peek_await_event(key).await
+        self.native.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -366,14 +366,14 @@ impl crate::AwaitEventResolver for IntentReplayController {
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+        self.native.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(
         &self,
         session_id: &str,
     ) -> Result<(), crate::RuntimeError> {
-        self.inline
+        self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
@@ -382,7 +382,7 @@ impl crate::AwaitEventResolver for IntentReplayController {
         &self,
         session_id: &str,
     ) -> Result<(), crate::RuntimeError> {
-        self.inline
+        self.native
             .cancel_await_events_for_session(session_id)
             .await
     }
@@ -829,7 +829,7 @@ fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContex
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -914,7 +914,7 @@ fn dispatch_context() -> ToolDispatchContext<'static> {
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -974,7 +974,7 @@ fn projection_policy_dispatch_context(
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1168,7 +1168,7 @@ fn lazy_contract_dispatch_context(
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1230,7 +1230,7 @@ fn hidden_member_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispat
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1277,7 +1277,7 @@ fn exact_dispatch_context_with_plugins(
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1405,7 +1405,7 @@ fn pending_dispatch_context(
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -1470,7 +1470,7 @@ fn parallel_dispatch_context(
         processes: Arc::new(crate::UnavailableProcessService),
         trigger_router: None,
         effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::InlineRuntimeEffectController::default()
+            crate::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(

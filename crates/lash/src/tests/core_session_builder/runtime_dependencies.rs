@@ -2,6 +2,21 @@
 // Explicit runtime dependency wiring
 // =============================================================================
 //
+fn ephemeral_facets_without_queued_work_choice(
+    builder: crate::core::LashCoreBuilder,
+) -> crate::core::LashCoreBuilder {
+    builder
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .effect_host(Arc::new(
+            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
+        ))
+        .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
+        .process_env_store(Arc::new(
+            crate::persistence::InMemoryProcessExecutionEnvStore::new(),
+        ))
+}
+
 /// A standard-mode builder with a model + provider already named, ready for the
 /// explicit dependency wiring under test.
 fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
@@ -24,7 +39,7 @@ fn commit_budget_is_required_for_builder_construction_and_deserialization() {
             .provider(mock_provider())
             .model(mock_model_spec())
             .effect_host(Arc::new(
-                lash_core::facade_support::InlineEffectHost::default(),
+                lash_core::facade_support::NativeEffectHost::default(),
             ))
             .attachment_store(Arc::new(
                 lash_core::facade_support::InMemoryAttachmentStore::new(),
@@ -52,7 +67,7 @@ fn queued_work_action_reserve_is_required() {
             .provider(mock_provider())
             .model(mock_model_spec())
             .effect_host(Arc::new(
-                lash_core::facade_support::InlineEffectHost::default(),
+                lash_core::facade_support::NativeEffectHost::default(),
             ))
             .attachment_store(Arc::new(
                 lash_core::facade_support::InMemoryAttachmentStore::new(),
@@ -227,7 +242,7 @@ async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_
         let config = core
             .substrate_slot
             .process_worker_config()
-            .expect("inline worker config must be assembled at build");
+            .expect("native worker config must be assembled at build");
         Arc::clone(&config.trigger_store)
     };
     let public_trigger_store = Arc::clone(&core.durable_process_worker_config()?.trigger_store);
@@ -250,7 +265,7 @@ async fn default_trigger_store_observes_core_clock_for_inline_and_public_worker_
 async fn builder_requires_explicit_process_env_store_at_build() {
     let result = peer_coherence_builder()
         .effect_host(Arc::new(
-            lash_core::facade_support::InlineEffectHost::default(),
+            lash_core::facade_support::NativeEffectHost::default(),
         ))
         .attachment_store(Arc::new(
             lash_core::facade_support::InMemoryAttachmentStore::new(),
@@ -281,7 +296,7 @@ async fn all_durable_stores_build_successfully() -> Result<()> {
     peer_coherence_builder()
         .with_native_queued_work()
         .effect_host(Arc::new(
-            lash_core::facade_support::InlineEffectHost::default(),
+            lash_core::facade_support::NativeEffectHost::default(),
         ))
         .store_factory(durable_session_store_factory(dir.path()))
         .attachment_store(durable_attachment_store(dir.path()))
@@ -309,7 +324,7 @@ async fn durable_process_worker_config_uses_child_store_factory_without_root() -
     let core = peer_coherence_builder()
         .with_native_queued_work()
         .effect_host(Arc::new(
-            lash_core::facade_support::InlineEffectHost::default(),
+            lash_core::facade_support::NativeEffectHost::default(),
         ))
         .child_store_factory(Arc::clone(&child_factory))
         .attachment_store(durable_attachment_store(dir.path()))
@@ -331,7 +346,7 @@ async fn durable_process_worker_config_matches_inline_child_factory_when_both_ar
     let core = peer_coherence_builder()
         .with_native_queued_work()
         .effect_host(Arc::new(
-            lash_core::facade_support::InlineEffectHost::default(),
+            lash_core::facade_support::NativeEffectHost::default(),
         ))
         .store_factory(root_factory)
         .child_store_factory(Arc::clone(&child_factory))
@@ -344,7 +359,7 @@ async fn durable_process_worker_config_matches_inline_child_factory_when_both_ar
     let inline_config = core
         .substrate_slot
         .process_worker_config()
-        .expect("inline process worker config must be assembled at build");
+        .expect("native process worker config must be assembled at build");
     let public_config = core.durable_process_worker_config()?;
     assert!(Arc::ptr_eq(
         &inline_config.session_store_factory,
@@ -470,9 +485,9 @@ async fn external_process_port_composes_native_queued_port_and_refreshes_after_r
 #[tokio::test]
 async fn default_process_work_driver_resolves_when_registry_and_store_factory_present() -> Result<()>
 {
-    // Zero-ceremony path: a registry + a store factory (so the inline worker can
+    // Zero-ceremony path: a registry + a store factory (so the native worker can
     // rebuild session runtimes) and no explicit driver constructs the default
-    // inline process work driver on first `session().open()`. The driver's actual
+    // native process work port on first `session().open()`. The driver's actual
     // lease-protected execution of out-of-turn processes is covered in lash-core
     // (`concurrent_workers_run_a_directly_registered_process_exactly_once`).
     let state = RuntimeSessionState {
@@ -495,7 +510,7 @@ async fn default_process_work_driver_resolves_when_registry_and_store_factory_pr
     core.session("main").open().await?;
     assert!(
         core.substrate_slot.ports().await.process.is_some(),
-        "the default inline process driver must resolve when a registry + store factory are wired"
+        "the default native process port must resolve when a registry + store factory are wired"
     );
     Ok(())
 }
@@ -1460,9 +1475,7 @@ fn durable_process_worker_rejects_incoherent_native_pacing_directly() {
         panic!("direct worker construction must reject zero-delay pacing");
     };
     assert!(
-        error
-            .to_string()
-            .contains("worker_sweep.fetch_retry_base"),
+        error.to_string().contains("worker_sweep.fetch_retry_base"),
         "error must identify the rejected worker pacing field: {error}"
     );
 }

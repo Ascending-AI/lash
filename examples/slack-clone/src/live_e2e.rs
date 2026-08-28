@@ -570,8 +570,7 @@ fn provider(config: &Config, ledger: &SpendLedger) -> ProviderHandle {
         ..ProviderOptions::default()
     };
     let mut compat = OpenAiCompat::openrouter();
-    // Sonnet 5 advertises tools but not parallel_tool_calls. Lash's OpenAI
-    // adapter gates only that optional field behind request_fields.
+    // Sonnet 5 advertises tools but not parallel_tool_calls; Lash gates that field behind request_fields.
     compat.request_fields = Some(false);
     compat.provider_routing = Some(ProviderRoutingPrefs {
         require_parameters: true,
@@ -805,7 +804,7 @@ fn standard_core(
         .model(model)
         .generation(generation(output_cap))
         .instructions(instructions)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -852,7 +851,7 @@ fn rlm_core(
     .instructions(instructions)
     .tools(tools)
     .effect_host(Arc::new(
-        lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+        lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
     ))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
     .process_env_store(Arc::new(

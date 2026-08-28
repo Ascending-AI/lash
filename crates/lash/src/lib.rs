@@ -724,8 +724,8 @@ pub mod durability {
     };
     pub use lash_core::{
         EffectHost, WorkerProcessWork, facade_support::DurableProcessWorker,
-        facade_support::DurableProcessWorkerConfig, facade_support::InlineEffectHost,
-        facade_support::LeaseTimings, facade_support::LeaseTimingsError,
+        facade_support::DurableProcessWorkerConfig, facade_support::LeaseTimings,
+        facade_support::LeaseTimingsError, facade_support::NativeEffectHost,
         facade_support::ProcessDrainReport, facade_support::RuntimeEnvironment,
         facade_support::RuntimeHostConfig, facade_support::TerminationPolicy,
     };
@@ -747,10 +747,10 @@ pub mod runtime {
         ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents, AwaitEventResolver,
         CheckpointClaimSet, CompletionKeyPreparation, DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY,
         DirectCompletionClient, EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost,
-        EventSink, ExecutionScope, GroupExecutors, GroupSettlement, GroupWakePolicy,
-        InlineRuntimeEffectController, LashRuntime, LlmAttachmentSpec, LlmRequestSpec, LoserPolicy,
-        NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork,
-        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
+        EventSink, ExecutionScope, GroupExecutors, GroupSettlement, GroupWakePolicy, LashRuntime,
+        LlmAttachmentSpec, LlmRequestSpec, LoserPolicy, NativeQueuedWork,
+        NativeRuntimeEffectController, NativeSubstrateConfig, NativeSubstrateConfigError,
+        NoQueuedWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
         QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
         QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
         QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,

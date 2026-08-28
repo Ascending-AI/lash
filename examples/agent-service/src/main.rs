@@ -9,7 +9,7 @@ use axum::routing::get;
 #[cfg(feature = "restate")]
 use lash::PluginBinding;
 use lash::{
-    durability::InlineEffectHost,
+    durability::NativeEffectHost,
     provider::{ProviderHandle, ProviderOptions},
     tracing::{JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceLevel, TraceSink},
 };
@@ -321,7 +321,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     let core = match durability {
         AgentServiceDurability::Local => core_builder
             .effect_host(Arc::new(
-                InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+                NativeEffectHost::default().allow_process_lifetime_completion_keys(),
             ))
             .process_registry(Arc::clone(&process_registry))
             .build(session_owner.clone())

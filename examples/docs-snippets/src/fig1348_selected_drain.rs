@@ -50,7 +50,7 @@ fn core(
                 .build()
                 .expect("valid selected-drain model"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -147,7 +147,7 @@ async fn advanced_selected_drain_observes_cooperative_cancellation() -> anyhow::
     let batch_id = enqueue(store_factory.as_ref(), &session, "docs-selected-advanced").await?;
     let cancel = CancellationToken::new();
     cancel.cancel();
-    let controller = lash::runtime::InlineRuntimeEffectController::default();
+    let controller = lash::runtime::NativeRuntimeEffectController::default();
     let scoped = lash::runtime::ScopedEffectController::borrowed(
         &controller,
         lash::runtime::ExecutionScope::queue_drain(session.session_id(), "docs-advanced-drain"),

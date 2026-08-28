@@ -49,10 +49,10 @@ use crate::{
 };
 
 /// Default maximum number of processes one [`DurableProcessWorker`] executes
-/// inline at once.
+/// natively at once.
 pub const DEFAULT_PROCESS_EXECUTION_CONCURRENCY: usize = 64;
 
-/// Validated per-worker inline process execution concurrency.
+/// Validated per-worker native process execution concurrency.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ProcessExecutionConcurrency(usize);
 
@@ -71,7 +71,7 @@ impl ProcessExecutionConcurrency {
     }
 }
 
-/// Invalid inline process execution concurrency supplied by a host.
+/// Invalid native process execution concurrency supplied by a host.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error(
     "process execution concurrency must be between 1 and {max} (inclusive), got {concurrency}",
@@ -113,7 +113,7 @@ pub struct DurableProcessWorkerConfig {
     queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
     #[doc(hidden)]
     pub turn_phase_probe_slot: crate::runtime::RuntimeTurnPhaseProbeSlot,
-    /// Maximum processes this worker executes inline at once. A run holds its
+    /// Maximum processes this worker executes natively at once. A run holds its
     /// slot while doing its own work and releases it while parked on work that
     /// another process or external owner must complete. This is a per-worker
     /// bound: two workers sharing one registry may execute twice this many.
@@ -183,7 +183,7 @@ impl DurableProcessWorkerConfig {
         }
     }
 
-    /// Set the maximum processes this worker executes inline at once.
+    /// Set the maximum processes this worker executes natively at once.
     ///
     /// The minimum is one. The maximum is Tokio's semaphore limit. The bound
     /// applies independently to each worker, not globally to a shared registry.
@@ -496,7 +496,7 @@ impl DurableProcessWorker {
 
     /// Run exactly one engine segment. Durable substrates use this method so a
     /// non-terminal boundary can end the current substrate invocation; the
-    /// inline worker's lease-fenced drive loops over segment boundaries
+    /// native worker's lease-fenced drive loops over segment boundaries
     /// internally.
     pub async fn run_process_segment_with_scoped_effect_controller(
         &self,
@@ -657,7 +657,7 @@ impl DurableProcessWorker {
     /// it and reports nothing, and the continuation pages of a pass are admitted
     /// by the dispatcher after the starting call has returned.
     ///
-    /// This is the sole inline executor for every process start: live tool and
+    /// This is the sole native executor for every process start: live tool and
     /// subagent starts, trigger deliveries, admin starts, session-open passes,
     /// and crash recovery all enter through this worklist. The drive:
     ///
@@ -775,7 +775,7 @@ impl DurableProcessWorker {
                 crate::task::spawn(async move {
                     let _completion = completion;
                     let process_id = record.id.clone();
-                    // Install the execution budget only at the inline worker
+                    // Install the execution budget only at the native worker
                     // boundary, never in the shared process-segment path.
                     let outcome = Box::pin(scope_process_execution_permit(
                         Arc::clone(&worker.execution_scheduler.slots),

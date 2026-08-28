@@ -76,7 +76,7 @@ async fn lazy_projection(provider: ProviderHandle, model: lash::ModelSpec) -> an
         .provider(provider)
         .model(model)
         .plugins(runtime_plugin_stack())
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -124,7 +124,7 @@ async fn prompt_template(provider: ProviderHandle) -> anyhow::Result<()> {
                 .build()
                 .expect("valid model metadata"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -327,7 +327,7 @@ async fn tone_session(
                 .expect("valid model metadata"),
         )
         .effect_host(std::sync::Arc::new(
-            lash::durability::InlineEffectHost::default(),
+            lash::durability::NativeEffectHost::default(),
         ))
         .attachment_store(std::sync::Arc::new(
             lash::persistence::InMemoryAttachmentStore::new(),

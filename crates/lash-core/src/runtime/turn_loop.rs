@@ -4381,7 +4381,7 @@ mod tests {
     };
     use crate::{
         AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope,
-        InlineRuntimeEffectController, Resolution, ResolveOutcome, RuntimeError, TurnAddress,
+        NativeRuntimeEffectController, Resolution, ResolveOutcome, RuntimeError, TurnAddress,
         TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnTerminal,
     };
 
@@ -4437,7 +4437,7 @@ mod tests {
     #[derive(Default)]
     struct RejectTerminalPublication {
         attempts: AtomicUsize,
-        inline: InlineRuntimeEffectController,
+        native: NativeRuntimeEffectController,
     }
 
     #[async_trait::async_trait]
@@ -4447,7 +4447,7 @@ mod tests {
             scope: &ExecutionScope,
             wait: AwaitEventWaitIdentity,
         ) -> Result<AwaitEventKey, RuntimeError> {
-            self.inline.await_event_key(scope, wait).await
+            self.native.await_event_key(scope, wait).await
         }
 
         async fn resolve_await_event(
@@ -4466,7 +4466,7 @@ mod tests {
             &self,
             key: &AwaitEventKey,
         ) -> Result<Option<Resolution>, RuntimeError> {
-            self.inline.peek_await_event(key).await
+            self.native.peek_await_event(key).await
         }
 
         async fn await_await_event(
@@ -4475,14 +4475,14 @@ mod tests {
             cancel: tokio_util::sync::CancellationToken,
             deadline: Option<std::time::Instant>,
         ) -> Result<Resolution, RuntimeError> {
-            self.inline.await_await_event(key, cancel, deadline).await
+            self.native.await_await_event(key, cancel, deadline).await
         }
 
         async fn revoke_await_events_for_session(
             &self,
             session_id: &str,
         ) -> Result<(), RuntimeError> {
-            self.inline
+            self.native
                 .revoke_await_events_for_session(session_id)
                 .await
         }
@@ -4491,7 +4491,7 @@ mod tests {
             &self,
             session_id: &str,
         ) -> Result<(), RuntimeError> {
-            self.inline
+            self.native
                 .cancel_await_events_for_session(session_id)
                 .await
         }

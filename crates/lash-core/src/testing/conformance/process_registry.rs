@@ -2001,7 +2001,7 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         "a retained tombstone await must render as information, not a tool failure"
     );
     assert!(matches!(
-        crate::InlineRuntimeEffectController::request_process_cancel(
+        crate::NativeRuntimeEffectController::request_process_cancel(
             Arc::clone(&registry),
             process_id,
             Some("cancel after prune".to_string()),

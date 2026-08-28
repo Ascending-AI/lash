@@ -241,7 +241,7 @@ impl LiveConformanceHarness {
                 Arc::new(RestateEffectHost::new(ingress_url.clone()))
                     as Arc<dyn lash_core::EffectHost>
             }
-            None => Arc::new(lash_core::facade_support::InlineEffectHost::default())
+            None => Arc::new(lash_core::facade_support::NativeEffectHost::default())
                 as Arc<dyn lash_core::EffectHost>,
         })
     }

@@ -52,7 +52,7 @@ pub struct QueuedWorkExecutionConcurrencyError {
 /// constructor.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum NativeQueuedWorkConfigError {
-    /// The requested inline execution bound is outside Tokio's semaphore range.
+    /// The requested native execution bound is outside Tokio's semaphore range.
     #[error("invalid queued-work execution configuration: {0}")]
     ExecutionConcurrency(#[from] QueuedWorkExecutionConcurrencyError),
     /// The requested scheduler cadence would create an incoherent native loop.
@@ -103,7 +103,7 @@ impl NativeQueuedWork {
         .expect("default work cadence is valid")
     }
 
-    /// Construct an inline reference-substrate driver with a host-selected
+    /// Construct an native reference-substrate driver with a host-selected
     /// admission bound.
     ///
     /// Engine-backed submitters should use [`Self::new`]: their substrate owns
@@ -137,7 +137,7 @@ impl NativeQueuedWork {
         .map_err(Into::into)
     }
 
-    /// Construct an inline reference-substrate driver admitted by `supplier`.
+    /// Construct an native reference-substrate driver admitted by `supplier`.
     #[doc(hidden)]
     pub fn with_worker_slot_supplier(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
@@ -208,7 +208,7 @@ impl NativeQueuedWork {
                     (Some(supplier), _) => {
                         QueuedWorkExecutionScheduler::with_supplier(supplier, None)
                     }
-                    (None, Some(concurrency)) => QueuedWorkExecutionScheduler::inline(concurrency),
+                    (None, Some(concurrency)) => QueuedWorkExecutionScheduler::native(concurrency),
                     (None, None) => QueuedWorkExecutionScheduler::unbounded(),
                 }),
                 work_cadence,

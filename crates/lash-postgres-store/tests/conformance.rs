@@ -552,7 +552,7 @@ async fn postgres_real_turn_crash_matrix_when_configured() {
             Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
                 as Arc<dyn RuntimePersistence>
         },
-        |_| lash_core::testing::conformance::ConformanceInvocation::inline(),
+        |_| lash_core::testing::conformance::ConformanceInvocation::native(),
     ))
     .await;
 }

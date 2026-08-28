@@ -1049,7 +1049,7 @@ mod tests {
             processes: Arc::new(crate::UnavailableProcessService),
             trigger_router: None,
             effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default(),
+                crate::NativeRuntimeEffectController::default(),
             )),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
@@ -1110,7 +1110,7 @@ mod tests {
             processes: Arc::new(crate::UnavailableProcessService),
             trigger_router: None,
             effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default(),
+                crate::NativeRuntimeEffectController::default(),
             )),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",

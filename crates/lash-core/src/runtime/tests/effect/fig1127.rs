@@ -5,7 +5,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     #[derive(Clone, Default)]
     struct ControllerOwnedTriggerEmitter {
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
-        inline: InlineRuntimeEffectController,
+        native: NativeRuntimeEffectController,
     }
 
     #[async_trait::async_trait]
@@ -36,7 +36,7 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
                 "non-tool trigger emission issues only its reserved process start"
             );
             self.process_starts.fetch_add(1, Ordering::SeqCst);
-            self.inline.execute_effect(envelope, local_executor).await
+            self.native.execute_effect(envelope, local_executor).await
         }
     }
 

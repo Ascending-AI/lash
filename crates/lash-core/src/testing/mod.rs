@@ -1520,7 +1520,7 @@ impl crate::ProcessService for MockSessionManager {
         process_id: &str,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
-        crate::InlineRuntimeEffectController::request_process_cancel(
+        crate::NativeRuntimeEffectController::request_process_cancel(
             self.process_registry.clone(),
             process_id,
             Some("requested by test".to_string()),
@@ -1536,7 +1536,7 @@ impl crate::ProcessService for MockSessionManager {
         reason: Option<String>,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
-        crate::InlineRuntimeEffectController::request_process_cancel(
+        crate::NativeRuntimeEffectController::request_process_cancel(
             self.process_registry.clone(),
             process_id,
             reason,

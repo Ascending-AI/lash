@@ -6,7 +6,7 @@ use super::process::{
     ProcessRegistry,
 };
 use super::{
-    EffectHost, InlineEffectHost, NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring,
+    EffectHost, NativeEffectHost, NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring,
     QueuedWorkSubstrate, SessionStoreFactory, TerminationPolicy,
 };
 
@@ -161,7 +161,7 @@ impl RuntimeHostConfig {
     }
 
     /// Explicit in-process / in-memory configuration: an
-    /// [`InlineEffectHost`] and in-memory stores.
+    /// [`NativeEffectHost`] and in-memory stores.
     ///
     /// Convenient for tests and local experiments; not durable. The commit
     /// budget remains required because backend latency policy is independent
@@ -171,7 +171,7 @@ impl RuntimeHostConfig {
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> Self {
         Self::new(
-            Arc::new(InlineEffectHost::default()),
+            Arc::new(NativeEffectHost::default()),
             Arc::new(crate::InMemoryAttachmentStore::new()),
             Arc::new(InMemoryProcessExecutionEnvStore::new()),
             commit_budget,
@@ -222,6 +222,8 @@ impl RuntimeHostConfig {
 }
 
 /// Base host shape for embedded runtimes.
+///
+/// "Embedded" means a runtime with no process registry.
 #[derive(Clone)]
 pub struct EmbeddedRuntimeHost {
     pub core: RuntimeHostConfig,

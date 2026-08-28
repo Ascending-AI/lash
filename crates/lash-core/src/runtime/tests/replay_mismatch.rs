@@ -1,4 +1,4 @@
-use super::effect::{RejectingEffectController, runtime_host_config_with_inline_controller};
+use super::effect::{RejectingEffectController, runtime_host_config_with_native_controller};
 use super::*;
 
 struct ProxyPumpingReplayMismatchController {
@@ -73,7 +73,7 @@ async fn controller_owned_replay_mismatch_reaches_host_with_structured_summary()
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        EmbeddedRuntimeHost::new(runtime_host_config_with_inline_controller(
+        EmbeddedRuntimeHost::new(runtime_host_config_with_native_controller(
             controller.clone(),
         )),
     )
@@ -113,7 +113,7 @@ async fn proxied_controller_owned_replay_mismatch_aborts_with_structured_summary
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        EmbeddedRuntimeHost::new(runtime_host_config_with_inline_controller(
+        EmbeddedRuntimeHost::new(runtime_host_config_with_native_controller(
             controller.clone(),
         )),
     )

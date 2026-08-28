@@ -29,7 +29,7 @@ pub struct EmbeddedRuntimeBuilder {
 
 /// Cold builder-only bindings live off the async build frame. Keeping this
 /// optional host wiring together avoids growing every `build` caller's future
-/// as new inline drivers are added.
+/// as new native drivers are added.
 struct EmbeddedRuntimeDriverBindings {
     process: Option<crate::ProcessWorkWiring>,
     queued: Arc<dyn crate::QueuedWorkSubstrate>,

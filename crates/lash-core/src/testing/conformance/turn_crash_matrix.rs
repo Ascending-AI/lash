@@ -1273,12 +1273,12 @@ async fn build_runtime_with_lease_timings(
 ) -> crate::LashRuntime {
     super::bind_conformance_session(&store, &identity.session_id).await;
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::InlineRuntimeEffectController::default()),
+        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
         control: control.clone(),
         executions,
     });
     let mut host = crate::RuntimeHostConfig::new(
-        Arc::new(crate::InlineEffectHost::new(Arc::clone(&effect_controller))),
+        Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller))),
         Arc::new(crate::InMemoryAttachmentStore::new()),
         Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1604,7 +1604,7 @@ where
     // is owned by a background timer rather than by the turn.
     control.pin_renewal_after_provider();
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: Arc::new(crate::InlineRuntimeEffectController::default()),
+        inner: Arc::new(crate::NativeRuntimeEffectController::default()),
         control: control.clone(),
         executions,
     });

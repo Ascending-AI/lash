@@ -9203,7 +9203,7 @@ async fn restate_enqueue_never_errors_after_commit() {
         .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             dir.path().join("sessions"),
         )))
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(DurableMemoryAttachmentStore::default()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -12232,12 +12232,12 @@ impl RestateProcessRunner for SegmentedRecordingRunner {
     }
 }
 
-fn inline_process_scope(process_id: &str) -> lash_core::ScopedEffectController<'static> {
+fn native_process_scope(process_id: &str) -> lash_core::ScopedEffectController<'static> {
     lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
         lash_core::ExecutionScope::process(process_id.to_string()),
     )
-    .expect("inline process scope")
+    .expect("native process scope")
 }
 
 async fn pending_process_cancel_signal() -> Result<(), HandlerError> {
@@ -12273,7 +12273,7 @@ async fn running_process_cancel_uses_native_signal_without_poll_delay() {
                 .run_registration(
                     registration,
                     ProcessExecutionContext::default(),
-                    inline_process_scope("prompt-cancel"),
+                    native_process_scope("prompt-cancel"),
                     0,
                     None,
                     cancellation_signal,
@@ -12344,7 +12344,7 @@ async fn cancel_watch_reissues_after_attach_ceiling_until_segment_completes() {
         .run_registration(
             registration,
             ProcessExecutionContext::default(),
-            inline_process_scope("ceiling-reissues"),
+            native_process_scope("ceiling-reissues"),
             0,
             None,
             workflow.cancellation_signal("ceiling-reissues", 0),
@@ -12381,7 +12381,7 @@ async fn non_timeout_cancel_watch_error_fails_the_segment() {
         .run_registration(
             rerunnable_registration("broken-cancel-watch"),
             ProcessExecutionContext::default(),
-            inline_process_scope("broken-cancel-watch"),
+            native_process_scope("broken-cancel-watch"),
             0,
             None,
             workflow.cancellation_signal("broken-cancel-watch", 0),
@@ -12430,7 +12430,7 @@ async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_indefinite_re
         .run_registration(
             rerunnable_registration("unregistered-cancel-watch"),
             ProcessExecutionContext::default(),
-            inline_process_scope("unregistered-cancel-watch"),
+            native_process_scope("unregistered-cancel-watch"),
             0,
             None,
             workflow.cancellation_signal("unregistered-cancel-watch", 0),
@@ -12538,7 +12538,7 @@ async fn transient_cancel_registry_read_error_cannot_fall_through_to_success() {
                 .run_registration(
                     registration,
                     ProcessExecutionContext::default(),
-                    inline_process_scope("transient-cancel-read"),
+                    native_process_scope("transient-cancel-read"),
                     0,
                     None,
                     async move {
@@ -12895,7 +12895,7 @@ async fn restate_segment_transition_replay_matrix_preserves_lineage_invariants()
                 .run_registration(
                     registration.clone(),
                     ProcessExecutionContext::default(),
-                    inline_process_scope(&process_id),
+                    native_process_scope(&process_id),
                     ordinal,
                     input_handover.take(),
                     pending_process_cancel_signal(),
@@ -13075,7 +13075,7 @@ async fn cancel_redrives_successor_engine() {
         .run_registration(
             registration,
             ProcessExecutionContext::default(),
-            inline_process_scope("cancel-between-segments"),
+            native_process_scope("cancel-between-segments"),
             1,
             Some(lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
@@ -15039,10 +15039,10 @@ async fn process_workflow_impl_runs_and_cancels_through_runner() {
             registration,
             execution_context,
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
                 lash_core::ExecutionScope::process("task-workflow"),
             )
-            .expect("inline process scope"),
+            .expect("native process scope"),
             0,
             None,
             pending_process_cancel_signal(),
@@ -15478,10 +15478,10 @@ async fn run_registration_abandons_restarted_owner_bound_without_running() {
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
                 lash_core::ExecutionScope::process("ob-restart"),
             )
-            .expect("inline process scope"),
+            .expect("native process scope"),
             0,
             None,
             pending_process_cancel_signal(),
@@ -15535,10 +15535,10 @@ async fn run_registration_runs_fresh_owner_bound() {
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
                 lash_core::ExecutionScope::process("ob-fresh"),
             )
-            .expect("inline process scope"),
+            .expect("native process scope"),
             0,
             None,
             pending_process_cancel_signal(),

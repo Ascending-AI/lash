@@ -1241,7 +1241,7 @@ mod tests {
             .await
             .expect("terminalize production target");
         let scope = lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
             lash_core::ExecutionScope::turn("test-session", "write-terminal-turn"),
         )
         .expect("build production-shaped intent controller");
@@ -1291,7 +1291,7 @@ mod tests {
         let provider = Arc::new(shell_provider(shell));
         let service = Arc::new(TestProcessService::default());
         let scope = lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
             lash_core::ExecutionScope::turn("test-session", "write-absent-turn"),
         )
         .expect("build production-shaped intent controller");
@@ -1360,7 +1360,7 @@ mod tests {
         assert_eq!(report.pruned_processes, 1);
 
         let scope = lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
             lash_core::ExecutionScope::turn("test-session", "write-pruned-turn"),
         )
         .expect("build production-shaped intent controller");
@@ -1409,7 +1409,7 @@ mod tests {
         let registry = service.registry();
         register_executable_signal_target(registry.as_ref(), "write-production").await;
         let scope = lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
             lash_core::ExecutionScope::turn("test-session", "write-sequence-turn"),
         )
         .expect("build production-shaped intent controller");

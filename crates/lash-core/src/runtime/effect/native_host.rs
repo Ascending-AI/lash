@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 use super::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectGroupHandle, EffectHost, EffectJournalRetirement,
-    ExecutionScope, GroupSettlement, InlineRuntimeEffectController, LoserPolicy, Resolution,
+    ExecutionScope, GroupSettlement, LoserPolicy, NativeRuntimeEffectController, Resolution,
     ResolveOutcome, RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, ScopedEffectController, SegmentProgress, TurnControlBinding,
@@ -17,12 +17,12 @@ use crate::runtime::effect::executor::control::facade_ops::ScopedEffectControlle
 
 /// In-process deployment effect host.
 #[derive(Clone)]
-pub struct InlineEffectHost {
+pub struct NativeEffectHost {
     controller: Arc<dyn RuntimeEffectController>,
     allow_process_lifetime_completion_keys: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl InlineEffectHost {
+impl NativeEffectHost {
     pub fn new(controller: Arc<dyn RuntimeEffectController>) -> Self {
         Self {
             controller,
@@ -41,14 +41,14 @@ impl InlineEffectHost {
     }
 }
 
-impl Default for InlineEffectHost {
+impl Default for NativeEffectHost {
     fn default() -> Self {
-        Self::new(Arc::new(InlineRuntimeEffectController::default()))
+        Self::new(Arc::new(NativeRuntimeEffectController::default()))
     }
 }
 
 #[async_trait::async_trait]
-impl AwaitEventResolver for InlineEffectHost {
+impl AwaitEventResolver for NativeEffectHost {
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
@@ -120,7 +120,7 @@ impl AwaitEventResolver for InlineEffectHost {
 }
 
 #[async_trait::async_trait]
-impl EffectHost for InlineEffectHost {
+impl EffectHost for NativeEffectHost {
     fn scoped<'run>(
         &'run self,
         scope: ExecutionScope,
@@ -163,7 +163,7 @@ impl EffectHost for InlineEffectHost {
 }
 
 #[async_trait::async_trait]
-impl RuntimeEffectController for InlineEffectHost {
+impl RuntimeEffectController for NativeEffectHost {
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {
         self.controller.wants_segment_boundary(progress)
     }

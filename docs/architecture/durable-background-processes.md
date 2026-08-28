@@ -246,8 +246,9 @@ Process-event sequences remain small ordered values; downstream prompts,
 origins, and workflow projections do not receive timestamp-scale identifiers.
 
 Process waiting follows the same split. `ProcessRegistry` exposes state only;
-terminal and event waits live in `ProcessWorkDriver` / `ProcessAwaiter` (see
-`docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`). Inline
+terminal waits live on `ProcessWorkSubstrate`, while event waits use the shared
+registry-backed awaiter (see
+`docs/adr/0016-process-waits-live-on-the-work-driver-seam.md`). Native
 deployments get prompt local wakeups from the watched-registry change hub and
 bounded point-read backoff otherwise. External deployments can attach waits to
 their own durable execution backend; the Restate driver attaches terminal waits
@@ -389,24 +390,24 @@ A generalization of code that already existed for turns — not a new subsystem:
   failure may keep the row non-terminal and its awaiters pending until the host
   cancels or abandons it. Producers with deterministic failure modes should set
   an explicit `max_attempts`.
-  Inline execution is bounded per worker by
+  Native execution is bounded per worker by
   `process_execution_concurrency` (default 64, minimum 1). A run holds a slot
   for its own work, including provider streaming and tool I/O, releases it while
   parked on another process or external completion, and reacquires before it
   resumes. Two workers over one registry therefore have twice the configured
   aggregate capacity.
-- **`ProcessWorkDriver` (`claim_and_run_pending`)** — the seam that *drives*
+- **`ProcessWorkSubstrate` (`admit_pending_processes`)** — the seam that *drives*
   `drive_pending_processes` promptly, returning the same admission report:
   invoked directly after a successful start
   and once on session open (`drive_process_on_open`), the latter folding in what
-  used to be a separate boot-time recovery sweep. A `ProcessRunHandle` selects
-  the tier: the inline `InlineProcessRunHandle` delegates to the worker's
-  `drive_pending_processes`; the Restate `RestateProcessIngressRunner` POSTs
+  used to be a separate boot-time recovery sweep. The native
+  `NativeProcessWork` delegates to the worker's `drive_pending_processes`; the
+  Restate process-work substrate POSTs
   `LashProcessWorkflow/{process_id}/run/send` to the ingress per non-terminal
   row (Restate coalesces by workflow key, so duplicate submits are idempotent).
   The control seam drives the driver after every successful `Start` —
   idempotently, since the driver skips leased/terminal rows and the durable
-  submit is keyed-idempotent — so in-turn-inline, trigger delivery, and other
+  submit is keyed-idempotent — so in-turn native starts, trigger delivery, and other
   explicit out-of-turn starts are all driven the same way.
   The driver lives on the runtime host, not the trait-object controller.
 
@@ -665,15 +666,14 @@ terminal are carried as request config / tool-access, not lost.
 
 ## References
 
-- `crates/lash-core/src/runtime/process_worker.rs` — `DurableProcessWorker`:
+- `crates/lash-core/src/runtime/process_worker/mod.rs` — `DurableProcessWorker`:
   `drive_pending_processes`, `ensure_durable_store_facets`, `ensure_stable_process_id`,
   lease-renewing run.
-- `crates/lash-core/src/runtime/process_work_driver.rs` — `ProcessWorkDriver`
-  (`claim_and_run_pending`, driven on start / on open), `ProcessRunHandle` /
-  `InlineProcessRunHandle`.
-- `crates/lash/src/core.rs` — `InlineWorkDriverSlot` / `ProcessWorkDriverSetup`
-  (lazy default-driver construction on first open),
-  `.process_registry(...)` / `.process_work_driver(...)`.
+- `crates/lash-core/src/runtime/native_substrate/process_work.rs` —
+  `NativeProcessWork` (native admission and terminal waits).
+- `crates/lash/src/core.rs` — `NativeSubstrateSlot` / `NativeSubstrateSetup`
+  (lazy native-substrate construction on first open),
+  `.process_registry(...)` / `.process_work(...)`.
 - `crates/lash-core/src/runtime/process/model.rs` — `ProcessLease` /
   `ProcessLeaseCompletion`, typed `ProcessExecutionEnvSpec`.
 - `crates/lash-core/src/runtime/process/validation.rs` — start-time and
@@ -690,7 +690,7 @@ terminal are carried as request config / tool-access, not lost.
   `ProcessService::start_from_request`, visibility-scoped cancellation, and
   typed cancel summaries.
 - `crates/lash-core/src/runtime/effect/executor.rs` —
-  `InlineEffectHost` / inline controller (stateless; the off-lease
+  `NativeEffectHost` / inline controller (stateless; the off-lease
   `tokio::spawn` deleted, `Start` only registers the row, cancel is a durable
   event append).
 - `crates/lash-core/src/runtime/effect/controller.rs` —

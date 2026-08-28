@@ -127,7 +127,7 @@ impl RuntimeEffectGroup {
     /// on it parks forever. The failure is a silent permanent hang rather than a
     /// refusal, and the rank-to-position lookup would mis-attribute the one
     /// settlement that did land, so the collision is refused here — where every
-    /// host, durable or inline, is already handed a checked group — rather than
+    /// host, durable or native, is already handed a checked group — rather than
     /// trusted to be unreachable because ordinal minting happens to make it so.
     ///
     /// **Empty groups are rejected, deliberately.** `Promise.all([])` resolves

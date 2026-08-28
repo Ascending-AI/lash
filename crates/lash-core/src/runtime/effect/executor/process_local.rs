@@ -44,7 +44,7 @@ impl ProcessLocalExecution {
                     registration = registration.with_execution_env_ref(Some(env_ref));
                 }
                 let record =
-                    InlineRuntimeEffectController::start_process(registry, registration, observers)
+                    NativeRuntimeEffectController::start_process(registry, registration, observers)
                         .await?;
                 let _ = process_work
                     .admit_pending_processes("process_start")
@@ -95,7 +95,7 @@ impl ProcessLocalExecution {
                         biased;
                         output = await_terminal() => output?,
                         _ = turn_cancellation.cancellation.cancelled() => {
-                            InlineRuntimeEffectController::request_process_cancel(
+                            NativeRuntimeEffectController::request_process_cancel(
                                 Arc::clone(&registry),
                                 &process_id,
                                 Some("turn cancelled while awaiting process".to_string()),
@@ -117,7 +117,7 @@ impl ProcessLocalExecution {
                 reason,
                 replay,
             } => {
-                let record = InlineRuntimeEffectController::request_process_cancel(
+                let record = NativeRuntimeEffectController::request_process_cancel(
                     registry,
                     &process_id,
                     reason,
@@ -142,7 +142,7 @@ impl ProcessLocalExecution {
                         }
                     }
                     crate::ProcessParentEndPolicy::Cancel => {
-                        match InlineRuntimeEffectController::request_process_cancel(
+                        match NativeRuntimeEffectController::request_process_cancel(
                             registry,
                             &process_id,
                             Some(reason),
@@ -354,7 +354,7 @@ mod tests {
             .await
             .expect("park process on deliberately divergent ordinal");
 
-        let controller = Arc::new(InlineRuntimeEffectController::default());
+        let controller = Arc::new(NativeRuntimeEffectController::default());
         let payload = serde_json::json!({"value": "wake-seven"});
         let outcome = controller
             .execute_effect(

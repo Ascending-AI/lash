@@ -637,7 +637,7 @@ mod tests {
     fn test_process_scope(id: &str) -> ProcessOpScope<'static> {
         ProcessOpScope::new(
             crate::ScopedEffectController::shared(
-                Arc::new(crate::InlineRuntimeEffectController::default()),
+                Arc::new(crate::NativeRuntimeEffectController::default()),
                 crate::ExecutionScope::runtime_operation(id),
             )
             .expect("test execution scope"),

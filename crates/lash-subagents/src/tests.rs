@@ -1083,7 +1083,7 @@ async fn run_seed_probe_inner(
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     // `agents.spawn(...)` starts a SessionTurn (subagent) process that the
-    // lease-protected worker executes — not inline. A SINGLE inline runner over
+    // lease-protected worker executes — not directly. A SINGLE native runner over
     // the same registry + an explicit in-memory store factory runs it (and
     // provider re-supply reaches the child). One runner suffices even for the
     // nested case here (`handle = start spawn_child` then `await handle`) because
@@ -1155,7 +1155,7 @@ async fn run_seed_probe_inner(
     .expect("runtime");
 
     let scoped_effect_controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
         lash_core::ExecutionScope::turn("root", "subagent-test-turn"),
     )
     .expect("test execution scope");

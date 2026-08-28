@@ -52,9 +52,10 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .without_queued_work()
     .provider(provider)
     .model(model)
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
     .process_env_store(Arc::new(
         lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -81,10 +82,11 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     artifact_store.clone(),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .with_native_queued_work()
     .provider(provider)
     .model(model)
     .store_factory(store_factory)
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .attachment_store(Arc::new(FileAttachmentStore::new(
         data_dir.join("attachments"),
     )))
@@ -138,11 +140,12 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     artifact_store,
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .with_native_queued_work()
     .provider(provider)
     .model(model)
     .store_factory(store_factory)
     .process_registry(process_registry)
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .attachment_store(attachment_store)
     .process_env_store(process_env_store)
     // Start bounded; tune both limits for your backend's latency envelope.
@@ -224,9 +227,9 @@ println!(
         <div class="section" id="durable-workflows">
           <div class="section-header">
             <h2>Durable Workflows</h2>
-            <p>Standard <code>LashCore</code> persists at the turn boundary. For durable in-flight effects (expensive LLM calls, long tool calls, process admin, mid-turn worker migration), wire an <code>EffectHost</code> on the builder and run each durable handler turn with <code>.turn_id(...).effects(&amp;controller).run()</code> or <code>.turn_id(...).effects(&amp;controller).stream_to(&amp;sink)</code>. The facade creates the turn <code>ExecutionScope</code> internally, while the handler still supplies the workflow controller explicitly. The <code>EffectHost</code> is the stable boundary an external workflow runtime (<a href="https://temporal.io/" rel="noopener" target="_blank">Temporal</a>, <a href="https://restate.dev/" rel="noopener" target="_blank">Restate</a>) would wrap; the default <code>InlineEffectHost</code> runs in process and is not in-flight durable.</p>
+            <p>Standard <code>LashCore</code> persists at the turn boundary. For durable in-flight effects (expensive LLM calls, long tool calls, process admin, mid-turn worker migration), wire an <code>EffectHost</code> on the builder and run each durable handler turn with <code>.turn_id(...).effects(&amp;controller).run()</code> or <code>.turn_id(...).effects(&amp;controller).stream_to(&amp;sink)</code>. The facade creates the turn <code>ExecutionScope</code> internally, while the handler still supplies the workflow controller explicitly. The <code>EffectHost</code> is the stable boundary an external workflow runtime (<a href="https://temporal.io/" rel="noopener" target="_blank">Temporal</a>, <a href="https://restate.dev/" rel="noopener" target="_blank">Restate</a>) would wrap; the default <code>NativeEffectHost</code> runs in process and is not in-flight durable.</p>
           </div>
-          <p>Shape: the runtime driver polls <code>TurnMachine</code>. For each reply-producing turn effect it builds a <code>RuntimeEffectEnvelope</code> with a typed <code>RuntimeInvocation</code>, invokes the active <code>ScopedEffectController</code>, and feeds the returned outcome back as the matching response. The <code>InlineEffectHost</code> runs locally and is not in-flight durable. A durable workflow <code>EffectHost</code> such as Restate records effects in workflow history, uses durable timers for sleeps, and reruns the handler with the same turn id before Lash retries the final idempotent commit.</p>
+          <p>Shape: the runtime driver polls <code>TurnMachine</code>. For each reply-producing turn effect it builds a <code>RuntimeEffectEnvelope</code> with a typed <code>RuntimeInvocation</code>, invokes the active <code>ScopedEffectController</code>, and feeds the returned outcome back as the matching response. The <code>NativeEffectHost</code> runs locally and is not in-flight durable. A durable workflow <code>EffectHost</code> such as Restate records effects in workflow history, uses durable timers for sleeps, and reruns the handler with the same turn id before Lash retries the final idempotent commit.</p>
           <p>Do not wrap a durable handler turn in another persistent submitted/running work-item state machine. The workflow key and <code>turn_id</code> are the durable in-flight identity; Lash's session execution lease, <code>TurnWorkDriver</code> keyed promises, and idempotent commit are the runtime correctness boundary; host tables should store product rows, reconnect outbox rows, exact turn addresses, or terminal output.</p>
           <p>Full contract: <a href="./architecture/durability.html">Architecture → Durability</a>. Embedders without workflow orchestration use the regular <a href="./persistence.html">session-store path</a>.</p>
         </div>
@@ -256,6 +259,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .without_queued_work()
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())
@@ -263,7 +267,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .build()
             .expect("valid model metadata"),
     )
-    .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
     .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
     .process_env_store(Arc::new(
         lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -351,6 +355,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     std::sync::Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
 );
 lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .without_queued_work()
     .provider(provider)
     .model(
         lash::ModelSpec::builder(model.clone())
@@ -359,7 +364,7 @@ lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .expect("valid model metadata"),
     )
     .effect_host(std::sync::Arc::new(
-        lash::durability::InlineEffectHost::default(),
+        lash::durability::NativeEffectHost::default(),
     ))
     .attachment_store(std::sync::Arc::new(
         lash::persistence::InMemoryAttachmentStore::new(),
@@ -417,6 +422,7 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
     artifact_store.clone(),
 );
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    .with_native_queued_work()
     .provider(provider)
     .model(
         lash::ModelSpec::builder("anthropic/claude-sonnet-4.6")
@@ -426,7 +432,7 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     )
     .store_factory(store_factory)
     .effect_host(std::sync::Arc::new(
-        lash::durability::InlineEffectHost::default(),
+        lash::durability::NativeEffectHost::default(),
     ))
     .attachment_store(std::sync::Arc::new(
         lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),

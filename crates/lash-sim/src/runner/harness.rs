@@ -6,7 +6,7 @@ pub(super) fn runtime_core_for_scripts(
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     provider_schedule: Option<ScriptedTransportSchedule>,
-    disable_inline_queued_work_driver: bool,
+    disable_native_queued_work_driver: bool,
     clock: Arc<SimClock>,
 ) -> Result<(lash::LashCore, Arc<ScriptedLlmHttpTransport>, String), FixedScriptRunnerError> {
     let provider_kind = scripts
@@ -36,7 +36,7 @@ pub(super) fn runtime_core_for_scripts(
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let mut builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .attachment_store(attachment_store)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -47,7 +47,7 @@ pub(super) fn runtime_core_for_scripts(
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .provider(provider_handle)
         .model(model);
-    builder = if disable_inline_queued_work_driver {
+    builder = if disable_native_queued_work_driver {
         builder.without_queued_work()
     } else {
         builder.with_native_queued_work()

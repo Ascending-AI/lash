@@ -358,7 +358,7 @@ impl RestateProcessIngressRunner {
     }
 
     /// Push one worker fault to the host-facing sink, or to `tracing` when this
-    /// handle has none — the same floor the inline worker keeps.
+    /// handle has none — the same floor the native worker keeps.
     async fn emit_worker_fault(
         &self,
         process_id: &str,
@@ -562,7 +562,7 @@ impl RestateProcessIngressRunner {
                         continue;
                     }
                     // Lash never executes an externally-owned row on any tier;
-                    // the inline worker reports the same typed deferral.
+                    // the native worker reports the same typed deferral.
                     report.deferred.push(ProcessAdmissionDeferred {
                         process_id,
                         disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,

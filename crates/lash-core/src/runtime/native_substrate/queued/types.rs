@@ -165,7 +165,7 @@ pub struct QueuedWorkSlowWake {
 /// Repeating operational evidence that queued work is blocked by a live
 /// session execution lease.
 ///
-/// This event is observational only. The inline driver must fully hydrate the
+/// This event is observational only. The native driver must fully hydrate the
 /// runtime before it can distinguish a blocked claim from an idle queue, so
 /// one hydration per bounded contention poll is the current floor. The cheap
 /// pre-hydration peek deliberately remains a conservative queue predicate; it
@@ -183,7 +183,7 @@ pub struct QueuedWorkWakeContended {
 
 /// Whether one queued-work pass actually claimed durable work.
 ///
-/// The inline reference driver reports this so a positive conservative peek
+/// The native reference driver reports this so a positive conservative peek
 /// followed by a live session-lease conflict backs off instead of rehydrating
 /// eagerly. External engine submitters may retain the default `Unknown` result;
 /// Lash never re-drives engine-owned work.
@@ -234,7 +234,7 @@ pub trait QueuedWorkRunHandle: Send + Sync {
 
     /// Run one pass and report whether the pass claimed durable work.
     ///
-    /// External handles keep the single-pass default. The inline reference
+    /// External handles keep the single-pass default. The native reference
     /// handle overrides this to distinguish progress from lease contention.
     async fn claim_and_run_pending_with_progress(
         &self,

@@ -29,7 +29,7 @@ async fn facade_turn(
         )
         .store_factory(store_factory)
         .effect_host(std::sync::Arc::new(
-            lash::durability::InlineEffectHost::default(),
+            lash::durability::NativeEffectHost::default(),
         ))
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),

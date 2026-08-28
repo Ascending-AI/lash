@@ -26,7 +26,7 @@ async fn inmemory_core(provider: ProviderHandle, model: ModelSpec) -> anyhow::Re
         .without_queued_work()
         .provider(provider)
         .model(model)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -66,7 +66,7 @@ async fn sqlite_core(
         .provider(provider)
         .model(model)
         .store_factory(store_factory)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(FileAttachmentStore::new(
             data_dir.join("attachments"),
         )))
@@ -177,7 +177,7 @@ async fn process_registry_core(
         .model(model)
         .store_factory(store_factory)
         .process_registry(process_registry)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(attachment_store)
         .process_env_store(process_env_store)
         // Start bounded; tune both limits for your backend's latency envelope.
@@ -222,7 +222,7 @@ async fn subagents_core(
                 .build()
                 .expect("valid model metadata"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -306,7 +306,7 @@ fn configured_mcp_core(
                 .expect("valid model metadata"),
         )
         .effect_host(std::sync::Arc::new(
-            lash::durability::InlineEffectHost::default(),
+            lash::durability::NativeEffectHost::default(),
         ))
         .attachment_store(std::sync::Arc::new(
             lash::persistence::InMemoryAttachmentStore::new(),
@@ -367,7 +367,7 @@ async fn durable_stores_core(
         )
         .store_factory(store_factory)
         .effect_host(std::sync::Arc::new(
-            lash::durability::InlineEffectHost::default(),
+            lash::durability::NativeEffectHost::default(),
         ))
         .attachment_store(std::sync::Arc::new(
             lash::persistence::FileAttachmentStore::new(data_dir.join("attachments")),

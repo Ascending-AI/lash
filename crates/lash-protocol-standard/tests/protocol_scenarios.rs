@@ -891,7 +891,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             lash_core::TurnInput::text("run durable follow-on work"),
             tokio_util::sync::CancellationToken::new(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
                 lash_core::ExecutionScope::turn(
                     "standard-protocol-scenario",
                     "standard-protocol-turn",

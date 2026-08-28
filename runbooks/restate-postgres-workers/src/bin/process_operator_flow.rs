@@ -17,7 +17,7 @@ use anyhow::{Context, Result, bail, ensure};
 use lash::persistence::SessionStoreFactory as _;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::runtime::{
-    AwaitEventResolver, ExecutionScope, InlineRuntimeEffectController, RuntimeEffectController,
+    AwaitEventResolver, ExecutionScope, NativeRuntimeEffectController, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeError,
 };
@@ -267,7 +267,7 @@ impl StallingProvider {
 /// for the in-flight effect it admitted before declaring the journal empty.
 #[derive(Default)]
 struct JournalController {
-    inline: InlineRuntimeEffectController,
+    inline: NativeRuntimeEffectController,
     active: Mutex<BTreeSet<String>>,
     completed: Mutex<BTreeSet<String>>,
 }
@@ -404,7 +404,7 @@ fn core(
         .process_env_store(Arc::new(storage.process_env_store()))
         .process_registry(Arc::new(storage.process_registry()))
         .trigger_store(Arc::new(storage.trigger_store()))
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "process-operator-flow-worker",
             uuid::Uuid::new_v4().to_string(),

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash::durability::{InlineEffectHost, LeaseTimings};
+use lash::durability::{LeaseTimings, NativeEffectHost};
 use lash::persistence::{
     AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvStore, SessionLeaseRenewal,
     SessionStoreFactory,
@@ -41,7 +41,7 @@ fn configure_lease_timings(
                 .expect("valid model metadata"),
         )
         .store_factory(store_factory)
-        .effect_host(Arc::new(InlineEffectHost::default()))
+        .effect_host(Arc::new(NativeEffectHost::default()))
         .attachment_store(attachment_store)
         .process_env_store(process_env_store)
         // Start bounded; tune both limits for your backend's latency envelope.
@@ -275,7 +275,7 @@ mod tests {
                 lash::persistence::InMemorySessionStoreFactory::new(),
             ))
             .process_registry(registry.clone())
-            .effect_host(Arc::new(InlineEffectHost::default()))
+            .effect_host(Arc::new(NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),

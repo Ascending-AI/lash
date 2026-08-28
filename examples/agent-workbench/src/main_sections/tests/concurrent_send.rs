@@ -612,7 +612,7 @@ fn gated_first_call_provider(
 /// out: production supplies `WorkbenchQueuedWorkSubmitter`, so lash installs no
 /// inline queued-work runner and the drain of a deferred next-turn input is the
 /// workbench's Restate queued-turn workflow. A state built without a driver gets
-/// lash's `InlineQueuedWorkRunHandle` instead, which drains the input itself
+/// lash's `NativeQueuedWorkRunHandle` instead, which drains the input itself
 /// without the workbench in the loop — a shape the workbench never runs in.
 async fn queued_send_test_state(
     data_dir: &std::path::Path,

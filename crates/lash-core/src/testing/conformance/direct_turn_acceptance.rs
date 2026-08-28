@@ -132,7 +132,7 @@ pub async fn direct_turn_accepts_before_driving(
             .build()
             .into_handle()
     };
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::InlineEffectHost::default());
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
     let mut runtime = acceptance_runtime(
         &store,
         &effect_host,
@@ -232,7 +232,7 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
                 })
             })),
         ));
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::InlineEffectHost::default());
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
     let mut first_driver = acceptance_runtime(
         &store,
         &effect_host,
@@ -345,7 +345,7 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
             .build()
             .into_handle()
     };
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::InlineEffectHost::default());
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
     let mut runtime = acceptance_runtime(
         &store,
         &effect_host,
@@ -429,7 +429,7 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
             .into_handle()
     };
 
-    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::InlineEffectHost::default());
+    let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
     let mut loser = acceptance_runtime(
         &store,
         &effect_host,

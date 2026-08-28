@@ -620,7 +620,7 @@ impl LashSession {
     /// Request cooperative cancellation of exactly one turn in this session.
     ///
     /// The request is compiled onto the deployment's keyed-promise control
-    /// seam. An inline effect host is process-local; another process or a
+    /// seam. An native effect host is process-local; another process or a
     /// replayed owner can observe the request only with a controller-owned
     /// replay deployment. `origin` is opaque host-domain data that Lash records
     /// without interpretation. Detached effects are not guaranteed to stop.
@@ -650,7 +650,7 @@ impl LashSession {
     /// choosing how Lash handles active-turn input the turn did not deliver.
     ///
     /// The request is compiled onto the deployment's keyed-promise control
-    /// seam. An inline effect host is process-local; another process or a
+    /// seam. An native effect host is process-local; another process or a
     /// replayed owner can observe the request only with a controller-owned
     /// replay deployment. `origin` is opaque host-domain data that Lash records
     /// without interpretation. Detached effects are not guaranteed to stop.

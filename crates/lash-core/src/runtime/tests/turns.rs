@@ -6072,7 +6072,7 @@ async fn cancellation_watch_exhaustion_does_not_block_turn_completion() {
     let clock = Arc::new(CancelWatchTestClock::new(0));
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
     let host = EmbeddedRuntimeHost::new(
-        super::effect::runtime_host_config_with_inline_controller(controller.clone())
+        super::effect::runtime_host_config_with_native_controller(controller.clone())
             .with_clock(host_clock),
     );
     let mut runtime = standard_runtime_with_transport_and_host(transport, host).await;
@@ -8022,7 +8022,7 @@ async fn cancellation_sealed_before_renewal_failure_remains_evidence_bearing_can
 
     let turn_id = "cancel-before-renewal-failure";
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = inline_scope(persisted_state.turn_scope(turn_id));
+    let turn_scope = native_scope(persisted_state.turn_scope(turn_id));
     let turn_address = crate::TurnAddress::new(&persisted_state.session_id, turn_id);
     let turn = crate::task::spawn(async move {
         runtime
@@ -8957,7 +8957,7 @@ async fn session_manager_can_run_child_session_turn() {
         .expect("child session");
     let turn_id = "child-lifecycle-turn";
     let scoped_effect_controller = crate::ScopedEffectController::shared(
-        Arc::new(crate::InlineRuntimeEffectController::default()),
+        Arc::new(crate::NativeRuntimeEffectController::default()),
         crate::ExecutionScope::turn(&handle.session_id, turn_id),
     )
     .expect("scoped child turn");
@@ -9031,7 +9031,7 @@ async fn session_manager_preserves_runtime_error_from_child_session_turn() {
     .expect("child session execution lease");
     let turn_id = "busy-child-turn";
     let controller = crate::ScopedEffectController::shared(
-        Arc::new(crate::InlineRuntimeEffectController::default()),
+        Arc::new(crate::NativeRuntimeEffectController::default()),
         crate::ExecutionScope::turn(&handle.session_id, turn_id),
     )
     .expect("child turn controller");
@@ -9266,7 +9266,7 @@ async fn runtime_can_activate_managed_child_session() {
             turn_context: crate::TurnContext::default(),
         },
         crate::ScopedEffectController::shared(
-            Arc::new(crate::InlineRuntimeEffectController::default()),
+            Arc::new(crate::NativeRuntimeEffectController::default()),
             crate::ExecutionScope::turn("child", "activated-child-turn"),
         )
         .expect("scoped activated child turn"),

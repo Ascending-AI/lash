@@ -470,7 +470,7 @@ mod tests {
                 ..GenerationOptions::default()
             })
             .effect_host(Arc::new(
-                lash::durability::InlineEffectHost::default()
+                lash::durability::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
             .lease_timings(crate::lease::sim_runtime_lease_timings())

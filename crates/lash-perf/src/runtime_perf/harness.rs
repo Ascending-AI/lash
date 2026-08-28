@@ -67,7 +67,7 @@ trait ExplicitEphemeralFacets: Sized {
 impl ExplicitEphemeralFacets for lash::LashCoreBuilder {
     fn with_explicit_ephemeral_facets(self) -> Self {
         self.effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -672,7 +672,7 @@ pub(crate) fn build_embed_core(
     store: Arc<RuntimePerfStore>,
 ) -> anyhow::Result<BenchmarkCore> {
     let effect_host = Arc::new(
-        lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+        lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
     );
     match scenario {
         RuntimePerfScenario::EmbedStandard => {
@@ -750,14 +750,14 @@ pub(crate) async fn build_runtime_with_store(
     let effect_host: Arc<dyn lash_core::EffectHost> =
         if matches!(scenario, RuntimePerfScenario::TurnStartGate) {
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::new(Arc::new(
+                lash_core::facade_support::NativeEffectHost::new(Arc::new(
                     RetryingStartGateController::default(),
                 ))
                 .allow_process_lifetime_completion_keys(),
             )
         } else {
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::default()
+                lash_core::facade_support::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             )
         };
@@ -926,14 +926,14 @@ pub(crate) async fn build_runtime_with_store(
 
 struct RetryingStartGateController {
     attempts_by_key: Mutex<HashMap<String, usize>>,
-    delegate: lash_core::facade_support::InlineRuntimeEffectController,
+    delegate: lash_core::facade_support::NativeRuntimeEffectController,
 }
 
 impl Default for RetryingStartGateController {
     fn default() -> Self {
         Self {
             attempts_by_key: Mutex::new(HashMap::new()),
-            delegate: lash_core::facade_support::InlineRuntimeEffectController::default(),
+            delegate: lash_core::facade_support::NativeRuntimeEffectController::default(),
         }
     }
 }

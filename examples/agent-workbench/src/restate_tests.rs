@@ -495,18 +495,18 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
 
-    let inline_host: Arc<dyn lash::durability::EffectHost> =
-        Arc::new(lash::durability::InlineEffectHost::default());
+    let native_host: Arc<dyn lash::durability::EffectHost> =
+        Arc::new(lash::durability::NativeEffectHost::default());
     let durable_host: Arc<dyn lash::durability::EffectHost> =
         lash_restate::RestateTurnDeployment::new(lash_restate::RestateConnection::new(
             "http://127.0.0.1:8080",
         ))
         .effect_host();
     let scope = lash::runtime::ExecutionScope::turn("routing-session", "routing-turn");
-    let inline_scoped = inline_host.scoped(scope.clone()).expect("inline scope");
+    let native_scoped = native_host.scoped(scope.clone()).expect("inline scope");
     assert!(matches!(
-        inline_host
-            .turn_control_binding(&inline_scoped)
+        native_host
+            .turn_control_binding(&native_scoped)
             .await
             .expect("inline binding"),
         lash::runtime::TurnControlBinding::HostOwned {
@@ -588,7 +588,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
 
     // A runtime-owned host uses the same facade entry point and executes the
     // local provider body instead.
-    let runtime_owned = ownership_core(Arc::clone(&inline_host), "runtime-owned");
+    let runtime_owned = ownership_core(Arc::clone(&native_host), "runtime-owned");
     let session = runtime_owned
         .session("workbench-runtime-owned-replay")
         .open()

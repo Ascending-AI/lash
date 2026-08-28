@@ -207,7 +207,7 @@ impl ProcessRecoveryOperation {
     /// Stable snake_case label for this operation.
     ///
     /// The one spelling used in structured records, so a fault logged by the
-    /// inline worker and one logged by an out-of-crate tier (the Restate
+    /// native worker and one logged by an out-of-crate tier (the Restate
     /// ingress sweep) carry the same `operation` value rather than two
     /// dialects of the same vocabulary.
     pub fn label(self) -> &'static str {

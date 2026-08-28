@@ -4,7 +4,7 @@
 //! boundary when no Restate handler context is in scope. Real effect execution
 //! needs a handler, so this host resolves, peeks, awaits, durably cancels, and
 //! revokes waits through the ingress and fails loudly for anything else instead
-//! of falling back to inline execution.
+//! of falling back to native execution.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -41,7 +41,7 @@ use crate::ingress::{RestateConnection, RestateIngressClient};
 /// enter a Restate workflow/object first and then pass
 /// [`RestateRuntimeEffectController::scoped_effect_controller`](crate::RestateRuntimeEffectController::scoped_effect_controller)
 /// into Lash. If a caller tries to execute through this deployment host
-/// directly, it fails loudly instead of falling back to inline execution.
+/// directly, it fails loudly instead of falling back to native execution.
 #[derive(Clone)]
 pub struct RestateEffectHost {
     controller: Arc<RestateEffectHostController>,

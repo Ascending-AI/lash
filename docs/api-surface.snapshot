@@ -1296,9 +1296,6 @@ lash::durability::EffectJournalRetirement::Session
 lash::durability::EffectJournalRetirement::Session::session_id
 lash::durability::EffectJournalRetirement::process
 lash::durability::EffectJournalRetirement::session
-lash::durability::InlineEffectHost
-lash::durability::InlineEffectHost::allow_process_lifetime_completion_keys
-lash::durability::InlineEffectHost::new
 lash::durability::LeaseTimings
 lash::durability::LeaseTimings::from_ttl
 lash::durability::LeaseTimings::new
@@ -1312,6 +1309,9 @@ lash::durability::LeaseTimingsError::TtlRenewRatioTooSmall
 lash::durability::LeaseTimingsError::TtlRenewRatioTooSmall::renew_interval
 lash::durability::LeaseTimingsError::TtlRenewRatioTooSmall::ttl
 lash::durability::LeaseTimingsError::TtlTooSmall
+lash::durability::NativeEffectHost
+lash::durability::NativeEffectHost::allow_process_lifetime_completion_keys
+lash::durability::NativeEffectHost::new
 lash::durability::ProcessDrainDeferred
 lash::durability::ProcessDrainDeferred::disposition
 lash::durability::ProcessDrainDeferred::process_id
@@ -7260,9 +7260,6 @@ lash::runtime::GroupWakePolicy
 lash::runtime::GroupWakePolicy::All
 lash::runtime::GroupWakePolicy::First
 lash::runtime::GroupWakePolicy::FirstSuccess
-lash::runtime::InlineRuntimeEffectController
-lash::runtime::InlineRuntimeEffectController::allow_process_lifetime_completion_keys
-lash::runtime::InlineRuntimeEffectController::register_group_executors
 lash::runtime::LashRuntime
 lash::runtime::LashRuntime::activate_managed_session
 lash::runtime::LashRuntime::add_prompt_contribution
@@ -7350,6 +7347,9 @@ lash::runtime::NativeQueuedWork::new
 lash::runtime::NativeQueuedWork::validate_execution_concurrency
 lash::runtime::NativeQueuedWork::with_execution_concurrency
 lash::runtime::NativeQueuedWork::with_worker_slot_supplier
+lash::runtime::NativeRuntimeEffectController
+lash::runtime::NativeRuntimeEffectController::allow_process_lifetime_completion_keys
+lash::runtime::NativeRuntimeEffectController::register_group_executors
 lash::runtime::NativeSubstrateConfig
 lash::runtime::NativeSubstrateConfig::validate
 lash::runtime::NativeSubstrateConfig::work_cadence
@@ -8287,7 +8287,7 @@ lash::testing::conformance::ConformanceInvocation::controller
 lash::testing::conformance::ConformanceInvocation::controller_handle
 lash::testing::conformance::ConformanceInvocation::effect_redrive
 lash::testing::conformance::ConformanceInvocation::end
-lash::testing::conformance::ConformanceInvocation::inline
+lash::testing::conformance::ConformanceInvocation::native
 lash::testing::conformance::ConformanceInvocation::new
 lash::testing::conformance::ConformanceInvocation::redrive
 lash::testing::conformance::DrainWorld

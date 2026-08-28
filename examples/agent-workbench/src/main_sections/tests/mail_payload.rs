@@ -112,7 +112,7 @@ async fn inject_message_scopes_emission_to_requested_session() {
 
     let operation_id = "workbench-test-mail-delivery";
     let scoped_effect_controller = lash::runtime::ScopedEffectController::shared(
-        Arc::new(lash::runtime::InlineRuntimeEffectController::default()),
+        Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
         lash::runtime::ExecutionScope::runtime_operation(format!("trigger:{operation_id}")),
     )
     .expect("scoped effect controller");

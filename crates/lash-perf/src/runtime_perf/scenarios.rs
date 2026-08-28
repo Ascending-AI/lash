@@ -423,7 +423,7 @@ impl RuntimePerfScenario {
             "turn_start_gate",
             Standard,
             RuntimeScenario,
-            "Measures the inline turn-cancel gate peek through the bounded retry wrapper below protocol and facade ownership."
+            "Measures the native turn-cancel gate peek through the bounded retry wrapper below protocol and facade ownership."
         ),
         runtime_perf_metadata!(
             TurnCancelRoundTrip,

@@ -41,7 +41,7 @@ from the row's own evidence (the committed cell's tag), never from the environme
 variable you set.
 
 **Fixture honesty.** The controller-owned journal in this scenario is an in-process ledger
-of active replay keys, not a claim that `InlineEffectHost` has a durable workflow journal.
+of active replay keys, not a claim that `NativeEffectHost` has a durable workflow journal.
 It proves the host waited for the exact admitted effect before declaring its journal empty.
 The workflow-engine persistence half belongs to the Restate runbooks. Process rows use
 inert `External` inputs because execution is not under test; drain reads only the persisted

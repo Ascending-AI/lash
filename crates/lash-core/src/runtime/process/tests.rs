@@ -712,7 +712,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
             .expect("shared events before delete"),
     )
     .expect("serialize shared events");
-    let controller = crate::InlineRuntimeEffectController::default();
+    let controller = crate::NativeRuntimeEffectController::default();
     let invocation = crate::RuntimeInvocation::effect(
         crate::RuntimeScope::new("deleted"),
         "process:delete-session:deleted",

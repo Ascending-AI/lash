@@ -808,7 +808,7 @@ impl LashRuntime {
             .map_err(|err| RuntimeError::new(RuntimeErrorCode::QueuedWork, err.to_string()))?;
         match outcome {
             crate::SessionDrainOutcome::Ran => {
-                // An inline or external driver may have committed the command
+                // A native or external driver may have committed the command
                 // before returning. Reconcile that authoritative head before this
                 // resident runtime reaches another commit boundary; its lease is
                 // advisory, so retaining the pre-drive head would manufacture a

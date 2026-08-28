@@ -24,7 +24,7 @@ fn test_core(
                 .build()
                 .expect("valid docs ingress model"),
         )
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -496,7 +496,7 @@ async fn ingress_core_with_effect_host(
 #[tokio::test]
 async fn runtime_owned_cancel_uses_ingress_identity() -> anyhow::Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .await?;
     let ingress =
         core.tool_intents(SESSION, lash::runtime::ExecutionScope::turn(SESSION, SCOPE))?;

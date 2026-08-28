@@ -213,18 +213,18 @@ async fn wait_for_terminal_count(
     }
 }
 
-fn inline_worker(
+fn native_worker(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
 ) -> DurableProcessWorker {
-    inline_worker_with_trigger_store(
+    native_worker_with_trigger_store(
         registry,
         lease_owner,
         Arc::new(crate::InMemoryTriggerStore::default()),
     )
 }
 
-fn inline_worker_with_trigger_store(
+fn native_worker_with_trigger_store(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
@@ -237,7 +237,7 @@ fn inline_worker_with_trigger_store(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
-            Arc::new(InlineSessionStoreFactory),
+            Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             lease_owner,
@@ -266,7 +266,7 @@ fn reentrant_worker_with_trigger_store(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),
             ),
-            Arc::new(InlineSessionStoreFactory),
+            Arc::new(InMemorySessionStoreFactory),
             crate::WorkerProcessWork::External(process_work),
             Arc::new(crate::NoQueuedWork::new()),
             lease_owner,
@@ -963,7 +963,7 @@ async fn run_production_chain(
     assert_eq!(state.root_runs.load(Ordering::SeqCst), roots);
     assert!(
         state.max_active_work.load(Ordering::SeqCst) <= concurrency,
-        "inline process execution exceeded its configured concurrency"
+        "native process execution exceeded its configured concurrency"
     );
     if nodes > 1 {
         assert_eq!(state.first_children_started.load(Ordering::SeqCst), roots);
@@ -1220,7 +1220,7 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
         "test starts in the reserve/start crash window"
     );
 
-    let worker = inline_worker_with_trigger_store(
+    let worker = native_worker_with_trigger_store(
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store),
@@ -1459,7 +1459,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         "test starts in the reserve/start crash window"
     );
 
-    let worker = inline_worker_with_trigger_store(
+    let worker = native_worker_with_trigger_store(
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store_dyn),
@@ -1557,7 +1557,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
         .await
         .expect("pre-register delivery process");
 
-    let worker = inline_worker_with_trigger_store(
+    let worker = native_worker_with_trigger_store(
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         trigger_store,
@@ -1593,7 +1593,7 @@ async fn sweep_never_claims_externally_owned_rows() {
         .await
         .expect("register");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1672,7 +1672,7 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
         .await
         .expect("record exhausted attempt");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("recovery-worker", "host-b", "recovery-start"),
     );
@@ -1715,7 +1715,7 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
         .await
         .expect("request abandon");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1769,7 +1769,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
         .acquired()
         .expect("live holder lease acquired");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1828,7 +1828,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         .expect("request abandon");
     // No live lease held: the row's owner lease has lapsed.
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -1862,7 +1862,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
         .await
         .expect("register");
 
-    let worker = inline_worker(
+    let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
     );
@@ -2056,13 +2056,13 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
 }
 
 /// Owner drain (ADR 0019): a host closing gracefully terminalizes its own
-/// started OwnerBound work inline as `Abandoned{OwnerDrain}` under a live lease,
+/// started OwnerBound work natively as `Abandoned{OwnerDrain}` under a live lease,
 /// while leaving rerunnable, not-yet-started, and other-owner rows untouched.
 #[tokio::test]
 async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let owner = local_owner("drain-host", "host-a", "start-a");
-    let worker = inline_worker(Arc::clone(&registry), owner.clone());
+    let worker = native_worker(Arc::clone(&registry), owner.clone());
 
     // (a) OwnerBound row this worker started -> drained.
     registry
@@ -2159,7 +2159,7 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
 }
 
 #[tokio::test]
-async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
+async fn native_start_records_stable_owner_that_owner_drain_can_match() {
     let started = Arc::new(tokio::sync::Notify::new());
     let fail = Arc::new(tokio::sync::Notify::new());
     let run_handle = Arc::new(LateBoundProcessWork::default());
@@ -2173,7 +2173,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     )
     .await;
     let mut registration = engine_registration(
-        "real-inline-owner-bound",
+        "real-native-owner-bound",
         "paused-infra",
         env_ref,
         serde_json::Value::Null,
@@ -2192,7 +2192,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
         .expect("engine starts");
 
     let record = registry
-        .get_process("real-inline-owner-bound")
+        .get_process("real-native-owner-bound")
         .await
         .expect("read process")
         .expect("started record");
@@ -2205,7 +2205,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     fail.notify_one();
     tokio::time::timeout(Duration::from_secs(1), async {
         while registry
-            .get_process_lease("real-inline-owner-bound")
+            .get_process_lease("real-native-owner-bound")
             .await
             .expect("lease read")
             .is_some()
@@ -2219,7 +2219,7 @@ async fn inline_start_records_stable_owner_that_owner_drain_can_match() {
     let report = worker.drain_owner_bound_work().await.expect("owner drain");
     assert_eq!(
         report.abandoned,
-        vec!["real-inline-owner-bound".to_string()]
+        vec!["real-native-owner-bound".to_string()]
     );
     assert!(report.deferred.is_empty());
 }
@@ -2254,7 +2254,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         )))
         .await;
 
-    let worker = inline_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner);
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 

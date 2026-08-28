@@ -1,4 +1,4 @@
-//! In-process await-event (Durable Wait) registry backing the inline effect
+//! In-process await-event (Durable Wait) registry backing the native effect
 //! host and controller.
 
 use lash_sansio::sync::{MutexExt, RwLockExt};

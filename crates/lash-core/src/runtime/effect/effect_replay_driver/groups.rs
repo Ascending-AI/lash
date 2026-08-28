@@ -29,8 +29,8 @@
 //!
 //! # Three mechanisms, matching the in-memory reference host
 //!
-//! The inline controller
-//! ([`InlineRuntimeEffectController`](crate::InlineRuntimeEffectController)) is
+//! The native controller
+//! ([`NativeRuntimeEffectController`](crate::NativeRuntimeEffectController)) is
 //! the conformance definition of the contract's observable semantics, so this
 //! host is written to agree with it mechanism for mechanism:
 //!
@@ -38,7 +38,7 @@
 //!   losers, because `RunToCompletion` says a losing promise keeps running.
 //! * **The rank is allocated at settlement by a single allocator.** Here that is
 //!   layer 1's single-row counter bump inside the child's own finalize
-//!   transaction (N1) rather than the inline tier's per-group lock, which is the
+//!   transaction (N1) rather than the native substrate's per-group lock, which is the
 //!   same discipline against the same defect.
 //! * **A settlement is served from the record, never re-raced.** Rank
 //!   `consumed + 1` is a `SELECT`; once decided it re-reads the same child,
@@ -481,7 +481,7 @@ impl<P: EffectReplayPersistence + 'static, A: AwaitEventBackend + 'static>
     /// the group is both closed and complete.
     ///
     /// Retention is bounded by close **and** completion, for the same reason it
-    /// is on the inline tier: a `RunToCompletion` loser keeps settling after the
+    /// is on the native substrate: a `RunToCompletion` loser keeps settling after the
     /// caller is gone, and its settlement is exactly what this state is here to
     /// let a caller read. Completion is two claims, not one: this process's own
     /// child tasks must have returned, *and* the journal must hold no unsettled

@@ -491,7 +491,7 @@ mod tests {
                     .build()
                     .expect("model spec"),
             )
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .store_factory(Arc::new(
                 lash::persistence::InMemorySessionStoreFactory::new(),

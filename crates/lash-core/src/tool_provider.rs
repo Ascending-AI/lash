@@ -903,7 +903,7 @@ impl<'run> ToolContext<'run> {
             crate::CompletionKeyPreparation::Unsupported
             | crate::CompletionKeyPreparation::NotNeeded => Err(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
-                "completion keys require an effect controller with process-loss-safe await-event routing; single-process deployments may explicitly opt in with InlineEffectHost::allow_process_lifetime_completion_keys()",
+                "completion keys require an effect controller with process-loss-safe await-event routing; single-process deployments may explicitly opt in with NativeEffectHost::allow_process_lifetime_completion_keys()",
             )),
         }
     }
@@ -1015,7 +1015,7 @@ impl<'run> ToolContext<'run> {
             session_graph,
             processes,
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default()
+                crate::NativeRuntimeEffectController::default()
                     .allow_process_lifetime_completion_keys(),
             )),
             attachment_store,
@@ -1508,7 +1508,7 @@ mod tests {
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default(),
+                crate::NativeRuntimeEffectController::default(),
             )),
             Arc::new(crate::SessionAttachmentStore::in_memory()),
             crate::DirectCompletionClient::unavailable(
@@ -1531,9 +1531,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inline_completion_key_requires_process_lifetime_opt_in() {
+    async fn native_completion_key_requires_process_lifetime_opt_in() {
         let prepared = PreparedToolCall::from_parts(
-            "call-inline-risk",
+            "call-native-risk",
             "tool:demo_tool",
             "demo_tool",
             serde_json::json!({}),
@@ -1541,13 +1541,13 @@ mod tests {
             serde_json::json!({}),
         );
         let context = ToolContext::builder(
-            "session-inline-risk".to_string(),
+            "session-native-risk".to_string(),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::testing::MockSessionManager::default()),
             Arc::new(crate::UnavailableProcessService),
             crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::InlineRuntimeEffectController::default(),
+                crate::NativeRuntimeEffectController::default(),
             )),
             Arc::new(crate::SessionAttachmentStore::in_memory()),
             crate::DirectCompletionClient::unavailable(
@@ -1560,7 +1560,7 @@ mod tests {
         let error = context
             .completion_key()
             .await
-            .expect_err("Inline completion keys must refuse by default");
+            .expect_err("Native completion keys must refuse by default");
         assert_eq!(error.code.as_str(), "tool_completion_key_process_lifetime");
         assert!(error.message.contains("process-loss-safe"));
         assert!(

@@ -1,4 +1,5 @@
 include!("core_session_builder/session_lifecycle.rs");
+include!("core_session_builder/session_lifecycle_usage.rs");
 include!("core_session_builder/config_settlement.rs");
 include!("core_session_builder/commit_budget.rs");
 include!("core_session_builder/session_delete_failure.rs");

@@ -101,7 +101,7 @@ impl QueuedWorkExecutionScheduler {
         }
     }
 
-    pub(super) fn inline(concurrency: QueuedWorkExecutionConcurrency) -> Self {
+    pub(super) fn native(concurrency: QueuedWorkExecutionConcurrency) -> Self {
         let supplier = Arc::new(DefaultWorkerSlotSupplier::new(
             DEFAULT_PROCESS_EXECUTION_CONCURRENCY,
             concurrency.get(),

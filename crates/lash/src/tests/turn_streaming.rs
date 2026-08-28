@@ -372,7 +372,7 @@ struct DurableEffectInvocation {
 #[derive(Default)]
 struct RecordingDurableEffectController {
     invocations: StdMutex<Vec<DurableEffectInvocation>>,
-    inline: lash_core::facade_support::InlineRuntimeEffectController,
+    native: lash_core::facade_support::NativeRuntimeEffectController,
 }
 
 impl RecordingDurableEffectController {
@@ -388,7 +388,7 @@ impl lash_core::AwaitEventResolver for RecordingDurableEffectController {
         scope: &lash_core::ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        self.native.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -396,7 +396,7 @@ impl lash_core::AwaitEventResolver for RecordingDurableEffectController {
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        self.native.resolve_await_event(key, resolution).await
     }
 }
 
@@ -440,13 +440,13 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
 }
 
 #[derive(Default)]
-struct RecordingInlineEffectController {
+struct RecordingNativeEffectController {
     invocations: StdMutex<Vec<DurableEffectInvocation>>,
     persisted_outcomes: StdMutex<Vec<String>>,
-    inline: lash_core::facade_support::InlineRuntimeEffectController,
+    native: lash_core::facade_support::NativeRuntimeEffectController,
 }
 
-impl RecordingInlineEffectController {
+impl RecordingNativeEffectController {
     fn invocations(&self) -> Vec<DurableEffectInvocation> {
         self.invocations.lock_recover().clone()
     }
@@ -462,13 +462,13 @@ impl RecordingInlineEffectController {
 }
 
 #[async_trait]
-impl lash_core::AwaitEventResolver for RecordingInlineEffectController {
+impl lash_core::AwaitEventResolver for RecordingNativeEffectController {
     async fn await_event_key(
         &self,
         scope: &lash_core::ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> std::result::Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        self.native.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
@@ -476,14 +476,14 @@ impl lash_core::AwaitEventResolver for RecordingInlineEffectController {
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> std::result::Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        self.native.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
         key: &lash_core::AwaitEventKey,
     ) -> std::result::Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.inline.peek_await_event(key).await
+        self.native.peek_await_event(key).await
     }
 
     async fn await_await_event(
@@ -492,14 +492,14 @@ impl lash_core::AwaitEventResolver for RecordingInlineEffectController {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> std::result::Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+        self.native.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(
         &self,
         session_id: &str,
     ) -> std::result::Result<(), lash_core::RuntimeError> {
-        self.inline
+        self.native
             .revoke_await_events_for_session(session_id)
             .await
     }
@@ -508,14 +508,14 @@ impl lash_core::AwaitEventResolver for RecordingInlineEffectController {
         &self,
         session_id: &str,
     ) -> std::result::Result<(), lash_core::RuntimeError> {
-        self.inline
+        self.native
             .cancel_await_events_for_session(session_id)
             .await
     }
 }
 
 #[async_trait]
-impl lash_core::RuntimeEffectController for RecordingInlineEffectController {
+impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -959,17 +959,17 @@ fn runtime_batch_provider() -> ProviderHandle {
 }
 
 #[tokio::test]
-async fn turn_run_uses_configured_inline_effect_host_without_explicit_effects() -> Result<()> {
-    let recorder = Arc::new(RecordingInlineEffectController::default());
+async fn turn_run_uses_configured_native_effect_host_without_explicit_effects() -> Result<()> {
+    let recorder = Arc::new(RecordingNativeEffectController::default());
     let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
             effect_controller,
         )))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
-    let session = core.session("inline-default-effect-host").open().await?;
+    let session = core.session("native-default-effect-host").open().await?;
 
     let output = session.turn(TurnInput::text("inline")).run().await?;
 
@@ -1095,10 +1095,10 @@ async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()> {
 
 #[tokio::test]
 async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
-    let recorder = Arc::new(RecordingInlineEffectController::default());
+    let recorder = Arc::new(RecordingNativeEffectController::default());
     let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
             effect_controller,
         )))
         .provider(mock_provider())
@@ -1129,9 +1129,9 @@ async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
 
 #[tokio::test]
 async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallback() -> Result<()> {
-    let recorder = Arc::new(RecordingInlineEffectController::default());
+    let recorder = Arc::new(RecordingNativeEffectController::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
             recorder.clone(),
         )))
         .provider(mock_provider())
@@ -1175,7 +1175,7 @@ async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallback() -> Re
 
 #[tokio::test]
 async fn explicit_effect_controller_creates_turn_scope_internally() -> Result<()> {
-    let recorder = RecordingInlineEffectController::default();
+    let recorder = RecordingNativeEffectController::default();
     let core = standard_core();
     let session = core.session("explicit-handler-effects").open().await?;
 
@@ -1252,10 +1252,10 @@ async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle() -> Resul
 
 #[tokio::test]
 async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<()> {
-    let recorder = Arc::new(RecordingInlineEffectController::default());
+    let recorder = Arc::new(RecordingNativeEffectController::default());
     let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
             effect_controller,
         )))
         .provider(mock_provider())
@@ -1335,7 +1335,7 @@ async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
         .build(crate::testing::runtime_lease_owner())?;
     let session_id = "queued-builder-turn-starts";
     let session = core.session(session_id).open().await?;
-    let controller = RecordingInlineEffectController::default();
+    let controller = RecordingNativeEffectController::default();
 
     session
         .enqueue(TurnInput::text("automatic queued builder"))
@@ -2772,7 +2772,7 @@ async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Res
 
 #[tokio::test]
 async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> Result<()> {
-    let recorder = RecordingInlineEffectController::default();
+    let recorder = RecordingNativeEffectController::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -5268,7 +5268,7 @@ async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability
 }
 
 #[tokio::test]
-async fn inline_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
+async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Result<()> {
     const INPUTS: usize = 8;
     let builds = Arc::new(AtomicUsize::new(0));
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -7021,7 +7021,7 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
             })
             .build()
             .into_handle();
-        let recorder = Arc::new(RecordingInlineEffectController::default());
+        let recorder = Arc::new(RecordingNativeEffectController::default());
         let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
             lash_core::TurnBudget::Unbounded,
@@ -7037,7 +7037,7 @@ fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .effect_host(Arc::new(lash_core::facade_support::InlineEffectHost::new(
+        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
             effect_controller,
         )))
         .build(crate::testing::runtime_lease_owner())?;
@@ -7504,7 +7504,7 @@ finish "done""#,
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
         .collect::<Vec<_>>();
 
-    // The inline tier never persists progress boundaries, but the protocol
+    // The native substrate never persists progress boundaries, but the protocol
     // events returned by those boundaries must still reach the trace sink.
     // Runtime diagnostics use a separate emitter and do not prove this path.
     entries
@@ -8588,7 +8588,7 @@ async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commit
             dir.path().join("attachments"),
         )))
         .effect_host(Arc::new(
-            lash_core::facade_support::InlineEffectHost::default(),
+            lash_core::facade_support::NativeEffectHost::default(),
         ))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))

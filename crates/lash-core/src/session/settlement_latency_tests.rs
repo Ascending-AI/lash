@@ -68,7 +68,7 @@ impl LeafSettledSignal {
 /// to be resolved after its own delay, so the completions genuinely race.
 #[derive(Clone)]
 struct LatencyProbeTools {
-    controller: Arc<crate::InlineRuntimeEffectController>,
+    controller: Arc<crate::NativeRuntimeEffectController>,
     /// When set, the synchronous probe blocks until this signal is raised
     /// instead of sleeping out a fixed delay.
     awaited_leaf: Option<LeafSettledSignal>,
@@ -178,14 +178,14 @@ impl crate::ToolProvider for LatencyProbeTools {
 
 fn probe_context(
     provider: Arc<dyn crate::ToolProvider>,
-    controller: Arc<crate::InlineRuntimeEffectController>,
+    controller: Arc<crate::NativeRuntimeEffectController>,
 ) -> crate::RuntimeExecutionContext<'static> {
     probe_context_with_projector(provider, controller, None)
 }
 
 fn probe_context_with_projector(
     provider: Arc<dyn crate::ToolProvider>,
-    controller: Arc<crate::InlineRuntimeEffectController>,
+    controller: Arc<crate::NativeRuntimeEffectController>,
     projector: Option<crate::plugin::ToolResultProjector>,
 ) -> crate::RuntimeExecutionContext<'static> {
     let spec = crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider));
@@ -248,7 +248,7 @@ fn probe_context_with_projector(
 
 fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
     let controller = Arc::new(
-        crate::InlineRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
+        crate::NativeRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
     );
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
         controller: Arc::clone(&controller),
@@ -263,7 +263,7 @@ fn handshake_probe_context(
     awaited_leaf: LeafSettledSignal,
 ) -> crate::RuntimeExecutionContext<'static> {
     let controller = Arc::new(
-        crate::InlineRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
+        crate::NativeRuntimeEffectController::default().allow_process_lifetime_completion_keys(),
     );
     let projector = awaited_leaf.projector();
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
@@ -313,7 +313,7 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
         catalog_definition,
         attempts: Arc::clone(&attempts),
     });
-    let controller = Arc::new(crate::InlineRuntimeEffectController::default());
+    let controller = Arc::new(crate::NativeRuntimeEffectController::default());
     let context = probe_context(provider, controller);
 
     let scalar = context

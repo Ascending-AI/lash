@@ -154,7 +154,7 @@ pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {
 ///
 /// * **SQLite session stores** — the committed transcript, and any queued turn
 ///   input not yet drained, survive a restart. This is the load-bearing one.
-/// * **Inline effect host** — process-local effect journalling. Enough to make
+/// * **Native effect host** — process-local effect journalling. Enough to make
 ///   the bot correct within a boot; not enough to make a turn interrupted
 ///   mid-flight resume itself. The README documents the Restate upgrade.
 /// * **No queued-work driver** — see [`LashCore::disable_queued_work_driver`]
@@ -227,7 +227,7 @@ pub async fn build_core(
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .process_env_store(process_env_store)
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .tools(tools::workspace_tools(api))
         .trace_sink(trace_sink(config))
         .trace_level(TraceLevel::Extended)

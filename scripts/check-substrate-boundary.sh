@@ -135,6 +135,7 @@ while IFS=: read -r file line source; do
       crates/lash-core/src/tool_provider.rs | \
       crates/lash-core/src/tool_provider/process_events.rs | \
       crates/lash/src/core.rs | \
+      crates/lash/src/core/queued_work.rs | \
       crates/lash/src/core/work_drivers.rs | \
       crates/lash/src/lib.rs | \
       crates/lash/src/support.rs | \

@@ -12,7 +12,7 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .without_queued_work()
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -129,7 +129,7 @@ pub(super) async fn run_live_turn_facts(
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .with_native_queued_work()
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -281,7 +281,7 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
     let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
         .with_native_queued_work()
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -519,7 +519,7 @@ pub(super) async fn prove_final_value_semantic_channel()
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .with_native_queued_work()
         .effect_host(Arc::new(
-            lash::durability::InlineEffectHost::default().allow_process_lifetime_completion_keys(),
+            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
         ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))

@@ -180,7 +180,7 @@ async fn default_slot_supplier_releases_permits_and_preserves_admission_bound() 
 }
 
 #[tokio::test]
-async fn external_engine_submitters_do_not_inherit_the_inline_admission_bound() {
+async fn external_engine_submitters_do_not_inherit_the_native_admission_bound() {
     const SIGNALS: usize = 8;
     let handle = Arc::new(AdmissionRunHandle {
         active: AtomicUsize::new(0),
@@ -244,7 +244,7 @@ impl QueuedWorkRunHandle for ParkAwareRunHandle {
 }
 
 #[tokio::test]
-async fn inline_admission_slot_is_released_while_a_turn_is_parked() {
+async fn native_admission_slot_is_released_while_a_turn_is_parked() {
     let handle = Arc::new(ParkAwareRunHandle {
         first_parked: tokio::sync::Notify::new(),
         second_entered: tokio::sync::Notify::new(),
@@ -259,7 +259,7 @@ async fn inline_admission_slot_is_released_while_a_turn_is_parked() {
     driver.notify_pending_work(Some("session-runnable"), "queued_turn_input");
     tokio::time::timeout(Duration::from_secs(1), handle.second_entered.notified())
         .await
-        .expect("a parked inline turn releases its queued-work slot");
+        .expect("a parked native turn releases its queued-work slot");
     handle.resume_first.add_permits(1);
     tokio::time::timeout(Duration::from_secs(1), async {
         while handle.completed.load(Ordering::SeqCst) != 2 {

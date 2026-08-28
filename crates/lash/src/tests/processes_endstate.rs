@@ -1099,13 +1099,13 @@ fn process_test_core_with_sink(
     .build(crate::testing::runtime_lease_owner())
 }
 
-/// Inline-tier end to end across the process wait, observation, and retention
+/// native-substrate end to end across the process wait, observation, and retention
 /// interfaces: a host starts a process, holds `ProcessWorkSubstrate::await_process_terminal`
 /// (through `core.processes().await_output`), signals it to completion, and
 /// observes its intermediate events through a wired `ProcessEventSink` — then
 /// prunes the terminal registry rows while the host's projected copies survive.
 #[tokio::test]
-async fn inline_process_await_sink_and_prune_end_to_end() -> Result<()> {
+async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
     let trigger_store: Arc<dyn lash_core::TriggerStore> =
@@ -1339,7 +1339,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     let await_id = process_id.to_string();
     let waiter = tokio::spawn(async move { await_core.processes().await_output(&await_id).await });
 
-    // The host drains its own started OwnerBound work inline at close.
+    // The host drains its own started OwnerBound work natively at close.
     let report = worker.drain_owner_bound_work().await?;
     assert_eq!(
         report.abandoned,

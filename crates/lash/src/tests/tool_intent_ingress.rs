@@ -225,7 +225,7 @@ async fn runtime_owned_trigger_submission_records_its_outcome_once() -> Result<(
     use lash_core::TriggerStore as _;
 
     let (core, store, _subscription) =
-        ingress_core_with_trigger_store(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_trigger_store(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-owned-trigger-call", 0);
@@ -304,7 +304,7 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
 
 #[derive(Default)]
 struct KeyJournalController {
-    inner: lash_core::facade_support::InlineRuntimeEffectController,
+    inner: lash_core::facade_support::NativeRuntimeEffectController,
     recorded: std::sync::Mutex<std::collections::HashMap<String, lash_core::RuntimeEffectOutcome>>,
 }
 
@@ -409,7 +409,7 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
 
 #[derive(Default)]
 struct AdmissionCrashController {
-    inner: lash_core::facade_support::InlineRuntimeEffectController,
+    inner: lash_core::facade_support::NativeRuntimeEffectController,
     admitted: tokio::sync::Notify,
     admission: std::sync::Mutex<Option<MockEffectAdmission>>,
     realizations: std::sync::atomic::AtomicUsize,
@@ -791,7 +791,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 #[tokio::test]
 async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-owned-duplicate", 0);
@@ -833,7 +833,7 @@ async fn runtime_owned_duplicate_identity_is_a_typed_ingress_refusal() -> Result
 #[tokio::test]
 async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
@@ -932,7 +932,7 @@ async fn runtime_owned_cancel_duplicate_identity_is_typed_and_realizes_once() ->
 #[tokio::test]
 async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("runtime-cross-target-kind", 0);
@@ -975,7 +975,7 @@ async fn runtime_owned_identity_is_bound_before_a_different_target_is_submitted(
 #[tokio::test]
 async fn runtime_owned_identity_gate_is_shared_across_independent_ingress_handles() -> Result<()> {
     let (core, registry) =
-        ingress_core_with_effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        ingress_core_with_effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
             .await?;
     let left = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let right = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1374,7 +1374,7 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     let env_store = Arc::new(ProbeProcessEnvStore::default());
     env_store.fail_put.store(true, Ordering::SeqCst);
     let (core, registry) = ingress_core_with_effect_host_and_env_store(
-        Arc::new(crate::durability::InlineEffectHost::default()),
+        Arc::new(crate::durability::NativeEffectHost::default()),
         Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>,
     )
     .await?;

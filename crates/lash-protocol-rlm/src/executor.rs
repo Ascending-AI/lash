@@ -2284,7 +2284,7 @@ mod tests {
         let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
             Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
         let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-            lash_core::facade_support::InlineRuntimeEffectController::default()
+            lash_core::facade_support::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         );
         let surface = LashlangSurface::new(
@@ -2303,7 +2303,7 @@ mod tests {
         };
         let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::new(controller.clone())
+                lash_core::facade_support::NativeEffectHost::new(controller.clone())
                     .allow_process_lifetime_completion_keys(),
             ),
             Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
@@ -2420,7 +2420,7 @@ mod tests {
         let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
             Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
         let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-            lash_core::facade_support::InlineRuntimeEffectController::default()
+            lash_core::facade_support::NativeRuntimeEffectController::default()
                 .allow_process_lifetime_completion_keys(),
         );
         let inspected = Arc::new(std::sync::Mutex::new(None));
@@ -2445,7 +2445,7 @@ mod tests {
         };
         let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
             Arc::new(
-                lash_core::facade_support::InlineEffectHost::new(controller.clone())
+                lash_core::facade_support::NativeEffectHost::new(controller.clone())
                     .allow_process_lifetime_completion_keys(),
             ),
             Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),

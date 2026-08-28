@@ -1422,7 +1422,7 @@ mod tests {
             store,
             crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
         );
-        let controller = crate::InlineRuntimeEffectController::default();
+        let controller = crate::NativeRuntimeEffectController::default();
 
         let report = router
             .emit(
@@ -1488,7 +1488,7 @@ mod tests {
         let report = router
             .emit(
                 button_occurrence(source_key, "session-button-blue"),
-                &crate::InlineRuntimeEffectController::default(),
+                &crate::NativeRuntimeEffectController::default(),
             )
             .await
             .expect("emit session trigger");

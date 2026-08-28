@@ -6,7 +6,7 @@ pub(crate) mod executor;
 mod group;
 pub mod group_drain;
 mod group_journal;
-mod inline_host;
+mod native_host;
 mod outcome;
 pub mod promise_semantics;
 mod validation;
@@ -23,7 +23,7 @@ pub use envelope::{
 pub use executor::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
-    ExecutionScope, ExternalCompletionError, InlineRuntimeEffectController, ProcessLocalExecution,
+    ExecutionScope, ExternalCompletionError, NativeRuntimeEffectController, ProcessLocalExecution,
     ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
     QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, Resolution, ResolveOutcome,
     RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
@@ -38,8 +38,8 @@ pub use group::{
 pub use group_drain::{
     ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainReport, GroupExecutors,
 };
-pub use inline_host::InlineEffectHost;
 pub use lash_sansio::CausalRef;
+pub use native_host::NativeEffectHost;
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     validate_replayed_effect_envelope,
@@ -94,8 +94,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inline_host_forwards_tagged_controller_operations_without_inferring_key_lifetime() {
-        let host = InlineEffectHost::new(Arc::new(ControllerOwnedReplay));
+    async fn native_host_forwards_tagged_controller_operations_without_inferring_key_lifetime() {
+        let host = NativeEffectHost::new(Arc::new(ControllerOwnedReplay));
         assert_eq!(
             host.runtime_effect_failure_disposition(crate::RuntimeErrorCode::Plugin)
                 .await
@@ -133,7 +133,7 @@ mod tests {
             }
         ));
 
-        let local_host = InlineEffectHost::default();
+        let local_host = NativeEffectHost::default();
         let local_scoped = local_host
             .scoped(ExecutionScope::turn("local-session", "local-turn"))
             .expect("local scoped controller");
@@ -148,7 +148,7 @@ mod tests {
                     peek: _,
                 }
             ),
-            "a local inline host must construct HostOwned turn control"
+            "a local native host must construct HostOwned turn control"
         );
     }
 
@@ -226,14 +226,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inline_host_owns_registry_and_shares_it_only_with_its_scoped_controllers() {
-        let host_a = InlineEffectHost::default();
-        let host_b = InlineEffectHost::default();
-        let scope = ExecutionScope::turn("owned-inline-session", "owned-inline-turn");
+    async fn native_host_owns_registry_and_shares_it_only_with_its_scoped_controllers() {
+        let host_a = NativeEffectHost::default();
+        let host_b = NativeEffectHost::default();
+        let scope = ExecutionScope::turn("owned-native-session", "owned-native-turn");
         let key = host_a
             .await_event_key(
                 &scope,
-                AwaitEventWaitIdentity::tool_completion("owned-inline-call"),
+                AwaitEventWaitIdentity::tool_completion("owned-native-call"),
             )
             .await
             .expect("host A key");
@@ -260,7 +260,7 @@ mod tests {
                 .await
                 .expect("independent host rejects key"),
             ResolveOutcome::UnknownOrRevoked,
-            "independent Inline hosts must not rendezvous through process-global state"
+            "independent native hosts must not rendezvous through process-global state"
         );
     }
 
@@ -283,10 +283,10 @@ mod tests {
             assert_eq!(error.code.as_str(), "await_event_unsupported");
         }
 
-        let key = InlineRuntimeEffectController::default()
+        let key = NativeRuntimeEffectController::default()
             .await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
             .await
-            .expect("explicit inline controller key");
+            .expect("explicit native controller key");
         assert_eq!(
             resolver
                 .resolve_await_event(&key, Resolution::Cancelled)
@@ -460,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     async fn await_event_key_is_stable_for_scope_and_wait_identity() {
-        let host = InlineEffectHost::default();
+        let host = NativeEffectHost::default();
         let scope = ExecutionScope::turn("session", "turn");
         let wait = AwaitEventWaitIdentity::tool_completion("call");
 
@@ -478,7 +478,7 @@ mod tests {
 
     #[tokio::test]
     async fn duplicate_await_event_resolution_reports_existing_terminal() {
-        let host = InlineEffectHost::default();
+        let host = NativeEffectHost::default();
         let scope = ExecutionScope::turn("session-dupe", "turn-dupe");
         let key = host
             .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-dupe"))

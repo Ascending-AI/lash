@@ -820,7 +820,7 @@ impl GeneratedRuntimeWorld {
         let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .with_native_queued_work()
             .effect_host(Arc::new(
-                lash::durability::InlineEffectHost::default()
+                lash::durability::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))

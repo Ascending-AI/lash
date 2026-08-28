@@ -531,7 +531,7 @@ async fn run_high_traffic_operation(
             .send()
             .await?;
         durable_queue_depth = session.pending_turn_inputs().await?.len() as u64;
-        let controller = lash::runtime::InlineRuntimeEffectController::default()
+        let controller = lash::runtime::NativeRuntimeEffectController::default()
             .allow_process_lifetime_completion_keys();
         let drain = session
             .queued_turn()
@@ -565,7 +565,7 @@ async fn run_high_traffic_operation(
         )
         .with_source(serde_json::json!({}))
         .for_session(session.session_id());
-        let trigger_controller = lash::runtime::InlineRuntimeEffectController::default()
+        let trigger_controller = lash::runtime::NativeRuntimeEffectController::default()
             .allow_process_lifetime_completion_keys();
         let controller = lash_core::ScopedEffectController::borrowed(
             &trigger_controller,
@@ -622,7 +622,7 @@ async fn run_high_traffic_direct_turn(
     ordinal: usize,
     kind: &str,
 ) -> anyhow::Result<TokenUsage> {
-    let controller = lash::runtime::InlineRuntimeEffectController::default()
+    let controller = lash::runtime::NativeRuntimeEffectController::default()
         .allow_process_lifetime_completion_keys();
     let report = session
         .turn(TurnInput::text(format!(

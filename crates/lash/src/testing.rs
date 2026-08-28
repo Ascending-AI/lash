@@ -463,14 +463,14 @@ finish "registered"
             .expect("the background worker releases the admission lease promptly")
         }
 
-        fn inline_trigger_scope(
+        fn native_trigger_scope(
             scope_id: impl Into<String>,
         ) -> lash_core::ScopedEffectController<'static> {
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::InlineRuntimeEffectController::default()),
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
                 lash_core::ExecutionScope::runtime_operation(scope_id.into()),
             )
-            .expect("inline trigger occurrence execution scope")
+            .expect("native trigger occurrence execution scope")
         }
 
         async fn emit_first_clock_alarm(
@@ -502,7 +502,7 @@ finish "registered"
                         payload,
                         idempotency_key.clone(),
                     ),
-                    inline_trigger_scope(format!("trigger:{idempotency_key}")),
+                    native_trigger_scope(format!("trigger:{idempotency_key}")),
                 )
                 .await
                 .expect("emit clock trigger occurrence")
@@ -606,7 +606,7 @@ finish "registered"
                         idempotency_key,
                     )
                     .with_source(serde_json::json!({})),
-                    inline_trigger_scope(format!("trigger:{idempotency_key}")),
+                    native_trigger_scope(format!("trigger:{idempotency_key}")),
                 )
                 .await
                 .expect("emit trigger occurrence");

@@ -17,7 +17,7 @@ mod worker_capacity;
 
 pub use advanced_builder::AdvancedLashCoreBuilder;
 pub use drain::DeploymentDrainStatus;
-use queued_work::InlineQueuedWorkRunConfig;
+use queued_work::NativeQueuedWorkRunConfig;
 use work_drivers::{
     NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup, ProcessWorkSelection,
     ProcessWorkSource, QueuedPortSetup, QueuedWorkSource, WakeDeliveryDriverSetup,
@@ -39,7 +39,7 @@ pub struct LashCore {
     pub(crate) process_execution_concurrency: usize,
     /// Explicit host supplier; `None` preserves a fresh bound per process worker.
     pub(crate) worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
-    /// Shared across core clones so inline drivers are constructed at most once.
+    /// Shared across core clones so native substrate ports are constructed at most once.
     pub(crate) substrate_slot: Arc<NativeSubstrateSlot>,
     /// Host-facing process event sink, retained so a worker config built from
     /// this core reports its worker faults to the same sink the registry
@@ -750,7 +750,7 @@ impl LashCore {
 }
 
 #[derive(Clone)]
-struct InlineProcessWorkerSetup {
+struct NativeProcessWorkerSetup {
     worker_plugin_host: PluginHost,
     env: RuntimeEnvironment,
     process_lifecycle_available: bool,
@@ -764,7 +764,7 @@ struct InlineProcessWorkerSetup {
     native_substrate: NativeSubstrateConfig,
 }
 
-impl InlineProcessWorkerSetup {
+impl NativeProcessWorkerSetup {
     fn build(
         &self,
         queued_work: Arc<dyn QueuedWorkSubstrate>,
@@ -868,14 +868,14 @@ pub struct LashCoreBuilder {
     // Single source of truth for process lifecycle support and process-work
     // consumption.
     process_work_source: ProcessWorkSelection,
-    // Per-worker bound for the default inline process executor.
+    // Per-worker bound for the default native process executor.
     process_execution_concurrency: Option<usize>,
-    // Per-driver bound for the default inline queued-work executor.
+    // Per-driver bound for the default native queued-work executor.
     queued_work_execution_concurrency: Option<usize>,
     // Optional host admission controller replacing both fixed worker lanes.
     worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     // Optional host-facing best-effort feed of appended process events,
-    // installed on the inline process-registry decorator at build time.
+    // installed on the native process-registry decorator at build time.
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     queued_work_source: QueuedWorkSource,
@@ -1022,7 +1022,7 @@ impl LashCoreBuilder {
     }
 
     /// Set the deployment effect host — the durability boundary every operation
-    /// crosses. Pass [`InlineEffectHost`](crate::durability::InlineEffectHost)
+    /// crosses. Pass [`NativeEffectHost`](crate::durability::NativeEffectHost)
     /// for in-process execution, or a workflow-backed host for durable
     /// execution.
     pub fn effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
@@ -1217,8 +1217,8 @@ impl LashCoreBuilder {
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?;
         let tool_registry =
             lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
-        let inline_process_registry = process_work_source.process_registry();
-        // Build the inline config eagerly so a missing factory fails at build.
+        let native_process_registry = process_work_source.process_registry();
+        // Build the native config eagerly so a missing factory fails at build.
         let live_replay_clock = Arc::clone(&core.clock);
         let mut env_builder = RuntimeEnvironment::builder(
             core.durability.commit_budget,
@@ -1226,7 +1226,7 @@ impl LashCoreBuilder {
         )
         .with_plugin_host(Arc::clone(&default_plugin_host))
         .with_runtime_host_config(core);
-        if let Some(process_registry) = inline_process_registry.as_ref() {
+        if let Some(process_registry) = native_process_registry.as_ref() {
             env_builder = env_builder.with_process_registry(Arc::clone(process_registry));
         } else if let Some(wiring) = process_work_source.external_wiring() {
             env_builder = env_builder.with_process_work(wiring);
@@ -1323,9 +1323,9 @@ impl LashCoreBuilder {
     ///
     /// - no registry => nothing to run ([`ProcessWorkSource::None`]);
     /// - external wiring supplied => use it ([`ProcessPortSetup::External`]);
-    /// - inline registry wired => lazily construct the native port on first open. Its
+    /// - native registry wired => lazily construct the native port on first open. Its
     ///   [`DurableProcessWorkerConfig`] is built eagerly when a store factory is
-    ///   present; without one the inline worker cannot rebuild session runtimes.
+    ///   present; without one the native worker cannot rebuild session runtimes.
     // Mirrors `resolve_queued_work`; inputs are the required driver state.
     #[allow(clippy::too_many_arguments)]
     fn resolve_process_work(
@@ -1347,7 +1347,7 @@ impl LashCoreBuilder {
                     wiring: wiring.clone(),
                 });
             }
-            ProcessWorkSource::Inline(watched) => watched.clone(),
+            ProcessWorkSource::Native(watched) => watched.clone(),
         };
         // The worker rebuilds a session runtime per process, so it needs a store
         // factory; without one the default runner could not execute anything, so
@@ -1355,7 +1355,7 @@ impl LashCoreBuilder {
         if env.session_store_factory.is_none() {
             return Err(EmbedError::ProcessRegistryRequiresStoreFactory);
         }
-        let config = Box::new(InlineProcessWorkerSetup {
+        let config = Box::new(NativeProcessWorkerSetup {
             worker_plugin_host: worker_plugin_host.clone(),
             env: env.clone(),
             process_lifecycle_available,
@@ -1369,10 +1369,10 @@ impl LashCoreBuilder {
             turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot::default(),
             native_substrate,
         });
-        // Validate the same worker assembly eagerly. The live inline worker is
+        // Validate the same worker assembly eagerly. The live native worker is
         // constructed lazily once the outer queued-work dispatcher exists.
         config.build(Arc::new(NoQueuedWork::new()))?;
-        Ok(ProcessPortSetup::LazyDefault { config, watched })
+        Ok(ProcessPortSetup::NativeDefault { config, watched })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1397,7 +1397,7 @@ impl LashCoreBuilder {
             },
             QueuedWorkSource::Native => match store_factory {
                 Some(store_factory) => QueuedPortSetup::Native {
-                    config: Arc::new(InlineQueuedWorkRunConfig {
+                    config: Arc::new(NativeQueuedWorkRunConfig {
                         session_execution_owner,
                         env,
                         policy,
@@ -1422,11 +1422,11 @@ impl LashCoreBuilder {
 
     /// Configures the process registry used by the built core.
     pub fn process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.process_work_source = ProcessWorkSelection::Inline(process_registry);
+        self.process_work_source = ProcessWorkSelection::Native(process_registry);
         self
     }
 
-    /// Install a best-effort, host-facing [`ProcessEventSink`] on the inline
+    /// Install a best-effort, host-facing [`ProcessEventSink`] on the native
     /// process registry.
     ///
     /// Each appended process event is pushed to the sink after its durable
@@ -1435,7 +1435,7 @@ impl LashCoreBuilder {
     /// log. Observe completion via the await seam even though the terminal
     /// append is also emitted. See [`ProcessEventSink`] for the full contract.
     ///
-    /// Event emission applies to the inline registry path
+    /// Event emission applies to the native registry path
     /// ([`Self::process_registry`]); a host that supplies its own
     /// [`ProcessWorkWiring`] installs the
     /// sink through the deployment's constructor for those.
@@ -1465,7 +1465,7 @@ impl LashCoreBuilder {
     ///
     /// Durable hosts construct [`ProcessWorkWiring`] from the same watched
     /// registry and port used by their deployment runner, then pass it here.
-    /// The wiring's registry becomes the core's process registry and no inline
+    /// The wiring's registry becomes the core's process registry and no native
     /// runner is spawned.
     pub fn process_work(mut self, wiring: ProcessWorkWiring) -> Self {
         self.process_work_source = ProcessWorkSelection::External(wiring);

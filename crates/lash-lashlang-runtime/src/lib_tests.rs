@@ -27,7 +27,7 @@ impl lash_core::RuntimeEffectController for EveryNEffectsController {
 }
 
 #[test]
-fn every_n_controller_requests_boundaries_and_inline_default_does_not() {
+fn every_n_controller_requests_boundaries_and_native_default_does_not() {
     let progress = lash_core::SegmentProgress {
         effects_executed: 2,
         journaled_bytes_estimate: None,
@@ -39,9 +39,9 @@ fn every_n_controller_requests_boundaries_and_inline_default_does_not() {
         ),
         Some(lash_core::BoundaryReason::JournalBudget)
     );
-    let inline = lash_core::facade_support::InlineRuntimeEffectController::default();
+    let native = lash_core::facade_support::NativeRuntimeEffectController::default();
     assert_eq!(
-        lash_core::RuntimeEffectController::wants_segment_boundary(&inline, &progress,),
+        lash_core::RuntimeEffectController::wants_segment_boundary(&native, &progress,),
         None
     );
 }

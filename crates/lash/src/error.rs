@@ -135,9 +135,9 @@ pub enum EmbedError {
     /// Returned when a durable process worker has no store factory.
     MissingProcessWorkerStoreFactory,
     #[error(
-        "a process registry is configured for the default inline process work runner but no session store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) - InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory - or use .process_work(...) for an externally driven durable runner."
+        "a process registry is configured for the default native process work runner but no session store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) - InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory - or use .process_work(...) for an externally driven durable runner."
     )]
-    /// Returned when the inline process runner cannot rebuild sessions without a store factory.
+    /// Returned when the native process runner cannot rebuild sessions without a store factory.
     ProcessRegistryRequiresStoreFactory,
     #[error("durable process worker config requires a LashCore process registry")]
     /// Returned when durable process-worker configuration has no process registry.

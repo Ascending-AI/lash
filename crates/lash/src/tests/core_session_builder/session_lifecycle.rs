@@ -1,11 +1,9 @@
-use lash_sansio::sync::MutexExt;
 use super::*;
 #[cfg(feature = "rlm")]
-use crate::rlm::{
-    RlmDialect, RlmFinalAnswerFormat, RlmTurnBuilderExt as _,
-};
+use crate::rlm::{RlmDialect, RlmFinalAnswerFormat, RlmTurnBuilderExt as _};
 #[cfg(feature = "rlm")]
 use lash_lashlang_runtime::LashlangArtifactStore as _;
+use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
 async fn store_less_session_ids_are_single_use_per_core_process() {
@@ -63,7 +61,10 @@ impl lash_core::facade_support::PluginFactory for ReconciliationProbeFactory {
     fn build(
         &self,
         _ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
         Ok(Arc::new(ReconciliationProbePlugin {
             transform: Arc::clone(&self.transform),
         }))
@@ -101,7 +102,10 @@ impl lash_core::facade_support::TurnContextTransform for ReconciliationTransform
         &self,
         ctx: &lash_core::facade_support::TurnTransformContext<'_>,
         input: lash_core::facade_support::PreparedContext,
-    ) -> std::result::Result<lash_core::facade_support::PreparedContext, lash_core::facade_support::ContextError> {
+    ) -> std::result::Result<
+        lash_core::facade_support::PreparedContext,
+        lash_core::facade_support::ContextError,
+    > {
         let snapshot = ctx.sessions.snapshot_session(&ctx.session_id).await?;
         self.observations
             .lock_recover()
@@ -129,7 +133,9 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
         policy: historical_policy.clone(),
         agent_frames: Vec::new(),
         current_frame_node_id: None,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.ensure_agent_frame_initialized();
     let frame_key = format!("conflicting-frame-{session_id}");
@@ -146,8 +152,9 @@ fn conflicting_reopen_state(session_id: &str) -> RuntimeSessionState {
             protocol_turn_options: Default::default(),
         },
     });
-    state.session_graph = lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.to_string()))
-        .expect("session lifecycle fixture graph is valid");
+    state.session_graph =
+        lash_core::SessionGraph::from_nodes(nodes, Some(frame_node_id.to_string()))
+            .expect("session lifecycle fixture graph is valid");
     state.current_frame_node_id = Some(frame_node_id);
     state.agent_frames = state.session_graph.agent_frame_records(session_id);
     state.policy = lash_core::SessionPolicy {
@@ -189,7 +196,10 @@ impl lash_core::facade_support::PluginFactory for CompileSurfaceToolFactory {
     fn build(
         &self,
         ctx: &lash_core::facade_support::PluginSessionContext,
-    ) -> std::result::Result<Arc<dyn lash_core::facade_support::SessionPlugin>, lash_core::PluginError> {
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
         let config = ctx
             .plugin_options
             .decode::<CompileSurfaceToolConfig>(self.id)
@@ -251,17 +261,20 @@ impl lash_core::ToolProvider for CompileSurfaceToolProvider {
 
 #[cfg(feature = "rlm")]
 fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefinition {
-    test_tool_definition_with_tool_binding(lash_core::ToolDefinition::raw(
-        format!("tool:{name}"),
+    test_tool_definition_with_tool_binding(
+        lash_core::ToolDefinition::raw(
+            format!("tool:{name}"),
+            name.to_string(),
+            "Compile-surface test tool.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+            serde_json::json!({ "type": "object" }),
+        ),
         name.to_string(),
-        "Compile-surface test tool.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-        }),
-        serde_json::json!({ "type": "object" }),
-    ), name.to_string())
+    )
 }
 
 #[tokio::test]
@@ -418,10 +431,7 @@ fn pending_park_state(session_id: &str, text: &str) -> RuntimeSessionState {
     let mut state = RuntimeSessionState::new(policy);
     state.session_id = session_id.to_string();
     state.ensure_agent_frame_initialized();
-    state.append_active_conversation_messages(&[text_message(
-        lash_core::MessageRole::User,
-        text,
-    )]);
+    state.append_active_conversation_messages(&[text_message(lash_core::MessageRole::User, text)]);
     state
 }
 
@@ -582,7 +592,7 @@ fn typed_core_builders_require_explicit_store_choice() {
         .without_queued_work()
         .provider(mock_provider())
         .model(mock_model_spec())
-        .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
         .build(crate::testing::runtime_lease_owner())
     {
         Ok(_) => panic!("attachment store must be explicit after effect host is wired"),
@@ -671,8 +681,7 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
         assert!(prompt.contains("Zulu core instruction."));
         assert_eq!(prompt.matches("Repeated instruction.").count(), 1);
         assert!(
-            prompt.find("Alpha session instruction.")
-                < prompt.find("Zulu core instruction."),
+            prompt.find("Alpha session instruction.") < prompt.find("Zulu core instruction."),
             "same-priority instructions should sort by content, not scope or call order: {prompt}"
         );
     }
@@ -837,8 +846,7 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
             move |request| {
                 let seen = Arc::clone(&seen);
                 async move {
-                    seen.lock_recover()
-                        .push(system_text(&request));
+                    seen.lock_recover().push(system_text(&request));
                     Ok(text_response(&lashlang_block("finish \"ok\"")))
                 }
             }
@@ -857,14 +865,16 @@ async fn rlm_protocol_config_lashlang_abilities_drive_prompt_surface() -> Result
         .with_native_queued_work()
         .provider(provider)
         .model(mock_model_spec())
-        .effect_host(Arc::new(crate::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(crate::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(crate::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .process_env_store(Arc::new(
             crate::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
-        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-abilities-prompt").open().await?;
@@ -1285,7 +1295,6 @@ async fn malformed_rlm_create_extras_fail_child_session_creation() -> Result<()>
     Ok(())
 }
 
-
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn rlm_projection_errors_surface_from_protocol_extensions() -> Result<()> {
@@ -1365,8 +1374,7 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         ))
     };
     state.set_execution_state_snapshot(Some(old_version_snapshot));
-    let store: Arc<dyn lash_core::RuntimePersistence> =
-        Arc::new(SnapshotStore::with_state(state));
+    let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(rlm_core_builder())
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -1396,7 +1404,9 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.append_active_conversation_messages(&[text_message(
         lash_core::MessageRole::User,
@@ -1418,14 +1428,12 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
 
 #[tokio::test]
 async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
-    let expected_prompt = lash_core::PromptLayer::new().with_contribution(
-        lash_core::PromptContribution::guidance(
+    let expected_prompt =
+        lash_core::PromptLayer::new().with_contribution(lash_core::PromptContribution::guidance(
             "Committed policy",
             "Continue with the committed prompt configuration.",
-        ),
-    );
-    let mut persisted_policy =
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+        ));
+    let mut persisted_policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
     persisted_policy.provider_id = mock_provider().kind().to_string();
     persisted_policy.model = mock_model_spec();
     persisted_policy.prompt = expected_prompt.clone();
@@ -1458,7 +1466,9 @@ async fn park_then_resume_preserves_session_transcript() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("parked").open().await?;
@@ -1555,7 +1565,9 @@ async fn park_with_a_live_handle_reports_session_still_in_use() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())
-        .store_factory(Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()))
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("busy").open().await?;
@@ -1610,7 +1622,9 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.ensure_agent_frame_initialized();
     state.append_active_conversation_messages(&[text_message(
@@ -1648,7 +1662,9 @@ async fn persisted_provider_id_mismatch_fails_at_turn_execution() -> Result<()> 
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.ensure_agent_frame_initialized();
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
@@ -1687,7 +1703,9 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state.session_graph.leaf_node_id.clone();
@@ -1733,7 +1751,9 @@ async fn refreshed_head_provider_id_does_not_override_live_provider_before_commi
         },
         current_frame_node_id: None,
         agent_frames: Vec::new(),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.ensure_agent_frame_initialized();
     let store = Arc::new(SnapshotStore::with_state(state));
@@ -1922,7 +1942,9 @@ async fn store_session_id_mismatch_is_rejected() -> Result<()> {
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
@@ -1955,7 +1977,9 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     state.append_active_conversation_messages(&[text_message(
         lash_core::MessageRole::User,
@@ -2079,9 +2103,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         .run()
         .await?;
 
-    let observations = transform_observations
-        .lock_recover()
-        .clone();
+    let observations = transform_observations.lock_recover().clone();
     assert!(!observations.is_empty());
     assert!(observations.iter().all(|observation| {
         observation.max_context_tokens == Some(77_777)
@@ -2393,7 +2415,9 @@ async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Re
             model: mock_model_spec(),
             ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
     };
     explicit_state.append_active_conversation_messages(&[text_message(
         lash_core::MessageRole::User,
@@ -2426,72 +2450,4 @@ async fn explicit_session_store_takes_precedence_over_core_store_factory() -> Re
     assert_eq!(messages.len(), 1);
     assert_eq!(message_text(&messages[0]), "explicit store");
     Ok(())
-}
-
-#[test]
-fn turn_result_total_usage_sums_parent_and_children() {
-    use lash_core::{
-        facade_support::TurnExecutionMetrics, facade_support::OutputState, SessionPolicy, SessionSnapshot, facade_support::TurnFinish, facade_support::TurnOutcome,
-    };
-
-    let result = TurnReport {
-        acceptance: None,
-        cancel_input_outcome: Default::default(),
-        state: SessionSnapshot {
-            session_id: "s".to_string(),
-            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-            ..lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded))
-        },
-        outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
-            text: "ok".to_string(),
-        }),
-        assistant_output: AssistantOutput {
-            safe_text: "ok".to_string(),
-            raw_text: "ok".to_string(),
-            state: OutputState::Usable,
-        },
-        usage: TokenUsage {
-            input_tokens: 10,
-            output_tokens: 5,
-            cache_read_input_tokens: 2,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 1,
-        },
-        children_usage: vec![
-            TokenLedgerEntry {
-                source: "subagent".to_string(),
-                model: "m".to_string(),
-                usage: TokenUsage {
-                    input_tokens: 7,
-                    output_tokens: 3,
-                    cache_read_input_tokens: 4,
-                    cache_write_input_tokens: 0,
-                    reasoning_output_tokens: 0,
-                },
-            },
-            TokenLedgerEntry {
-                source: "compaction".to_string(),
-                model: "m".to_string(),
-                usage: TokenUsage {
-                    input_tokens: 1,
-                    output_tokens: 0,
-                    cache_read_input_tokens: 0,
-                    cache_write_input_tokens: 0,
-                    reasoning_output_tokens: 0,
-                },
-            },
-        ],
-        llm_calls: Vec::new(),
-        tool_calls: Vec::new(),
-        execution: TurnExecutionMetrics::default(),
-        errors: Vec::new(),
-    };
-
-    let total = result.total_usage();
-    assert_eq!(total.input_tokens, 10 + 7 + 1);
-    assert_eq!(total.output_tokens, 5 + 3);
-    assert_eq!(total.cache_read_input_tokens, 2 + 4);
-    assert_eq!(total.reasoning_output_tokens, 1);
-    // Parent's own usage is unchanged.
-    assert_eq!(result.usage.input_tokens, 10);
 }

@@ -25,7 +25,7 @@ use std::sync::Arc;
 use lash_trace::{TraceContext, TraceLevel, TraceSink};
 
 #[cfg(test)]
-use super::InlineEffectHost;
+use super::NativeEffectHost;
 use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
 use super::{
@@ -305,7 +305,7 @@ mod tests {
     fn builder_methods_configure_runtime_host() {
         let attachment_store: Arc<dyn crate::AttachmentStore> =
             Arc::new(crate::InMemoryAttachmentStore::new());
-        let effect_host: Arc<dyn EffectHost> = Arc::new(InlineEffectHost::default());
+        let effect_host: Arc<dyn EffectHost> = Arc::new(NativeEffectHost::default());
         let trace_context = TraceContext::default().for_session("session-1");
         let termination = TerminationPolicy {
             treat_missing_done_as_failure: false,

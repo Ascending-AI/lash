@@ -43,7 +43,7 @@ fn hello_lash_core(provider: ProviderHandle, model: ModelSpec) -> lash::Result<L
         .provider(provider)
         .model(model)
         .instructions("Answer in one short sentence. Skip preamble.")
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),

@@ -26,7 +26,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -42,7 +42,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
@@ -59,7 +59,7 @@ fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback() {
         .without_queued_work()
         .provider(trigger_registration_provider())
         .model(test_model())
-        .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(bounded)
         .queued_work_batching(batching)

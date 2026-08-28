@@ -45,7 +45,7 @@ economics, and gives store-only deployments one shared implementation.
 - Store adapters implement no process wait loops and keep no wait notification
   fields. A watched registry decorator publishes in-process change ticks without
   changing the registry trait.
-- Inline waits are still correct without a hub: the awaiter repeatedly performs
+- Native waits are still correct without a hub: the awaiter repeatedly performs
   narrow point reads with a 25ms floor, doubling backoff, and a 1s cap. With a
   hub, local mutations wake waiters promptly without database polling.
 - External drivers that install `ProcessAttach` are authoritative for terminal

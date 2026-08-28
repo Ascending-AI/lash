@@ -176,7 +176,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
             })
             .collect::<Vec<_>>();
         // Age, owner death, and removal happen under the same transaction/lock
-        // boundary. Process owners are conservatively live in the inline store;
+        // boundary. Process owners are conservatively live in the in-memory store;
         // durable factories evaluate process-row existence in their database.
         self.attachment_manifest.lock_recover().retain(|_, entry| {
             let owner_is_dead = match (entry.owner_kind, entry.owner_id.as_deref()) {
@@ -253,7 +253,7 @@ impl crate::AttachmentManifest for InMemorySessionStore {
                                 && turn_id != owner_id
                                 && *committed_at_ms > entry.intent_at_epoch_ms
                         }),
-                    // The inline store has no durable process registry, so it
+                    // The in-memory store has no durable process registry, so it
                     // cannot prove process death and must retain the root.
                     (Some(crate::AttachmentOwnerKind::Process), Some(_)) => true,
                     // Invalid owner pairs are conservatively retained.

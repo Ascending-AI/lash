@@ -259,12 +259,12 @@ pub trait TurnAttach: Send + Sync {
 /// Cooperative, exact-turn control compiled onto Lash's keyed-promise seam.
 ///
 /// `Requested` means the cancellation request won this driver's keyed-promise
-/// gate. On an inline effect host that promise is process-local, so the driver
+/// gate. On an native effect host that promise is process-local, so the driver
 /// only reaches owners in the same OS process. A durable effect-host deployment
 /// is required for another process or replayed owner to observe the request.
 /// The returned [`TurnCancelReceipt`] reports only the cancellation outcome.
 /// Hosts must use their configured effect-host topology when deciding whether
-/// an inline receipt is cross-process proof.
+/// an native receipt is cross-process proof.
 ///
 /// Lash asks the running or replayed owner to unwind and commit a cancelled
 /// result; it cannot guarantee that detached tasks, subprocesses, or
@@ -707,7 +707,7 @@ impl ActiveTurnControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InlineEffectHost, TurnFinish, TurnStop};
+    use crate::{NativeEffectHost, TurnFinish, TurnStop};
 
     fn address(label: &str) -> TurnAddress {
         TurnAddress::new(
@@ -740,7 +740,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_before_start_duplicate_and_terminal_attach() {
-        let host = Arc::new(InlineEffectHost::default());
+        let host = Arc::new(NativeEffectHost::default());
         let driver = TurnWorkDriver::new(host.clone());
         let address = address("before-start");
 
@@ -801,7 +801,7 @@ mod tests {
         // value is what keeps one cancellation to one request id: minting
         // `internal:{turn_id}` here would hand the host a second identity for
         // the same fact.
-        let host = Arc::new(InlineEffectHost::default());
+        let host = Arc::new(NativeEffectHost::default());
         let driver = TurnWorkDriver::new(host.clone());
         let address = address("assembled");
         let active = ActiveTurnControl::new(host.as_ref(), address.clone())
@@ -831,7 +831,7 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_completion_seal_vs_cancel_is_first_writer_wins() {
-        let host = Arc::new(InlineEffectHost::default());
+        let host = Arc::new(NativeEffectHost::default());
         let driver = TurnWorkDriver::new(host.clone());
         let address = address("race");
         let active = ActiveTurnControl::new(host.as_ref(), address.clone())
@@ -853,7 +853,7 @@ mod tests {
 
     #[tokio::test]
     async fn recovered_owner_observes_pending_cancel_after_control_recreation() {
-        let host = Arc::new(InlineEffectHost::default());
+        let host = Arc::new(NativeEffectHost::default());
         let driver = TurnWorkDriver::new(host.clone());
         let address = address("replay");
         let requested = driver
@@ -887,7 +887,7 @@ mod tests {
 
     #[tokio::test]
     async fn turn_control_is_exact_scope_and_excluded_from_wait_cancel_sweep() {
-        let host = Arc::new(InlineEffectHost::default());
+        let host = Arc::new(NativeEffectHost::default());
         let driver = TurnWorkDriver::new(host.clone());
         let address_a = address("scope");
         let address_b = TurnAddress::new(&address_a.session_id, "turn-b");
@@ -951,7 +951,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_deletion_revokes_control_promises() {
-        let host = Arc::new(InlineEffectHost::default());
+        let host = Arc::new(NativeEffectHost::default());
         let driver = TurnWorkDriver::new(host.clone());
         let address = address("revoke");
         host.revoke_await_events_for_session(&address.session_id)
@@ -969,7 +969,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_attachment_timeout_does_not_poison_later_publication() {
-        let host = Arc::new(InlineEffectHost::default());
+        let host = Arc::new(NativeEffectHost::default());
         let driver = TurnWorkDriver::new(host.clone());
         let address = address("terminal-timeout");
         let error = driver

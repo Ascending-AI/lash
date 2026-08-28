@@ -205,7 +205,7 @@ mod tests {
             Arc::new(SqliteSessionStoreFactory::new(dir.join("sessions")));
         let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
             .with_native_queued_work()
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(
                 lash::persistence::InMemoryAttachmentStore::default(),
             ))

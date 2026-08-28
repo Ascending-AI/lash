@@ -95,7 +95,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
         let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
             .with_native_queued_work()
             .effect_host(Arc::new(
-                lash::durability::InlineEffectHost::default()
+                lash::durability::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -207,7 +207,7 @@ async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
 async fn divergent_seed_cross_backend_durable_state_agrees() {
     // Regression guard for full-random seed 14123330213291275571, whose durable
     // cross-backend re-run previously hung (a `next_turn` queued ingress ran an
-    // unmodeled inline turn under serialized execution) and then diverged (a
+    // unmodeled native turn under serialized execution) and then diverged (a
     // slow async store let later boundaries overtake a live turn's completion,
     // drifting the seeded delivery order). The serialized in-memory reference
     // and the SQLite durable re-run share the serialize-provider-turn discipline

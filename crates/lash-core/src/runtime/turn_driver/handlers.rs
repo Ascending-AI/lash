@@ -152,7 +152,7 @@ impl RuntimeTurnDriver<'_> {
         // away from mid-flight. The durable contract is therefore cancellation
         // between iterations. A local provider may still cooperatively observe
         // `cancel` while the run is executing, and that result is journaled.
-        // Runtime-owned (inline) execution keeps its existing cooperative-token
+        // Runtime-owned (native) execution keeps its existing cooperative-token
         // behavior. Only a controller-owned journal needs this additional
         // durable, replayed boundary.
         if self.observes_durable_cancel_after_llm {

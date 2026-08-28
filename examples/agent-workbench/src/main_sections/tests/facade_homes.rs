@@ -443,7 +443,7 @@
                 session_graph: manager,
                 scoped_effect_controller: lash::runtime::ScopedEffectController::shared(
                     Arc::new(
-                        lash::runtime::InlineRuntimeEffectController::default(),
+                        lash::runtime::NativeRuntimeEffectController::default(),
                     ),
                     lash::runtime::ExecutionScope::turn(
                         "workbench-rolling-history-session",

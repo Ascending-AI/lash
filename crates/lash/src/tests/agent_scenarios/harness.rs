@@ -541,7 +541,7 @@ impl AgentSessionTurnProcessScenario {
             .processes()
             .start(
                 self.start_request(),
-                inline_scope(lash_core::ExecutionScope::process(self.process_id)),
+                native_scope(lash_core::ExecutionScope::process(self.process_id)),
             )
             .await?;
         assert_eq!(handle.process_id, self.process_id);

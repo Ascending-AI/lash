@@ -579,7 +579,7 @@ mod tests {
                 );
                 crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(substrate)
             },
-            |_| ConformanceInvocation::inline(),
+            |_| ConformanceInvocation::native(),
         ))
         .await;
     }
@@ -714,10 +714,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inline_effect_host_satisfies_conformance() {
-        effect_host(|| Arc::new(crate::InlineEffectHost::default())).await;
-        effect_host_await_events(|| Arc::new(crate::InlineEffectHost::default())).await;
-        turn_work_driver(Arc::new(crate::InlineEffectHost::default())).await;
+    async fn native_effect_host_satisfies_conformance() {
+        effect_host(|| Arc::new(crate::NativeEffectHost::default())).await;
+        effect_host_await_events(|| Arc::new(crate::NativeEffectHost::default())).await;
+        turn_work_driver(Arc::new(crate::NativeEffectHost::default())).await;
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 use super::*;
 
 impl LashCoreBuilder {
-    /// Set the number of processes each default inline worker may execute at
+    /// Set the number of processes each default native worker may execute at
     /// once. A running process releases its slot while parked and reacquires it
     /// before resuming. Invalid values are reported by [`Self::build`].
     pub fn process_execution_concurrency(mut self, concurrency: usize) -> Self {
@@ -9,14 +9,14 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Set the number of queued-work notifications the default inline driver
+    /// Set the number of queued-work notifications the default native driver
     /// may execute at once. Invalid values are reported by [`Self::build`].
     pub fn queued_work_execution_concurrency(mut self, concurrency: usize) -> Self {
         self.queued_work_execution_concurrency = Some(concurrency);
         self
     }
 
-    /// Replace both fixed inline worker bounds with a host admission supplier.
+    /// Replace both fixed native worker bounds with a host admission supplier.
     ///
     /// The supplier is consulted before process or queued work leaves its
     /// scheduler queue. Its RAII permit is held only while that work is running;

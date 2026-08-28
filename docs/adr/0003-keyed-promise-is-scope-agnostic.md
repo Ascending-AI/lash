@@ -32,7 +32,7 @@ replay, wait keys, cancellation, tracing, and environment binding.
 - A Suspended Turn remains the active session turn. It is observable through
   session observation, but it is not a Runtime Process and does not commit
   partial session history while waiting.
-- Inline tier: the EffectHost wait capability is an in-process park (no durable
+- Native substrate: the EffectHost wait capability is an in-process park (no durable
   suspension); the optimization is a deliberate no-op there.
 - Execution Scope owns effect/replay/wait/cancel/trace identity. It is not the
   Execution Environment: processes still run from captured environment refs, and

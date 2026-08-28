@@ -60,7 +60,7 @@ pub(super) fn map_process_task_join(
         }
         Err(err) => Err(RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
-            format!("inline process effect task failed: {err}"),
+            format!("native process effect task failed: {err}"),
         )),
     }
 }

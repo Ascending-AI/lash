@@ -19,7 +19,7 @@ impl DurableProcessWorker {
             // relabel it as `Busy`.
             let externally_owned = record.disposition == RecoveryContract::ExternallyOwned;
             if state.scheduled.insert(record.id.clone()) {
-                // The inline worker still queues it, because a pending Abandon
+                // The native worker still queues it, because a pending Abandon
                 // Request on such a row is reconciled there — but it reports
                 // the same typed deferral the Restate tier reports for it.
                 if externally_owned {

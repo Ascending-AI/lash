@@ -13,7 +13,7 @@ use super::*;
 /// what an out-of-tree host looks like the day groups land.
 #[derive(Clone, Default)]
 struct GrouplessEffectController {
-    inline: InlineRuntimeEffectController,
+    native: NativeRuntimeEffectController,
 }
 
 #[async_trait::async_trait]
@@ -26,7 +26,7 @@ impl RuntimeEffectController for GrouplessEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.inline.execute_effect(envelope, local_executor).await
+        self.native.execute_effect(envelope, local_executor).await
     }
 }
 
@@ -39,7 +39,7 @@ impl RuntimeEffectController for GrouplessEffectController {
 /// !true`, which a flag hard-coded to `false` also satisfies.
 #[derive(Default)]
 struct GroupSupportingEffectController {
-    inline: InlineRuntimeEffectController,
+    native: NativeRuntimeEffectController,
     /// The disposition the open declared, so the close can resolve against it
     /// rather than accept whatever it is handed.
     declared: std::sync::Mutex<Option<crate::LoserPolicy>>,
@@ -55,7 +55,7 @@ impl RuntimeEffectController for GroupSupportingEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.inline.execute_effect(envelope, local_executor).await
+        self.native.execute_effect(envelope, local_executor).await
     }
 
     fn supports_effect_groups(&self) -> bool {
@@ -249,7 +249,7 @@ async fn the_group_capability_flag_and_the_group_methods_must_agree() {
     // established at wiring time rather than a constant. Both are asserted
     // against the same relation: unwired must refuse all three with the
     // capability code, wired must refuse none of them.
-    let unwired = InlineRuntimeEffectController::default();
+    let unwired = NativeRuntimeEffectController::default();
     assert!(
         !unwired.supports_effect_groups(),
         "a controller with no registered resolver has no runner for any child, \
@@ -257,13 +257,13 @@ async fn the_group_capability_flag_and_the_group_methods_must_agree() {
     );
     assert_coherent(&unwired).await;
 
-    let wired = InlineRuntimeEffectController::default();
+    let wired = NativeRuntimeEffectController::default();
     wired
         .register_group_executors(std::sync::Arc::new(EveryChildRuns))
         .expect("a fresh controller has no resolver yet");
     assert!(
         wired.supports_effect_groups(),
-        "registering the resolver is what makes the inline tier support groups"
+        "registering the resolver is what makes the native substrate support groups"
     );
     assert_coherent(&wired).await;
 }
@@ -282,7 +282,7 @@ fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     const REGISTRARS: usize = 8;
 
     for _ in 0..64 {
-        let controller = InlineRuntimeEffectController::default();
+        let controller = NativeRuntimeEffectController::default();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(REGISTRARS));
         let outcomes = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..REGISTRARS)
@@ -346,7 +346,7 @@ async fn a_child_this_host_cannot_route_is_a_shape_refusal_not_an_unsupported_ho
         }
     }
 
-    let controller = InlineRuntimeEffectController::default();
+    let controller = NativeRuntimeEffectController::default();
     controller
         .register_group_executors(std::sync::Arc::new(NoChildRuns))
         .expect("a fresh controller has no resolver yet");
