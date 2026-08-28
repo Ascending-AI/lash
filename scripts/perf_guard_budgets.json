@@ -61,6 +61,10 @@
               "budget_ms": 11.904,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 24.242,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 13.87,
               "required": true
@@ -219,6 +223,10 @@
               "budget_ms": 15.442,
               "required": false
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 23.036,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 15.294,
               "required": false
@@ -329,6 +337,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 4.426,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 15.59,
               "required": true
             },
             "committed_turn": {
@@ -503,6 +515,10 @@
               "budget_ms": 31.992,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 19.212,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 10.45,
               "required": true
@@ -569,6 +585,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 5.856,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 20.526,
               "required": true
             },
             "committed_turn": {
@@ -707,6 +727,10 @@
               "budget_ms": 11.63,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 59.906,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 9.404,
               "required": true
@@ -777,6 +801,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 5.572,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 26.018,
               "required": true
             },
             "committed_turn": {
@@ -987,6 +1015,10 @@
               "budget_ms": 4.352,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 21.02,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 7.538,
               "required": true
@@ -1053,6 +1085,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 14.628,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 163.5,
               "required": true
             },
             "committed_turn": {
@@ -1175,6 +1211,10 @@
               "budget_ms": 3.926,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 23.776,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 10.824,
               "required": true
@@ -1289,6 +1329,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 3.97,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 31.75,
               "required": true
             },
             "committed_turn": {
@@ -1407,6 +1451,10 @@
               "budget_ms": 6.878,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 19.922,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 33.938,
               "required": true
@@ -1473,6 +1521,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 4.558,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 24.284,
               "required": true
             },
             "committed_turn": {
@@ -1591,6 +1643,10 @@
               "budget_ms": 3.84,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 21.63,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 10.002,
               "required": true
@@ -1657,6 +1713,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 9.57,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 39.752,
               "required": true
             },
             "committed_turn": {
@@ -1759,6 +1819,10 @@
               "budget_ms": 10.836,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 10.262,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 8.874,
               "required": true
@@ -1809,6 +1873,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 5.3,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 22.74,
               "required": true
             },
             "committed_turn": {
@@ -1867,6 +1935,10 @@
               "budget_ms": 11.738,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 11.966,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 40.386,
               "required": true
@@ -1917,6 +1989,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 4.378,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 11.086,
               "required": true
             },
             "committed_turn": {
@@ -1971,6 +2047,10 @@
               "budget_ms": 8.584,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 14.508,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 3.304,
               "required": true
@@ -2021,6 +2101,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 3.448,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 11.656,
               "required": true
             },
             "committed_turn": {
@@ -2203,6 +2287,10 @@
               "budget_ms": 4.268,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 10.532,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 13.01,
               "required": true
@@ -2267,6 +2355,10 @@
               "budget_ms": 6.136,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 16.972,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 8.3,
               "required": true
@@ -2317,6 +2409,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 5.256,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 18.296,
               "required": true
             },
             "committed_turn": {
@@ -2391,6 +2487,10 @@
               "budget_ms": 7.518,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 10.382,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 23.344,
               "required": true
@@ -2446,6 +2546,10 @@
             "before_turn_hooks": {
               "budget_ms": 4.29,
               "required": false
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 8.78,
+              "required": true
             },
             "committed_turn": {
               "budget_ms": 12.76,
@@ -2586,6 +2690,10 @@
             "before_turn_hooks": {
               "budget_ms": 12.158,
               "required": false
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 10.128,
+              "required": true
             },
             "committed_turn": {
               "budget_ms": 21.296,

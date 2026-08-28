@@ -8,7 +8,7 @@ use super::scheduler::{
 use super::types::{
     QueuedWorkRunError, QueuedWorkRunErrorClass, QueuedWorkRunProgress, QueuedWorkSlowWake,
     QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome, WAKE_MAX_ATTEMPTS,
-    WAKE_RETRY_INITIAL, WAKE_RETRY_MAX,
+    WAKE_RETRY_INITIAL, WAKE_RETRY_MAX, jittered_wake_retry,
 };
 
 pub(super) struct QueuedWorkTaskDriver {
@@ -196,7 +196,10 @@ impl QueuedWorkTaskDriver {
                         );
                         *heartbeat = now + self.inner.slow_wake_threshold;
                     }
-                    if !self.wait_for_retry(contended_retry_after).await {
+                    if !self
+                        .wait_for_retry(jittered_wake_retry(contended_retry_after))
+                        .await
+                    {
                         return;
                     }
                     contended_retry_after =
@@ -219,15 +222,13 @@ impl QueuedWorkTaskDriver {
                         }
                         QueuedWorkRunErrorClass::Transient => QueuedWorkWakeOutcome::Retrying,
                     };
+                    let retry_after = matches!(disposition, QueuedWorkWakeOutcome::Retrying)
+                        .then(|| jittered_wake_retry(transient_retry_after));
                     let failure = QueuedWorkWakeFailure {
                         session_id: demand.session_id.clone(),
                         reason: reason.clone(),
                         attempt: transient_attempt,
-                        retry_after_ms: if matches!(disposition, QueuedWorkWakeOutcome::Retrying) {
-                            transient_retry_after.as_millis() as u64
-                        } else {
-                            0
-                        },
+                        retry_after_ms: retry_after.map_or(0, |delay| delay.as_millis() as u64),
                         disposition,
                         error: err.to_string(),
                     };
@@ -267,7 +268,10 @@ impl QueuedWorkTaskDriver {
                             return;
                         }
                     }
-                    if !self.wait_for_retry(transient_retry_after).await {
+                    if !self
+                        .wait_for_retry(retry_after.expect("retrying disposition has a delay"))
+                        .await
+                    {
                         return;
                     }
                     transient_retry_after =

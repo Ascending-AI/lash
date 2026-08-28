@@ -201,6 +201,110 @@ mod contention_tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn gate_bypass_second_completer_hits_receipt_conflict_then_rebuilds_after_backoff() {
+        let session_id = "commit-admission-bypass";
+        let factory = lash_core::facade_support::InMemorySessionStoreFactory::new();
+        let store = factory
+            .create_store(&runtime_perf_session_create_request(session_id))
+            .await
+            .expect("create synthetic contention store");
+        let mut first_state = RuntimeSessionState {
+            session_id: session_id.to_string(),
+            ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                lash_core::TurnBudget::Unbounded,
+            ))
+        };
+        first_state.policy.provider_id = "first-completer".to_string();
+        let mut bypass_state = first_state.clone();
+        bypass_state.policy.provider_id = "gate-bypass-completer".to_string();
+        let shared_operation = lash_core::OperationId::new(
+            lash_core::ExecutionScope::runtime_operation("commit-admission-bypass"),
+            "commit",
+        );
+        let first_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
+            &first_state,
+            &[],
+            shared_operation.clone(),
+        );
+        // Mutation probe: this second completer deliberately builds its stale
+        // intent without entering the process-local admission FIFO.
+        let bypass_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
+            &bypass_state,
+            &[],
+            shared_operation,
+        );
+        lash_core::facade_support::run_head_advancing_commit_attempt(
+            session_id,
+            "first",
+            CancellationToken::new(),
+            |_, _| async {
+                store.commit_runtime_state(first_commit).await?;
+                Ok::<(), anyhow::Error>(())
+            },
+        )
+        .await
+        .expect("first completer advances the head");
+
+        let conflict = store
+            .commit_runtime_state(bypass_commit)
+            .await
+            .expect_err("gate bypass must still reach the receipt CAS");
+        assert!(
+            matches!(
+                conflict,
+                lash_core::StoreError::RuntimeTurnCommitConflict { ref session_id, .. }
+                    if session_id == "commit-admission-bypass"
+            ),
+            "gate bypass must preserve the typed receipt conflict, got {conflict:?}"
+        );
+
+        let counters = DurableContentionCounters::default();
+        counters
+            .cas_failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut retry_after = Duration::from_millis(1);
+        wait_for_durable_contention_retry(&counters, &mut retry_after).await;
+        lash_core::facade_support::run_head_advancing_commit_attempt(
+            session_id,
+            "retry",
+            CancellationToken::new(),
+            |_, _| async {
+                let mut fresh = lash_core::store::load_persisted_session_state(store.as_ref())
+                    .await?
+                    .expect("session remains durable");
+                fresh.policy.provider_id = "gate-bypass-completer".to_string();
+                let retry_commit = RuntimeCommit::persisted_state_with_operation_for_testing(
+                    &fresh,
+                    &[],
+                    lash_core::OperationId::new(
+                        lash_core::ExecutionScope::runtime_operation(
+                            "commit-admission-bypass-retry",
+                        ),
+                        "commit",
+                    ),
+                );
+                store.commit_runtime_state(retry_commit).await?;
+                Ok::<(), anyhow::Error>(())
+            },
+        )
+        .await
+        .expect("fresh rebuild commits after residual backoff");
+        assert_eq!(
+            counters
+                .cas_failures
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            counters
+                .cas_backoff_sleeps
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "the receipt conflict must traverse the bounded jittered backoff"
+        );
+    }
 }
 
 fn push_contention_wave_metrics(
@@ -607,6 +711,7 @@ struct DurableContentionCounters {
     reclaim_conflicts: std::sync::atomic::AtomicU64,
     store_contention_retries: std::sync::atomic::AtomicU64,
     cas_failures: std::sync::atomic::AtomicU64,
+    cas_backoff_sleeps: std::sync::atomic::AtomicU64,
     completions: std::sync::atomic::AtomicU64,
 }
 
@@ -614,41 +719,84 @@ struct DurableContentionCounters {
 struct DurableContentionSamples {
     claim_wait_ms: Mutex<Vec<f64>>,
     service_ms: Mutex<Vec<f64>>,
+    commit_admission_wait_ms: Mutex<Vec<f64>>,
+    commit_admission_queue_depth: Mutex<Vec<f64>>,
 }
 
 async fn settle_durable_contention_claim(
     store: &(dyn lash_core::RuntimePersistence + '_),
     completion: QueuedWorkCompletion,
     counters: &DurableContentionCounters,
+    samples: &DurableContentionSamples,
 ) -> anyhow::Result<()> {
-    for _ in 0..256 {
-        let state = lash_core::store::load_persisted_session_state(store)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("durable contention session state disappeared"))?;
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-        commit.completed_queue_claims = vec![completion.clone()];
-        match store.commit_runtime_state(commit).await {
-            Ok(_) => return Ok(()),
-            Err(lash_core::StoreError::Contended) => {
-                counters
-                    .store_contention_retries
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tokio::task::yield_now().await;
+    let session_id = completion.session_id.clone();
+    let work_identity = completion.claim_id.clone();
+    lash_core::facade_support::run_head_advancing_commit_attempt(
+        session_id,
+        work_identity,
+        CancellationToken::new(),
+        |admission_wait, admission_queue_depth| async move {
+            if admission_queue_depth > 0 {
+                samples
+                    .commit_admission_wait_ms
+                    .lock_recover()
+                    .push(round3(admission_wait.as_secs_f64() * 1000.0));
+                samples
+                    .commit_admission_queue_depth
+                    .lock_recover()
+                    .push(admission_queue_depth as f64);
             }
-            Err(
-                lash_core::StoreError::HeadRevisionConflict { .. }
-                | lash_core::StoreError::RuntimeTurnCommitConflict { .. }
-                | lash_core::StoreError::AppendOperationIdentityConflict { .. },
-            ) => {
-                counters
-                    .cas_failures
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tokio::task::yield_now().await;
+            let mut cas_retry_after = Duration::from_millis(1);
+            for _ in 0..256 {
+                let state = lash_core::store::load_persisted_session_state(store)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("durable contention session state disappeared")
+                    })?;
+                let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+                commit.completed_queue_claims = vec![completion.clone()];
+                match store.commit_runtime_state(commit).await {
+                    Ok(_) => return Ok(()),
+                    Err(lash_core::StoreError::Contended) => {
+                        counters
+                            .store_contention_retries
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        wait_for_durable_contention_retry(counters, &mut cas_retry_after).await;
+                    }
+                    Err(
+                        lash_core::StoreError::HeadRevisionConflict { .. }
+                        | lash_core::StoreError::RuntimeTurnCommitConflict { .. }
+                        | lash_core::StoreError::AppendOperationIdentityConflict { .. },
+                    ) => {
+                        counters
+                            .cas_failures
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        wait_for_durable_contention_retry(counters, &mut cas_retry_after).await;
+                    }
+                    Err(error) => return Err(error.into()),
+                }
             }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    anyhow::bail!("durable contention completion exhausted 256 CAS retries")
+            anyhow::bail!("durable contention completion exhausted 256 CAS retries")
+        },
+    )
+    .await
+}
+
+async fn wait_for_durable_contention_retry(
+    counters: &DurableContentionCounters,
+    retry_after: &mut Duration,
+) {
+    const RETRY_MAX: Duration = Duration::from_millis(25);
+    let delay = lash_core::facade_support::bounded_multiplicative_jitter(
+        *retry_after,
+        Duration::from_millis(1),
+        RETRY_MAX,
+    );
+    counters
+        .cas_backoff_sleeps
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    tokio::time::sleep(delay).await;
+    *retry_after = retry_after.saturating_mul(2).min(RETRY_MAX);
 }
 
 async fn run_durable_contention_worker(
@@ -776,7 +924,8 @@ async fn run_durable_contention_worker(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
-        settle_durable_contention_claim(store.as_ref(), claim.completion(), &counters).await?;
+        settle_durable_contention_claim(store.as_ref(), claim.completion(), &counters, &samples)
+            .await?;
         counters
             .completions
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -948,6 +1097,8 @@ pub(crate) async fn run_once_durable_queued_work_contention(
     let after_export_memory = process_memory_sample();
     let claim_wait_ms = samples.claim_wait_ms.lock_recover().clone();
     let service_ms = samples.service_ms.lock_recover().clone();
+    let commit_admission_wait_ms = samples.commit_admission_wait_ms.lock_recover().clone();
+    let commit_admission_queue_depth = samples.commit_admission_queue_depth.lock_recover().clone();
     let claim_summary = crate::perf_support::metrics::percentile_summary(claim_wait_ms.clone());
     let service_summary = crate::perf_support::metrics::percentile_summary(service_ms.clone());
     let pool_wait_ms = store_metrics.pool_checkout_wait_samples_ms();
@@ -963,6 +1114,10 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         ),
         ("durable_contention.service_ms".to_string(), service_ms),
         ("durable_contention.pool_wait_ms".to_string(), pool_wait_ms),
+        (
+            "durable_contention.commit_admission_wait_ms".to_string(),
+            commit_admission_wait_ms,
+        ),
     ]);
     let phase_profile = BTreeMap::from([
         (
@@ -977,7 +1132,15 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             "durable_contention.pool_wait".to_string(),
             metric_phase(&metric_samples_ms["durable_contention.pool_wait_ms"]),
         ),
+        (
+            "durable_contention.commit_admission_wait".to_string(),
+            metric_phase(&metric_samples_ms["durable_contention.commit_admission_wait_ms"]),
+        ),
     ]);
+    let metric_samples = BTreeMap::from([(
+        "durable_contention.commit_admission_queue_depth".to_string(),
+        commit_admission_queue_depth.clone(),
+    )]);
     let mut extra_counters = BTreeMap::from([
         ("durable_contention.workers".to_string(), workers as u64),
         (
@@ -1063,6 +1226,23 @@ pub(crate) async fn run_once_durable_queued_work_contention(
                 .load(std::sync::atomic::Ordering::Relaxed),
         ),
         (
+            "durable_contention.cas_backoff_sleeps".to_string(),
+            counters
+                .cas_backoff_sleeps
+                .load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        (
+            "durable_contention.commit_admission_waits".to_string(),
+            commit_admission_queue_depth.len() as u64,
+        ),
+        (
+            "durable_contention.commit_admission_queue_depth_max".to_string(),
+            commit_admission_queue_depth
+                .iter()
+                .copied()
+                .fold(0.0, f64::max) as u64,
+        ),
+        (
             "durable_contention.pool_wait_observable".to_string(),
             u64::from(scenario.uses_postgres()),
         ),
@@ -1126,7 +1306,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
         session_nodes: 0,
         active_path_messages: 0,
         extra_counters,
-        metric_samples: BTreeMap::new(),
+        metric_samples,
         metric_samples_ms,
         memory: RuntimePerfMemoryRunResult {
             rss_before_kb: before_memory.rss_kb,

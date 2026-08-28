@@ -401,6 +401,7 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "durable_contention.store_contention_retries",
         "durable_contention.lease_probe_busy",
         "durable_contention.cas_failures",
+        "durable_contention.cas_backoff_sleeps",
     ] {
         assert!(
             result.extra_counters.contains_key(counter),
@@ -411,6 +412,45 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
     let claim_attempts = result.extra_counters["durable_contention.claim_attempts"];
     let claim_refusals = result.extra_counters["durable_contention.claim_refusals"];
     let cas_failures = result.extra_counters["durable_contention.cas_failures"];
+    let admission_waits = *result
+        .extra_counters
+        .get("durable_contention.commit_admission_waits")
+        .expect("contention run must report commit admission waits");
+    let admission_depth_max = *result
+        .extra_counters
+        .get("durable_contention.commit_admission_queue_depth_max")
+        .expect("contention run must report maximum commit admission queue depth");
+    let admission_wait = result
+        .metric_samples_ms
+        .get("durable_contention.commit_admission_wait_ms")
+        .expect("contention run must emit commit admission wait samples");
+    let admission_depth = result
+        .metric_samples
+        .get("durable_contention.commit_admission_queue_depth")
+        .expect("contention run must emit commit admission queue-depth samples");
+    let admission_phase = result
+        .phase_profile
+        .get("durable_contention.commit_admission_wait")
+        .expect("contention run must bind commit admission waits to a phase");
+    assert_eq!(admission_waits as usize, admission_wait.len());
+    assert_eq!(admission_wait.len(), admission_depth.len());
+    assert_eq!(admission_phase.samples, admission_wait.len());
+    assert_eq!(
+        admission_depth_max,
+        admission_depth.iter().copied().fold(0.0, f64::max) as u64
+    );
+    assert!(
+        workers == 1 || admission_waits > 0,
+        "multiple workers must queue at commit admission: admission_waits={admission_waits}"
+    );
+    assert!(
+        workers == 1 || admission_depth_max > 0,
+        "multiple workers must report nonzero commit queue depth: queue_depth_max={admission_depth_max}"
+    );
+    assert_eq!(
+        cas_failures, 0,
+        "same-process commit admission must eliminate receipt/head CAS losses"
+    );
     assert!(
         workers == 1 || claim_attempts > completed,
         "multiple workers must poll concurrently: claim_attempts={claim_attempts}, completed_batches={completed}"

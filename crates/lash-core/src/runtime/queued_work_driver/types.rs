@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::PluginError;
@@ -5,6 +6,61 @@ use crate::PluginError;
 pub(super) const WAKE_RETRY_INITIAL: Duration = Duration::from_millis(25);
 pub(super) const WAKE_RETRY_MAX: Duration = Duration::from_secs(1);
 pub(super) const WAKE_MAX_ATTEMPTS: u32 = 8;
+
+static RETRY_JITTER_SEQUENCE: AtomicU64 = AtomicU64::new(0x9e37_79b9_7f4a_7c15);
+
+/// Apply 80-120% multiplicative jitter inside an explicit retry envelope.
+///
+/// The sequence is process-local and affects pacing only. It is deliberately
+/// independent of durable identities, replay, and the store's authority.
+#[doc(hidden)]
+pub fn bounded_multiplicative_jitter(
+    base: Duration,
+    floor: Duration,
+    ceiling: Duration,
+) -> Duration {
+    debug_assert!(floor <= ceiling);
+    let sequence = RETRY_JITTER_SEQUENCE.fetch_add(0x9e37_79b9_7f4a_7c15, Ordering::Relaxed);
+    // SplitMix64 finalization gives adjacent calls unrelated low bits without
+    // adding a random-number dependency to the runtime kernel.
+    let mut mixed = sequence;
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed ^= mixed >> 31;
+    let percent = 80 + mixed % 41;
+    let jittered_nanos = base.as_nanos().saturating_mul(u128::from(percent)) / 100;
+    let bounded_nanos = jittered_nanos.clamp(floor.as_nanos(), ceiling.as_nanos());
+    Duration::from_nanos(bounded_nanos.min(u64::MAX.into()) as u64)
+}
+
+pub(super) fn jittered_wake_retry(base: Duration) -> Duration {
+    bounded_multiplicative_jitter(base, WAKE_RETRY_INITIAL, WAKE_RETRY_MAX)
+}
+
+#[cfg(test)]
+mod jitter_tests {
+    use super::*;
+
+    #[test]
+    fn retry_jitter_stays_inside_the_production_envelope() {
+        for base in [
+            Duration::from_millis(25),
+            Duration::from_millis(100),
+            Duration::from_millis(500),
+            Duration::from_secs(1),
+        ] {
+            for _ in 0..128 {
+                let delay = jittered_wake_retry(base);
+                assert!(delay >= WAKE_RETRY_INITIAL);
+                assert!(delay <= WAKE_RETRY_MAX);
+                if base < WAKE_RETRY_MAX {
+                    assert!(delay >= base.mul_f64(0.8));
+                    assert!(delay <= base.mul_f64(1.2));
+                }
+            }
+        }
+    }
+}
 
 #[cfg(any(test, feature = "testing"))]
 pub const QUEUED_WORK_MAX_TRANSIENT_ATTEMPTS: usize = WAKE_MAX_ATTEMPTS as usize;

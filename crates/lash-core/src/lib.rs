@@ -192,6 +192,8 @@ pub mod store_backend_support {
 
 #[doc(hidden)]
 pub mod facade_support {
+    pub use crate::runtime::bounded_multiplicative_jitter;
+    pub use crate::runtime::run_head_advancing_commit_attempt;
     pub use crate::runtime::turn_loop::{
         EmptyQueuedDrainReason, QueuedTurnDrain, SelectedQueuedWorkBatchSatisfaction,
         SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainOutcome,

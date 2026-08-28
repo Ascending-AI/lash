@@ -499,6 +499,69 @@ impl PreparedTurn {
 
     #[allow(clippy::too_many_arguments)]
     async fn commit(
+        self,
+        session: Option<&mut Session>,
+        staged_usage: session_manager::StagedTokenLedger,
+        commit_effects: super::logical_turn::LogicalTurnCommitEffects,
+        session_execution_lease: Option<&SessionExecutionLeaseGuard>,
+        release_session_execution_lease: bool,
+        trace_turn_id: &str,
+        recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
+        cancellation: CancellationToken,
+        turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    ) -> Result<CommittedTurn, crate::StoreError> {
+        let has_durable_store = session
+            .as_deref()
+            .and_then(Session::history_store)
+            .is_some();
+        if !has_durable_store {
+            return self
+                .commit_after_admission(
+                    session,
+                    staged_usage,
+                    commit_effects,
+                    session_execution_lease,
+                    release_session_execution_lease,
+                    trace_turn_id,
+                    recorded_attachment_intent_ids,
+                )
+                .await;
+        }
+        let session_id = self.turn_pipeline.state().session_id.clone();
+        let work_identity = trace_turn_id.to_string();
+        super::run_head_advancing_commit_attempt(
+            session_id.clone(),
+            work_identity.clone(),
+            cancellation,
+            move |waited, queue_depth| async move {
+                super::commit_admission::record_product_commit_admission(
+                    "turn_final_commit",
+                    &session_id,
+                    &work_identity,
+                    waited,
+                    queue_depth,
+                );
+                let _product_commit_phase = super::RuntimeNamedPhase::begin(
+                    turn_phase_probe,
+                    "commit_admission.product_attempt",
+                );
+                self.commit_after_admission(
+                    session,
+                    staged_usage,
+                    commit_effects,
+                    session_execution_lease,
+                    release_session_execution_lease,
+                    trace_turn_id,
+                    recorded_attachment_intent_ids,
+                )
+                .await
+            },
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn commit_after_admission(
         mut self,
         session: Option<&mut Session>,
         staged_usage: session_manager::StagedTokenLedger,
@@ -1637,8 +1700,8 @@ impl LashRuntime {
                 return Err(runtime_error_from_store_commit(err));
             }
         };
-        let committed = match prepared
-            .commit(
+        let committed = match Box::pin(
+            prepared.commit(
                 self.session.as_mut(),
                 staged_usage,
                 commit_effects,
@@ -1650,8 +1713,11 @@ impl LashRuntime {
                     .durability
                     .attachment_store
                     .recorded_turn_intent_ids(&trace_turn_id),
-            )
-            .await
+                cancel_state.clone(),
+                self.turn_phase_probe.clone(),
+            ),
+        )
+        .await
         {
             Ok(committed) => committed,
             Err(err) => {
@@ -2154,7 +2220,10 @@ impl LashRuntime {
         if drain_commands_before_turn_input {
             loop {
                 match self
-                    .drain_next_session_command(&session_execution_fence)
+                    .drain_next_session_command_with_cancellation(
+                        &session_execution_fence,
+                        cancel.clone(),
+                    )
                     .await
                 {
                     Ok(Some(_)) => {}
@@ -2566,7 +2635,7 @@ impl LashRuntime {
             && let Some(lease) = session_execution_lease
         {
             while self
-                .drain_next_session_command(&lease.fence())
+                .drain_next_session_command_with_cancellation(&lease.fence(), cancel.clone())
                 .await?
                 .is_some()
             {}
