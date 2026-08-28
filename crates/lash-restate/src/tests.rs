@@ -4801,6 +4801,7 @@ async fn restate_wake_delivery_ordering_group_conformance() {
         registry
             as Arc<dyn lash_core::testing::conformance::WakeDeliveryOrderingGroupFaultInjector>,
         process_work,
+        lash_core::testing::conformance::ProcessTerminalWaitWitness::Reattach,
     )
     .await;
     wait_transport.assert_reattached_to("wake-ordering-terminal");
@@ -4836,6 +4837,7 @@ async fn restate_wake_delivery_crash_matrix_conformance() {
         registry as Arc<dyn ProcessRegistry>,
         clock,
         process_work,
+        lash_core::testing::conformance::ProcessTerminalWaitWitness::Reattach,
     )
     .await;
     wait_transport.assert_reattached_to("wake-crash-terminal");

@@ -8367,6 +8367,9 @@ lash::testing::conformance::LineageConformanceInjector::edge_path
 lash::testing::conformance::LineageConformanceInjector::force_lineage
 lash::testing::conformance::LineageConformanceInjector::lineage_ancestors
 lash::testing::conformance::LineageConformanceInjector::tombstone_node
+lash::testing::conformance::ProcessTerminalWaitWitness
+lash::testing::conformance::ProcessTerminalWaitWitness::Direct
+lash::testing::conformance::ProcessTerminalWaitWitness::Reattach
 lash::testing::conformance::ProcessTriggerRetentionHandles
 lash::testing::conformance::ProcessTriggerRetentionHandles::registry
 lash::testing::conformance::ProcessTriggerRetentionHandles::sessions

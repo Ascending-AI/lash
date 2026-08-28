@@ -56,6 +56,7 @@ async fn sqlite_wake_delivery_crash_matrix() {
         registry,
         clock,
         process_work,
+        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
     ))
     .await;
 }
@@ -78,6 +79,7 @@ async fn sqlite_wake_delivery_ordering_group_conformance() {
             path: process_registry_path,
         }),
         process_work,
+        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
     )
     .await;
 }

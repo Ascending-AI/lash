@@ -612,7 +612,14 @@ mod tests {
         let process_work = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
             &registry,
         )));
-        wake_delivery_crash_matrix(factory, registry, clock, process_work).await;
+        wake_delivery_crash_matrix(
+            factory,
+            registry,
+            clock,
+            process_work,
+            ProcessTerminalWaitWitness::Direct,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -625,6 +632,7 @@ mod tests {
             Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
             registry as Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
             process_work,
+            ProcessTerminalWaitWitness::Direct,
         )
         .await;
     }
