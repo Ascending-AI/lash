@@ -25,11 +25,13 @@ enum NativeProcessWorker {
 impl NativeProcessWork {
     /// Construct native process work over an already-watched registry.
     pub fn new(watched: &WatchedRegistry, worker: DurableProcessWorker) -> Self {
+        let work_cadence = worker.config().native_substrate.work_cadence.clone();
         Self {
             worker: NativeProcessWorker::Durable(worker),
-            terminal_awaiter: NativeProcessAwaiter::new(
+            terminal_awaiter: NativeProcessAwaiter::new_with_work_cadence(
                 Arc::clone(watched.registry()),
                 watched.hub().clone(),
+                work_cadence,
             ),
         }
     }

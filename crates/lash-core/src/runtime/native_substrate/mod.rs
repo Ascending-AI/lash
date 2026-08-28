@@ -121,6 +121,20 @@ impl ProcessWorkWiring {
         }
     }
 
+    /// Apply the validated native polling cadence to process-event waits.
+    ///
+    /// Use the same [`WorkCadencePolicy`] passed to native process, queued-work,
+    /// and wake-delivery drivers so an externally supplied process port does
+    /// not leave the event awaiter on hidden hardcoded pacing.
+    pub fn with_work_cadence(
+        mut self,
+        work_cadence: WorkCadencePolicy,
+    ) -> Result<Self, NativeSubstrateConfigError> {
+        work_cadence.validate()?;
+        self.event_awaiter = self.event_awaiter.with_work_cadence(work_cadence);
+        Ok(self)
+    }
+
     /// Ask the bound substrate to admit this owner's claimable pending processes.
     ///
     /// A host calls this after its process endpoint is ready, or whenever

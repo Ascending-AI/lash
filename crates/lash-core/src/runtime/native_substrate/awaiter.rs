@@ -1,12 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRegistry};
+use crate::{PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRegistry, WorkCadencePolicy};
 
 use super::super::process::ProcessChangeHub;
-
-const AWAIT_BACKOFF_MIN: Duration = Duration::from_millis(25);
-const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
 
 /// Native waiter for process terminal state and events (ADR 0016).
 ///
@@ -17,6 +14,7 @@ const AWAIT_BACKOFF_MAX: Duration = Duration::from_secs(1);
 pub(crate) struct NativeProcessAwaiter {
     registry: Arc<dyn ProcessRegistry>,
     hub: Option<ProcessChangeHub>,
+    work_cadence: WorkCadencePolicy,
 }
 
 impl NativeProcessAwaiter {
@@ -24,6 +22,19 @@ impl NativeProcessAwaiter {
         Self {
             registry,
             hub: Some(hub),
+            work_cadence: WorkCadencePolicy::default(),
+        }
+    }
+
+    pub(crate) fn new_with_work_cadence(
+        registry: Arc<dyn ProcessRegistry>,
+        hub: ProcessChangeHub,
+        work_cadence: WorkCadencePolicy,
+    ) -> Self {
+        Self {
+            registry,
+            hub: Some(hub),
+            work_cadence,
         }
     }
 
@@ -32,7 +43,13 @@ impl NativeProcessAwaiter {
         Self {
             registry,
             hub: None,
+            work_cadence: WorkCadencePolicy::default(),
         }
+    }
+
+    pub(crate) fn with_work_cadence(mut self, work_cadence: WorkCadencePolicy) -> Self {
+        self.work_cadence = work_cadence;
+        self
     }
 
     pub(crate) async fn await_terminal(
@@ -73,7 +90,7 @@ impl NativeProcessAwaiter {
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<Option<T>, PluginError>>,
     {
-        let mut backoff = AWAIT_BACKOFF_MIN;
+        let mut backoff = self.work_cadence.poll_initial;
         if let Some(hub) = self.hub.as_ref() {
             let mut rx = hub.subscribe(process_id);
             loop {
@@ -83,12 +100,12 @@ impl NativeProcessAwaiter {
                 tokio::select! {
                     changed = rx.changed() => {
                         match changed {
-                            Ok(()) => backoff = AWAIT_BACKOFF_MIN,
+                            Ok(()) => backoff = self.work_cadence.poll_initial,
                             Err(_) => break,
                         }
                     }
                     _ = tokio::time::sleep(backoff) => {
-                        backoff = next_backoff(backoff);
+                        backoff = next_backoff(backoff, self.work_cadence.poll_max);
                     }
                 }
             }
@@ -98,7 +115,7 @@ impl NativeProcessAwaiter {
                 return Ok(item);
             }
             tokio::time::sleep(backoff).await;
-            backoff = next_backoff(backoff);
+            backoff = next_backoff(backoff, self.work_cadence.poll_max);
         }
     }
 
@@ -147,8 +164,8 @@ impl NativeProcessAwaiter {
     }
 }
 
-fn next_backoff(current: Duration) -> Duration {
-    current.saturating_mul(2).min(AWAIT_BACKOFF_MAX)
+fn next_backoff(current: Duration, maximum: Duration) -> Duration {
+    current.saturating_mul(2).min(maximum)
 }
 
 #[cfg(test)]
