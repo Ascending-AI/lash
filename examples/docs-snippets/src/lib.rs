@@ -52,6 +52,7 @@ mod plugins_facade_part3;
 mod plugins_operations;
 mod plugins_runtime;
 mod plugins_tools;
+mod queued_work_port;
 mod quickstart;
 mod remote_protocol;
 mod rlm;
