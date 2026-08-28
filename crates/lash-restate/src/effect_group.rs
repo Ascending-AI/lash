@@ -11,8 +11,13 @@
 //! the existing durable-wait services so resolution-before-registration and
 //! retained terminal resolutions have one implementation.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+#[cfg(test)]
+use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, GroupExecutors, GroupSettlement,
@@ -109,7 +114,6 @@ impl RestateEffectGroupServices {
                 executors,
                 ingress,
                 infinite_retry_policy: infinite_retry_policy.0,
-                resolved: Arc::new(Mutex::new(HashMap::new())),
             },
             wait: RestateEffectGroupWaitServices::default(),
         }
@@ -260,14 +264,85 @@ pub struct EffectGroupSettlementRecord {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct EffectGroupIndexRecord {
+struct EffectGroupIndexLiveRecord {
     shape: EffectGroupShape,
-    lifecycle: EffectGroupLifecycle,
     next_rank: u64,
     #[serde(with = "btree_map_as_pairs")]
     settlements: BTreeMap<u64, EffectGroupSettlementRecord>,
     #[serde(with = "btree_map_as_pairs")]
     settled_positions: BTreeMap<usize, u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct EffectGroupIndexRecord {
+    shape_digest: String,
+    lifecycle: EffectGroupLifecycle,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    live: Option<EffectGroupIndexLiveRecord>,
+}
+
+impl EffectGroupIndexRecord {
+    fn live(&self) -> Result<&EffectGroupIndexLiveRecord, TerminalError> {
+        self.live.as_ref().ok_or_else(|| {
+            TerminalError::new(format!(
+                "effect-group index {} has no live state before completed retirement",
+                self.shape_digest
+            ))
+        })
+    }
+
+    fn live_mut(&mut self) -> Result<&mut EffectGroupIndexLiveRecord, TerminalError> {
+        self.live.as_mut().ok_or_else(|| {
+            TerminalError::new(format!(
+                "effect-group index {} has no live state before completed retirement",
+                self.shape_digest
+            ))
+        })
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn completed_retirement_index_serializes_as_tombstone_only() {
+    let record = EffectGroupIndexRecord {
+        shape_digest: "shape-digest".to_owned(),
+        lifecycle: EffectGroupLifecycle::Retired {
+            cleanup: EffectGroupCleanup::Complete,
+        },
+        live: None,
+    };
+
+    assert_eq!(
+        serde_json::to_value(record).expect("serialize completed retirement tombstone"),
+        serde_json::json!({
+            "shape_digest": "shape-digest",
+            "lifecycle": {
+                "type": "retired",
+                "cleanup": { "type": "complete" }
+            }
+        })
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn missing_live_index_state_is_a_typed_terminal_error_before_retirement() {
+    let record = EffectGroupIndexRecord {
+        shape_digest: "shape-digest".to_owned(),
+        lifecycle: EffectGroupLifecycle::Preparing {
+            dispatch: EffectGroupDispatchState::Unadopted,
+        },
+        live: None,
+    };
+
+    let error = record
+        .live()
+        .expect_err("missing live state must be rejected without panicking");
+    assert!(
+        error
+            .to_string()
+            .contains("has no live state before completed retirement")
+    );
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -635,7 +710,7 @@ impl EffectGroupIndex {
         let response = match load_index_shared(&ctx).await? {
             None => EffectGroupProbeResponse::Absent,
             Some(record) => EffectGroupProbeResponse::Exists {
-                shape_digest: record.shape.digest()?,
+                shape_digest: record.shape_digest,
                 phase: phase(&record.lifecycle),
             },
         };
@@ -649,21 +724,28 @@ impl EffectGroupIndex {
         Json(request): Json<EffectGroupOpenRequest>,
     ) -> HandlerResult<Json<EffectGroupOpenResponse>> {
         let Some(record) = load_index(&ctx).await? else {
+            let shape_digest = request.shape.digest()?;
             store_index(
                 &ctx,
                 EffectGroupIndexRecord {
-                    shape: request.shape,
+                    shape_digest,
                     lifecycle: EffectGroupLifecycle::Preparing {
                         dispatch: EffectGroupDispatchState::Unadopted,
                     },
-                    next_rank: 1,
-                    settlements: BTreeMap::new(),
-                    settled_positions: BTreeMap::new(),
+                    live: Some(EffectGroupIndexLiveRecord {
+                        shape: request.shape,
+                        next_rank: 1,
+                        settlements: BTreeMap::new(),
+                        settled_positions: BTreeMap::new(),
+                    }),
                 },
             );
             return Ok(Json(EffectGroupOpenResponse::OpenedFresh));
         };
-        if record.shape != request.shape {
+        if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
+            return Ok(Json(EffectGroupOpenResponse::Retired));
+        }
+        if record.live()?.shape != request.shape {
             return Ok(Json(EffectGroupOpenResponse::ShapeMismatch));
         }
         Ok(Json(match record.lifecycle {
@@ -719,6 +801,11 @@ impl EffectGroupIndex {
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Json(EffectGroupRecordDispatchResponse::UnknownGroup));
         };
+        if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
+            return Ok(Json(EffectGroupRecordDispatchResponse::Retired));
+        }
+        let shape = record.live()?.shape.clone();
+        let children = shape.children;
         let response = match &mut record.lifecycle {
             EffectGroupLifecycle::Preparing {
                 dispatch: EffectGroupDispatchState::Adopted { dispatched, .. },
@@ -727,7 +814,7 @@ impl EffectGroupIndex {
                     EffectGroupRecordDispatchResponse::Duplicate
                 }
                 Some(_) => EffectGroupRecordDispatchResponse::DispatchMismatch,
-                None if request.position >= record.shape.children => {
+                None if request.position >= children => {
                     EffectGroupRecordDispatchResponse::DispatchMismatch
                 }
                 None => {
@@ -751,7 +838,7 @@ impl EffectGroupIndex {
         ) {
             resolve_group_wait(
                 &ctx,
-                &record.shape.wait_scope,
+                &shape.wait_scope,
                 &group_key,
                 EffectGroupWaitKind::Admit(request.position),
                 EffectGroupWaitResolution::Admit,
@@ -771,7 +858,11 @@ impl EffectGroupIndex {
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Json(EffectGroupRegisterResponse::UnknownGroup));
         };
-        let expected_positions = (0..record.shape.children).collect::<Vec<_>>();
+        if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
+            return Ok(Json(EffectGroupRegisterResponse::Retired));
+        }
+        let shape = record.live()?.shape.clone();
+        let expected_positions = (0..shape.children).collect::<Vec<_>>();
         if request.addresses.keys().copied().collect::<Vec<_>>() != expected_positions {
             return Ok(Json(EffectGroupRegisterResponse::RegistrationMismatch));
         }
@@ -785,7 +876,7 @@ impl EffectGroupIndex {
                 store_index(&ctx, record.clone());
                 resolve_group_wait(
                     &ctx,
-                    &record.shape.wait_scope,
+                    &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Ready,
                     EffectGroupWaitResolution::Ready,
@@ -821,6 +912,10 @@ impl EffectGroupIndex {
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Json(EffectGroupRegisterRefusalResponse::UnknownGroup));
         };
+        if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
+            return Ok(Json(EffectGroupRegisterRefusalResponse::Retired));
+        }
+        let shape = record.live()?.shape.clone();
         let response = match record.lifecycle {
             EffectGroupLifecycle::Preparing { .. } => {
                 record.lifecycle = EffectGroupLifecycle::Closed {
@@ -832,7 +927,7 @@ impl EffectGroupIndex {
                 store_index(&ctx, record.clone());
                 resolve_group_wait(
                     &ctx,
-                    &record.shape.wait_scope,
+                    &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Ready,
                     EffectGroupWaitResolution::Refused {
@@ -840,10 +935,10 @@ impl EffectGroupIndex {
                     },
                 )
                 .await?;
-                for position in 0..record.shape.children {
+                for position in 0..shape.children {
                     resolve_group_wait(
                         &ctx,
-                        &record.shape.wait_scope,
+                        &shape.wait_scope,
                         &group_key,
                         EffectGroupWaitKind::Admit(position),
                         EffectGroupWaitResolution::Refused {
@@ -928,13 +1023,14 @@ impl EffectGroupIndex {
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Json(EffectGroupRecordSettlementResponse::Retired));
         }
-        if request.position >= record.shape.children {
+        let live = record.live_mut()?;
+        if request.position >= live.shape.children {
             return Ok(Json(EffectGroupRecordSettlementResponse::UnknownChild));
         }
-        if let Some(rank) = record.settled_positions.get(&request.position).copied() {
+        if let Some(rank) = live.settled_positions.get(&request.position).copied() {
             resolve_group_wait(
                 &ctx,
-                &record.shape.wait_scope,
+                &live.shape.wait_scope,
                 &group_key,
                 EffectGroupWaitKind::Rank(rank),
                 EffectGroupWaitResolution::Rank,
@@ -944,8 +1040,8 @@ impl EffectGroupIndex {
                 rank,
             }));
         }
-        let rank = record.next_rank;
-        record.next_rank = record.next_rank.checked_add(1).ok_or_else(|| {
+        let rank = live.next_rank;
+        live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
             TerminalError::new(format!(
                 "effect group {group_key} exhausted settlement ranks"
             ))
@@ -955,12 +1051,13 @@ impl EffectGroupIndex {
             sequence: rank,
             terminal: request.terminal,
         };
-        record.settlements.insert(rank, settlement);
-        record.settled_positions.insert(request.position, rank);
+        live.settlements.insert(rank, settlement);
+        live.settled_positions.insert(request.position, rank);
+        let wait_scope = live.shape.wait_scope.clone();
         store_index(&ctx, record.clone());
         resolve_group_wait(
             &ctx,
-            &record.shape.wait_scope,
+            &wait_scope,
             &group_key,
             EffectGroupWaitKind::Rank(rank),
             EffectGroupWaitResolution::Rank,
@@ -981,7 +1078,7 @@ impl EffectGroupIndex {
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Json(EffectGroupReadRankResponse::Retired));
         }
-        Ok(Json(match record.settlements.get(&request.rank) {
+        Ok(Json(match record.live()?.settlements.get(&request.rank) {
             Some(settlement) => EffectGroupReadRankResponse::Settled {
                 settlement: settlement.clone(),
             },
@@ -999,12 +1096,16 @@ impl EffectGroupIndex {
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Json(EffectGroupCloseResponse::UnknownGroup));
         };
+        if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
+            return Ok(Json(EffectGroupCloseResponse::Retired));
+        }
+        let shape = record.live()?.shape.clone();
         let (declared, addresses, prior) = match &record.lifecycle {
             EffectGroupLifecycle::Preparing { .. } => {
                 return Ok(Json(EffectGroupCloseResponse::NotReady));
             }
             EffectGroupLifecycle::Ready { addresses } => {
-                (record.shape.loser_disposition, addresses.clone(), None)
+                (shape.loser_disposition, addresses.clone(), None)
             }
             EffectGroupLifecycle::Closed {
                 effective,
@@ -1031,17 +1132,18 @@ impl EffectGroupIndex {
             return Ok(Json(EffectGroupCloseResponse::AlreadyClosed));
         }
         if effective == LoserPolicy::Cancel {
-            for position in 0..record.shape.children {
-                if record.settled_positions.contains_key(&position) {
+            let live = record.live_mut()?;
+            for position in 0..live.shape.children {
+                if live.settled_positions.contains_key(&position) {
                     continue;
                 }
-                let rank = record.next_rank;
-                record.next_rank = record.next_rank.checked_add(1).ok_or_else(|| {
+                let rank = live.next_rank;
+                live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
                     TerminalError::new(format!(
                         "effect group {group_key} exhausted settlement ranks"
                     ))
                 })?;
-                record.settlements.insert(
+                live.settlements.insert(
                     rank,
                     EffectGroupSettlementRecord {
                         position,
@@ -1049,7 +1151,7 @@ impl EffectGroupIndex {
                         terminal: EffectGroupSettlementTerminal::Cancelled,
                     },
                 );
-                record.settled_positions.insert(position, rank);
+                live.settled_positions.insert(position, rank);
             }
         }
         record.lifecycle = EffectGroupLifecycle::Closed {
@@ -1058,11 +1160,20 @@ impl EffectGroupIndex {
         };
         store_index(&ctx, record.clone());
         if effective == LoserPolicy::Cancel {
-            for position in 0..record.shape.children {
-                let rank = record.settled_positions[&position];
+            for position in 0..shape.children {
+                let rank = record
+                    .live()?
+                    .settled_positions
+                    .get(&position)
+                    .copied()
+                    .ok_or_else(|| {
+                        TerminalError::new(format!(
+                            "effect group {group_key} has no settlement rank for child {position}"
+                        ))
+                    })?;
                 resolve_group_wait(
                     &ctx,
-                    &record.shape.wait_scope,
+                    &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Rank(rank),
                     EffectGroupWaitResolution::Rank,
@@ -1070,15 +1181,15 @@ impl EffectGroupIndex {
                 .await?;
                 resolve_group_wait(
                     &ctx,
-                    &record.shape.wait_scope,
+                    &shape.wait_scope,
                     &group_key,
-                    EffectGroupWaitKind::Cancel(&record.shape.replay_keys[position]),
+                    EffectGroupWaitKind::Cancel(&shape.replay_keys[position]),
                     EffectGroupWaitResolution::Cancel,
                 )
                 .await?;
                 resolve_group_wait(
                     &ctx,
-                    &record.shape.wait_scope,
+                    &shape.wait_scope,
                     &group_key,
                     EffectGroupWaitKind::Admit(position),
                     EffectGroupWaitResolution::Cancel,
@@ -1110,6 +1221,7 @@ impl EffectGroupIndex {
                 EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
             }));
         }
+        let shape = record.live()?.shape.clone();
         let (dispatcher, dispatched) = match &record.lifecycle {
             EffectGroupLifecycle::Preparing { dispatch } => {
                 let dispatched = match dispatch {
@@ -1129,7 +1241,7 @@ impl EffectGroupIndex {
                     .workflow_client::<EffectGroupDispatchClient>(group_key.clone())
                     .run(Json(EffectGroupDispatchRequest {
                         group_key,
-                        shape: record.shape.clone(),
+                        shape: shape.clone(),
                         children: Vec::new(),
                     }))
                     .send()
@@ -1142,14 +1254,23 @@ impl EffectGroupIndex {
                     addresses.clone(),
                 )
             }
-            EffectGroupLifecycle::Retired { .. } => unreachable!(),
+            EffectGroupLifecycle::Retired { cleanup } => {
+                return Ok(Json(match cleanup {
+                    EffectGroupCleanup::Pending { facts } => {
+                        EffectGroupRetireResponse::AlreadyRetired {
+                            cleanup: facts.clone(),
+                        }
+                    }
+                    EffectGroupCleanup::Complete => EffectGroupRetireResponse::Tombstone,
+                }));
+            }
         };
         let cleanup = EffectGroupCleanupFacts {
-            children: record.shape.children,
-            replay_keys: record.shape.replay_keys.clone(),
+            children: shape.children,
+            replay_keys: shape.replay_keys,
             dispatcher,
             dispatched,
-            wait_scope: record.shape.wait_scope.clone(),
+            wait_scope: shape.wait_scope,
         };
         record.lifecycle = EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Pending {
@@ -1175,6 +1296,7 @@ impl EffectGroupIndex {
                 record.lifecycle = EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Complete,
                 };
+                record.live = None;
                 store_index(&ctx, record);
                 EffectGroupFinishRetirementResponse::Finished
             }
@@ -1205,17 +1327,18 @@ impl EffectGroupIndex {
             _ => return Ok(Json(EffectGroupRetirementCancelResponse::NotRetired)),
         };
         let mut changed = false;
+        let live = record.live_mut()?;
         for position in 0..facts.children {
-            if record.settled_positions.contains_key(&position) {
+            if live.settled_positions.contains_key(&position) {
                 continue;
             }
-            let rank = record.next_rank;
-            record.next_rank = record.next_rank.checked_add(1).ok_or_else(|| {
+            let rank = live.next_rank;
+            live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
                 TerminalError::new(format!(
                     "effect group {group_key} exhausted settlement ranks during retirement"
                 ))
             })?;
-            record.settlements.insert(
+            live.settlements.insert(
                 rank,
                 EffectGroupSettlementRecord {
                     position,
@@ -1223,12 +1346,21 @@ impl EffectGroupIndex {
                     terminal: EffectGroupSettlementTerminal::Cancelled,
                 },
             );
-            record.settled_positions.insert(position, rank);
+            live.settled_positions.insert(position, rank);
             changed = true;
         }
         store_index(&ctx, record.clone());
         for position in 0..facts.children {
-            let rank = record.settled_positions[&position];
+            let rank = record
+                .live()?
+                .settled_positions
+                .get(&position)
+                .copied()
+                .ok_or_else(|| {
+                    TerminalError::new(format!(
+                        "effect group {group_key} has no retirement settlement rank for child {position}"
+                    ))
+                })?;
             resolve_group_wait(
                 &ctx,
                 &facts.wait_scope,
@@ -1365,7 +1497,6 @@ pub struct EffectGroupDispatch {
     executors: Arc<dyn GroupExecutors>,
     ingress: RestateIngressClient,
     infinite_retry_policy: RunRetryPolicy,
-    resolved: Arc<Mutex<HashMap<String, lash_core::RuntimeEffectLocalExecutor<'static>>>>,
 }
 
 impl std::fmt::Debug for EffectGroupDispatch {
@@ -1379,28 +1510,6 @@ impl std::fmt::Debug for EffectGroupDispatch {
 
 #[restate_sdk::workflow(name = "EffectGroupDispatch")]
 impl EffectGroupDispatch {
-    fn cache_executor(&self, child: &RuntimeEffectEnvelope) -> bool {
-        let Some(replay_key) = child.invocation.replay_key().map(str::to_string) else {
-            return false;
-        };
-        if self
-            .resolved
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains_key(&replay_key)
-        {
-            return true;
-        }
-        let Some(executor) = self.executors.executor_for(child) else {
-            return false;
-        };
-        self.resolved
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(replay_key, executor);
-        true
-    }
-
     #[handler]
     async fn run(
         &self,
@@ -1432,30 +1541,15 @@ impl EffectGroupDispatch {
         }
 
         let executors = Arc::clone(&self.executors);
-        let resolved = Arc::clone(&self.resolved);
         let preflight_children = request.children.clone();
         let Json(missing) = ctx
             .run(move || async move {
-                let missing = preflight_children.iter().position(|child| {
-                    let Some(replay_key) = child.invocation.replay_key().map(str::to_string) else {
-                        return true;
-                    };
-                    if resolved
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .contains_key(&replay_key)
-                    {
-                        return false;
+                let mut missing = None;
+                for (position, child) in preflight_children.iter().enumerate() {
+                    if executors.executor_for(child).is_none() && missing.is_none() {
+                        missing = Some(position);
                     }
-                    let Some(executor) = executors.executor_for(child) else {
-                        return true;
-                    };
-                    resolved
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .insert(replay_key, executor);
-                    false
-                });
+                }
                 Ok(Json(missing))
             })
             .name("lash:effect-group:dispatch-preflight")
@@ -1543,11 +1637,9 @@ impl EffectGroupDispatch {
         _ctx: SharedWorkflowContext<'_>,
         Json(children): Json<Vec<RuntimeEffectEnvelope>>,
     ) -> HandlerResult<Json<Option<usize>>> {
-        Ok(Json(
-            children
-                .iter()
-                .position(|child| !self.cache_executor(child)),
-        ))
+        Ok(Json(children.iter().position(|child| {
+            self.executors.executor_for(child).is_none()
+        })))
     }
 
     #[handler]
@@ -1610,28 +1702,20 @@ impl EffectGroupDispatch {
             }
         }
 
-        let replay_key =
-            request.envelope.invocation.replay_key().ok_or_else(|| {
-                TerminalError::new("effect-group child is missing its replay key")
-            })?;
-        let executor = self
-            .resolved
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(replay_key)
-            .or_else(|| self.executors.executor_for(&request.envelope));
-        let Some(executor) = executor else {
-            return Err(std::io::Error::other(format!(
-                "no executor currently routes effect group {} child {}; retry on a carrying deployment",
-                request.group_key, request.position
-            ))
-            .into());
-        };
         let cancellation = tokio_util::sync::CancellationToken::new();
         let run_cancellation = cancellation.clone();
         let envelope = request.envelope.clone();
+        let executors = Arc::clone(&self.executors);
+        let group_key = request.group_key.clone();
+        let position = request.position;
         let mut run = Box::pin(
             ctx.run(move || async move {
+                let Some(executor) = executors.executor_for(&envelope) else {
+                    return Err(std::io::Error::other(format!(
+                        "no executor currently routes effect group {group_key} child {position}; retry on a carrying deployment"
+                    ))
+                    .into());
+                };
                 let outcome = tokio::select! {
                     biased;
                     _ = run_cancellation.cancelled() => EffectGroupChildRunOutcome::Cancelled,

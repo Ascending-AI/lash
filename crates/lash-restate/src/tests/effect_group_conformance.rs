@@ -2,14 +2,15 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::{
     ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy, Resolution, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, RuntimeScope,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeErrorCode, RuntimeInvocation,
+    RuntimeScope,
 };
 use restate_sdk::endpoint::Endpoint;
 use restate_sdk::http_server::HttpServer;
@@ -19,14 +20,13 @@ use crate::effect_group::{
     payload_key, rank_wait_request, ready_wait_request,
 };
 use crate::{
-    EffectGroupAdmissionRequest, EffectGroupAdmissionResponse, EffectGroupAdoptRequest,
-    EffectGroupCleanupFacts, EffectGroupDispatchRequest, EffectGroupOpenRequest,
-    EffectGroupOpenResponse, EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
-    EffectGroupProbeAdoptResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
-    EffectGroupRecordDispatchRequest, EffectGroupRecordDispatchResponse,
-    EffectGroupRecordSettlementRequest, EffectGroupRecordSettlementResponse,
-    EffectGroupRetireResponse, EffectGroupSettlementTerminal, EffectGroupShape,
-    EffectGroupWaitResolution, LashDurableWaitIndex, LashDurableWaitWorkflow,
+    EffectGroupAdoptRequest, EffectGroupCleanupFacts, EffectGroupDispatchRequest,
+    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadPutRequest,
+    EffectGroupPayloadPutResponse, EffectGroupProbeAdoptResponse, EffectGroupReadRankRequest,
+    EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
+    EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
+    EffectGroupRecordSettlementResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
+    EffectGroupShape, EffectGroupWaitResolution, LashDurableWaitIndex, LashDurableWaitWorkflow,
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateEffectGroupRetryPolicy,
     RestateEffectGroupServices, RestateEffectHost, RestateIngressClient,
 };
@@ -34,14 +34,26 @@ use crate::{
 #[derive(Default)]
 struct ConformanceExecutors {
     current: Mutex<Option<Arc<dyn GroupExecutors>>>,
+    staged: Mutex<HashMap<String, Arc<Mutex<Option<RuntimeEffectLocalExecutor<'static>>>>>>,
+    mapping_current: AtomicBool,
 }
 
 impl ConformanceExecutors {
     fn install(&self, executors: Arc<dyn GroupExecutors>) {
+        self.mapping_current.store(false, Ordering::SeqCst);
+        self.staged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         *self
             .current
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(executors);
+    }
+
+    fn install_mapping_current(&self, executors: Arc<dyn GroupExecutors>) {
+        self.install(executors);
+        self.mapping_current.store(true, Ordering::SeqCst);
     }
 }
 
@@ -50,22 +62,78 @@ impl GroupExecutors for ConformanceExecutors {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        self.current
+        let replay_key = envelope.invocation.replay_key()?.to_owned();
+        if self.mapping_current.load(Ordering::SeqCst) {
+            return self
+                .current
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .and_then(|executors| executors.executor_for(envelope));
+        }
+        if let Some(staged) = self
+            .staged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&replay_key)
+            .cloned()
+        {
+            return Some(staged_executor(staged, replay_key));
+        }
+        let current = self
+            .current
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
-            .and_then(|executors| executors.executor_for(envelope))
+            .cloned()?;
+        let executor = current.executor_for(envelope)?;
+        let staged = Arc::new(Mutex::new(Some(executor)));
+        self.staged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(replay_key.clone(), Arc::clone(&staged));
+        Some(staged_executor(staged, replay_key))
     }
+}
+
+fn staged_executor(
+    staged: Arc<Mutex<Option<RuntimeEffectLocalExecutor<'static>>>>,
+    replay_key: String,
+) -> RuntimeEffectLocalExecutor<'static> {
+    RuntimeEffectLocalExecutor::testing(move |envelope| async move {
+        let executor = staged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .ok_or_else(|| {
+                RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+                    format!("conformance executor for {replay_key} was already consumed"),
+                )
+            })?;
+        executor.execute(envelope).await
+    })
 }
 
 #[derive(Default)]
 struct WitnessExecutors {
-    staged: Mutex<HashMap<String, RuntimeEffectLocalExecutor<'static>>>,
+    staged: Mutex<HashMap<String, WitnessRoute>>,
     resolutions: AtomicUsize,
 }
 
+#[derive(Clone)]
+struct WitnessRoute {
+    executions: Arc<AtomicUsize>,
+    label: &'static str,
+}
+
 impl WitnessExecutors {
-    fn stage(&self, child: &RuntimeEffectEnvelope, executor: RuntimeEffectLocalExecutor<'static>) {
+    fn stage(
+        &self,
+        child: &RuntimeEffectEnvelope,
+        executions: Arc<AtomicUsize>,
+        label: &'static str,
+    ) {
         self.staged
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -75,7 +143,7 @@ impl WitnessExecutors {
                     .replay_key()
                     .expect("witness child has replay key")
                     .to_owned(),
-                executor,
+                WitnessRoute { executions, label },
             );
     }
 }
@@ -86,10 +154,18 @@ impl GroupExecutors for WitnessExecutors {
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
         self.resolutions.fetch_add(1, Ordering::SeqCst);
-        self.staged
+        let route = self
+            .staged
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(envelope.invocation.replay_key()?)
+            .get(envelope.invocation.replay_key()?)
+            .cloned()?;
+        Some(RuntimeEffectLocalExecutor::testing(move |_| async move {
+            route.executions.fetch_add(1, Ordering::SeqCst);
+            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                value: serde_json::json!({ "witness": route.label }),
+            })
+        }))
     }
 }
 
@@ -183,22 +259,13 @@ async fn run_conformance() {
 async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExecutors>) {
     let ingress = RestateIngressClient::new(ingress_url.to_owned());
     let witness_executors = Arc::new(WitnessExecutors::default());
-    executors.install(Arc::clone(&witness_executors) as Arc<dyn GroupExecutors>);
+    executors.install_mapping_current(Arc::clone(&witness_executors) as Arc<dyn GroupExecutors>);
 
     let group_key = witness_key("dispatcher");
     let child = witness_child(&group_key, 0);
     let shape = witness_shape(&group_key, std::slice::from_ref(&child));
     let executions = Arc::new(AtomicUsize::new(0));
-    let child_executions = Arc::clone(&executions);
-    witness_executors.stage(
-        &child,
-        RuntimeEffectLocalExecutor::testing(move |_| async move {
-            child_executions.fetch_add(1, Ordering::SeqCst);
-            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
-                value: serde_json::json!({ "witness": "dispatcher-convergence" }),
-            })
-        }),
-    );
+    witness_executors.stage(&child, Arc::clone(&executions), "dispatcher-convergence");
     let opened: EffectGroupOpenResponse = ingress
         .call_object_json(
             "EffectGroupIndex",
@@ -354,15 +421,10 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         .expect("admission witness adopts dispatcher");
     assert_eq!(adopted, EffectGroupProbeAdoptResponse::Adopted);
     let admission_executions = Arc::new(AtomicUsize::new(0));
-    let child_executions = Arc::clone(&admission_executions);
     witness_executors.stage(
         &admission_child,
-        RuntimeEffectLocalExecutor::testing(move |_| async move {
-            child_executions.fetch_add(1, Ordering::SeqCst);
-            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
-                value: serde_json::json!({ "witness": "fresh-admission" }),
-            })
-        }),
+        Arc::clone(&admission_executions),
+        "fresh-admission",
     );
     let first_admit = arm_admission_witness(&admission_group);
     let child_invocation = ingress
@@ -432,12 +494,20 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
     let gap_group = witness_key("gap");
     let gap_child = witness_child(&gap_group, 0);
     let gap_shape = witness_shape(&gap_group, std::slice::from_ref(&gap_child));
+    let gap_executions = Arc::new(AtomicUsize::new(0));
+    witness_executors.stage(
+        &gap_child,
+        Arc::clone(&gap_executions),
+        "never-recorded-child",
+    );
     let _: EffectGroupOpenResponse = ingress
         .call_object_json(
             "EffectGroupIndex",
             &gap_group,
             "open",
-            &EffectGroupOpenRequest { shape: gap_shape },
+            &EffectGroupOpenRequest {
+                shape: gap_shape.clone(),
+            },
         )
         .await
         .expect("send-record-gap witness opens");
@@ -445,19 +515,26 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         .call_object_empty_json("EffectGroupIndex", &gap_group, "retire")
         .await
         .expect("send-record-gap witness tombstones");
-    let refused: EffectGroupAdmissionResponse = ingress
-        .call_object_json(
-            "EffectGroupIndex",
+    let executions_before_child = gap_executions.load(Ordering::SeqCst);
+    ingress
+        .call_workflow_json::<_, ()>(
+            "EffectGroupDispatch",
             &gap_group,
-            "admit_child",
-            &EffectGroupAdmissionRequest {
+            "child",
+            &EffectGroupChildRequest {
+                group_key: gap_group.clone(),
+                shape: gap_shape,
                 position: 0,
-                invocation_id: "inv_never_recorded".to_owned(),
+                envelope: gap_child,
             },
         )
         .await
-        .expect("post-tombstone admission answers");
-    assert_eq!(refused, EffectGroupAdmissionResponse::Retired);
+        .expect("post-tombstone never-recorded child is refused");
+    assert_eq!(
+        gap_executions.load(Ordering::SeqCst),
+        executions_before_child,
+        "post-tombstone child whose mapping was never recorded must not execute"
+    );
     println!("EFFECT_GROUP_WITNESS m admission-enumeration PASS");
 }
 
