@@ -134,6 +134,19 @@ documented. Compiled examples and doctests answer whether the facade is
 exercised; review covers only the part FIG-2090 cannot yet derive mechanically,
 without creating handwritten inventory rows.
 
+The restored mechanical backstop compiler-scrapes direct function and method
+calls from `agent-service`, `agent-workbench`, and `slack-clone` against the
+default-feature `lash` facade and the public, non-hidden `lash_restate`
+choreography surface. The Restate scrape enables `agent-service/restate`; the
+upstream `restate_sdk` re-export is not adapter-owned surface. These callable
+identities are the blocking scope once the mechanically reported residual gap
+set reaches zero. Until then the pull-request job remains explicitly advisory
+and publishes every gap rather than silently waiving it. Fields, variants,
+types, concrete trait implementations, doctests, and other uses the stock
+scraper cannot derive remain a review-time expectation. Including the adapter
+in this evidence scope does not make its internal package a second promised
+package.
+
 ## Alternatives considered
 
 * **Keep a two-tier supported family.** Rejected. It preserves the ambiguity

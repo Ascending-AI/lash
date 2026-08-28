@@ -1,5 +1,25 @@
 # FIG-2090: compiler-derived facade example coverage
 
+## 2026-08-29 coverage-gate restoration
+
+The compiler-derived report now covers two operator-facing choreography
+surfaces: the default-feature `lash` facade and the public, non-hidden
+`lash_restate` adapter surface. The upstream `restate_sdk` re-export is outside
+the adapter-owned surface. The same scrape still compiles exactly
+`agent-service`, `agent-workbench`, and `slack-clone`; it now enables
+`agent-service/restate` so the effect-group consumer added by PR #853 is part
+of the compiler evidence.
+
+`python3 scripts/api_evidence.py --check --all-gaps` gives the report teeth: it
+returns nonzero if any direct-call candidate lacks compiled evidence and prints
+every residual identity. On `ccaa7fa08` (PR #853), `lash` covered 245 of 2,417
+direct-call candidates and `lash_restate` covered 23 of 111. The remaining
+2,172 and 88 gaps respectively prevent promotion, so the workflow retains its
+job- and step-level `continue-on-error` overrides and publishes the complete
+gap report. It now runs on path-scoped pull requests, where those overrides can
+be removed once the report reaches zero, as well as matching `main` pushes and
+manual dispatches.
+
 ## Verdict evidence
 
 The prototype is feasible as an **advisory direct-call index**. It mechanically
@@ -26,8 +46,8 @@ deliberately excluded by rustdoc.
 compiler-coordinated scrape and one mechanical join:
 
 1. It imports the canonical identity, re-export, and primary-path logic from
-   `scripts/api_surface.py`. The prototype uses the default-feature facade
-   surface, currently 7,392 identities.
+   `scripts/api_surface.py`. The restored report uses the default-feature
+   `lash` facade and the public, non-hidden `lash_restate` adapter surface.
 2. It reads Cargo metadata and selects three product example packages:
    `agent-service`, `agent-workbench`, and `slack-clone`. This fixed
    representative package set is not an item-to-example map.
@@ -35,21 +55,24 @@ compiler-coordinated scrape and one mechanical join:
    The script creates a temporary `git archive` snapshot and adds that target
    setting mechanically to each selected package. It does not change a tracked
    manifest or example source.
-4. It invokes Cargo once for `lash-runtime` and all selected examples with
+4. It invokes Cargo once for `lash-runtime`, `lash-internal-restate`, and all
+   selected examples with `agent-service/restate` and
    `-Zrustdoc-scrape-examples`. Cargo/rustdoc coordinate the private compiler
    identities; the script does not decode rustc's opaque `.examples` files.
 5. It reads the scraped-example sections rustdoc attached to rendered `lash`
-   function and method pages, then joins those page paths through the existing
-   canonical alias sets. Calls through facade re-exports collapse onto their
-   underlying canonical identity.
+   and `lash_restate` function and method pages, then joins those page paths
+   through the existing canonical alias sets. Calls through facade re-exports
+   collapse onto their underlying canonical identity.
 6. It fails if fewer than three packages are selected or any selected package
-   contributes zero matched facade calls. Non-call inventory kinds are printed
-   separately as `not derivable`.
+   contributes zero matched facade calls. `--check` also fails on any uncovered
+   direct-call identity, while non-call inventory kinds are printed separately
+   as `not derivable`.
 
 The advisory workflow is `.github/workflows/api-evidence.yml`. It runs on
 facade/example-affecting pull requests and `main`, publishes the report in the
-job summary, and deliberately uses `continue-on-error`: unstable rustdoc drift
-or an evidence gap must not become a release gate.
+job summary, and retains `continue-on-error` while the residual gaps above
+remain. Its pull-request placement is the blocking point once a clean local
+check permits promotion.
 
 No mapping file or hand-maintained disposition entry was added or changed.
 
@@ -253,18 +276,19 @@ From repository root:
 
 ```console
 $ . ./env.sh
-$ python3 scripts/api_evidence.py
+$ python3 scripts/api_evidence.py --check --all-gaps
 ```
 
 The command prints compiler-derived covered identities and source files,
 uncovered direct-call candidates, and every non-derivable inventory category.
 The checked representative result must have nonzero contributor counts for all
-three default example packages.
+three default example packages and no uncovered direct-call candidates.
 
 Supporting checks:
 
 ```console
-$ python3 -m py_compile scripts/api_evidence.py
+$ python3 scripts/test_api_evidence.py
+$ python3 -m py_compile scripts/api_evidence.py scripts/api_surface.py
 $ python3 scripts/lint_docs.py docs/agents/fig2090-findings.md
 $ git diff --check
 ```

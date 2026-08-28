@@ -1,9 +1,64 @@
-name: API example evidence (advisory)
+name: API example coverage (advisory)
 
 on:
-  # Advisory evidence only: dispatch on demand (2026-08-26 ruling) instead
-  # of spending a compile on every PR and push.
   workflow_dispatch:
+  # PR execution is the eventual blocking point. Keep the scrape scoped to
+  # facade definitions, crates whose public members can flow through those
+  # facades, the three compiled consumers, and the evidence implementation.
+  pull_request:
+    paths:
+      - ".github/actions/rust-toolchain/**"
+      - ".github/workflows/api-evidence.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/lash/**"
+      - "crates/lash-core/**"
+      - "crates/lash-http-transport/**"
+      - "crates/lash-lashlang-runtime/**"
+      - "crates/lash-plugin-tool-output-budget/**"
+      - "crates/lash-protocol-rlm/**"
+      - "crates/lash-restate/**"
+      - "crates/lash-remote-protocol/**"
+      - "crates/lash-rlm-types/**"
+      - "crates/lash-sansio/**"
+      - "crates/lash-tool-support/**"
+      - "crates/lash-trace/**"
+      - "crates/lash-typescript/**"
+      - "crates/lashlang/**"
+      - "examples/agent-service/**"
+      - "examples/agent-workbench/**"
+      - "examples/slack-clone/**"
+      - "scripts/api_evidence.py"
+      - "scripts/api_surface.py"
+      - "scripts/rustdoc_json_cache.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/actions/rust-toolchain/**"
+      - ".github/workflows/api-evidence.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/lash/**"
+      - "crates/lash-core/**"
+      - "crates/lash-http-transport/**"
+      - "crates/lash-lashlang-runtime/**"
+      - "crates/lash-plugin-tool-output-budget/**"
+      - "crates/lash-protocol-rlm/**"
+      - "crates/lash-restate/**"
+      - "crates/lash-remote-protocol/**"
+      - "crates/lash-rlm-types/**"
+      - "crates/lash-sansio/**"
+      - "crates/lash-tool-support/**"
+      - "crates/lash-trace/**"
+      - "crates/lash-typescript/**"
+      - "crates/lashlang/**"
+      - "examples/agent-service/**"
+      - "examples/agent-workbench/**"
+      - "examples/slack-clone/**"
+      - "scripts/api_evidence.py"
+      - "scripts/api_surface.py"
+      - "scripts/rustdoc_json_cache.py"
 
 permissions:
   contents: read
@@ -17,8 +72,8 @@ jobs:
     name: Compiler-derived call index (advisory)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # Advisory at the job level too: a timeout cancellation is not absorbed
-    # by step-level continue-on-error (ADR 0079: advisory until the cutover).
+    # Residual direct-call gaps on current main keep this advisory. Remove this
+    # and the evidence step's override only after the local check is clean.
     continue-on-error: true
 
     steps:
@@ -54,7 +109,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          python3 scripts/api_evidence.py | tee api-evidence.txt
+          python3 scripts/api_evidence.py --check --all-gaps | tee api-evidence.txt
 
       - name: Publish advisory report
         if: always()
@@ -69,7 +124,7 @@ jobs:
             fi
             if [[ "${EVIDENCE_OUTCOME}" != "success" ]]; then
               echo
-              echo "Advisory only: compiler-derived evidence did not complete."
+              echo "Advisory only: compiler-derived evidence has residual gaps or did not complete."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
         env:

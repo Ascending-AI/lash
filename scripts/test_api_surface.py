@@ -55,5 +55,51 @@ class SnapshotTests(unittest.TestCase):
         )
 
 
+class PublicSurfaceTests(unittest.TestCase):
+    def test_generic_root_prefix_and_excluded_external_export(self) -> None:
+        document = {
+            "root": 0,
+            "index": {
+                "0": {
+                    "inner": {"module": {"items": [1, 2]}},
+                },
+                "1": {
+                    "id": 1,
+                    "name": "run",
+                    "visibility": "public",
+                    "inner": {"function": {}},
+                },
+                "2": {
+                    "id": 2,
+                    "name": "restate_sdk",
+                    "visibility": "public",
+                    "inner": {
+                        "use": {
+                            "source": "restate_sdk",
+                            "id": 3,
+                            "is_glob": False,
+                        }
+                    },
+                },
+            },
+            "paths": {
+                "1": {"path": ["lash_restate", "run"], "kind": "function"},
+                "3": {"path": ["restate_sdk"], "kind": "module"},
+            },
+        }
+
+        self.assertEqual(
+            api_surface.public_surface(
+                document,
+                "lash_restate",
+                False,
+                excluded_root_exports=frozenset({"restate_sdk"}),
+            ),
+            {
+                ("lash_restate::run", "function"): "lash_restate::run",
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

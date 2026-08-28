@@ -403,6 +403,7 @@ jobs:
 
       - name: Test repository scripts
         run: |
+          python3 scripts/test_api_evidence.py
           python3 scripts/test_api_surface.py
           python3 scripts/test_check_core_public_member_docs.py
           python3 scripts/test_check_facade_external_types.py
