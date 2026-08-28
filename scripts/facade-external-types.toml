@@ -10,6 +10,9 @@ external_types = [
     "serde_json::number::Number",
     "serde_json::value::Value",
     "tokio::sync::mutex::Mutex",
+    # Substrate implementors construct ToolIntentSubmissionGuard for lock_submission_gate;
+    # Tokio is Lash's settled runtime dependency.
+    "tokio::sync::mutex::OwnedMutexGuard",
     "tokio::sync::watch::Receiver",
     "tokio_util::sync::cancellation_token::CancellationToken",
     "tokio_util::sync::cancellation_token::WaitForCancellationFuture",
