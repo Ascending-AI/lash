@@ -49,7 +49,7 @@ class DocOnlyTests(unittest.TestCase):
         scope = scope_of("docs/guide.md", "README.md", "CONTRIBUTING.md")
         self.assertEqual(scope.classification, "docs-only")
         self.assertTrue(scope.runs("docs-text"))
-        for family in ("rust-compile", "scripts", "registry", "workflows"):
+        for family in ("rust-compile", "scripts", "workflows"):
             self.assertFalse(scope.runs(family), family)
 
     def test_the_reason_names_the_paths_that_drove_it(self) -> None:
@@ -80,7 +80,6 @@ class RustSourceTests(unittest.TestCase):
         scope = scope_of("crates/lash-core/src/runtime/turn_loop.rs")
         self.assertEqual(scope.classification, "rust-only")
         self.assertTrue(scope.runs("rust-compile"))
-        self.assertTrue(scope.runs("registry"))
         self.assertTrue(scope.runs("docs-text"))
         self.assertFalse(scope.runs("workflows"))
         self.assertFalse(scope.runs("scripts"))
@@ -94,21 +93,6 @@ class RustSourceTests(unittest.TestCase):
         scope = scope_of("examples/slack-clone/ui/index.html")
         self.assertEqual(scope.classification, "unknown-paths")
         self.assertEqual(scope.families, gate_scope.ALL_FAMILIES)
-
-
-class RegistryTests(unittest.TestCase):
-    def test_the_coverage_registry_also_runs_rust_compile(self) -> None:
-        scope = scope_of("docs/api-example-coverage.toml")
-        self.assertEqual(scope.classification, "registry-only")
-        self.assertTrue(scope.runs("registry"))
-        self.assertTrue(scope.runs("rust-compile"))
-        self.assertFalse(scope.runs("workflows"))
-
-    def test_the_registry_rule_wins_over_the_docs_rule(self) -> None:
-        self.assertEqual(
-            gate_scope.classify_path("docs/api-example-coverage.toml"),
-            "registry-manifest",
-        )
 
 
 class MixedTests(unittest.TestCase):

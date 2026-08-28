@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Discover and snapshot Lash's compiler-derived facade API surface.
-
-The discovery is shared with check_api_example_coverage.py so the checked
-snapshot and the disposition ledger always read the same rustdoc graph,
-canonical identities, aliases, and feature availability.
-"""
+"""Discover and snapshot Lash's compiler-derived facade API surface."""
 
 from __future__ import annotations
 
@@ -13,8 +8,8 @@ import difflib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
-import tomllib
 from typing import Any, NamedTuple
 
 
@@ -22,45 +17,21 @@ SCRIPTS = Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import rustdoc_json_cache  # noqa: E402  (sibling script, located above)
+import rustdoc_json_cache  # noqa: E402  (sibling script)
 
 REPO = Path(__file__).resolve().parents[1]
-INVENTORY = REPO / "docs" / "api-example-coverage.toml"
 SNAPSHOT = REPO / "docs" / "api-surface.snapshot"
 
-def target_directory(environment: dict[str, str] | None = None) -> Path:
-    """Cargo's target directory for this checkout, as an absolute path.
 
-    A relative `CARGO_TARGET_DIR` is resolved by cargo against its *working
-    directory*, and `rustdoc()` runs cargo at the repository root, so the
-    repository is where a relative value lands.  This script may be invoked
-    from anywhere, so it cannot resolve one against its own cwd and still name
-    the directory cargo wrote to.  The invariant belongs to that call site, not
-    to cargo: generation moving to another cwd would have to move this with it.
-    """
+def target_directory(environment: dict[str, str] | None = None) -> Path:
+    """Return Cargo's target directory for this checkout as an absolute path."""
     if environment is None:
         environment = dict(os.environ)
     return REPO / Path(environment.get("CARGO_TARGET_DIR") or "target")
 
 
 TARGET = target_directory()
-#: Where this gate's rustdoc builds live.
-#:
-#: Every `cargo doc` and `cargo rustdoc` in a checkout writes
-#: `<target>/doc/<crate>.json`, so a document at that path belongs to whichever
-#: documentation build ran last rather than to the invocation that is about to
-#: read it.  The rustdoc gate documents these same two crates with
-#: `--all-features`; a run of it that lands between this gate's default-features
-#: rustdoc and this gate's read hands the default pass an all-features document,
-#: which is an availability flip on every `testing`-gated item -- and, because
-#: the rustdoc-JSON cache stores what it finds at the destination, one that
-#: outlives the run that produced it.  A subdirectory of its own makes the
-#: document this gate reads a function of the command this gate issued.
-#:
-#: Derived from `CARGO_TARGET_DIR` rather than named absolutely so a worktree
-#: keeps its artifacts inside its own target directory, and so the isolation
-#: survives `orb`-style forks that relocate it.
-GATE_TARGET = TARGET / "coverage-gate"
+FACADE_GATE_TARGET = TARGET / "facade-gate"
 
 PUBLIC_KINDS = {
     "assoc_const",
@@ -79,12 +50,8 @@ PUBLIC_KINDS = {
     "union",
 }
 
-#: Crates whose rustdoc JSON this check may need in order to resolve a
-#: re-exported member-bearing type.  The boolean is "first party": a workspace
-#: crate answers to this repository's feature graph and to its ledger, so it is
-#: documented with `--all-features` and with hidden items; a third-party crate
-#: answers to neither, and its hidden internals are not this inventory's
-#: business.  A spec is version-qualified when the graph holds two majors.
+# Crates whose rustdoc JSON may be needed to resolve facade re-exports. The
+# boolean says whether the package supports the all-features hidden-item pass.
 DEPENDENCY_PACKAGES = {
     "lash_core": ("lash-internal-core", "lash_core", True),
     "lash_http_transport": ("lash-internal-http-transport", "lash_http_transport", True),
@@ -107,10 +74,8 @@ DEPENDENCY_PACKAGES = {
     "tokio_util": ("tokio-util", "tokio_util", False),
 }
 _DEPENDENCY_DOCUMENTS: dict[tuple[str, bool], dict[str, Any]] = {}
+_METADATA: dict[str, Any] = {}
 
-
-#: Type-bearing rustdoc kinds a reachability edge can land on.
-REACHABLE_KINDS = {"enum", "struct", "trait", "type_alias", "union"}
 
 def item_kind(item: dict[str, Any]) -> str:
     return next(iter(item["inner"]))
@@ -118,32 +83,6 @@ def item_kind(item: dict[str, Any]) -> str:
 
 def public(visibility: Any) -> bool:
     return visibility == "public"
-
-
-def doc_hidden(item: dict[str, Any]) -> bool:
-    """Whether rustdoc recorded `#[doc(hidden)]` on this item.
-
-    This is the drift guard for `gated_core_modules`, so it has to recognize
-    every shape rustdoc has used to say it.  Older formats wrote the attribute
-    as a bare string or as a `{"doc_hidden": ...}` tag; the current one wraps
-    unparsed attributes as `{"other": "#[doc(hidden)]"}`, which a key lookup
-    misses -- and a guard that silently answers "no" to every item is not a
-    guard.  Any string in the attribute, key or value, therefore decides.
-    """
-    for attribute in item.get("attrs") or []:
-        if isinstance(attribute, dict):
-            texts = [*attribute.keys(), *(
-                value for value in attribute.values() if isinstance(value, str)
-            )]
-        else:
-            texts = [attribute]
-        for text in texts:
-            if not isinstance(text, str):
-                continue
-            collapsed = text.replace(" ", "")
-            if "doc(hidden)" in collapsed or "doc_hidden" in collapsed:
-                return True
-    return False
 
 
 def target_id(item: dict[str, Any]) -> str | None:
@@ -166,6 +105,15 @@ def export_path(prefix: str, item: dict[str, Any]) -> str:
     return f"{prefix}::{exported_name(item)}"
 
 
+def canonical_identity(
+    item_id: str | None, paths: dict[str, dict[str, Any]], fallback: str
+) -> str:
+    entry = paths.get(str(item_id)) if item_id is not None else None
+    if entry is None or not entry.get("path"):
+        return fallback
+    return "::".join(entry["path"])
+
+
 def add_members(
     surface: dict[tuple[str, str], str],
     path: str,
@@ -173,12 +121,7 @@ def add_members(
     item_id: str,
     index: dict[str, dict[str, Any]],
 ) -> None:
-    """Record every public member of `path` under both its path and its identity.
-
-    `canonical` is the owner's compiler identity, so a member's identity is that
-    identity plus the member name.  The same method reached through the facade
-    and through `lash_core` therefore lands on one identity.
-    """
+    """Record public fields, variants, and inherent members of an exported type."""
     item = index.get(item_id)
     if item is None:
         return
@@ -187,27 +130,29 @@ def add_members(
 
     if kind == "enum":
         for variant_id in inner["variants"]:
-            variant = index[str(variant_id)]
+            variant = index.get(str(variant_id))
+            if variant is None:
+                continue
             variant_path = f"{path}::{variant['name']}"
             variant_canonical = f"{canonical}::{variant['name']}"
             surface[(variant_path, "variant")] = variant_canonical
-            variant_shape = variant["inner"]["variant"]["kind"]
-            variant_fields: list[int] = []
-            if isinstance(variant_shape, dict) and "struct" in variant_shape:
-                variant_fields = variant_shape["struct"]["fields"]
-            elif isinstance(variant_shape, dict) and "tuple" in variant_shape:
-                variant_fields = [
-                    field for field in variant_shape["tuple"] if field is not None
-                ]
-            for field_id in variant_fields:
-                field = index[str(field_id)]
+            shape = variant["inner"]["variant"]["kind"]
+            field_ids: list[Any] = []
+            if isinstance(shape, dict) and "struct" in shape:
+                field_ids = shape["struct"]["fields"]
+            elif isinstance(shape, dict) and "tuple" in shape:
+                field_ids = [field for field in shape["tuple"] if field is not None]
+            for field_id in field_ids:
+                field = index.get(str(field_id))
+                if field is None:
+                    continue
                 name = field.get("name") or field_id
                 surface[(f"{variant_path}::{name}", "field")] = (
                     f"{variant_canonical}::{name}"
                 )
     elif kind in {"struct", "union"}:
         shape = inner["kind"] if kind == "struct" else inner
-        field_ids: list[int] = []
+        field_ids: list[Any] = []
         if isinstance(shape, dict) and "plain" in shape:
             field_ids = shape["plain"]["fields"]
         elif isinstance(shape, dict) and "tuple" in shape:
@@ -215,48 +160,35 @@ def add_members(
         elif kind == "union":
             field_ids = inner["fields"]
         for field_id in field_ids:
-            field = index[str(field_id)]
-            if public(field["visibility"]):
+            field = index.get(str(field_id))
+            if field is not None and public(field["visibility"]):
                 name = field.get("name") or field_id
                 surface[(f"{path}::{name}", "field")] = f"{canonical}::{name}"
 
+    members: list[dict[str, Any]] = []
     if kind == "trait":
-        for member_id in inner["items"]:
-            member = index[str(member_id)]
-            name = member["name"]
-            surface[(f"{path}::{name}", item_kind(member))] = f"{canonical}::{name}"
-
-    impl_ids = inner.get("impls", []) if isinstance(inner, dict) else []
-    for impl_id in impl_ids:
+        members.extend(
+            member
+            for member_id in inner["items"]
+            if (member := index.get(str(member_id))) is not None
+        )
+    for impl_id in inner.get("impls", []) if isinstance(inner, dict) else []:
         implementation = index.get(str(impl_id))
         if implementation is None:
             continue
         impl = implementation["inner"].get("impl")
         if impl is None or impl["trait"] is not None:
             continue
-        for member_id in impl["items"]:
-            member = index.get(str(member_id))
-            if member is None or not public(member["visibility"]):
-                continue
-            name = member["name"]
+        members.extend(
+            member
+            for member_id in impl["items"]
+            if (member := index.get(str(member_id))) is not None
+            and public(member["visibility"])
+        )
+    for member in members:
+        name = member.get("name")
+        if name is not None:
             surface[(f"{path}::{name}", item_kind(member))] = f"{canonical}::{name}"
-
-
-def canonical_identity(
-    item_id: str | None, paths: dict[str, dict[str, Any]], fallback: str
-) -> str:
-    """The compiler's canonical path for an item, or `fallback` when it has none.
-
-    This is the item's identity across every path that reaches it.  Rustdoc's
-    `paths` table records it for local and dependency-defined items alike, which
-    is what lets a facade re-export and its `lash_core` original collapse onto
-    one row.  Unresolved re-exports (globs) have no identity of their own, so the
-    export path stands in for one.
-    """
-    entry = paths.get(str(item_id)) if item_id is not None else None
-    if entry is None or not entry.get("path"):
-        return fallback
-    return "::".join(entry["path"])
 
 
 def add_export(
@@ -274,8 +206,6 @@ def add_export(
     if target is not None:
         kind = item_kind(target)
     elif item_id is not None and str(item_id) in paths:
-        # rustdoc does not copy dependency-defined re-export targets into this
-        # crate's index.  Their compiler identity and kind remain in `paths`.
         kind = paths[str(item_id)]["kind"]
         resolved = external_target(paths[str(item_id)], all_features)
         if resolved is not None:
@@ -295,16 +225,15 @@ def add_export(
             raise RuntimeError(f"cannot resolve external module export {path}")
         for child_id in target["inner"]["module"]["items"]:
             child = member_index[str(child_id)]
-            if not public(child["visibility"]):
-                continue
-            add_export(
-                surface,
-                export_path(path, child),
-                child,
-                member_index,
-                member_paths,
-                all_features,
-            )
+            if public(child["visibility"]):
+                add_export(
+                    surface,
+                    export_path(path, child),
+                    child,
+                    member_index,
+                    member_paths,
+                    all_features,
+                )
         return
     if kind not in PUBLIC_KINDS:
         return
@@ -317,22 +246,18 @@ def add_export(
 def lash_surface(
     document: dict[str, Any], all_features: bool
 ) -> dict[tuple[str, str], str]:
+    """Walk every public export in the app-facing `lash` crate."""
     index = document["index"]
     paths = document["paths"]
     surface: dict[tuple[str, str], str] = {}
 
     def walk(module_id: str, prefix: str) -> None:
-        module = index[module_id]["inner"]["module"]
-        for child_id in module["items"]:
+        for child_id in index[module_id]["inner"]["module"]["items"]:
             child = index[str(child_id)]
             if not public(child["visibility"]):
                 continue
-            kind = item_kind(child)
-            name = exported_name(child)
             path = export_path(prefix, child)
-            if kind == "module":
-                # Modules organize the inventory but are not callable API
-                # entries in their own right.
+            if item_kind(child) == "module":
                 walk(str(child_id), path)
             else:
                 add_export(surface, path, child, index, paths, all_features)
@@ -342,7 +267,7 @@ def lash_surface(
 
 
 def referenced_ids(node: Any, found: set[str]) -> None:
-    """Collect every resolved item id a rustdoc type/generics node names."""
+    """Collect resolved item ids from a rustdoc type or generics node."""
     if isinstance(node, list):
         for element in node:
             referenced_ids(element, found)
@@ -361,7 +286,6 @@ def referenced_ids(node: Any, found: set[str]) -> None:
 
 
 def signature_ids(member: dict[str, Any]) -> set[str]:
-    """Item ids a public member exposes through its signature."""
     found: set[str] = set()
     kind = item_kind(member)
     inner = member["inner"][kind]
@@ -375,24 +299,18 @@ def signature_ids(member: dict[str, Any]) -> set[str]:
 
 
 def exposed_ids(item_id: str, index: dict[str, dict[str, Any]]) -> set[str]:
-    """Item ids an export hands to a host: field, variant, and member types.
-
-    Standalone exports carry their exposure in their own signature; types carry
-    it in their public fields, variants, and inherent or trait members.
-    """
+    """Return item ids exposed through a facade export's public signature."""
     item = index.get(item_id)
     if item is None:
         return set()
     kind = item_kind(item)
-    if kind not in REACHABLE_KINDS:
+    if kind not in {"enum", "struct", "trait", "type_alias", "union"}:
         return signature_ids(item)
     inner = item["inner"][kind]
     found: set[str] = set()
-
     if kind == "type_alias":
         referenced_ids(inner.get("type"), found)
         return found
-
     field_ids: list[Any] = []
     if kind == "enum":
         for variant_id in inner["variants"]:
@@ -401,9 +319,9 @@ def exposed_ids(item_id: str, index: dict[str, dict[str, Any]]) -> set[str]:
                 continue
             shape = variant["inner"]["variant"]["kind"]
             if isinstance(shape, dict) and "struct" in shape:
-                field_ids += shape["struct"]["fields"]
+                field_ids.extend(shape["struct"]["fields"])
             elif isinstance(shape, dict) and "tuple" in shape:
-                field_ids += [field for field in shape["tuple"] if field is not None]
+                field_ids.extend(field for field in shape["tuple"] if field is not None)
     elif kind in {"struct", "union"}:
         shape = inner["kind"] if kind == "struct" else inner
         if isinstance(shape, dict) and "plain" in shape:
@@ -419,158 +337,31 @@ def exposed_ids(item_id: str, index: dict[str, dict[str, Any]]) -> set[str]:
         ]
     for field_id in field_ids:
         field = index.get(str(field_id))
-        if field is None:
-            continue
-        referenced_ids(field["inner"]["struct_field"], found)
-
+        if field is not None:
+            referenced_ids(field["inner"]["struct_field"], found)
     members: list[dict[str, Any]] = []
     if kind == "trait":
-        members += [
+        members.extend(
             member
             for member_id in inner["items"]
             if (member := index.get(str(member_id))) is not None
-        ]
+        )
     for impl_id in inner.get("impls", []) if isinstance(inner, dict) else []:
         implementation = index.get(str(impl_id))
         if implementation is None:
             continue
         impl = implementation["inner"].get("impl")
-        # Inherent impls only: a trait impl's members belong to the trait.
         if impl is None or impl["trait"] is not None:
             continue
-        members += [
+        members.extend(
             member
             for member_id in impl["items"]
             if (member := index.get(str(member_id))) is not None
             and public(member["visibility"])
-        ]
+        )
     for member in members:
         found |= signature_ids(member)
     return found
-
-
-def core_reachable_types(
-    seeds: set[str], index: dict[str, dict[str, Any]], paths: dict[str, dict[str, Any]]
-) -> dict[str, str]:
-    """Core-owned types a host can reach from the root exports, but cannot name.
-
-    A root export's public method can return, or accept, a type whose only
-    module path is `pub(crate)`. The value is then in host hands and every
-    public method on it is callable, yet a root walk never mentions it. This
-    closes over public signatures, fields, and variants from the root exports
-    until no new core-owned type appears, and keys each result by the
-    compiler's canonical path -- the only stable identity such a type has.
-
-    Returns `{canonical path: item id}` for types outside `seeds`.
-    """
-    reached = set(seeds)
-    frontier = list(seeds)
-    while frontier:
-        for candidate in exposed_ids(frontier.pop(), index):
-            if candidate in reached:
-                continue
-            item = index.get(candidate)
-            # Absent from this index means another crate owns it.
-            if item is None or item_kind(item) not in REACHABLE_KINDS:
-                continue
-            reached.add(candidate)
-            frontier.append(candidate)
-
-    named: dict[str, str] = {}
-    for item_id in sorted(reached - seeds):
-        entry = paths.get(item_id)
-        if entry is None:
-            raise RuntimeError(f"reachable core type {item_id} has no canonical path")
-        named["::".join(entry["path"])] = item_id
-    return named
-
-
-def lash_core_surface(
-    document: dict[str, Any],
-    all_features: bool,
-    gated_modules: set[str] | None = None,
-) -> dict[tuple[str, str], str]:
-    """Root host exports plus every core-owned type they make reachable.
-
-    Root exports are the named surface; the reachability closure is the rest of
-    the contract. Nested public modules are not walked -- an item there enters
-    the gate only when a publicly reachable signature exposes it, which is the
-    same thing as being host-visible.
-
-    `gated_modules` are the exception: the crate root's internal support modules,
-    walked in full because they are the workspace's cross-crate API and the
-    ledger answers for them like any other path. The set is recorded in the
-    inventory rather than derived from `#[doc(hidden)]` alone, so neither adding
-    a hidden support module nor un-hiding an existing one changes what the gate
-    covers without an explicit edit: an unlisted hidden root module is an error,
-    and a listed module that has vanished is an error too -- judged against the
-    all-features document, so that a feature-gated support module is allowed to
-    be absent from the default pass without reading as retired.
-    """
-    index = document["index"]
-    paths = document["paths"]
-    root = index[str(document["root"])]["inner"]["module"]
-    surface: dict[tuple[str, str], str] = {}
-    seeds: set[str] = set()
-    gated = set(gated_modules or ())
-    walked: set[str] = set()
-    unlisted: list[str] = []
-    for child_id in root["items"]:
-        child = index[str(child_id)]
-        if not public(child["visibility"]):
-            continue
-        if item_kind(child) == "module":
-            name = exported_name(child)
-            if name in gated:
-                walked.add(name)
-                add_export(
-                    surface,
-                    export_path("lash_core", child),
-                    child,
-                    index,
-                    paths,
-                    all_features,
-                )
-            elif doc_hidden(child):
-                unlisted.append(name)
-            continue
-        add_export(
-            surface,
-            export_path("lash_core", child),
-            child,
-            index,
-            paths,
-            all_features,
-        )
-        target = target_id(child)
-        if target is not None and target in index:
-            seeds.add(target)
-
-    if unlisted:
-        raise AssertionError(
-            "doc-hidden lash-core root modules outside the gate: "
-            f"{', '.join(sorted(unlisted))}. Hidden is a documentation choice, "
-            "not a ledger exemption -- add each to gated_core_modules in "
-            f"{INVENTORY.name} and disposition its paths."
-        )
-    # Only the all-features pass answers for existence: a support module may be
-    # feature-gated (`test_support` is `#[cfg(any(test, feature = "testing"))]`),
-    # and absent-without-the-feature is what that module is supposed to be, not
-    # a retirement. Retiring one still errors, because it is then missing from
-    # this pass too.
-    missing = sorted(gated - walked) if all_features else []
-    if missing:
-        raise AssertionError(
-            f"gated_core_modules names modules lash-core no longer exports: "
-            f"{', '.join(missing)}. Retiring a support module retires every path "
-            "it published; record that in the inventory rather than here."
-        )
-
-    for path, item_id in core_reachable_types(seeds, index, paths).items():
-        # A closure type is keyed by its canonical path, so path *is* identity.
-        surface[(path, item_kind(index[item_id]))] = path
-        add_members(surface, path, path, item_id, index)
-    return surface
 
 
 def rustdoc(
@@ -579,37 +370,21 @@ def rustdoc(
     command = ["cargo", "rustdoc", "-p", package]
     if all_features:
         command.append("--all-features")
-    command += [
-        "--lib",
-        "--",
-        "-Z",
-        "unstable-options",
-        "--output-format",
-        "json",
-    ]
+    command += ["--lib", "--", "-Z", "unstable-options", "--output-format", "json"]
     if hidden_items:
-        # Hidden items are still contract; the gate decides what to do with
-        # them, and it cannot decide about what the compiler never names.
         command.append("--document-hidden-items")
-    env = os.environ.copy()
-    env["RUSTC_BOOTSTRAP"] = "1"
-    # The isolation travels in the environment rather than as `--target-dir` on
-    # the command line, and deliberately: the cache keys the command verbatim,
-    # so an absolute target path inside it would give every checkout a key of
-    # its own and cost the cache the cross-worktree reuse it exists for. What
-    # the command names -- package, features, rustdoc flags -- is exactly what
-    # decides the document, and that is what stays keyed.
-    env["CARGO_TARGET_DIR"] = str(GATE_TARGET)
-    # Generation is the whole cost of this gate on an unchanged tree; the walk
-    # below still runs, against whichever copy of the compiler's answer the
-    # cache hands back.
+    environment = os.environ.copy()
+    environment["RUSTC_BOOTSTRAP"] = "1"
+    environment["CARGO_TARGET_DIR"] = str(FACADE_GATE_TARGET)
     document = rustdoc_json_cache.ensure(
         repo=REPO,
         package=package,
         crate_name=crate_name,
         command=command,
-        destination=GATE_TARGET / "doc" / f"{crate_name}.json",
-        generate=lambda: rustdoc_json_cache.run_command(command, cwd=REPO, env=env),
+        destination=FACADE_GATE_TARGET / "doc" / f"{crate_name}.json",
+        generate=lambda: rustdoc_json_cache.run_command(
+            command, cwd=REPO, env=environment
+        ),
     )
     with document.open("rb") as handle:
         return json.load(handle)
@@ -650,78 +425,53 @@ def external_target(
     return None
 
 
-def inventory_document() -> dict[str, Any]:
-    with INVENTORY.open("rb") as handle:
-        return tomllib.load(handle)
+def cargo_metadata() -> dict[str, Any]:
+    if not _METADATA:
+        completed = subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--all-features", "--locked"],
+            cwd=REPO,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
+        _METADATA.update(json.loads(completed.stdout))
+    return _METADATA
 
 
-def gated_core_modules(document: dict[str, Any] | None = None) -> set[str]:
-    """The `lash-core` root support modules the ledger answers for.
-
-    Recorded rather than derived so that both directions of drift are explicit:
-    a new hidden support module has to be added here before it can carry rows,
-    and un-hiding one does not quietly drop the paths it already published.
-    """
-    inventory = document if document is not None else inventory_document()
-    return set(inventory.get("gated_core_modules", []))
-
-
-def configured_surface(all_features: bool) -> dict[tuple[str, str], str]:
-    surface = lash_surface(
-        rustdoc("lash-runtime", "lash", all_features), all_features
-    )
-    core = lash_core_surface(
-        rustdoc("lash-internal-core", "lash_core", all_features),
-        all_features,
-        gated_core_modules(),
-    )
-    overlap = set(surface) & set(core)
-    if overlap:
-        raise AssertionError(f"crate-qualified API names overlap: {sorted(overlap)}")
-    surface.update(core)
-    return surface
-
-
-def primary_path(aliases: list[str]) -> str:
-    """The one path an item's inventory row is recorded at.
-
-    Prefer what a host writes: the `lash` facade path, then the shortest path,
-    then lexicographic order.  The choice only has to be deterministic and
-    stable; picking the facade keeps the inventory readable as host contract
-    rather than as core internals.
-    """
-    return min(
-        aliases,
-        key=lambda alias: (
-            0 if alias.startswith("lash::") else 1,
-            alias.count("::"),
-            alias,
-        ),
-    )
+def crate_directories() -> dict[str, str]:
+    """Return workspace library and proc-macro crate names mapped to directories."""
+    metadata = cargo_metadata()
+    members = set(metadata["workspace_members"])
+    directories: dict[str, str] = {}
+    for package in metadata["packages"]:
+        if package["id"] not in members:
+            continue
+        manifest = Path(package["manifest_path"]).parent
+        if not manifest.is_relative_to(REPO):
+            continue
+        directory = manifest.relative_to(REPO).as_posix()
+        for target in package["targets"]:
+            if "lib" in target["kind"] or "proc-macro" in target["kind"]:
+                directories[target["name"].replace("-", "_")] = directory
+    return directories
 
 
 def api_items(surface: dict[tuple[str, str], str]) -> dict[tuple[str, str], list[str]]:
-    """Group surface paths into API items keyed by `(identity, kind)`.
-
-    Values are every path that reaches the item, sorted; the first element is
-    not special -- use `primary_path`.
-    """
     grouped: dict[tuple[str, str], list[str]] = {}
     for (path, kind), identity in surface.items():
         grouped.setdefault((identity, kind), []).append(path)
     return {key: sorted(paths) for key, paths in grouped.items()}
 
 
-class ApiItem(NamedTuple):
-    """One unit of contract: the thing a disposition is about."""
+def primary_path(paths: list[str]) -> str:
+    return min(paths, key=lambda path: (path.count("::"), path))
 
-    #: The path the inventory row lives at.
+
+class ApiItem(NamedTuple):
     primary: str
     kind: str
     availability: str
-    #: Every path that reaches this item, primary included.
     paths: list[str]
-    #: The compiler's canonical path -- the identity that made these one item.
     identity: str
 
     def aliases(self) -> list[str]:
@@ -729,16 +479,13 @@ class ApiItem(NamedTuple):
 
 
 def current_surface() -> list[ApiItem]:
-    """One record per API item, sorted by primary path.
-
-    Availability is the item's, not a path's: an item is available in a
-    configuration when any path reaches it there.
-    """
-    default = configured_surface(False)
-    all_features = configured_surface(True)
+    default = lash_surface(rustdoc("lash-runtime", "lash", False), False)
+    all_features = lash_surface(rustdoc("lash-runtime", "lash", True), True)
     surface = {**all_features, **default}
     conflicts = sorted(
-        key for key in set(default) & set(all_features) if default[key] != all_features[key]
+        key
+        for key in set(default) & set(all_features)
+        if default[key] != all_features[key]
     )
     if conflicts:
         raise AssertionError(f"API identity differs between configurations: {conflicts}")
@@ -754,14 +501,11 @@ def current_surface() -> list[ApiItem]:
             if in_default
             else "all-features"
         )
-        items.append(
-            ApiItem(primary_path(paths), kind, availability, paths, identity)
-        )
+        items.append(ApiItem(primary_path(paths), kind, availability, paths, identity))
     return sorted(items)
 
 
 def canonical_paths(items: list[ApiItem] | None = None) -> list[str]:
-    """Return every public facade spelling in deterministic order."""
     discovered = current_surface() if items is None else items
     return sorted(
         {
@@ -774,13 +518,10 @@ def canonical_paths(items: list[ApiItem] | None = None) -> list[str]:
 
 
 def snapshot_text(items: list[ApiItem] | None = None) -> str:
-    """Serialize the facade path set as one newline-terminated path per row."""
-    paths = canonical_paths(items)
-    return "".join(f"{path}\n" for path in paths)
+    return "".join(f"{path}\n" for path in canonical_paths(items))
 
 
 def generate(snapshot: Path | None = None) -> int:
-    """Regenerate the checked-in facade surface snapshot."""
     destination = SNAPSHOT if snapshot is None else snapshot
     text = snapshot_text()
     destination.write_text(text, encoding="utf-8")
@@ -789,14 +530,12 @@ def generate(snapshot: Path | None = None) -> int:
 
 
 def check_snapshot(snapshot: Path | None = None) -> int:
-    """Fail when the compiler-derived facade paths differ from the snapshot."""
     destination = SNAPSHOT if snapshot is None else snapshot
     recorded = destination.read_text(encoding="utf-8") if destination.exists() else ""
     current = snapshot_text()
     if recorded == current:
         print(f"API surface snapshot passed ({len(current.splitlines())} paths)")
         return 0
-
     print("API surface snapshot differs:", file=sys.stderr)
     for line in difflib.unified_diff(
         recorded.splitlines(),
@@ -808,15 +547,12 @@ def check_snapshot(snapshot: Path | None = None) -> int:
         lineterm="",
     ):
         print(line, file=sys.stderr)
-    print(
-        "Regenerate with: python3 scripts/api_surface.py generate",
-        file=sys.stderr,
-    )
+    print("Regenerate with: python3 scripts/api_surface.py generate", file=sys.stderr)
     return 1
 
 
 def dump_surface() -> int:
-    """Print the full item projection consumed by the disposition checker."""
+    """Print the compiler-derived facade item projection as JSON."""
     json.dump(
         [
             {
@@ -840,7 +576,7 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("generate", help="write docs/api-surface.snapshot")
     commands.add_parser("check", help="compare the snapshot with rustdoc")
-    commands.add_parser("dump-surface", help="print the full surface as JSON")
+    commands.add_parser("dump-surface", help="print the facade item projection")
     args = parser.parse_args()
     if args.command == "generate":
         return generate()

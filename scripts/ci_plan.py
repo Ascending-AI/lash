@@ -15,7 +15,7 @@ FAMILIES = ("rust", "confidence", "stores", "functional_e2e", "workers_e2e")
 CHANGE_STATUSES = frozenset({"A", "M", "D", "T"})
 
 GATED_JOBS = {
-    "api-coverage": "rust",
+    "facade-gates": "rust",
     "semver-advisory": "rust",
     "lashlang-git-consumer": "rust",
     "package-feature-checks": "rust",
@@ -51,7 +51,7 @@ DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
 # Jobs that run only on the full profile (workflow_dispatch); every other
 # event must show them skipped.
-FULL_PROFILE_JOBS = {"api-coverage"}
+FULL_PROFILE_JOBS = {"facade-gates"}
 
 UNGATED_JOBS = {
     "plan",

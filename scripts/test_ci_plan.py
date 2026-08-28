@@ -50,11 +50,6 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual("false", plan["docs_only"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
-    def test_api_example_coverage_fixture_runs_every_expensive_family(self) -> None:
-        plan = ci_plan.classify([("M", "docs/api-example-coverage.toml")])
-        self.assertEqual("false", plan["docs_only"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
-
     def test_extensionless_docs_path_runs_every_expensive_family(self) -> None:
         plan = ci_plan.classify([("M", "docs/CNAME")])
         self.assertEqual("false", plan["docs_only"])

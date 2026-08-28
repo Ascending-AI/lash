@@ -15,17 +15,12 @@ being wrong in the run direction costs wall-clock and nothing else.
 Families
 --------
 ``rust-compile``
-    fmt, check, clippy, nextest, doctests, rustdoc, the API-coverage build,
-    and every source guard that reads ``crates/``.
+    fmt, check, clippy, nextest, doctests, rustdoc, and every source guard that
+    reads ``crates/``.
 ``docs-text``
     lint_docs, the production file-size budget, documented format versions.
 ``scripts``
     the repository script self-test suite.
-``registry``
-    ``docs/api-example-coverage.toml`` consistency. Emitted for CI's benefit
-    and for the audit table; ``push-gate.sh`` has no registry leg to dispatch,
-    because ``check_api_example_coverage.py`` is deliberately CI-only (an
-    omission must block the merge, not the push).
 ``workflows``
     the ``.github/`` guards. This family can never differ from the global
     answer today: its only inputs are ``.github/**``, ``scripts/**`` and the
@@ -71,7 +66,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 
-FAMILIES = ("rust-compile", "docs-text", "scripts", "registry", "workflows")
+FAMILIES = ("rust-compile", "docs-text", "scripts", "workflows")
 ALL_FAMILIES = frozenset(FAMILIES)
 
 # Shared inputs: paths that can move the result of *any* gate, either because
@@ -118,25 +113,16 @@ class Rule:
 # Ordered, first match wins: the narrowest classes come first so a specific
 # path is not swallowed by the shared-input net behind it.
 RULES: tuple[Rule, ...] = (
-    # The example-coverage registry names public symbols, so a change to it is
-    # only meaningful against the crates it cites: it runs the registry gate
-    # and the rust-compile family that owns the API-coverage leg.
-    Rule(
-        name="registry-manifest",
-        patterns=("docs/api-example-coverage.toml",),
-        families=frozenset({"registry", "rust-compile", "docs-text"}),
-    ),
     Rule(
         name="shared-inputs",
         patterns=SHARED_INPUT_PATTERNS,
         families=ALL_FAMILIES,
     ),
-    # Rust sources also drive the registry (coverage is a claim about which
-    # public symbols examples use) and the text gates that scan `crates/`.
+    # Rust sources also drive the text gates that scan `crates/`.
     Rule(
         name="rust-sources",
         patterns=("crates/**", "examples/**/*.rs"),
-        families=frozenset({"rust-compile", "docs-text", "registry"}),
+        families=frozenset({"rust-compile", "docs-text"}),
     ),
     # Prose the Rust suite reads. `rust-sources` already routes crate-local
     # markdown to `rust-compile` because `include_str!` can pull it in; the
@@ -285,8 +271,6 @@ def classify(paths: list[str]) -> Scope:
         classification = "docs-only"
     elif set(buckets) == {"rust-sources"}:
         classification = "rust-only"
-    elif set(buckets) == {"registry-manifest"}:
-        classification = "registry-only"
     elif set(buckets) == {"rust-runtime-doc-inputs"}:
         classification = "rust-input-docs"
     else:

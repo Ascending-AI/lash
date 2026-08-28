@@ -26,8 +26,8 @@ deliberately excluded by rustdoc.
 compiler-coordinated scrape and one mechanical join:
 
 1. It imports the canonical identity, re-export, and primary-path logic from
-   `scripts/check_api_example_coverage.py`. The prototype uses the existing
-   gate's default-feature surface, currently 7,392 identities.
+   `scripts/api_surface.py`. The prototype uses the default-feature facade
+   surface, currently 7,392 identities.
 2. It reads Cargo metadata and selects three product example packages:
    `agent-service`, `agent-workbench`, and `slack-clone`. This fixed
    representative package set is not an item-to-example map.
@@ -51,7 +51,7 @@ facade/example-affecting pull requests and `main`, publishes the report in the
 job summary, and deliberately uses `continue-on-error`: unstable rustdoc drift
 or an evidence gap must not become a release gate.
 
-No mapping file or `docs/api-example-coverage.toml` entry was added or changed.
+No mapping file or hand-maintained disposition entry was added or changed.
 
 ## Measured Lash result
 
