@@ -2,7 +2,9 @@
 //!
 //! The claim/execute/renew/finalize state machine lives in
 //! [`StoreEffectReplayDriver`]; this module is the PostgreSQL half of its
-//! persistence port plus the host and controller types that expose it. Every
+//! [`EffectReplayRowStore`] plug-in plus the host and controller types that
+//! expose it. Row storage is all this module owns: the driver decides every
+//! claim, replay, and drain. Every
 //! atom runs in a server transaction that takes the row's write lock
 //! (`SELECT … FOR UPDATE`, or a guarded `UPDATE`), so the read, the transition
 //! decision, and the write it guards cannot interleave with a competing

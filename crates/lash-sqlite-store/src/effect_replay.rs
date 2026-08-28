@@ -1,8 +1,10 @@
 //! SQLite-backed runtime effect replay host.
 //!
 //! The claim/execute/renew/finalize state machine lives in
-//! [`StoreEffectReplayDriver`]; this module is the SQLite half of its persistence
-//! port plus the host and controller types that expose it. Every atom runs
+//! [`StoreEffectReplayDriver`]; this module is the SQLite half of its
+//! [`EffectReplayRowStore`] plug-in plus the host and controller types that
+//! expose it. Row storage is all this module owns: the driver decides every
+//! claim, replay, and drain. Every atom runs
 //! inside `SqliteConnection::write` (`BEGIN IMMEDIATE`), so the read, the
 //! transition decision, and the write it guards take the cross-process write
 //! lock up front and cannot interleave with a competing claimant.

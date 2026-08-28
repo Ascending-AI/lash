@@ -1,5 +1,36 @@
 //! The durable effect-replay state machine shared by every SQL backend.
 //!
+//! # Where this sits: one contract, two implementations
+//!
+//! The outer seam is the *substrate contract* — the ports
+//! [`EffectHost`](super::executor::EffectHost),
+//! the effect-group surface it hands out
+//! ([`EffectGroupHandle`](super::group::EffectGroupHandle)),
+//! [`QueuedWorkSubstrate`](crate::runtime::QueuedWorkSubstrate) and
+//! [`ProcessWorkSubstrate`](crate::runtime::ProcessWorkSubstrate). Every
+//! substrate answers those ports, and the conformance laws that say what an
+//! answer must mean live at that level, not here.
+//!
+//! There are two implementations of that contract:
+//!
+//! * the **store-backed driver** — this module. It absorbs *all* of the
+//!   semantics: leases, claim arbitration, replay decisions, journal payload
+//!   encoding, group membership, and the loser drain. Backends plug into it
+//!   through [`EffectReplayRowStore`], which is dumb row storage and nothing
+//!   more; PostgreSQL and SQLite are two sets of rows under one state machine.
+//! * the **engine-backed host** — `lash-restate`, which implements the same
+//!   ports directly against the engine's own journal. It has no replay ledger,
+//!   no Lash lease, and no drain, because the engine already owns retention and
+//!   exactly-once execution; it proves the same substrate laws live.
+//!
+//! Everything store-scoped in this module is therefore *driver-internal
+//! machinery*, not part of the substrate contract, and its names say so:
+//! [`StoreEffectReplayDriver`], [`EffectReplayRowStore`],
+//! [`StoreEffectGroupDrain`](super::group_drain::StoreEffectGroupDrain), and
+//! the `store_effect_group_drain_conformance` laws. A reader who wants "what
+//! must every substrate do" should be reading the ports; a reader who wants
+//! "how does the SQL tier do it" is in the right file.
+//!
 //! Runtime effects are journaled: the first worker to reach a
 //! `(scope_id, replay_key)` pair claims it under a fenced lease, executes it
 //! once, and records the terminal outcome; every later arrival replays that
@@ -639,6 +670,16 @@ pub mod sealed {
 }
 
 /// Atomic row operations a durable substrate must provide to journal effects.
+///
+/// # Implementing this trait inherits the whole driver
+///
+/// This is the plug-in seam of the store-backed tier, not a second place to
+/// write effect semantics. A backend that supplies these row operations gets
+/// claim/execute/renew/finalize, payload encoding, group membership, and the
+/// loser drain from [`StoreEffectReplayDriver`] for free — and gets no say in
+/// any of them. Nobody hand-rolls replay or drain: there is one copy, above
+/// this trait, and adding a SQL tier means answering these rows and nothing
+/// else.
 ///
 /// Each method is one atomic unit: the backend takes whatever transaction and
 /// lock it needs (SQLite's `BEGIN IMMEDIATE` write lock, PostgreSQL's
