@@ -18,6 +18,8 @@ use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatiblePr
 mod board;
 mod db;
 mod demo_plugin;
+#[cfg(feature = "restate")]
+mod effect_groups;
 #[cfg(test)]
 mod fork_rewind_contract;
 mod lease_triage;
@@ -55,6 +57,8 @@ fn default_openrouter_model_capability_for(model: lash::ModelSpec) -> lash::Mode
 use crate::db::AppDb;
 #[cfg(feature = "restate")]
 use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
+#[cfg(feature = "restate")]
+use crate::effect_groups::{AgentServiceEffectGroupWorkflow, AgentServiceEffectGroupWorkflowImpl};
 use crate::raw_activities::stream_raw_activities;
 #[cfg(feature = "restate")]
 use crate::restate::{AgentServiceTurnWorkflow, AgentServiceTurnWorkflowImpl};
@@ -67,8 +71,7 @@ use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
 use lash::durability::DurableProcessWorker;
 #[cfg(feature = "restate")]
 use lash_restate::{
-    LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
-    LashDurableWaitWorkflowImpl, LashProcessWorkflow, RestateProcessDeployment,
+    LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow, RestateProcessDeployment,
     RestateTurnDeployment,
 };
 
@@ -420,15 +423,24 @@ async fn async_main() -> anyhow_like::Result<()> {
     #[cfg(feature = "restate")]
     if durability == AgentServiceDurability::Restate {
         let process_deployment = process_deployment.expect("process deployment configured");
+        let effect_groups = crate::effect_groups::effect_group_services(
+            state
+                .restate_ingress_url()
+                .expect("Restate durability configures ingress"),
+        );
         let endpoint = restate_sdk::endpoint::Endpoint::builder()
             .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
+            .bind(AgentServiceEffectGroupWorkflowImpl.serve())
             .bind(
                 process_deployment
                     .workflow(process_worker.expect("process worker configured for Restate"))
                     .serve(),
             )
-            .bind(LashDurableWaitWorkflowImpl.serve())
-            .bind(LashDurableWaitIndexImpl.serve())
+            .bind(effect_groups.index)
+            .bind(effect_groups.payload)
+            .bind(effect_groups.dispatch)
+            .bind(effect_groups.wait.workflow.serve())
+            .bind(effect_groups.wait.index.serve())
             .build();
         tokio::spawn(async move {
             restate_sdk::http_server::HttpServer::new(endpoint)
@@ -491,8 +503,18 @@ async fn async_main() -> anyhow_like::Result<()> {
         .route(
             "/api/chats/{chat_id}/turns/{turn_id}/cancel",
             axum::routing::post(cancel_turn),
+        );
+    #[cfg(feature = "restate")]
+    let app = app
+        .route(
+            "/api/effect-groups",
+            axum::routing::post(crate::effect_groups::run_effect_group),
         )
-        .with_state(state);
+        .route(
+            "/api/effect-groups/{run_id}",
+            get(crate::effect_groups::get_effect_group),
+        );
+    let app = app.with_state(state);
 
     println!(
         "agent-service listening on http://{addr} (durability: {})",

@@ -338,15 +338,19 @@ mod restate_tests {
     use crate::board::BoardState;
     use crate::db::AppDb;
     use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
+    use crate::effect_groups::{
+        AgentServiceEffectGroupWorkflow, AgentServiceEffectGroupWorkflowImpl, EffectGroupRunReport,
+        EffectGroupRunTerminal, effect_group_services, get_effect_group, run_effect_group,
+    };
+    use crate::routes::settings;
     use crate::state::AgentServiceDurability;
+    use axum::Router;
+    use axum::routing::{get, post};
     use lash::LashCore;
     use lash::PluginBinding;
     use lash::direct::LlmOutputPart;
     use lash::provider::LlmResponse;
-    use lash_restate::{
-        LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
-        LashDurableWaitWorkflowImpl, LashProcessWorkflow,
-    };
+    use lash_restate::{LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow};
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
@@ -400,16 +404,21 @@ mod restate_tests {
         } else {
             local_addr
         };
+        let effect_groups = effect_group_services(ingress_url.clone());
         let endpoint = restate_sdk::endpoint::Endpoint::builder()
             .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
+            .bind(AgentServiceEffectGroupWorkflowImpl.serve())
             .bind(
                 harness
                     .process_deployment
                     .workflow(harness.process_worker.clone())
                     .serve(),
             )
-            .bind(LashDurableWaitWorkflowImpl.serve())
-            .bind(LashDurableWaitIndexImpl.serve())
+            .bind(effect_groups.index)
+            .bind(effect_groups.payload)
+            .bind(effect_groups.dispatch)
+            .bind(effect_groups.wait.workflow.serve())
+            .bind(effect_groups.wait.index.serve())
             .build();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
@@ -418,6 +427,26 @@ mod restate_tests {
                     let _ = shutdown_rx.await;
                 })
                 .await;
+        });
+        let app_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind agent-service E2E HTTP surface");
+        let app_addr = app_listener
+            .local_addr()
+            .expect("agent-service E2E HTTP address");
+        let app = Router::new()
+            .route("/api/settings", get(settings))
+            .route("/api/effect-groups", post(run_effect_group))
+            .route("/api/effect-groups/{run_id}", get(get_effect_group))
+            .with_state(state.clone());
+        let (app_shutdown_tx, app_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let app_server = tokio::spawn(async move {
+            axum::serve(app_listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = app_shutdown_rx.await;
+                })
+                .await
+                .expect("serve agent-service E2E HTTP surface");
         });
         let _ = harness
             .process_deployment
@@ -494,6 +523,119 @@ mod restate_tests {
             "assistant message was not persisted through Restate workflow; messages={messages:?}; outbox={outbox_events:?}"
         );
 
+        let group_run_id = format!("agent-service-e2e-{}", uuid::Uuid::new_v4());
+        let group_url = format!("http://{app_addr}/api/effect-groups/{group_run_id}");
+        let settings_response = state
+            .restate_http()
+            .get(format!("http://{app_addr}/api/settings"))
+            .send()
+            .await
+            .expect("preflight agent-service settings surface");
+        assert!(
+            settings_response.status().is_success(),
+            "agent-service settings preflight failed: {}",
+            settings_response.status()
+        );
+        let missing_response = state
+            .restate_http()
+            .get(&group_url)
+            .send()
+            .await
+            .expect("preflight absent effect group through agent-service HTTP surface");
+        let missing_status = missing_response.status();
+        let missing_body = missing_response
+            .text()
+            .await
+            .expect("read absent effect-group response");
+        assert!(!missing_status.is_success());
+        assert!(
+            missing_body.contains("does not exist"),
+            "absent group response did not name the missing run: {missing_status} {missing_body}"
+        );
+
+        let group_response = state
+            .restate_http()
+            .post(format!("http://{app_addr}/api/effect-groups"))
+            .json(&json!({ "run_id": group_run_id.clone() }))
+            .send()
+            .await
+            .expect("run effect group through agent-service HTTP surface");
+        let group_status = group_response.status();
+        let group_body = group_response
+            .text()
+            .await
+            .expect("read effect-group HTTP response");
+        assert!(
+            group_status.is_success(),
+            "agent-service effect-group request failed: {group_status} {group_body}"
+        );
+        let group_report: EffectGroupRunReport =
+            serde_json::from_str(&group_body).expect("decode effect-group report");
+        assert_eq!(group_report.child_count, 3);
+        assert!(group_report.group_admitted);
+        assert!(group_report.children_dispatched);
+        assert_eq!(group_report.first_settlement_rank, 1);
+        assert_eq!(group_report.settlements.len(), 3);
+        assert_eq!(
+            group_report.settlements[0].terminal,
+            EffectGroupRunTerminal::Completed
+        );
+        assert!(
+            group_report.settlements[1..]
+                .iter()
+                .all(|settlement| settlement.terminal == EffectGroupRunTerminal::Cancelled)
+        );
+        assert_eq!(group_report.cancelled_losers, 2);
+        assert!(group_report.group_terminal);
+
+        let durable_response = state
+            .restate_http()
+            .get(&group_url)
+            .send()
+            .await
+            .expect("read durable effect-group report through agent-service HTTP surface");
+        assert!(durable_response.status().is_success());
+        let durable_report: EffectGroupRunReport = durable_response
+            .json()
+            .await
+            .expect("decode durable effect-group report");
+        assert_eq!(durable_report, group_report);
+
+        let duplicate_response = state
+            .restate_http()
+            .post(format!("http://{app_addr}/api/effect-groups"))
+            .json(&json!({ "run_id": group_run_id }))
+            .send()
+            .await
+            .expect("repeat effect-group request through agent-service HTTP surface");
+        let duplicate_status = duplicate_response.status();
+        let duplicate_body = duplicate_response
+            .text()
+            .await
+            .expect("read duplicate effect-group response");
+        assert!(!duplicate_status.is_success());
+        assert!(
+            duplicate_body.contains("already exists"),
+            "duplicate group response did not name the identity fence: {duplicate_status} {duplicate_body}"
+        );
+
+        let unchanged_report: EffectGroupRunReport = state
+            .restate_http()
+            .get(&group_url)
+            .send()
+            .await
+            .expect("read unchanged effect-group report")
+            .json()
+            .await
+            .expect("decode unchanged effect-group report");
+        assert_eq!(unchanged_report, group_report);
+        println!(
+            "AGENT_SERVICE_EFFECT_GROUP group={} settings=OK preflight=ABSENT ranks={:?} cancelled_losers={} durable_read=MATCH duplicate=REFUSED unchanged=MATCH terminal=PASS",
+            group_report.group_key, group_report.settlements, group_report.cancelled_losers
+        );
+
+        let _ = app_shutdown_tx.send(());
+        app_server.await.expect("agent-service E2E HTTP task");
         let _ = shutdown_tx.send(());
         server.await.expect("endpoint server task");
     }
