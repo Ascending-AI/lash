@@ -30,8 +30,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-clock_forbidden='tokio::time::(sleep|sleep_until|interval)|tokio::task::yield_now'
-containment_forbidden='(^|[^[:alnum:]_])(NativeQueuedWork|NoQueuedWork|NativeProcessWork|NativeProcessAwaiter|NativeQueuedWorkRunHandle|NativeSubstrateSetup|NativeSubstrateSlot|WakeDeliveryDriver)([^[:alnum:]_]|$)'
+clock_forbidden='tokio::time::(sleep|sleep_until|interval)|tokio::task::yield_now|use[[:space:]]+tokio::time::\{[^}]*(sleep|sleep_until|interval)'
+containment_forbidden='(^|[^[:alnum:]_])(NativeQueuedWork|NoQueuedWork|NativeProcessWork|NativeProcessAwaiter|NativeSubstrateSetup|NativeSubstrateSlot|WakeDeliveryDriver)([^[:alnum:]_]|$)'
 fallback_forbidden='ProcessAwaiter::polling|Option[[:space:]]*<[[:space:]]*Arc[[:space:]]*<[[:space:]]*dyn[[:space:]]+(QueuedWorkSubstrate|ProcessWorkSubstrate)[[:space:]]*>[[:space:]]*>|Option[[:space:]]*<[[:space:]]*(ProcessWorkDriver|QueuedWorkDriver)[[:space:]]*>'
 capability_names='replay_ownership|journal_addressing|durable_workflow_controller|allows_process_lifetime_completion_keys'
 capability_forbidden="fn[[:space:]]+(${capability_names})([^[:alnum:]_]|$)|\.(${capability_names})[[:space:]]*\(|(^|[^[:alnum:]_])(${capability_names})[[:space:]]*:"
@@ -81,6 +81,27 @@ test_region_start_line() {
   grep -nE '^[[:space:]]*#\[cfg\(test\)\]' "$file" | tail -1 | cut -d: -f1 || true
 }
 
+clock_exemption_is_allowlisted() {
+  local file=$1 line=$2 source=$3
+  # Exact file-and-line entries cap the exception inventory. The source check
+  # prevents a permitted cooperative yield or process-local timeout from being
+  # replaced by a different direct clock operation without review.
+  case "$file:$line" in
+    crates/lash-core/src/session/tool_execution.rs:571)
+      [[ $source == *'tokio::task::yield_now()'* ]]
+      ;; # Cooperative scheduling only; no time value participates in behavior.
+    crates/lash-core/src/runtime/event_pump.rs:42)
+      [[ $source == *'tokio::task::yield_now()'* ]]
+      ;; # Cooperative scheduling only; no time value participates in behavior.
+    crates/lash-core/src/runtime/commit_admission.rs:227)
+      [[ $source == *'tokio::time::sleep(self.inner.wait_ttl)'* ]]
+      ;; # Process-local admission timeout; no durable timestamp or ordering fact.
+    *)
+      return 1
+      ;;
+  esac
+}
+
 capture_search "clock discipline" "$clock_forbidden" "$tmp_dir/rule1.raw" crates/lash-core/src
 : >"$tmp_dir/rule1.hits"
 while IFS=: read -r file line source; do
@@ -97,11 +118,7 @@ while IFS=: read -r file line source; do
   if [[ -n $cfg_test_line && $line -ge $cfg_test_line ]]; then
     continue
   fi
-  preceding_line=''
-  if [[ $line -gt 1 ]]; then
-    preceding_line=$(sed -n "$((line - 1))p" "$file")
-  fi
-  if [[ $preceding_line == *'clock-exempt:'* ]]; then
+  if clock_exemption_is_allowlisted "$file" "$line" "$source"; then
     continue
   fi
   printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule1.hits"
@@ -113,7 +130,7 @@ if [[ -s "$tmp_dir/rule1.hits" ]]; then
 fi
 
 capture_search "module containment" "$containment_forbidden" "$tmp_dir/rule2.raw" \
-  crates/lash-core/src crates/lash/src
+  crates/lash-core/src crates/lash/src crates/lash-restate/src
 : >"$tmp_dir/rule2.hits"
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
@@ -152,7 +169,7 @@ if [[ -s "$tmp_dir/rule2.hits" ]]; then
 fi
 
 capture_search "fallback shape" "$fallback_forbidden" "$tmp_dir/rule3.hits" \
-  crates/lash-core/src crates/lash/src
+  crates/lash-core/src crates/lash/src crates/lash-restate/src
 if [[ -s "$tmp_dir/rule3.hits" ]]; then
   cat "$tmp_dir/rule3.hits" >&2
   echo "substrate boundary rule 3 failed: removed polling or optional-port fallback shape found" >&2
