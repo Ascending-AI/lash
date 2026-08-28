@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
 //! The `LashProcessWorkflow` segment executor.
 //!
 //! One responsibility: run exactly one process segment inside a Restate
@@ -15,7 +20,7 @@ use lash_core::{
     ProcessExecutionContext, ProcessRegistration, ProcessRegistry, ScopedEffectController,
 };
 use restate_sdk::context::{
-    ContextClient, ContextPromises, InvocationHandle, SharedWorkflowContext, WorkflowContext,
+    ContextClient, ContextPromises, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -667,7 +672,7 @@ where
                         segment_ordinal: next_segment_ordinal,
                         execution_id: Some(execution_id),
                     }));
-                let _ = request.send().invocation_id().await?;
+                let _ = request.send().await?;
                 if self
                     .process_cancel_requested(&process_id)
                     .await

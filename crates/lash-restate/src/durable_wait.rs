@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
 //! Await-event identity and the two durable-wait Restate services.
 //!
 //! One responsibility: every Lash await-event key is turned into an exact

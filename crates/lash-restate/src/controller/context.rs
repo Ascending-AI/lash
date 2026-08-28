@@ -20,8 +20,8 @@ use lash_core::{
 };
 use lash_sansio::sync::MutexExt;
 use restate_sdk::context::{
-    Context as RestateContext, ContextAwakeables, ContextClient, InvocationHandle, ObjectContext,
-    RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
+    Context as RestateContext, ContextAwakeables, ContextClient, ObjectContext, RunRetryPolicy,
+    SharedObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, TerminalError};
 use restate_sdk::serde::Json;
@@ -622,7 +622,10 @@ macro_rules! impl_restate_controller_context {
                             execution_id: None,
                         }));
                     let handle = request.send();
-                    Box::pin(async move { handle.invocation_id().await })
+                    Box::pin(async move {
+                        let handle = handle.await?;
+                        Ok(handle.invocation_id().to_owned())
+                    })
                 }
 
                 fn request_process_workflow_cancel<'run>(

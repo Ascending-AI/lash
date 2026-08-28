@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API used by protocol fixtures"
+)]
+
 //! Tests for the Restate adapter (extracted from lib.rs).
 //!
 //! The obsolete FIG-1127 nested-command refusal fixture was removed with the
@@ -58,6 +63,7 @@ use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+mod effect_group_sdk_preconditions;
 mod endpoint_protocol;
 mod process_tool_replay;
 mod replay_corpus;

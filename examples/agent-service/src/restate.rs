@@ -1,3 +1,7 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
 #![cfg(feature = "restate")]
 
 use lash::sync::MutexExt;

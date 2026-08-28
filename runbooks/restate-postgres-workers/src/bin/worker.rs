@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
 use anyhow::{Context, Result};
 use axum::{
     Json as AxumJson, Router, extract::State, http::StatusCode, routing::get, routing::post,

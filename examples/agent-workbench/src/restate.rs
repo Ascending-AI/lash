@@ -1,3 +1,8 @@
+#![allow(
+    deprecated,
+    reason = "Restate SDK 0.11 retains the trait service API while its replacement is staged"
+)]
+
 use lash::sync::MutexExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
@@ -17,8 +22,7 @@ use lash_restate::{
     LashDurableWaitWorkflowImpl, LashProcessWorkflow,
 };
 use restate_sdk::context::{
-    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, InvocationHandle,
-    RunFuture,
+    ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, RunFuture,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::prelude::{Endpoint, ObjectContext, SharedObjectContext, WorkflowContext};
@@ -1426,7 +1430,7 @@ async fn schedule_next(
         .object_client::<WorkbenchCronJobClient>(ctx.key())
         .run()
         .send_after(delay);
-    let next_execution_id = handle.invocation_id().await?;
+    let next_execution_id = handle.await?.invocation_id().to_owned();
     let state = WorkbenchCronState {
         request,
         next_execution_time: next.to_rfc3339(),
@@ -1439,10 +1443,7 @@ async fn schedule_next(
 
 async fn cancel_stored_execution(ctx: &ObjectContext<'_>) -> HandlerResult<()> {
     if let Some(Json(existing)) = ctx.get::<Json<WorkbenchCronState>>(CRON_STATE_KEY).await? {
-        let _ = ctx
-            .invocation_handle(existing.next_execution_id)
-            .cancel()
-            .await;
+        ctx.invocation_handle(existing.next_execution_id).cancel();
     }
     Ok(())
 }
