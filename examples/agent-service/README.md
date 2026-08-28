@@ -60,9 +60,10 @@ source of truth for the CI split:
 - **Deterministic CI:** `Test docs + build cache` compiles all workspace targets, and
   `Test shard ${{ matrix.shard }}/4` runs workspace tests.
 - **Full-host CI:** `Functional E2E (agent-service)` runs `agent-service-restate-e2e`,
-  including the Restate ingress and process-workflow live test; it does not judge the
-  browser journeys.
-- **Manual judged:** [`agent-service-branching`](../../runbooks/agent-service-branching/runbook.md)
+  including the Restate ingress, process-workflow, and effect-group HTTP live tests; it
+  does not judge the browser journeys.
+- **Manual judged:** [`agent-service-branching`](../../runbooks/agent-service-branching/runbook.md),
+  [`agent-service-effect-groups`](../../runbooks/agent-service-effect-groups/runbook.md),
   and [`tictactoe-full-game`](../../runbooks/tictactoe-full-game/runbook.md).
 
 Optional environment:
@@ -133,6 +134,27 @@ workflow creates a `RestateRuntimeEffectController` and calls
 `session.turn(...).turn_id(...).effects(&controller).stream_to(...)`.
 The stable chat/session id and turn id keep Restate replay and Lash final
 commit addressed to the same operation.
+
+The Restate endpoint also binds the complete `RestateEffectGroupServices`
+bundle: `EffectGroupIndex`, `EffectGroupPayload`, `EffectGroupDispatch`,
+`LashDurableWaitWorkflow`, and `LashDurableWaitIndex`. The worked HTTP path
+runs a three-child deadline group with one short sleep and two long sleeps. It
+returns the first completed settlement at rank 1, closes under `Cancel`, and
+then reads all durable ranks so the cancelled losers are visible without a
+crate-internal test hook:
+
+```http
+POST /api/effect-groups
+Content-Type: application/json
+
+{"run_id":"worked-example-1"}
+```
+
+`GET /api/effect-groups/worked-example-1` reads the same terminal ranked
+report from the Restate index. Run ids are one-shot workflow identities;
+reusing one is rejected instead of attaching a new example request to old
+durable state.
+
 Every message response includes that stable id in the `x-lash-turn-id` header.
 An authenticated host can request cooperative cancellation from any process,
 without retaining the session handle that submitted the turn:
