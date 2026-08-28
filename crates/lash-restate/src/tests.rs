@@ -126,19 +126,17 @@ impl QueuedLaneProbe for QueuedLaneProbeDouble {
     }
 }
 
-#[tokio::test]
-async fn restate_controller_waits_but_deployment_host_keeps_the_one_shot_lane_default() {
+async fn assert_restate_queued_lane_conformance() {
     let controller_probe = Arc::new(QueuedLaneProbeDouble::new([
         QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_400)),
         QueuedLaneAttempt::Busy(lash_core::testing::queued_lane_holder_for_testing(7_401)),
     ]));
     let controller = RestateRuntimeEffectController::new(Arc::new(RecordingContext::default()));
-    let result = controller
-        .acquire_queued_lane(
-            Arc::clone(&controller_probe) as Arc<dyn QueuedLaneProbe>,
-            tokio_util::sync::CancellationToken::new(),
-        )
-        .await;
+    let result = lash_core::testing::conformance::durable_queued_drain_wait_contract(
+        &controller,
+        Arc::clone(&controller_probe) as Arc<dyn QueuedLaneProbe>,
+    )
+    .await;
     let Err(error) = result else {
         panic!("the Restate handler controller must use the engine-paced lane wait")
     };
@@ -154,13 +152,12 @@ async fn restate_controller_waits_but_deployment_host_keeps_the_one_shot_lane_de
         lash_core::testing::queued_lane_holder_for_testing(7_400),
     )]));
     let host = RestateEffectHost::new("http://127.0.0.1:8080");
-    let result = host
-        .acquire_queued_lane(
-            Arc::clone(&host_probe) as Arc<dyn QueuedLaneProbe>,
-            tokio_util::sync::CancellationToken::new(),
-        )
-        .await
-        .expect("deployment-host queued-lane default");
+    let result = lash_core::testing::conformance::durable_queued_drain_wait_contract(
+        &host,
+        Arc::clone(&host_probe) as Arc<dyn QueuedLaneProbe>,
+    )
+    .await
+    .expect("deployment-host queued-lane default");
     assert!(matches!(result, QueuedLaneAcquisition::NotAcquired));
     assert_eq!(host_probe.try_calls.load(Ordering::SeqCst), 1);
     assert_eq!(host_probe.pause_calls.load(Ordering::SeqCst), 0);
@@ -4593,34 +4590,144 @@ async fn restate_turn_work_driver_satisfies_shared_conformance() {
     lash_core::testing::conformance::turn_work_driver(host).await;
 }
 
+fn replayable_conformance_invocation(
+    context: Arc<ReplayableRecordingContext>,
+) -> lash_core::testing::conformance::ConformanceInvocation {
+    let controller: Arc<dyn RuntimeEffectController> =
+        Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
+    lash_core::testing::conformance::ConformanceInvocation::new(
+        controller,
+        lash_core::testing::conformance::ConformanceEffectRedrive::ReplaysJournal,
+        || {},
+        move || {
+            context.start_replay();
+            Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)))
+                as Arc<dyn RuntimeEffectController>
+        },
+    )
+}
+
+fn crash_redrive_conformance_invocation(
+    _scenario: &str,
+) -> lash_core::testing::conformance::ConformanceInvocation {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let controller: Arc<dyn RuntimeEffectController> =
+        Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)));
+    lash_core::testing::conformance::ConformanceInvocation::new(
+        controller,
+        lash_core::testing::conformance::ConformanceEffectRedrive::ReplaysJournal,
+        || {},
+        move || {
+            context.start_replay_allowing_journal_extension();
+            Arc::new(RestateRuntimeEffectController::new(Arc::clone(&context)))
+                as Arc<dyn RuntimeEffectController>
+        },
+    )
+}
+
+#[derive(Debug)]
+struct ConformanceProcessWaitTransport {
+    terminal: ProcessAwaitOutput,
+    request_urls: Mutex<Vec<String>>,
+}
+
+impl ConformanceProcessWaitTransport {
+    fn new(terminal: ProcessAwaitOutput) -> Self {
+        Self {
+            terminal,
+            request_urls: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn assert_reattached_to(&self, process_id: &str) {
+        let requests = self.request_urls.lock_recover();
+        assert_eq!(requests.len(), 2, "Restate process wait must reattach once");
+        let expected = format!("/LashProcessWorkflow/{process_id}/await_terminal");
+        assert!(
+            requests.iter().all(|url| url.ends_with(&expected)),
+            "every Restate attachment must retain the same process id: {requests:?}"
+        );
+    }
+}
+
+#[async_trait::async_trait]
+impl HttpTransport for ConformanceProcessWaitTransport {
+    async fn send(
+        &self,
+        request: HttpRequest,
+        _timeout: Option<Duration>,
+    ) -> Result<HttpResponse, HttpTransportError> {
+        let request_index = {
+            let mut requests = self.request_urls.lock_recover();
+            let index = requests.len();
+            requests.push(request.url);
+            index
+        };
+        match request_index {
+            0 => Err(
+                HttpTransportError::new("conformance attachment ceiling elapsed")
+                    .with_kind(lash_core::ProviderFailureKind::Timeout)
+                    .with_code("timeout")
+                    .with_retry_verdict(
+                        lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                    ),
+            ),
+            1 => Ok(HttpResponse {
+                status: 200,
+                headers: vec![("content-type".to_string(), "application/json".to_string())],
+                body: HttpResponseBody::buffered(
+                    serde_json::to_string(&self.terminal)
+                        .expect("serialize conformance process terminal"),
+                ),
+            }),
+            _ => Err(HttpTransportError::new(
+                "conformance process wait exceeded one reattachment",
+            )),
+        }
+    }
+}
+
+fn conformance_restate_process_work(
+    registry: Arc<dyn ProcessRegistry>,
+    terminal: ProcessAwaitOutput,
+) -> (
+    Arc<dyn lash_core::ProcessWorkSubstrate>,
+    Arc<ConformanceProcessWaitTransport>,
+) {
+    let transport = Arc::new(ConformanceProcessWaitTransport::new(terminal));
+    let connection = RestateConnection::with_transport(
+        "https://conformance.restate.invalid",
+        Arc::clone(&transport) as Arc<dyn HttpTransport>,
+    );
+    let process_work = Arc::new(RestateProcessIngressRunner::new(
+        connection,
+        registry,
+        continuation_store(),
+    )) as Arc<dyn lash_core::ProcessWorkSubstrate>;
+    (process_work, transport)
+}
+
 #[tokio::test]
 async fn restate_handler_controller_satisfies_concurrent_replay_conformance() {
     let context = Arc::new(ReplayableRecordingContext::default());
-    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
-    let replay_context = Arc::clone(&context);
-
-    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(
-        &controller,
-        move || replay_context.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic({
+        let context = Arc::clone(&context);
+        move || replayable_conformance_invocation(context)
+    })
     .await;
 
     let durable_context = Arc::new(ReplayableRecordingContext::default());
-    let durable_controller = RestateRuntimeEffectController::new(Arc::clone(&durable_context));
-    let durable_replay_context = Arc::clone(&durable_context);
-    lash_core::testing::conformance::effect_controller_journaled_effect_replay(
-        &durable_controller,
-        move || durable_replay_context.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_journaled_effect_replay({
+        let context = Arc::clone(&durable_context);
+        move || replayable_conformance_invocation(context)
+    })
     .await;
 
     let tool_context = Arc::new(ReplayableRecordingContext::default());
-    let tool_controller = RestateRuntimeEffectController::new(Arc::clone(&tool_context));
-    let tool_replay_context = Arc::clone(&tool_context);
-    lash_core::testing::conformance::effect_controller_tool_attempt_fanout_replay_deterministic(
-        &tool_controller,
-        move || tool_replay_context.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_tool_attempt_fanout_replay_deterministic({
+        let context = Arc::clone(&tool_context);
+        move || replayable_conformance_invocation(context)
+    })
     .await;
 
     let runs = context.runs();
@@ -4640,6 +4747,161 @@ async fn restate_handler_controller_satisfies_concurrent_replay_conformance() {
             .iter()
             .any(|name| name.ends_with(":tool-attempt-fast"))
     );
+}
+
+#[tokio::test]
+async fn restate_effect_controller_replay_mismatch_diagnostics_conformance() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    lash_core::testing::conformance::effect_controller_replay_mismatch_diagnostics(
+        move || replayable_conformance_invocation(context),
+        "restate_effect_hash_mismatch",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn restate_durable_queued_drain_wait_conformance() {
+    assert_restate_queued_lane_conformance().await;
+}
+
+#[tokio::test]
+async fn restate_public_signal_intent_wakes_parked_process_conformance() {
+    let context = Arc::new(RecordingContext::default());
+    let effect_host: Arc<dyn EffectHost> = Arc::new(RestateRuntimeEffectController::new(context));
+    let registry =
+        Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+    let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+        serde_json::json!({"signal": "observed"}),
+    ));
+    let (process_work, wait_transport) =
+        conformance_restate_process_work(Arc::clone(&registry), terminal);
+    lash_core::testing::conformance::public_signal_intent_wakes_parked_process(
+        "restate-public-signal-intent",
+        effect_host,
+        registry,
+        process_work,
+    )
+    .await;
+    wait_transport.assert_reattached_to("restate-public-signal-intent-target");
+}
+
+#[tokio::test]
+async fn restate_wake_delivery_ordering_group_conformance() {
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+        serde_json::json!({"terminal_wait": "observed"}),
+    ));
+    let (process_work, wait_transport) = conformance_restate_process_work(
+        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+        terminal,
+    );
+    lash_core::testing::conformance::wake_delivery_ordering_group_conformance(
+        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+        registry
+            as Arc<dyn lash_core::testing::conformance::WakeDeliveryOrderingGroupFaultInjector>,
+        process_work,
+    )
+    .await;
+    wait_transport.assert_reattached_to("wake-ordering-terminal");
+}
+
+#[tokio::test]
+async fn restate_wake_delivery_crash_matrix_conformance() {
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
+    let registry = Arc::new(
+        lash_core::TestLocalProcessRegistry::default()
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+            .with_wake_delivery_config(
+                lash_core::WakeDeliveryConfig::new(10_000)
+                    .expect("valid Restate conformance wake expiry")
+                    .with_enqueuing_stale_after_ms(25)
+                    .expect("valid Restate conformance stale-claim age"),
+            ),
+    );
+    let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+        serde_json::json!({"terminal_wait": "observed"}),
+    ));
+    let (process_work, wait_transport) = conformance_restate_process_work(
+        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+        terminal,
+    );
+    let factory = Arc::new(
+        lash_core::facade_support::InMemorySessionStoreFactory::with_clock(
+            Arc::clone(&clock) as Arc<dyn lash_core::Clock>
+        ),
+    );
+    lash_core::testing::conformance::wake_delivery_crash_matrix(
+        factory,
+        registry as Arc<dyn ProcessRegistry>,
+        clock,
+        process_work,
+    )
+    .await;
+    wait_transport.assert_reattached_to("wake-crash-terminal");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restate_turn_crash_matrix_level_1_conformance() {
+    let dir = tempfile::tempdir().expect("Restate turn-crash conformance tempdir");
+    lash_core::testing::conformance::turn_crash_matrix_level_1(
+        move |scenario| {
+            let path = dir.path().join(format!("restate-turn-crash-{scenario}.db"));
+            sync_await(async move {
+                Arc::new(
+                    lash_sqlite_store::Store::open(&path)
+                        .await
+                        .expect("open Restate turn-crash SQLite state carrier"),
+                ) as Arc<dyn lash_core::RuntimePersistence>
+            })
+        },
+        crash_redrive_conformance_invocation,
+    )
+    .await;
+}
+
+#[test]
+#[ignore = "requires an isolated Restate server; run through the effect-group orb gate"]
+fn live_restate_effect_group_conformance() {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("build Restate conformance-parity runtime")
+        .block_on(async {
+            tokio::time::timeout(Duration::from_secs(240), async {
+                let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+
+                lash_core::testing::conformance::effect_group_host_conformance(
+                    harness.group_host_factory(),
+                )
+                .await;
+                println!("RESTATE_CONFORMANCE effect_group_host_conformance PASS");
+                lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable(
+                    harness.group_host_factory(),
+                )
+                .await;
+                println!(
+                    "RESTATE_CONFORMANCE effect_group_cancelled_child_terminal_is_durable PASS"
+                );
+                harness.run_design_witnesses().await;
+                println!("EFFECT_GROUP_CONFORMANCE 18/18 PASS");
+                println!("EFFECT_GROUP_WITNESSES h-m PASS");
+                lash_core::testing::conformance::effect_host_await_events_cold_instance(
+                    harness.effect_host_factory(),
+                )
+                .await;
+                println!("RESTATE_CONFORMANCE effect_host_await_events_cold_instance PASS");
+                lash_core::testing::conformance::effect_host_await_events(
+                    harness.effect_host_factory(),
+                )
+                .await;
+                println!("RESTATE_CONFORMANCE effect_host_await_events PASS");
+
+                println!("RESTATE_CONFORMANCE_PARITY live=4/4 PASS");
+                harness.finish().await;
+            })
+            .await
+            .expect("Restate conformance parity exceeded 240 seconds");
+        });
 }
 
 #[tokio::test]
@@ -7837,15 +8099,22 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     {
         let resolution = if self.replaying.load(Ordering::SeqCst) {
             let position = self.peek_cursor.fetch_add(1, Ordering::SeqCst);
-            self.peek_records
-                .lock_recover()
-                .get(position)
-                .cloned()
-                .ok_or_else(|| {
-                    TerminalError::new(format!(
-                        "missing recorded await-event peek at position {position}"
-                    ))
-                })
+            if let Some(recorded) = self.peek_records.lock_recover().get(position).cloned() {
+                Ok(recorded)
+            } else if self.append_missing_on_replay.load(Ordering::SeqCst) {
+                let resolution = self
+                    .events
+                    .durable_events
+                    .lock_recover()
+                    .get(&address.workflow_key)
+                    .cloned();
+                self.peek_records.lock_recover().push(resolution.clone());
+                Ok(resolution)
+            } else {
+                Err(TerminalError::new(format!(
+                    "missing recorded await-event peek at position {position}"
+                )))
+            }
         } else {
             let resolution = self
                 .events

@@ -38,6 +38,37 @@ mod trigger_occurrence_retention;
 #[path = "conformance/wake_delivery.rs"]
 mod wake_delivery;
 
+fn sqlite_conformance_invocation(
+    controller: SqliteRuntimeEffectController,
+) -> lash_core::testing::conformance::ConformanceInvocation {
+    let live: Arc<dyn RuntimeEffectController> = Arc::new(controller.clone());
+    lash_core::testing::conformance::ConformanceInvocation::new(
+        live,
+        lash_core::testing::conformance::ConformanceEffectRedrive::ReplaysJournal,
+        || {},
+        move || {
+            controller.start_replay();
+            Arc::new(controller.clone()) as Arc<dyn RuntimeEffectController>
+        },
+    )
+}
+
+#[test]
+fn conformance_invocation_lifecycle_control_is_consumable_cross_crate() {
+    use lash_core::testing::conformance::{ConformanceEffectRedrive, ConformanceInvocation};
+
+    let invocation = ConformanceInvocation::inline();
+    assert_eq!(
+        ConformanceInvocation::effect_redrive(&invocation),
+        ConformanceEffectRedrive::ReexecutesUncommitted
+    );
+    let _journaled_redrive = ConformanceEffectRedrive::ReplaysJournal;
+    let _controller = ConformanceInvocation::controller(&invocation);
+    let _controller_handle = ConformanceInvocation::controller_handle(&invocation);
+    let successor = ConformanceInvocation::redrive(invocation);
+    ConformanceInvocation::end(successor);
+}
+
 struct SqliteLineageConformanceInjector {
     path: PathBuf,
     _dir: TempDir,
@@ -1286,6 +1317,7 @@ async fn sqlite_real_turn_crash_matrix() {
     let dir = tempfile::tempdir().expect("real-turn crash matrix tempdir");
     Box::pin(lash_core::testing::conformance::turn_crash_matrix_level_1(
         |scenario| open_store(&dir.path().join(format!("turn-crash-matrix-{scenario}.db"))),
+        |_| lash_core::testing::conformance::ConformanceInvocation::inline(),
     ))
     .await;
 }
@@ -1547,10 +1579,14 @@ async fn sqlite_public_signal_intent_wakes_a_parked_process() {
         .await
         .expect("open SQLite signal-intent process registry"),
     ) as Arc<dyn ProcessRegistry>;
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    )));
     lash_core::testing::conformance::public_signal_intent_wakes_parked_process(
         "sqlite-public-signal-intent",
         effect_host,
         registry,
+        process_work,
     )
     .await;
 }
@@ -2071,10 +2107,9 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
     ))
     .await;
 
-    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(
-        &controller,
-        || controller.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_concurrent_replay_deterministic(|| {
+        sqlite_conformance_invocation(controller.clone())
+    })
     .await;
 
     let (_tool_controller_dir, tool_controller) =
@@ -2084,8 +2119,7 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
         ))
         .await;
     lash_core::testing::conformance::effect_controller_tool_attempt_fanout_replay_deterministic(
-        &tool_controller,
-        || tool_controller.start_replay(),
+        || sqlite_conformance_invocation(tool_controller.clone()),
     )
     .await;
 
@@ -2093,10 +2127,9 @@ async fn sqlite_effect_controller_satisfies_replay_conformance() {
         durable_turn_scope("durable-step-session", "durable-step-turn"),
     )
     .await;
-    lash_core::testing::conformance::effect_controller_journaled_effect_replay(
-        &durable_controller,
-        || durable_controller.start_replay(),
-    )
+    lash_core::testing::conformance::effect_controller_journaled_effect_replay(|| {
+        sqlite_conformance_invocation(durable_controller.clone())
+    })
     .await;
 }
 
@@ -2242,7 +2275,7 @@ async fn sqlite_effect_controller_reports_envelope_divergent_paths() {
     let (_controller_dir, controller) =
         open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
     lash_core::testing::conformance::effect_controller_replay_mismatch_diagnostics(
-        &controller,
+        || sqlite_conformance_invocation(controller.clone()),
         "sqlite_effect_replay_hash_conflict",
     )
     .await;

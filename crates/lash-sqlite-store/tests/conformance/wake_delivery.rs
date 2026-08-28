@@ -48,8 +48,14 @@ async fn sqlite_wake_delivery_crash_matrix() {
         SqliteSessionStoreFactory::new_with_process_registry(dir.path(), process_registry_path)
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     ) as Arc<dyn SessionStoreFactory>;
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    )));
     Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
-        factory, registry, clock,
+        factory,
+        registry,
+        clock,
+        process_work,
     ))
     .await;
 }
@@ -63,11 +69,15 @@ async fn sqlite_wake_delivery_ordering_group_conformance() {
             .await
             .expect("open process registry"),
     );
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+    ));
     lash_core::testing::conformance::wake_delivery_ordering_group_conformance(
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(SqliteWakeDeliveryOrderingGroupFaultInjector {
             path: process_registry_path,
         }),
+        process_work,
     )
     .await;
 }

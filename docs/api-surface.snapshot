@@ -8280,6 +8280,17 @@ lash::testing::conformance::AttachmentOwnerColdReplayBackend::process_registry
 lash::testing::conformance::AttachmentOwnerColdReplayBackend::reopen_effect_controller
 lash::testing::conformance::AttachmentOwnerColdReplayBackend::session_store_factory
 lash::testing::conformance::COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT
+lash::testing::conformance::ConformanceEffectRedrive
+lash::testing::conformance::ConformanceEffectRedrive::ReexecutesUncommitted
+lash::testing::conformance::ConformanceEffectRedrive::ReplaysJournal
+lash::testing::conformance::ConformanceInvocation
+lash::testing::conformance::ConformanceInvocation::controller
+lash::testing::conformance::ConformanceInvocation::controller_handle
+lash::testing::conformance::ConformanceInvocation::effect_redrive
+lash::testing::conformance::ConformanceInvocation::end
+lash::testing::conformance::ConformanceInvocation::inline
+lash::testing::conformance::ConformanceInvocation::new
+lash::testing::conformance::ConformanceInvocation::redrive
 lash::testing::conformance::DrainWorld
 lash::testing::conformance::DrainWorld::drain
 lash::testing::conformance::DrainWorld::host

@@ -50,8 +50,14 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
             )
             .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
     ) as Arc<dyn ProcessRegistry>;
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    )));
     Box::pin(lash_core::testing::conformance::wake_delivery_crash_matrix(
-        factory, registry, clock,
+        factory,
+        registry,
+        clock,
+        process_work,
     ))
     .await;
 }
@@ -67,11 +73,15 @@ async fn postgres_wake_delivery_ordering_group_conformance_when_configured() {
     };
     reset(&storage).await;
     let registry = Arc::new(storage.process_registry());
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+        Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
+    ));
     lash_core::testing::conformance::wake_delivery_ordering_group_conformance(
         registry as Arc<dyn ProcessRegistry>,
         Arc::new(PostgresWakeDeliveryOrderingGroupFaultInjector {
             pool: storage.pool().clone(),
         }),
+        process_work,
     )
     .await;
 }

@@ -52,6 +52,7 @@ pub trait WakeDeliveryOrderingGroupFaultInjector: Send + Sync {
 pub async fn wake_delivery_ordering_group_conformance(
     registry: Arc<dyn crate::ProcessRegistry>,
     injector: Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
+    process_work: Arc<dyn crate::ProcessWorkSubstrate>,
 ) {
     ordering_group_discard_case(
         &registry,
@@ -70,6 +71,55 @@ pub async fn wake_delivery_ordering_group_conformance(
     )
     .await;
     ordering_group_discard_case(&registry, &injector, "reasonless", None, false).await;
+    assert_process_terminal_wait(&registry, &process_work, "wake-ordering-terminal").await;
+}
+
+async fn assert_process_terminal_wait(
+    registry: &Arc<dyn crate::ProcessRegistry>,
+    process_work: &Arc<dyn crate::ProcessWorkSubstrate>,
+    process_id: &str,
+) {
+    registry
+        .register_process(process_registry::registration(process_id))
+        .await
+        .expect("register terminal-wait conformance process");
+    let terminal = crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+        serde_json::json!({"terminal_wait": "observed"}),
+    ));
+    let wait = {
+        let process_work = Arc::clone(process_work);
+        let process_id = process_id.to_string();
+        crate::task::spawn(async move {
+            let mut reattachments = 0_usize;
+            loop {
+                match process_work
+                    .await_process_terminal(&process_id)
+                    .await
+                    .expect("wait for terminal process through peer substrate")
+                {
+                    crate::ProcessTerminalWait::Terminal(output) => break output,
+                    crate::ProcessTerminalWait::Reattach => {
+                        reattachments += 1;
+                        assert!(
+                            reattachments <= 3,
+                            "peer substrate must settle after bounded reattachments"
+                        );
+                    }
+                }
+            }
+        })
+    };
+    tokio::task::yield_now().await;
+    registry
+        .complete_process(
+            process_id,
+            terminal.clone(),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete terminal-wait conformance process");
+    let observed = wait.await.expect("terminal-wait task joins");
+    assert_eq!(observed, terminal);
 }
 
 async fn ordering_group_discard_case(
@@ -165,6 +215,7 @@ pub async fn wake_delivery_crash_matrix(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
+    process_work: Arc<dyn crate::ProcessWorkSubstrate>,
 ) {
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
@@ -919,6 +970,7 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&clock),
     )
     .await;
+    assert_process_terminal_wait(&registry, &process_work, "wake-crash-terminal").await;
     expired_is_a_typed_discard(factory, registry, clock).await;
 }
 

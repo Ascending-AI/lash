@@ -169,59 +169,73 @@ impl GroupExecutors for WitnessExecutors {
     }
 }
 
-#[test]
-#[ignore = "requires an isolated Restate server; run through the effect-group orb gate"]
-fn live_restate_effect_group_conformance() {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("build Restate effect-group conformance runtime")
-        .block_on(async {
-            tokio::time::timeout(Duration::from_secs(180), run_conformance())
-                .await
-                .expect("Restate effect-group conformance exceeded 180 seconds");
-        });
+type GroupHostFactory =
+    Box<dyn Fn(Option<Arc<dyn GroupExecutors>>) -> Arc<dyn lash_core::EffectHost> + Send + Sync>;
+
+pub(super) struct LiveConformanceHarness {
+    ingress_url: String,
+    executors: Arc<ConformanceExecutors>,
+    shutdown_tx: tokio::sync::oneshot::Sender<()>,
+    server: tokio::task::JoinHandle<()>,
 }
 
-async fn run_conformance() {
-    let ingress_url = required("RESTATE_INGRESS_URL");
-    let admin_url = required("RESTATE_ADMIN_URL");
-    let bind_addr = required("EG_RESTATE_ENDPOINT_BIND")
-        .parse::<SocketAddr>()
-        .expect("valid EG_RESTATE_ENDPOINT_BIND");
-    let endpoint_url = required("EG_RESTATE_ENDPOINT_URL");
-    let ingress = RestateIngressClient::new(ingress_url.clone());
-    let executors = Arc::new(ConformanceExecutors::default());
-    let services = RestateEffectGroupServices::new(
-        Arc::clone(&executors) as Arc<dyn GroupExecutors>,
-        ingress,
-        RestateEffectGroupRetryPolicy::infinite(),
-    );
-    let listener = tokio::net::TcpListener::bind(bind_addr)
-        .await
-        .expect("bind Restate effect-group endpoint");
-    let endpoint = Endpoint::builder()
-        .bind(services.index)
-        .bind(services.payload)
-        .bind(services.dispatch)
-        .bind(services.wait.workflow.serve())
-        .bind(services.wait.index.serve())
-        .build();
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(async move {
-        HttpServer::new(endpoint)
-            .serve_with_cancel(listener, async {
-                let _ = shutdown_rx.await;
-            })
-            .await;
-    });
-    wait_for_endpoint(bind_addr).await;
-    register_deployment(&admin_url, &endpoint_url).await;
+impl LiveConformanceHarness {
+    pub(super) async fn start() -> Self {
+        let ingress_url = required("RESTATE_INGRESS_URL");
+        let admin_url = required("RESTATE_ADMIN_URL");
+        let bind_addr = required("EG_RESTATE_ENDPOINT_BIND")
+            .parse::<SocketAddr>()
+            .expect("valid EG_RESTATE_ENDPOINT_BIND");
+        let endpoint_url = required("EG_RESTATE_ENDPOINT_URL");
+        let ingress = RestateIngressClient::new(ingress_url.clone());
+        let executors = Arc::new(ConformanceExecutors::default());
+        let services = RestateEffectGroupServices::new(
+            Arc::clone(&executors) as Arc<dyn GroupExecutors>,
+            ingress,
+            RestateEffectGroupRetryPolicy::infinite(),
+        );
+        let listener = tokio::net::TcpListener::bind(bind_addr)
+            .await
+            .expect("bind Restate effect-group endpoint");
+        let endpoint = Endpoint::builder()
+            .bind(services.index)
+            .bind(services.payload)
+            .bind(services.dispatch)
+            .bind(services.wait.workflow.serve())
+            .bind(services.wait.index.serve())
+            .build();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            HttpServer::new(endpoint)
+                .serve_with_cancel(listener, async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+        wait_for_endpoint(bind_addr).await;
+        register_deployment(&admin_url, &endpoint_url).await;
 
-    lash_core::testing::conformance::effect_group_host_conformance({
-        let executors = Arc::clone(&executors);
-        let ingress_url = ingress_url.clone();
-        move |resolver| match resolver {
+        Self {
+            ingress_url,
+            executors,
+            shutdown_tx,
+            server,
+        }
+    }
+
+    pub(super) fn effect_host_factory(
+        &self,
+    ) -> Box<dyn Fn() -> Arc<dyn lash_core::EffectHost> + Send + Sync> {
+        let ingress_url = self.ingress_url.clone();
+        Box::new(move || {
+            Arc::new(RestateEffectHost::new(ingress_url.clone())) as Arc<dyn lash_core::EffectHost>
+        })
+    }
+
+    pub(super) fn group_host_factory(&self) -> GroupHostFactory {
+        let ingress_url = self.ingress_url.clone();
+        let executors = Arc::clone(&self.executors);
+        Box::new(move |resolver| match resolver {
             Some(resolver) => {
                 executors.install(resolver);
                 Arc::new(RestateEffectHost::new(ingress_url.clone()))
@@ -229,31 +243,19 @@ async fn run_conformance() {
             }
             None => Arc::new(lash_core::facade_support::InlineEffectHost::default())
                 as Arc<dyn lash_core::EffectHost>,
-        }
-    })
-    .await;
+        })
+    }
 
-    lash_core::testing::conformance::effect_group_cancelled_child_terminal_is_durable({
-        let executors = Arc::clone(&executors);
-        let ingress_url = ingress_url.clone();
-        move |resolver| match resolver {
-            Some(resolver) => {
-                executors.install(resolver);
-                Arc::new(RestateEffectHost::new(ingress_url.clone()))
-                    as Arc<dyn lash_core::EffectHost>
-            }
-            None => Arc::new(lash_core::facade_support::InlineEffectHost::default())
-                as Arc<dyn lash_core::EffectHost>,
-        }
-    })
-    .await;
+    pub(super) async fn finish(self) {
+        let _ = self.shutdown_tx.send(());
+        self.server
+            .await
+            .expect("Restate effect-group endpoint task");
+    }
 
-    run_design_witnesses(&ingress_url, &executors).await;
-
-    println!("EFFECT_GROUP_CONFORMANCE 18/18 PASS");
-    println!("EFFECT_GROUP_WITNESSES h-m PASS");
-    let _ = shutdown_tx.send(());
-    server.await.expect("Restate effect-group endpoint task");
+    pub(super) async fn run_design_witnesses(&self) {
+        run_design_witnesses(&self.ingress_url, &self.executors).await;
+    }
 }
 
 async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExecutors>) {
