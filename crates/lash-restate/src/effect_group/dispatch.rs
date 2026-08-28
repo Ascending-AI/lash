@@ -46,6 +46,7 @@ impl EffectGroupDispatch {
         ctx: WorkflowContext<'_>,
         Json(request): Json<EffectGroupDispatchRequest>,
     ) -> HandlerResult<Json<()>> {
+        request.shape.validate_wire()?;
         let own_id = ctx.invocation_id().to_string();
         let Json(adopted) = ctx
             .object_client::<EffectGroupIndexClient>(request.group_key.clone())
@@ -178,6 +179,7 @@ impl EffectGroupDispatch {
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<EffectGroupChildRequest>,
     ) -> HandlerResult<Json<()>> {
+        request.shape.validate_wire()?;
         let own_id = ctx.invocation_id().to_string();
         let admission_request = EffectGroupAdmissionRequest {
             position: request.position,
@@ -264,7 +266,7 @@ impl EffectGroupDispatch {
         let cancel_key = group_wait_key(
             &request.shape.wait_scope,
             &request.group_key,
-            EffectGroupWaitKind::Cancel(&request.shape.replay_keys[request.position]),
+            EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
         )?;
         let cancel_address = RestateDurableWaitAddress::for_key(&cancel_key);
         let cancel_request = RestateDurableWaitAwaitRequest {

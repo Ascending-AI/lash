@@ -168,6 +168,40 @@ impl EffectGroupShape {
         })
     }
 
+    /// The invariant `from_group` establishes, re-checked on the way in.
+    ///
+    /// `children` and `replay_keys` are two public fields of a public type, so
+    /// a shape that arrives over the wire carries whatever the caller put in
+    /// it. Every later reader pairs a position drawn from `children` with the
+    /// replay key at that position; a shape whose two halves disagree is a
+    /// caller defect that can never become valid by retrying, so it is refused
+    /// once, terminally, at the boundary rather than surviving into stored
+    /// state where a later handler would meet it.
+    pub(crate) fn validate_wire(&self) -> Result<(), TerminalError> {
+        if self.children != self.replay_keys.len() {
+            return Err(TerminalError::new(format!(
+                "effect-group shape declares {} children but carries {} replay keys",
+                self.children,
+                self.replay_keys.len()
+            )));
+        }
+        Ok(())
+    }
+
+    /// The replay key of a child position, as a terminal error when the shape
+    /// does not have one.
+    pub(crate) fn replay_key(&self, position: usize) -> Result<&str, TerminalError> {
+        self.replay_keys
+            .get(position)
+            .map(String::as_str)
+            .ok_or_else(|| {
+                TerminalError::new(format!(
+                    "effect-group shape has no replay key for child {position} of {}",
+                    self.children
+                ))
+            })
+    }
+
     fn digest(&self) -> Result<String, TerminalError> {
         let bytes = serde_json::to_vec(self).map_err(|error| {
             TerminalError::new(format!("serialize effect-group shape: {error}"))
@@ -195,6 +229,23 @@ pub struct EffectGroupCleanupFacts {
     #[serde(with = "btree_map_as_pairs")]
     pub dispatched: BTreeMap<usize, String>,
     pub wait_scope: ExecutionScope,
+}
+
+impl EffectGroupCleanupFacts {
+    /// The replay key of a child position, as a terminal error when the
+    /// retirement facts do not have one. Same pairing, same independent public
+    /// fields, and the same refusal as [`EffectGroupShape::replay_key`].
+    pub(crate) fn replay_key(&self, position: usize) -> Result<&str, TerminalError> {
+        self.replay_keys
+            .get(position)
+            .map(String::as_str)
+            .ok_or_else(|| {
+                TerminalError::new(format!(
+                    "effect-group retirement facts have no replay key for child {position} of {}",
+                    self.children
+                ))
+            })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -723,6 +774,7 @@ impl EffectGroupIndex {
         ctx: ObjectContext<'_>,
         Json(request): Json<EffectGroupOpenRequest>,
     ) -> HandlerResult<Json<EffectGroupOpenResponse>> {
+        request.shape.validate_wire()?;
         let Some(record) = load_index(&ctx).await? else {
             let shape_digest = request.shape.digest()?;
             store_index(
@@ -1183,7 +1235,7 @@ impl EffectGroupIndex {
                     &ctx,
                     &shape.wait_scope,
                     &group_key,
-                    EffectGroupWaitKind::Cancel(&shape.replay_keys[position]),
+                    EffectGroupWaitKind::Cancel(shape.replay_key(position)?),
                     EffectGroupWaitResolution::Cancel,
                 )
                 .await?;
@@ -1373,7 +1425,7 @@ impl EffectGroupIndex {
                 &ctx,
                 &facts.wait_scope,
                 &group_key,
-                EffectGroupWaitKind::Cancel(&facts.replay_keys[position]),
+                EffectGroupWaitKind::Cancel(facts.replay_key(position)?),
                 EffectGroupWaitResolution::Cancel,
             )
             .await?;

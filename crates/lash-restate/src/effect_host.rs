@@ -437,9 +437,14 @@ impl RuntimeEffectController for RestateEffectHostController {
                 .await
                 .map_err(|error| ingress_group_error("EffectGroupDispatch/preflight", error))?
         {
+            let replay_key = shape.replay_keys.get(position).ok_or_else(|| {
+                group_shape_error(format!(
+                    "effect group {group_key} preflight named child {position}, outside the {} children its shape carries",
+                    shape.replay_keys.len()
+                ))
+            })?;
             return Err(group_shape_error(format!(
-                "effect group {group_key} child {position} ({}) has no registered executor; refusing before group state is created",
-                shape.replay_keys[position]
+                "effect group {group_key} child {position} ({replay_key}) has no registered executor; refusing before group state is created"
             )));
         }
         let opened = ingress
