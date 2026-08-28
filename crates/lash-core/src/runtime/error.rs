@@ -124,9 +124,6 @@ pub enum RuntimeErrorCode {
     ProcessSignalWaitTimeout,
     RestateAwaitEventAwait,
     RestateAwaitEventCancel,
-    /// The local observer was cancelled while the durable promise stayed live;
-    /// its disposition is unknown until another observer attaches.
-    RestateAwaitEventCancelled,
     RestateAwaitEventPeek,
     RestateAwaitEventResolve,
     RestateAwaitEventRevocationRead,
@@ -525,7 +522,6 @@ impl RuntimeErrorCode {
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
             Self::RestateAwaitEventAwait => "restate_await_event_await",
             Self::RestateAwaitEventCancel => "restate_await_event_cancel",
-            Self::RestateAwaitEventCancelled => "restate_await_event_cancelled",
             Self::RestateAwaitEventPeek => "restate_await_event_peek",
             Self::RestateAwaitEventResolve => "restate_await_event_resolve",
             Self::RestateAwaitEventRevocationRead => "restate_await_event_revocation_read",
@@ -883,7 +879,6 @@ impl RuntimeErrorCode {
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,
             "restate_await_event_await" => Self::RestateAwaitEventAwait,
             "restate_await_event_cancel" => Self::RestateAwaitEventCancel,
-            "restate_await_event_cancelled" => Self::RestateAwaitEventCancelled,
             "restate_await_event_peek" => Self::RestateAwaitEventPeek,
             "restate_await_event_resolve" => Self::RestateAwaitEventResolve,
             "restate_await_event_revocation_read" => Self::RestateAwaitEventRevocationRead,
@@ -1337,7 +1332,6 @@ mod tests {
             | RuntimeErrorCode::LiveReplay
             | RuntimeErrorCode::PostgresAwaitEventNotify
             | RuntimeErrorCode::QueuedWork
-            | RuntimeErrorCode::RestateAwaitEventCancelled
             | RuntimeErrorCode::RuntimeEffectControllerTaskClosed
             | RuntimeErrorCode::SessionHeadRefresh
             | RuntimeErrorCode::SqliteAwaitEventNotify
@@ -1415,7 +1409,6 @@ mod tests {
             RuntimeErrorCode::ProcessSignalWaitTimeout,
             RuntimeErrorCode::RestateAwaitEventAwait,
             RuntimeErrorCode::RestateAwaitEventCancel,
-            RuntimeErrorCode::RestateAwaitEventCancelled,
             RuntimeErrorCode::RestateAwaitEventPeek,
             RuntimeErrorCode::RestateAwaitEventResolve,
             RuntimeErrorCode::RestateAwaitEventRevocationRead,

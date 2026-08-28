@@ -9072,6 +9072,88 @@ async fn restate_effect_host_checks_revocation_then_awaits_resolution() {
     );
 }
 
+#[derive(Debug)]
+struct AwaitEventCancellationTransport {
+    requests: Mutex<Vec<HttpRequest>>,
+    resolve_outcome: ResolveOutcome,
+}
+
+#[async_trait::async_trait]
+impl HttpTransport for AwaitEventCancellationTransport {
+    async fn send(
+        &self,
+        request: HttpRequest,
+        _timeout: Option<Duration>,
+    ) -> Result<HttpResponse, HttpTransportError> {
+        let url = request.url.clone();
+        self.requests.lock_recover().push(request);
+        let body = if url.ends_with("/is_revoked") {
+            "false".to_string()
+        } else if url.ends_with("/await_resolution") {
+            return std::future::pending().await;
+        } else if url.ends_with("/resolve") {
+            serde_json::to_string(&self.resolve_outcome).expect("encode resolve outcome")
+        } else {
+            return Err(HttpTransportError::new(format!(
+                "unexpected await-event cancellation request: {url}"
+            )));
+        };
+        Ok(HttpResponse {
+            status: 200,
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
+            body: HttpResponseBody::buffered(body),
+        })
+    }
+}
+
+#[tokio::test]
+async fn restate_effect_host_cancellation_records_and_returns_the_durable_winner() {
+    let earlier = Resolution::Ok(serde_json::json!({ "winner": "earlier" }));
+    for (resolve_outcome, expected) in [
+        (ResolveOutcome::Accepted, Resolution::Cancelled),
+        (
+            ResolveOutcome::AlreadyResolved {
+                terminal: earlier.clone(),
+            },
+            earlier,
+        ),
+    ] {
+        let transport = Arc::new(AwaitEventCancellationTransport {
+            requests: Mutex::new(Vec::new()),
+            resolve_outcome,
+        });
+        let host = RestateEffectHost::new(RestateConnection::with_transport(
+            "https://restate.example",
+            transport.clone(),
+        ));
+        let key = restate_await_event_key(
+            &durable_turn_scope("cancel-session", "cancel-turn"),
+            AwaitEventWaitIdentity::Custom {
+                key: "cancel-wait".to_string(),
+            },
+        )
+        .expect("cancel wait key");
+        let cancel = tokio_util::sync::CancellationToken::new();
+        cancel.cancel();
+
+        let resolution = host
+            .await_await_event(&key, cancel, None)
+            .await
+            .expect("settle cancelled wait through ingress");
+
+        assert_eq!(resolution, expected);
+        let requests = transport.requests.lock_recover();
+        let resolve = requests
+            .iter()
+            .find(|request| request.url.ends_with("/resolve"))
+            .expect("cancellation must resolve through the durable index");
+        let request: RestateDurableWaitResolveRequest =
+            serde_json::from_slice(&resolve.body).expect("decode cancellation resolve request");
+        assert_eq!(request.key, key);
+        assert_eq!(request.resolution, Resolution::Cancelled);
+    }
+}
+
 struct PostCommitFailingQueuedWorkRunHandle {
     attempts: AtomicUsize,
     recovered: tokio::sync::Notify,

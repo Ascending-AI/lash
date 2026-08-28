@@ -7781,7 +7781,6 @@ lash::runtime::RuntimeErrorCode::RecordEncodingFailed
 lash::runtime::RuntimeErrorCode::ResidentSessionReloadFailed
 lash::runtime::RuntimeErrorCode::RestateAwaitEventAwait
 lash::runtime::RuntimeErrorCode::RestateAwaitEventCancel
-lash::runtime::RuntimeErrorCode::RestateAwaitEventCancelled
 lash::runtime::RuntimeErrorCode::RestateAwaitEventPeek
 lash::runtime::RuntimeErrorCode::RestateAwaitEventResolve
 lash::runtime::RuntimeErrorCode::RestateAwaitEventRevocationRead

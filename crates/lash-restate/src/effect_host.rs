@@ -2,9 +2,9 @@
 //!
 //! One responsibility: give a long-lived Lash core a durable await-event
 //! boundary when no Restate handler context is in scope. Real effect execution
-//! needs a handler, so this host resolves, peeks, awaits, and revokes waits
-//! through the ingress and fails loudly for anything else instead of falling
-//! back to inline execution.
+//! needs a handler, so this host resolves, peeks, awaits, durably cancels, and
+//! revokes waits through the ingress and fails loudly for anything else instead
+//! of falling back to inline execution.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -284,9 +284,19 @@ async fn await_restate_await_event_via_ingress(
         } => result.map_err(|err| {
             RuntimeError::new(lash_core::RuntimeErrorCode::RestateAwaitEventAwait, err.to_string())
         }),
-        _ = cancel.cancelled() => Err(RuntimeError::new(lash_core::RuntimeErrorCode::RestateAwaitEventCancelled,
-            "Restate await-event ingress observation was cancelled locally",
-        )),
+        _ = cancel.cancelled() => {
+            let outcome = resolve_restate_await_event_via_ingress(
+                ingress,
+                key,
+                Resolution::Cancelled,
+            ).await?;
+            Ok(match outcome {
+                ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => {
+                    Resolution::Cancelled
+                }
+                ResolveOutcome::AlreadyResolved { terminal } => terminal,
+            })
+        },
     }
 }
 struct RestateEffectHostController {
