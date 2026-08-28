@@ -49,7 +49,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::runtime::effect::group_drain::{
-    ChildDrainOutcome, EffectGroupDrain, GroupDrainReport, GroupExecutors,
+    ChildDrainOutcome, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
 };
 use crate::{EffectGroupHandle, GroupSettlement, GroupWakePolicy, LoserPolicy, RuntimeEffectGroup};
 
@@ -62,7 +62,7 @@ pub struct DrainWorld {
     pub host: Arc<dyn EffectHost>,
     /// The drain over the same journal, resolving children through the same
     /// registered resolver the host does.
-    pub drain: Arc<dyn EffectGroupDrain>,
+    pub drain: Arc<dyn StoreEffectGroupDrain>,
 }
 
 /// What a law needs the next host to be built with.
@@ -96,7 +96,7 @@ pub type DrainWorldFactory =
     Arc<dyn Fn(DrainWorldSpec) -> Pin<Box<dyn Future<Output = DrainWorld> + Send>> + Send + Sync>;
 
 /// Run the effect-group drain suite.
-pub async fn effect_group_drain_conformance(make: DrainWorldFactory) {
+pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     let prefix = format!("drain-conformance-{}", uuid::Uuid::new_v4().simple());
     a_group_this_process_is_still_working_is_refused(&make, &prefix).await;
     a_group_the_journal_does_not_hold_is_refused(&make, &prefix).await;

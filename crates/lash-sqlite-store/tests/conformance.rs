@@ -1813,7 +1813,7 @@ async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
 
 /// SQLite's authoritative effect-lease clock is the host's injected `Clock`,
 /// because this store shares its host's clock domain. PostgreSQL — the other
-/// implementor of the same shared `EffectReplayDriver` — deliberately reads the
+/// implementor of the same shared `StoreEffectReplayDriver` — deliberately reads the
 /// *server* clock instead (the `Clock` contract's database-authoritative lease
 /// boundary, fenced by `postgres_clock_contract`), so
 /// each half of that split needs its own referee now that one driver drives

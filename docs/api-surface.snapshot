@@ -8629,7 +8629,6 @@ lash::testing::conformance::effect_controller_replay_mismatch_diagnostics
 lash::testing::conformance::effect_controller_segmentation_vector
 lash::testing::conformance::effect_controller_tool_attempt_fanout_replay_deterministic
 lash::testing::conformance::effect_group_cancelled_child_terminal_is_durable
-lash::testing::conformance::effect_group_drain_conformance
 lash::testing::conformance::effect_group_host_conformance
 lash::testing::conformance::effect_host
 lash::testing::conformance::effect_host_await_events
@@ -8691,6 +8690,7 @@ lash::testing::conformance::session_store_factory_delete_fences_stale_handles
 lash::testing::conformance::session_store_factory_read_session
 lash::testing::conformance::signed_counter_write_domain_conformance
 lash::testing::conformance::store_contract_state_machine
+lash::testing::conformance::store_effect_group_drain_conformance
 lash::testing::conformance::store_maintenance_outcome_contract
 lash::testing::conformance::store_maintenance_unimplemented_levers_fail
 lash::testing::conformance::tombstoned_old_leaf_is_rejected

@@ -1,6 +1,6 @@
 //! Store-side contract tests for the SQLite effect journal.
 //!
-//! The group tests exercise [`SqliteEffectReplayPersistence`] directly rather than through
+//! The group tests exercise [`SqliteEffectReplayRowStore`] directly rather than through
 //! a host: what is under test is the *allocation* discipline — which transaction
 //! may move a group's settlement counter, and what a fenced-out finalize is
 //! allowed to leave behind — and a host would only obscure which write did what.
@@ -28,14 +28,14 @@ fn stored_effect_corruption_is_non_retryable() {
 const SCOPE: &str = "session:s1";
 const GROUP: &str = "session:s1/group-1";
 
-async fn persistence() -> SqliteEffectReplayPersistence {
+async fn row_store() -> SqliteEffectReplayRowStore {
     let conn = SqliteConnection::open_in_memory()
         .await
         .expect("open the in-memory effect database");
     ensure_effect_schema(&conn)
         .await
         .expect("provision the effect schema");
-    SqliteEffectReplayPersistence {
+    SqliteEffectReplayRowStore {
         conn,
         clock: Arc::new(lash_core::facade_support::SystemClock),
     }
@@ -86,7 +86,7 @@ fn terminal(replay_key: &str) -> EffectTerminal {
 }
 
 async fn open_and_claim(
-    store: &SqliteEffectReplayPersistence,
+    store: &SqliteEffectReplayRowStore,
     keys: &[(&str, &str)],
 ) -> Vec<EffectLeaseFence> {
     store
@@ -116,7 +116,7 @@ fn allocated_rank(outcome: EffectFinalizeOutcome) -> u64 {
     }
 }
 
-async fn next_seq(store: &SqliteEffectReplayPersistence) -> i64 {
+async fn next_seq(store: &SqliteEffectReplayRowStore) -> i64 {
     store
         .conn
         .call(|conn| {
@@ -150,7 +150,7 @@ async fn next_seq(store: &SqliteEffectReplayPersistence) -> i64 {
 /// interleave inside one `READ COMMITTED` window.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_finalize_allocates_distinct_settlement_sequences() {
-    let store = persistence().await;
+    let store = row_store().await;
     let fences = open_and_claim(&store, &[("k1", "owner-a"), ("k2", "owner-b")]).await;
 
     let (first, second) = (terminal("k1"), terminal("k2"));
@@ -180,7 +180,7 @@ async fn concurrent_finalize_allocates_distinct_settlement_sequences() {
 /// first and the counter moves only on rowcount 1.
 #[tokio::test]
 async fn a_fence_miss_allocates_nothing() {
-    let store = persistence().await;
+    let store = row_store().await;
     let fences = open_and_claim(&store, &[("k1", "owner-a")]).await;
     let stale = EffectLeaseFence {
         lease_token: "token-superseded".to_string(),
@@ -214,7 +214,7 @@ async fn a_fence_miss_allocates_nothing() {
 /// sequence is the (n+1)-th settlement even when the numbers are not contiguous.
 #[tokio::test]
 async fn settlements_are_read_by_rank_not_by_sequence_value() {
-    let store = persistence().await;
+    let store = row_store().await;
     let fences = open_and_claim(&store, &[("k1", "owner-a"), ("k2", "owner-b")]).await;
     for fence in &fences {
         store
@@ -264,7 +264,7 @@ async fn settlements_are_read_by_rank_not_by_sequence_value() {
 /// outliving their group settle against a missing allocator.
 #[tokio::test]
 async fn retirement_removes_a_group_and_its_children_together() {
-    let store = persistence().await;
+    let store = row_store().await;
     let fences = open_and_claim(&store, &[("k1", "owner-a"), ("k2", "owner-b")]).await;
     store
         .finalize(&fences[0], &terminal("k1"))
@@ -300,7 +300,7 @@ async fn retirement_removes_a_group_and_its_children_together() {
 /// boundary rather than only its key.
 #[tokio::test]
 async fn unsettled_children_are_exactly_the_children_without_a_rank() {
-    let store = persistence().await;
+    let store = row_store().await;
     let fences = open_and_claim(&store, &[("k1", "owner-a"), ("k2", "owner-b")]).await;
 
     let unsettled = store
@@ -374,7 +374,7 @@ async fn unsettled_children_are_exactly_the_children_without_a_rank() {
 /// gets back is the first open's, not its own.
 #[tokio::test]
 async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered() {
-    let store = persistence().await;
+    let store = row_store().await;
     let recorded = store
         .open_group(&group_record())
         .await

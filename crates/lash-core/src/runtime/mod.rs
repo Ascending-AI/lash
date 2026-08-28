@@ -144,7 +144,7 @@ pub use clock::{Clock, SystemClock};
 pub use effect::{
     AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
     BoundaryReason, CanonicalRuntimeEffectEnvelope, CausalRef, CheckpointClaimSet,
-    ChildDrainOutcome, CompletionKeyPreparation, DrainedChild, EffectGroupDrain, EffectGroupHandle,
+    ChildDrainOutcome, CompletionKeyPreparation, DrainedChild, EffectGroupHandle,
     EffectGroupMembership, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     ExecutionScope, ExternalCompletionError, GroupDrainReport, GroupExecutors, GroupSettlement,
     GroupWakePolicy, LlmAttachmentSpec, LlmRequestSpec, LoserPolicy, NativeEffectHost,
@@ -157,10 +157,10 @@ pub use effect::{
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
     RuntimeEffectReplayTrace, RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay,
     RuntimeReplayAttribution, RuntimeScope, RuntimeSleepOptions, RuntimeSubject,
-    ScopedEffectController, SegmentProgress, ToolAttemptEffectOutcome, ToolAttemptLaunch,
-    ToolBatchEffectOutcome, ToolCallLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding, TurnControlParticipation,
-    refuse_unhonored_group_membership, validate_replayed_effect_envelope,
+    ScopedEffectController, SegmentProgress, StoreEffectGroupDrain, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch, ToolIntentOutcomeSink,
+    ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution, TurnControlBinding,
+    TurnControlParticipation, refuse_unhonored_group_membership, validate_replayed_effect_envelope,
 };
 pub(crate) use effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use environment::{ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};

@@ -36,7 +36,7 @@ pub use group::{
     RuntimeEffectGroup, refuse_unhonored_group_membership,
 };
 pub use group_drain::{
-    ChildDrainOutcome, DrainedChild, EffectGroupDrain, GroupDrainReport, GroupExecutors,
+    ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,
 };
 pub use lash_sansio::CausalRef;
 pub use native_host::NativeEffectHost;

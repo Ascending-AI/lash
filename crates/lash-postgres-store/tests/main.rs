@@ -8,8 +8,6 @@ mod attempt_atomicity;
 mod checkpoint_commit_delete_race;
 #[path = "commit_size_benchmark.rs"]
 mod commit_size_benchmark;
-#[path = "effect_group_drain_conformance.rs"]
-mod effect_group_drain_conformance;
 #[path = "orphaned_tombstone_reclaim.rs"]
 mod orphaned_tombstone_reclaim;
 #[path = "postgres_clock_contract.rs"]
@@ -28,3 +26,5 @@ mod queued_work_ordering;
 mod refcount_benchmark;
 #[path = "session_execution_lease_renewal.rs"]
 mod session_execution_lease_renewal;
+#[path = "store_effect_group_drain_conformance.rs"]
+mod store_effect_group_drain_conformance;

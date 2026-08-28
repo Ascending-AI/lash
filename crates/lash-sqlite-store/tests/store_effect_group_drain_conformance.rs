@@ -58,5 +58,5 @@ async fn sqlite_effect_host_satisfies_the_loser_drain_contract() {
         let path = path.clone();
         Box::pin(async move { world(path, spec).await })
     });
-    lash_core::testing::conformance::effect_group_drain_conformance(make).await;
+    lash_core::testing::conformance::store_effect_group_drain_conformance(make).await;
 }
