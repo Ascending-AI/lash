@@ -865,6 +865,10 @@ pub(crate) async fn build_runtime_with_store(
             if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
                 builder = builder
                     .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
+            } else {
+                // The globals benchmark runs storeless; native queued work
+                // requires a store factory, so the choice is made explicit.
+                builder = builder.without_queued_work();
             }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
@@ -904,6 +908,10 @@ pub(crate) async fn build_runtime_with_store(
             if !matches!(scenario, RuntimePerfScenario::RlmGlobals) {
                 builder = builder
                     .store_factory(Arc::new(RuntimePerfStoreFactory::new(Arc::clone(&store))));
+            } else {
+                // The globals benchmark runs storeless; native queued work
+                // requires a store factory, so the choice is made explicit.
+                builder = builder.without_queued_work();
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
