@@ -305,9 +305,13 @@ fn ingress_group_error(
     operation: &str,
     error: crate::RestateHttpError,
 ) -> RuntimeEffectControllerError {
-    group_shape_error(format!(
-        "Restate effect-group operation {operation} failed (verify the required services are registered): {error}"
-    ))
+    let service_unregistered = error.is_service_unregistered();
+    let message = format!("Restate effect-group operation {operation} failed: {error}");
+    if service_unregistered {
+        RuntimeEffectControllerError::new(RuntimeErrorCode::RestateServiceUnregistered, message)
+    } else {
+        group_shape_error(message)
+    }
 }
 
 #[async_trait::async_trait]
@@ -738,5 +742,34 @@ impl RuntimeEffectController for RestateEffectHostController {
                     .unwrap_or_else(|| envelope.command.kind().as_str())
             ),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn service_call_error(status: u16) -> crate::RestateHttpError {
+        crate::RestateHttpError::Status {
+            operation: "Restate object call",
+            url: "https://restate.invalid/EffectGroupIndex/group/probe".to_string(),
+            status,
+            body: "not found".to_string(),
+        }
+    }
+
+    #[test]
+    fn effect_group_ingress_404_is_restate_service_unregistered() {
+        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(404));
+
+        assert_eq!(error.code, RuntimeErrorCode::RestateServiceUnregistered);
+        assert!(error.message.contains("EffectGroupIndex/probe"));
+    }
+
+    #[test]
+    fn effect_group_ingress_non_registration_failure_stays_a_shape_error() {
+        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(503));
+
+        assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
     }
 }
