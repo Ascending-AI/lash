@@ -15,7 +15,8 @@ use restate_sdk::endpoint::Endpoint;
 use restate_sdk::http_server::HttpServer;
 
 use crate::effect_group::{
-    admit_wait_request, decode_wait_resolution, payload_key, rank_wait_request, ready_wait_request,
+    EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
+    payload_key, rank_wait_request, ready_wait_request,
 };
 use crate::{
     EffectGroupAdmissionRequest, EffectGroupAdmissionResponse, EffectGroupAdoptRequest,
@@ -352,20 +353,35 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         .await
         .expect("admission witness adopts dispatcher");
     assert_eq!(adopted, EffectGroupProbeAdoptResponse::Adopted);
-    let admission = EffectGroupAdmissionRequest {
-        position: 0,
-        invocation_id: "inv_admission_child".to_owned(),
-    };
-    let first_admit: EffectGroupAdmissionResponse = ingress
-        .call_object_json(
-            "EffectGroupIndex",
+    let admission_executions = Arc::new(AtomicUsize::new(0));
+    let child_executions = Arc::clone(&admission_executions);
+    witness_executors.stage(
+        &admission_child,
+        RuntimeEffectLocalExecutor::testing(move |_| async move {
+            child_executions.fetch_add(1, Ordering::SeqCst);
+            Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                value: serde_json::json!({ "witness": "fresh-admission" }),
+            })
+        }),
+    );
+    let first_admit = arm_admission_witness(&admission_group);
+    let child_invocation = ingress
+        .send_workflow_json(
+            "EffectGroupDispatch",
             &admission_group,
-            "admit_child",
-            &admission,
+            "child",
+            &EffectGroupChildRequest {
+                group_key: admission_group.clone(),
+                shape: admission_shape.clone(),
+                position: 0,
+                envelope: admission_child,
+            },
         )
         .await
-        .expect("pre-record admission answers");
-    assert_eq!(first_admit, EffectGroupAdmissionResponse::NotYetRecorded);
+        .expect("send-before-record child is accepted");
+    tokio::time::timeout(Duration::from_secs(10), first_admit.notified())
+        .await
+        .expect("child reaches NotYetRecorded before dispatcher redrive");
     let recorded: EffectGroupRecordDispatchResponse = ingress
         .call_object_json(
             "EffectGroupIndex",
@@ -373,7 +389,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
             "record_dispatch",
             &EffectGroupRecordDispatchRequest {
                 position: 0,
-                invocation_id: admission.invocation_id.clone(),
+                invocation_id: child_invocation.as_str().to_owned(),
             },
         )
         .await
@@ -388,16 +404,20 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         EffectGroupWaitResolution::Admit,
         "record-before-register retains the ADMIT notification"
     );
-    let fresh_admit: EffectGroupAdmissionResponse = ingress
-        .call_object_json(
-            "EffectGroupIndex",
-            &admission_group,
-            "admit_child",
-            &admission,
+    assert_eq!(
+        await_group_wait(
+            &ingress,
+            rank_wait_request(&admission_shape.wait_scope, &admission_group, 1).unwrap()
         )
-        .await
-        .expect("fresh post-wake admission answers");
-    assert_eq!(fresh_admit, EffectGroupAdmissionResponse::Admitted);
+        .await,
+        EffectGroupWaitResolution::Rank,
+        "fresh admission executes and records a settlement"
+    );
+    assert_eq!(
+        admission_executions.load(Ordering::SeqCst),
+        1,
+        "the crash-before-record child executes exactly once"
+    );
     let retired: EffectGroupRetireResponse = ingress
         .call_object_empty_json("EffectGroupIndex", &admission_group, "retire")
         .await
@@ -407,7 +427,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         | EffectGroupRetireResponse::AlreadyRetired { cleanup } => cleanup,
         other => panic!("admission witness expected cleanup facts, got {other:?}"),
     };
-    assert_admission_enumerated(&cleanup, &admission.invocation_id);
+    assert_admission_enumerated(&cleanup, child_invocation.as_str());
 
     let gap_group = witness_key("gap");
     let gap_child = witness_child(&gap_group, 0);

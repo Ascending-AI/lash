@@ -39,6 +39,10 @@ const INDEX_STATE_KEY: &str = "effect-group/v1/state";
 const PAYLOAD_STATE_KEY: &str = "effect-group/v1/payload";
 const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 
+#[cfg(test)]
+static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
+    std::sync::OnceLock::new();
+
 mod btree_map_as_pairs {
     use std::collections::BTreeMap;
 
@@ -538,6 +542,29 @@ pub(crate) fn admit_wait_request(
         .map_err(|error| group_shape_error(error.to_string()))
 }
 
+#[cfg(test)]
+pub(crate) fn arm_admission_witness(group_key: &str) -> Arc<tokio::sync::Notify> {
+    let hook = Arc::new(tokio::sync::Notify::new());
+    ADMISSION_WITNESSES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(group_key.to_owned(), Arc::clone(&hook));
+    hook
+}
+
+#[cfg(test)]
+fn notify_admission_witness(group_key: &str) {
+    if let Some(hook) = ADMISSION_WITNESSES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .remove(group_key)
+    {
+        hook.notify_one();
+    }
+}
+
 fn wait_resolution(value: EffectGroupWaitResolution) -> Result<Resolution, TerminalError> {
     serde_json::to_value(value)
         .map(Resolution::Ok)
@@ -844,6 +871,8 @@ impl EffectGroupIndex {
         ctx: ObjectContext<'_>,
         Json(request): Json<EffectGroupAdmissionRequest>,
     ) -> HandlerResult<Json<EffectGroupAdmissionResponse>> {
+        #[cfg(test)]
+        let group_key = ctx.key().to_string();
         let Some(record) = load_index(&ctx).await? else {
             return Ok(Json(EffectGroupAdmissionResponse::Refused));
         };
@@ -879,6 +908,10 @@ impl EffectGroupIndex {
             EffectGroupLifecycle::Preparing { .. } => EffectGroupAdmissionResponse::NotYetRecorded,
             EffectGroupLifecycle::Retired { .. } => EffectGroupAdmissionResponse::Retired,
         };
+        #[cfg(test)]
+        if response == EffectGroupAdmissionResponse::NotYetRecorded {
+            notify_admission_witness(&group_key);
+        }
         Ok(Json(response))
     }
 
