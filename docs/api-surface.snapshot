@@ -5077,6 +5077,7 @@ lash::process::ProcessWorkSubstrate
 lash::process::ProcessWorkSubstrate::admit_pending_processes
 lash::process::ProcessWorkSubstrate::await_process_terminal
 lash::process::ProcessWorkWiring
+lash::process::ProcessWorkWiring::admit_pending_processes
 lash::process::ProcessWorkWiring::new
 lash::process::ProcessWorkerFault
 lash::process::ProcessWorkerFault::RecoveryBackendError

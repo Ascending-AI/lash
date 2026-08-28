@@ -121,6 +121,19 @@ impl ProcessWorkWiring {
         }
     }
 
+    /// Ask the bound substrate to admit this owner's claimable pending processes.
+    ///
+    /// A host calls this after its process endpoint is ready, or whenever
+    /// deployment recovery should be driven. The returned
+    /// [`ProcessAdmissionReport`] describes admission, not completion: admitted
+    /// processes may still be running when this future resolves.
+    pub async fn admit_pending_processes(
+        &self,
+        reason: &str,
+    ) -> Result<ProcessAdmissionReport, PluginError> {
+        self.port.admit_pending_processes(reason).await
+    }
+
     pub(crate) fn registry(&self) -> &Arc<dyn ProcessRegistry> {
         self.watched.registry()
     }
