@@ -601,7 +601,8 @@ fn assert_admission_enumerated(cleanup: &EffectGroupCleanupFacts, invocation_id:
 }
 
 fn required(name: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set by the orb gate"))
+    std::env::var(name)
+        .unwrap_or_else(|_| panic!("{name} must be set by `just effect-group-conformance-e2e`"))
 }
 
 async fn wait_for_endpoint(addr: SocketAddr) {

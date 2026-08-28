@@ -363,6 +363,46 @@ jobs:
         )
         self.assertEqual(checker.check_repository(self.root), [])
 
+    def test_a_registered_filter_without_the_opt_in_fails(self) -> None:
+        """An in-crate live suite is selected by name, not by a test binary."""
+        justfile = self.root / "justfile"
+        justfile.write_text(
+            "cargo test -p lash-internal-restate --locked"
+            " live_restate_effect_group_conformance -- --nocapture\n",
+            encoding="utf-8",
+        )
+        violations = checker.check_repository(self.root)
+        self.assertEqual(len(violations), 1, violations)
+        self.assertIn("live_restate_effect_group_conformance", violations[0].detail)
+
+    def test_a_registered_filter_with_the_ignored_flag_passes(self) -> None:
+        justfile = self.root / "justfile"
+        justfile.write_text(
+            "cargo test -p lash-internal-restate --locked"
+            " live_restate_effect_group_conformance -- --ignored --nocapture\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(checker.check_repository(self.root), [])
+
+    def test_the_sdk_precondition_filter_is_registered_too(self) -> None:
+        scripts = self.root / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "gate.sh").write_text(
+            "cargo test -p lash-internal-restate live_effect_group_sdk_preconditions\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(len(checker.check_repository(self.root)), 1)
+
+    def test_a_prefix_of_a_registered_filter_is_not_matched(self) -> None:
+        """The agent-workbench recipe's `live_restate_` prefix is a different run."""
+        scripts = self.root / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "gate.sh").write_text(
+            "cargo test -p lash-internal-restate live_restate_effect_group\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(checker.check_repository(self.root), [])
+
     def test_unrelated_test_binaries_are_left_alone(self) -> None:
         scripts = self.root / "scripts"
         scripts.mkdir(parents=True)

@@ -216,6 +216,77 @@ agent-workbench-restate-e2e:
   fi
   echo "panic gate: clean (no 'panicked at' lines in agent-workbench Restate E2E output)"
 
+# The regression gate for the Restate effect-group choreography. Both suites it
+# runs are `#[ignore]`d because they need an isolated Restate server, so this
+# recipe is the only thing that runs them: `scripts/check_service_gate_pinning.py`
+# pins the `--ignored` opt-in here so a future edit cannot turn the leg into an
+# invocation that selects them and runs none.
+effect-group-conformance-e2e:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  source "{{repo}}/scripts/worktree-gate-env.sh"
+  lash_gate_acquire effect-group-conformance-e2e
+  image="${EFFECT_GROUP_RESTATE_IMAGE:-restatedev/restate:1.7.0}"
+  container="${EFFECT_GROUP_RESTATE_CONTAINER:-lash-effect-group-restate-${LASH_GATE_WORKTREE_SLUG}}"
+  admin_port="${EFFECT_GROUP_RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 35))}"
+  ingress_port="${EFFECT_GROUP_RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 36))}"
+  node_port="${EFFECT_GROUP_RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 37))}"
+  endpoint_bind="${EG_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((LASH_E2E_PORT_BASE + 38))}"
+  endpoint_url="${EG_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 38))}"
+  sdk_endpoint_bind="${EG0_RESTATE_ENDPOINT_BIND:-127.0.0.1:$((LASH_E2E_PORT_BASE + 39))}"
+  sdk_endpoint_url="${EG0_RESTATE_ENDPOINT_URL:-http://127.0.0.1:$((LASH_E2E_PORT_BASE + 39))}"
+  admin_url="${RESTATE_ADMIN_URL:-http://127.0.0.1:$admin_port}"
+  ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$ingress_port}"
+
+  cleanup() {
+    docker rm -f "$container" >/dev/null 2>&1 || true
+    lash_gate_cleanup
+  }
+  trap cleanup EXIT
+
+  bash "{{repo}}/scripts/docker-pull-with-retry.sh" "$image"
+
+  docker run -d --name "$container" --label "$LASH_GATE_LABEL" --network host \
+    -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
+    -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
+    -e RESTATE_BIND_PORT="$node_port" \
+    "$image" >/dev/null
+
+  deadline=$((SECONDS + 60))
+  until (echo >"/dev/tcp/127.0.0.1/$admin_port") >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      docker logs "$container" >&2 || true
+      echo "Restate admin port $admin_port did not become ready" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  until (echo >"/dev/tcp/127.0.0.1/$ingress_port") >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      docker logs "$container" >&2 || true
+      echo "Restate ingress port $ingress_port did not become ready" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+
+  # The SDK preconditions run first: they are the cheap witnesses for the
+  # Restate behaviours the choreography is built on, so a broken assumption
+  # fails in thirty seconds instead of four minutes.
+  RESTATE_INGRESS_URL="$ingress_url" \
+  RESTATE_ADMIN_URL="$admin_url" \
+  EG0_RESTATE_ENDPOINT_BIND="$sdk_endpoint_bind" \
+  EG0_RESTATE_ENDPOINT_URL="$sdk_endpoint_url" \
+  cargo test -p lash-internal-restate --locked \
+    live_effect_group_sdk_preconditions -- --ignored --nocapture --test-threads=1
+
+  RESTATE_INGRESS_URL="$ingress_url" \
+  RESTATE_ADMIN_URL="$admin_url" \
+  EG_RESTATE_ENDPOINT_BIND="$endpoint_bind" \
+  EG_RESTATE_ENDPOINT_URL="$endpoint_url" \
+  cargo test -p lash-internal-restate --locked \
+    live_restate_effect_group_conformance -- --ignored --nocapture --test-threads=1
+
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
 

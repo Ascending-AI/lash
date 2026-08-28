@@ -177,7 +177,7 @@ struct SendResponse {
 }
 
 #[test]
-#[ignore = "requires an isolated Restate server; run through the EG0 orb gate"]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 fn live_effect_group_sdk_preconditions() {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -194,7 +194,7 @@ async fn run_live_witnesses() {
     let ingress_url = required_url("RESTATE_INGRESS_URL");
     let admin_url = required_url("RESTATE_ADMIN_URL");
     let bind_addr = std::env::var("EG0_RESTATE_ENDPOINT_BIND")
-        .expect("EG0_RESTATE_ENDPOINT_BIND must be set by the orb gate")
+        .expect("EG0_RESTATE_ENDPOINT_BIND must be set by `just effect-group-conformance-e2e`")
         .parse::<SocketAddr>()
         .expect("valid EG0_RESTATE_ENDPOINT_BIND");
     let endpoint_url = required_url("EG0_RESTATE_ENDPOINT_URL");
@@ -281,7 +281,7 @@ async fn run_live_witnesses() {
 
 fn required_url(name: &str) -> String {
     std::env::var(name)
-        .unwrap_or_else(|_| panic!("{name} must be set by the orb gate"))
+        .unwrap_or_else(|_| panic!("{name} must be set by `just effect-group-conformance-e2e`"))
         .trim_end_matches('/')
         .to_string()
 }

@@ -14,12 +14,15 @@ a job that provisions a service and forgets the flag skips green whenever the
 service fails to start -- which is exactly what the release and perf legs did
 before FIG-1217.
 
-Rule 2 -- the ignored-suite opt-in. The cross-backend differential's tests are
+Rule 2 -- the ignored-suite opt-in. A service-backed suite's tests are
 ``#[ignore]``d so a bare local run reports them as skipped instead of passing
 without comparing anything. That makes every invocation that *does* provision a
 service responsible for asking for them by name: ``--run-ignored`` for nextest,
-``--include-ignored`` for a libtest harness. An invocation that names the test
-binary without either flag runs zero of its tests and still exits 0.
+``--include-ignored`` or ``--ignored`` for a libtest harness. An invocation that
+selects such a suite without one of those flags runs zero of its tests and still
+exits 0. The registry below carries both ways a suite is selected -- an
+integration target by its test binary, an in-crate suite by its test-name
+filter -- so a suite added in either shape is covered by the same rule.
 
 Scope, stated rather than implied. Rule 1 covers GitHub workflow ``env``
 mappings only. Shell scripts also export these variables, but they do so around
@@ -54,21 +57,40 @@ REQUIRE_FLAG_PAIRS = {
     "LASH_MINIO_ENDPOINT": "LASH_REQUIRE_MINIO",
 }
 
-# The test binary whose tests are `#[ignore]`d, and the flags that ask for them.
+# The suites whose tests are `#[ignore]`d, and the flags that ask for them.
 #
-# Both matchers are deliberately token-exact rather than substring searches. A
+# Two ways a suite names itself. A separate integration target is selected by
+# its test binary (`--test <binary>`); a suite that lives in a crate's own test
+# module has no binary of its own and is selected by a test-name filter, which
+# cargo and nextest both take as a bare positional argument. Both spellings are
+# registered, because either one names a suite that runs zero tests and exits 0
+# without the ignored opt-in.
+#
+# All matchers are deliberately token-exact rather than substring searches. A
 # substring rule is one token away from being evaded in either direction:
 # `--test=<binary>` names the same binary without ever containing
 # "--test <binary>", and `--run-ignored default` contains "--run-ignored" while
 # running exactly zero ignored tests. Either would have restored the defect this
 # check exists to refuse, under a diff that reads like a no-op.
-IGNORED_SUITE_BINARY = "cross_backend_store_differential"
+IGNORED_SUITE_BINARIES = ("cross_backend_store_differential",)
+
+# Test-name filters that select an `#[ignore]`d suite. Both live in
+# `lash-internal-restate` and are run only by the `effect-group-conformance-e2e`
+# recipe, which is what holds the effect-group choreography to its conformance
+# and design witnesses.
+IGNORED_SUITE_FILTERS = (
+    "live_restate_effect_group_conformance",
+    "live_effect_group_sdk_preconditions",
+)
 
 # nextest's `--run-ignored` takes a mode, and only these two run ignored tests;
 # `default` runs none. libtest's `--include-ignored` takes no value.
 NEXTEST_RUN_IGNORED = "--run-ignored"
 NEXTEST_RUN_IGNORED_MODES = ("all", "ignored-only")
 LIBTEST_INCLUDE_IGNORED = "--include-ignored"
+# libtest's other opt-in: `--ignored` runs the ignored tests and nothing else,
+# which is what a gate leg dedicated to one live suite asks for.
+LIBTEST_IGNORED_ONLY = "--ignored"
 
 # Files rule 2 sweeps beyond the workflows. The globs are recursive and cover
 # both YAML spellings so a script or workflow filed one directory deeper does
@@ -176,18 +198,24 @@ def shell_commands(text: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in parts if part.strip())
 
 
-def names_ignored_suite(tokens: list[str]) -> bool:
-    """Whether a tokenized command selects the ignored suite's test binary.
+def names_ignored_suite(tokens: list[str]) -> str | None:
+    """The ignored suite a tokenized command selects, if it selects one.
 
-    Both spellings count: `--test <binary>` and `--test=<binary>`.
+    A binary counts in both spellings, `--test <binary>` and `--test=<binary>`.
+    A test-name filter counts wherever it appears as its own token, which is how
+    both cargo and nextest take one -- and matching it token-exact anywhere is
+    what keeps a reordered invocation from slipping past the rule.
     """
     for index, token in enumerate(tokens):
         if token == "--test" and index + 1 < len(tokens):
-            if tokens[index + 1] == IGNORED_SUITE_BINARY:
-                return True
-        elif token == f"--test={IGNORED_SUITE_BINARY}":
-            return True
-    return False
+            if tokens[index + 1] in IGNORED_SUITE_BINARIES:
+                return tokens[index + 1]
+            continue
+        if token.startswith("--test=") and token.split("=", 1)[1] in IGNORED_SUITE_BINARIES:
+            return token.split("=", 1)[1]
+        if token in IGNORED_SUITE_FILTERS:
+            return token
+    return None
 
 
 def requests_ignored_tests(tokens: list[str]) -> bool:
@@ -198,7 +226,7 @@ def requests_ignored_tests(tokens: list[str]) -> bool:
     rather than the flag's presence.
     """
     for index, token in enumerate(tokens):
-        if token == LIBTEST_INCLUDE_IGNORED:
+        if token in (LIBTEST_INCLUDE_IGNORED, LIBTEST_IGNORED_ONLY):
             return True
         if token == NEXTEST_RUN_IGNORED and index + 1 < len(tokens):
             if tokens[index + 1] in NEXTEST_RUN_IGNORED_MODES:
@@ -218,7 +246,8 @@ def check_ignored_suite_commands(
     for location, text in fragments:
         for command in shell_commands(text):
             tokens = command.split()
-            if not names_ignored_suite(tokens):
+            suite = names_ignored_suite(tokens)
+            if suite is None:
                 continue
             if requests_ignored_tests(tokens):
                 continue
@@ -227,8 +256,8 @@ def check_ignored_suite_commands(
                     path=str(path),
                     location=location,
                     detail=(
-                        f"runs the cross-backend differential without {modes} "
-                        f"or {LIBTEST_INCLUDE_IGNORED}; its tests are "
+                        f"selects `{suite}` without {modes}, "
+                        f"{LIBTEST_INCLUDE_IGNORED} or {LIBTEST_IGNORED_ONLY}; its tests are "
                         "`#[ignore]`d, so this invocation runs none of them and "
                         "still exits 0."
                     ),

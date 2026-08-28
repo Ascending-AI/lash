@@ -4860,7 +4860,7 @@ async fn restate_turn_crash_matrix_level_1_conformance() {
 }
 
 #[test]
-#[ignore = "requires an isolated Restate server; run through the effect-group orb gate"]
+#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 fn live_restate_effect_group_conformance() {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

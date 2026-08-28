@@ -1720,6 +1720,12 @@ jobs:
             artifact: none
             browser: false
             runner: ubuntu-24.04
+          - name: effect-group-conformance
+            recipe: effect-group-conformance-e2e
+            node: false
+            artifact: none
+            browser: false
+            runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
             node: true
