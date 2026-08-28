@@ -96,6 +96,7 @@ impl WakeDeliveryDriver {
             delivery_policy,
             WorkCadencePolicy::default(),
         )
+        .expect("default work cadence is valid")
     }
 
     pub(crate) fn with_work_cadence(
@@ -105,7 +106,8 @@ impl WakeDeliveryDriver {
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
         work_cadence: WorkCadencePolicy,
-    ) -> Self {
+    ) -> Result<Self, crate::NativeSubstrateConfigError> {
+        work_cadence.validate()?;
         let driver = Self {
             inner: Arc::new(WakeDeliveryDriverInner {
                 registry,
@@ -126,7 +128,7 @@ impl WakeDeliveryDriver {
         driver.lifetime.tasks.spawn(async move {
             Self::run_loop(inner, shutdown).await;
         });
-        driver
+        Ok(driver)
     }
 
     /// Wake the autonomous loop after a process append commits an outbox row.
@@ -614,7 +616,33 @@ impl WakeDeliveryDriver {
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkCadencePolicy, retry_delay_ms};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use super::{WakeDeliveryDriver, WorkCadencePolicy, retry_delay_ms};
+
+    #[test]
+    fn terminal_constructor_rejects_zero_poll_delay_directly() {
+        let work_cadence = WorkCadencePolicy {
+            poll_initial: Duration::ZERO,
+            ..WorkCadencePolicy::default()
+        };
+
+        let Err(error) = WakeDeliveryDriver::with_work_cadence(
+            Arc::new(crate::TestLocalProcessRegistry::default()),
+            Arc::new(crate::InMemorySessionStoreFactory::new()),
+            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::SystemClock),
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+            work_cadence,
+        ) else {
+            panic!("terminal wake-delivery construction must reject zero-delay polling");
+        };
+        assert!(
+            error.to_string().contains("work_cadence.poll_initial"),
+            "error must identify the rejected poll field: {error}"
+        );
+    }
 
     #[test]
     fn retry_delay_is_bounded_for_every_attempt_count() {

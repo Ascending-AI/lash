@@ -550,13 +550,10 @@ pub mod facade_support {
         concurrency: usize,
         work_cadence: crate::runtime::WorkCadencePolicy,
     ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeQueuedWorkConfigError> {
-        work_cadence.validate()?;
-        Ok(
-            crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
-                run_handle,
-                concurrency,
-                work_cadence,
-            )?,
+        crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
+            run_handle,
+            concurrency,
+            work_cadence,
         )
     }
 
@@ -566,13 +563,10 @@ pub mod facade_support {
         supplier: std::sync::Arc<dyn crate::runtime::WorkerSlotSupplier>,
         work_cadence: crate::runtime::WorkCadencePolicy,
     ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeSubstrateConfigError> {
-        work_cadence.validate()?;
-        Ok(
-            crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
-                run_handle,
-                supplier,
-                work_cadence,
-            ),
+        crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
+            run_handle,
+            supplier,
+            work_cadence,
         )
     }
 
@@ -586,15 +580,14 @@ pub mod facade_support {
         work_cadence: crate::runtime::WorkCadencePolicy,
     ) -> Result<crate::runtime::WakeDeliveryDriver, crate::runtime::NativeSubstrateConfigError>
     {
-        work_cadence.validate()?;
-        Ok(crate::runtime::WakeDeliveryDriver::with_work_cadence(
+        crate::runtime::WakeDeliveryDriver::with_work_cadence(
             registry,
             session_store_factory,
             queued_work,
             clock,
             delivery_policy,
             work_cadence,
-        ))
+        )
     }
 }
 

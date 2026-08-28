@@ -100,6 +100,7 @@ impl NativeQueuedWork {
             None,
             WorkCadencePolicy::default(),
         )
+        .expect("default work cadence is valid")
     }
 
     /// Construct an inline reference-substrate driver with a host-selected
@@ -111,24 +112,29 @@ impl NativeQueuedWork {
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         concurrency: usize,
     ) -> Result<Self, QueuedWorkExecutionConcurrencyError> {
-        Self::with_execution_concurrency_and_work_cadence(
+        let concurrency = QueuedWorkExecutionConcurrency::new(concurrency)?;
+        Ok(Self::from_parts_with_work_cadence(
             run_handle,
-            concurrency,
+            CancellationToken::new(),
+            Some(concurrency),
             WorkCadencePolicy::default(),
         )
+        .expect("default work cadence is valid"))
     }
 
     pub(crate) fn with_execution_concurrency_and_work_cadence(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         concurrency: usize,
         work_cadence: WorkCadencePolicy,
-    ) -> Result<Self, QueuedWorkExecutionConcurrencyError> {
-        Ok(Self::from_parts_with_work_cadence(
+    ) -> Result<Self, NativeQueuedWorkConfigError> {
+        let concurrency = QueuedWorkExecutionConcurrency::new(concurrency)?;
+        Self::from_parts_with_work_cadence(
             run_handle,
             CancellationToken::new(),
-            Some(QueuedWorkExecutionConcurrency::new(concurrency)?),
+            Some(concurrency),
             work_cadence,
-        ))
+        )
+        .map_err(Into::into)
     }
 
     /// Construct an inline reference-substrate driver admitted by `supplier`.
@@ -142,13 +148,14 @@ impl NativeQueuedWork {
             supplier,
             WorkCadencePolicy::default(),
         )
+        .expect("default work cadence is valid")
     }
 
     pub(crate) fn with_worker_slot_supplier_and_work_cadence(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         supplier: Arc<dyn WorkerSlotSupplier>,
         work_cadence: WorkCadencePolicy,
-    ) -> Self {
+    ) -> Result<Self, NativeSubstrateConfigError> {
         Self::from_parts_with_supplier(
             run_handle,
             CancellationToken::new(),
@@ -170,6 +177,7 @@ impl NativeQueuedWork {
             ..WorkCadencePolicy::default()
         };
         Self::from_parts_with_work_cadence(run_handle, shutdown, concurrency, work_cadence)
+            .expect("test work cadence is valid")
     }
 
     pub(crate) fn from_parts_with_work_cadence(
@@ -177,7 +185,7 @@ impl NativeQueuedWork {
         shutdown: CancellationToken,
         concurrency: Option<QueuedWorkExecutionConcurrency>,
         work_cadence: WorkCadencePolicy,
-    ) -> Self {
+    ) -> Result<Self, NativeSubstrateConfigError> {
         Self::from_parts_with_supplier(run_handle, shutdown, concurrency, None, work_cadence)
     }
 
@@ -187,10 +195,11 @@ impl NativeQueuedWork {
         concurrency: Option<QueuedWorkExecutionConcurrency>,
         supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         work_cadence: WorkCadencePolicy,
-    ) -> Self {
+    ) -> Result<Self, NativeSubstrateConfigError> {
+        work_cadence.validate()?;
         let shutdown = shutdown.child_token();
         let wake_tasks = TaskTracker::new();
-        Self {
+        Ok(Self {
             inner: Arc::new(NativeQueuedWorkInner {
                 run_handle,
                 shutdown: shutdown.clone(),
@@ -208,7 +217,7 @@ impl NativeQueuedWork {
                 shutdown,
                 wake_tasks,
             }),
-        }
+        })
     }
 
     pub(crate) async fn claim_and_run_pending(

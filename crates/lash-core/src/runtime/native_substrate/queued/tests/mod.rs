@@ -595,6 +595,30 @@ struct AlwaysFailRunHandle {
     class: QueuedWorkRunErrorClass,
 }
 
+#[test]
+fn terminal_constructor_rejects_zero_retry_delay_directly() {
+    let work_cadence = WorkCadencePolicy {
+        retry_initial: Duration::ZERO,
+        ..WorkCadencePolicy::default()
+    };
+
+    let Err(error) = NativeQueuedWork::from_parts_with_work_cadence(
+        Arc::new(AlwaysFailRunHandle {
+            attempts: Arc::new(AtomicUsize::new(0)),
+            class: QueuedWorkRunErrorClass::Transient,
+        }),
+        CancellationToken::new(),
+        None,
+        work_cadence,
+    ) else {
+        panic!("terminal queued-work construction must reject zero-delay retries");
+    };
+    assert!(
+        error.to_string().contains("work_cadence.retry_initial"),
+        "error must identify the rejected retry field: {error}"
+    );
+}
+
 #[async_trait::async_trait]
 impl QueuedWorkRunHandle for AlwaysFailRunHandle {
     async fn run_queued_work(
@@ -666,7 +690,8 @@ async fn work_cadence_policy_limits_transient_wake_attempts() {
         CancellationToken::new(),
         None,
         work_cadence,
-    );
+    )
+    .expect("configured work cadence is valid");
 
     driver.notify_pending_work(Some("session-configured-limit"), "queued_turn_input");
     tokio::time::timeout(Duration::from_secs(5), async {
