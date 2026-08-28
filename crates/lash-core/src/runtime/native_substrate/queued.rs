@@ -87,12 +87,25 @@ impl Drop for NativeQueuedWorkLifetime {
 }
 
 impl NativeQueuedWork {
+    /// Check a host-selected admission bound without constructing a driver.
+    ///
+    /// Rejects the same values [`Self::with_execution_concurrency`] would,
+    /// so a host composing configuration ahead of wiring can refuse an
+    /// incoherent bound at read time instead of first surfacing it when the
+    /// substrate is built.
     pub fn validate_execution_concurrency(
         concurrency: usize,
     ) -> Result<(), QueuedWorkExecutionConcurrencyError> {
         QueuedWorkExecutionConcurrency::new(concurrency).map(drop)
     }
 
+    /// Construct a native reference-substrate driver with unbounded
+    /// admission and the default work cadence.
+    ///
+    /// This is the constructor for engine-backed submitters: their substrate
+    /// owns backpressure, and Lash only coalesces same-session
+    /// notifications. A host that wants Lash to bound admission uses
+    /// [`Self::with_execution_concurrency`] instead.
     pub fn new(run_handle: Arc<dyn QueuedWorkRunHandle>) -> Self {
         Self::from_parts_with_work_cadence(
             run_handle,

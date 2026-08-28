@@ -48,7 +48,7 @@ pub struct RuntimeEnvironment {
 
     /// Host-owned process lifecycle support.
     ///
-    /// This can be present while `work` is [`RuntimeWork::SessionsOnly`] in the
+    /// This can be present while `work` is `RuntimeWork::SessionsOnly` in the
     /// named registry-only state used by the facade's lazy native composition:
     /// facade/admin/session consumers use the watched registry before the
     /// native process port is resolved. Once process work is wired, this is the
