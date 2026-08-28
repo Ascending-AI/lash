@@ -67,7 +67,7 @@ where
     let prefix = format!("group-conformance-{}", uuid::Uuid::new_v4().simple());
     // Keep the drop-based cancellation witness first: it proves the host
     // actually stops a live loser, not merely that it records Cancelled.
-    cancel_stops_the_losers_and_closes_the_caller_out(&make, &prefix).await;
+    cancel_stops_the_losers(&make, &prefix).await;
     an_unregistered_host_reports_no_groups_and_refuses_all_three(&unwired, &prefix).await;
     a_refused_open_journals_nothing(&unwired, &make, &prefix).await;
     a_child_with_no_runner_refuses_the_open_and_refuses_the_retry(&make, &prefix).await;
@@ -780,22 +780,42 @@ async fn run_to_completion_losers_settle_after_the_caller_is_gone<F: Fn() -> Hos
         .await
         .expect("the caller closes and moves on");
 
+    let mut same_host =
+        EffectGroupHandle::restored(key.as_str(), 2, 1).expect("the cursor restores");
+    let error = next(&scoped, &mut same_host)
+        .await
+        .expect_err("the closing host must observe the closed group at an absent rank");
+    assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeEffectGroupShape);
+    println!("EFFECT_GROUP_CLOSURE_LAW same_host_closed_read PASS");
+
+    // A second host has no process-local memory of the close. Its identical
+    // answer therefore witnesses that durable substrates retain the lifecycle
+    // fact across a restart, while the same-host assertion above keeps this law
+    // non-vacuous for hosts whose fresh instance has no registered group.
+    let resumed = make();
+    let resumed_scope = resumed
+        .scoped(scope(prefix, "run-resumed"))
+        .expect("a scope binds on the resuming host");
+    let mut fresh_host =
+        EffectGroupHandle::restored(key.as_str(), 2, 1).expect("the cursor restores");
+    let error = next(&resumed_scope, &mut fresh_host)
+        .await
+        .expect_err("a fresh host must observe the durable close at an absent rank");
+    assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeEffectGroupShape);
+    println!("EFFECT_GROUP_CLOSURE_LAW fresh_host_closed_read PASS");
+
     loser.release();
     until(|| loser.finished() == 1).await;
 }
 
-/// `Cancel`: the losers stop, and the caller that closed may observe nothing
-/// further.
+/// `Cancel`: the losers stop.
 ///
 /// The journaled half — each cancelled child holding its cancellation as its
 /// *terminal* — is a durable fact, asserted by
 /// [`effect_group_cancelled_child_terminal_is_durable`] from each store's own
-/// tests. What every tier owes here is that the loser does not go
-/// on to complete and that a closed group is closed to its caller.
-async fn cancel_stops_the_losers_and_closes_the_caller_out<F: Fn() -> Host>(
-    make: &F,
-    prefix: &str,
-) {
+/// tests. What every tier owes here is that the loser does not go on to
+/// complete.
+async fn cancel_stops_the_losers<F: Fn() -> Host>(make: &F, prefix: &str) {
     let host = make();
     let scoped = host.scoped(scope(prefix, "cancel")).expect("a scope binds");
     let key = group_key(prefix, "cancel");
@@ -812,7 +832,6 @@ async fn cancel_stops_the_losers_and_closes_the_caller_out<F: Fn() -> Host>(
     next(&scoped, &mut handle)
         .await
         .expect("the winner settles");
-    let replayed = EffectGroupHandle::restored(key.as_str(), 3, 1).expect("the cursor restores");
     loser.wait_until_waiting().await;
     close(&scoped, handle, LoserPolicy::Cancel)
         .await
@@ -829,12 +848,6 @@ async fn cancel_stops_the_losers_and_closes_the_caller_out<F: Fn() -> Host>(
         0,
         "a cancelled child must not go on to complete"
     );
-
-    let mut replayed = replayed;
-    let error = next(&scoped, &mut replayed)
-        .await
-        .expect_err("a closed group must serve its caller no further settlements");
-    assert_eq!(error.code, crate::RuntimeErrorCode::RuntimeEffectGroupShape);
 }
 
 /// Close may narrow the declared disposition and may never widen it: a

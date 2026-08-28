@@ -6,8 +6,7 @@
 //! revokes waits through the ingress and fails loudly for anything else instead
 //! of falling back to native execution.
 
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
@@ -54,7 +53,6 @@ impl RestateEffectHost {
                 await_event_ingress: RestateAwaitEventIngress {
                     ingress: RestateIngressClient::new(connection),
                 },
-                closed_effect_groups: Mutex::new(HashSet::new()),
             }),
         }
     }
@@ -301,7 +299,6 @@ async fn await_restate_await_event_via_ingress(
 }
 struct RestateEffectHostController {
     await_event_ingress: RestateAwaitEventIngress,
-    closed_effect_groups: Mutex<HashSet<String>>,
 }
 
 fn ingress_group_error(
@@ -531,17 +528,6 @@ impl RuntimeEffectController for RestateEffectHostController {
                 handle.children()
             )));
         }
-        if self
-            .closed_effect_groups
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(handle.group_key())
-        {
-            return Err(group_shape_error(format!(
-                "effect group {} is closed to this caller",
-                handle.group_key()
-            )));
-        }
         let ingress = &self.await_event_ingress.ingress;
         let rank = u64::try_from(handle.consumed() + 1).map_err(|error| {
             group_shape_error(format!("effect group rank does not fit u64: {error}"))
@@ -614,6 +600,12 @@ impl RuntimeEffectController for RestateEffectHostController {
                     handle.group_key()
                 )));
             }
+            EffectGroupReadRankResponse::Closed => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is closed to this caller",
+                    handle.group_key()
+                )));
+            }
             EffectGroupReadRankResponse::UnknownGroup => {
                 return Err(group_shape_error(format!(
                     "effect group {} is unknown",
@@ -680,13 +672,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/close", error))?;
         match response {
-            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => {
-                self.closed_effect_groups
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(group_key);
-                Ok(())
-            }
+            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => Ok(()),
             EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
                 "effect group {group_key} close attempted to widen its declared loser disposition"
             ))),
