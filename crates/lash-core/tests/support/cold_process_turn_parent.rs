@@ -1,6 +1,46 @@
 //! Shared parent-side SIGKILL matrix for backend full-turn helpers.
+//!
+//! # Why this file holds no wall-clock deadline
+//!
+//! Every wait here is an await on a *process event*: a line the helper prints
+//! when it reaches its semantic crash point, or the helper's own exit. Each of
+//! those events is already bounded by the helper's own semantic deadlines —
+//! `wait_for_hit`'s hit timeout for the crash actions, and the recovery
+//! lease-poll timeout for the recovery actions — which panic and so close
+//! stdout / exit the process. Wrapping those awaits in a second, *tighter*
+//! parent-side wall clock (this file used to spend 30s per wait against the
+//! helper's own 60s hit budget) inverts the layering: the outer watchdog can
+//! only ever fire on a healthy-but-slow helper, before the inner one has had a
+//! chance to say what actually went wrong. That is FIG-2174 — a 4-vcpu runner
+//! needed more than 30s to spawn a debug helper, run the SQLite migrations and
+//! drive the scripted turn to its first seam, and the parent killed a run that
+//! was making progress. It also produced the LEAK half of that report: a
+//! cancelled `timeout` drops the helper future without reaping the child.
+//!
+//! So the waits are event-driven and unbounded here, the helper's semantic
+//! deadlines bound each one, and the outermost bound is nextest's measured
+//! per-test ceiling (`profile.ci` `slow-timeout`/`terminate-after` in
+//! `.config/nextest.toml`), which releases the runner on a genuine hang.
+//! Helpers are additionally spawned `kill_on_drop`, so a panic on any parent
+//! assertion path reaps the child rather than leaking it.
 
 use tokio::io::{AsyncBufReadExt as _, BufReader};
+
+/// Build a helper command that is always reaped, even if the parent panics
+/// between spawn and the explicit kill.
+fn helper_command<F>(
+    command: &mut F,
+    action: &str,
+    nonce: &str,
+    marker: &std::path::Path,
+) -> tokio::process::Command
+where
+    F: FnMut(&str, &str, &std::path::Path) -> tokio::process::Command,
+{
+    let mut built = command(action, nonce, marker);
+    built.kill_on_drop(true);
+    built
+}
 
 pub async fn assert_real_turn_kill_recovery(
     tempdir: &std::path::Path,
@@ -11,15 +51,15 @@ pub async fn assert_real_turn_kill_recovery(
     {
         let nonce = uuid::Uuid::new_v4().to_string();
         let marker = tempdir.join(format!("{action}-{nonce}.log"));
-        let mut child = command(action, &nonce, &marker)
+        let mut child = helper_command(&mut command, action, &nonce, &marker)
             .stdout(std::process::Stdio::piped())
             .spawn()
             .unwrap_or_else(|error| panic!("spawn {action} real-turn helper: {error}"));
         let stdout = child.stdout.take().expect("real-turn helper stdout");
         let mut lines = BufReader::new(stdout).lines();
-        let ready = tokio::time::timeout(std::time::Duration::from_secs(30), lines.next_line())
+        let ready = lines
+            .next_line()
             .await
-            .unwrap_or_else(|_| panic!("{action} helper did not reach its semantic crash point"))
             .expect("read real-turn helper signal")
             .unwrap_or_else(|| panic!("{action} helper exited before its crash point"));
         assert_eq!(ready, "crash_ready", "unexpected {action} helper signal");
@@ -42,13 +82,10 @@ pub async fn assert_real_turn_kill_recovery(
             "{action} crash prefix"
         );
 
-        let recovered = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            command("turn_recover", &nonce, &marker).output(),
-        )
-        .await
-        .unwrap_or_else(|_| panic!("{action} recovery helper timed out"))
-        .unwrap_or_else(|error| panic!("spawn {action} recovery helper: {error}"));
+        let recovered = helper_command(&mut command, "turn_recover", &nonce, &marker)
+            .output()
+            .await
+            .unwrap_or_else(|error| panic!("spawn {action} recovery helper: {error}"));
         let recovery_stdout = String::from_utf8_lossy(&recovered.stdout);
         let recovery_stderr = String::from_utf8_lossy(&recovered.stderr);
         assert!(
@@ -72,17 +109,14 @@ pub async fn assert_real_turn_kill_recovery(
 
     let nonce = format!("checkpoint-outcome-gap-{}", uuid::Uuid::new_v4());
     let marker = tempdir.join(format!("{nonce}.log"));
-    let crashed = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command(
-            "turn_checkpoint_after_execute_before_outcome",
-            &nonce,
-            &marker,
-        )
-        .output(),
+    let crashed = helper_command(
+        &mut command,
+        "turn_checkpoint_after_execute_before_outcome",
+        &nonce,
+        &marker,
     )
+    .output()
     .await
-    .expect("checkpoint outcome-gap helper timed out")
     .expect("spawn checkpoint outcome-gap helper");
     assert_eq!(
         crashed.status.code(),
@@ -90,13 +124,10 @@ pub async fn assert_real_turn_kill_recovery(
         "checkpoint helper must die after local execution and before outcome finalization: {}",
         String::from_utf8_lossy(&crashed.stderr)
     );
-    let recovered = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command("turn_recover", &nonce, &marker).output(),
-    )
-    .await
-    .expect("checkpoint outcome-gap recovery timed out")
-    .expect("spawn checkpoint outcome-gap recovery");
+    let recovered = helper_command(&mut command, "turn_recover", &nonce, &marker)
+        .output()
+        .await
+        .expect("spawn checkpoint outcome-gap recovery");
     let stdout = String::from_utf8_lossy(&recovered.stdout);
     let stderr = String::from_utf8_lossy(&recovered.stderr);
     assert!(
@@ -115,17 +146,14 @@ pub async fn assert_real_turn_kill_recovery(
 
     let nonce = format!("checkpoint-double-crash-{}", uuid::Uuid::new_v4());
     let marker = tempdir.join(format!("{nonce}.log"));
-    let crashed = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command(
-            "turn_checkpoint_after_execute_before_outcome",
-            &nonce,
-            &marker,
-        )
-        .output(),
+    let crashed = helper_command(
+        &mut command,
+        "turn_checkpoint_after_execute_before_outcome",
+        &nonce,
+        &marker,
     )
+    .output()
     .await
-    .expect("checkpoint double-crash helper timed out")
     .expect("spawn checkpoint double-crash helper");
     assert_eq!(
         crashed.status.code(),
@@ -140,13 +168,10 @@ pub async fn assert_real_turn_kill_recovery(
         &marker,
     )
     .await;
-    let recovered = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command("turn_recover", &nonce, &marker).output(),
-    )
-    .await
-    .expect("checkpoint outcome-gap final recovery timed out")
-    .expect("spawn checkpoint outcome-gap final recovery");
+    let recovered = helper_command(&mut command, "turn_recover", &nonce, &marker)
+        .output()
+        .await
+        .expect("spawn checkpoint outcome-gap final recovery");
     let stdout = String::from_utf8_lossy(&recovered.stdout);
     let stderr = String::from_utf8_lossy(&recovered.stderr);
     assert!(
@@ -177,26 +202,20 @@ pub async fn assert_real_turn_kill_recovery(
     let nonce = format!("peer-reclaim-pinned-active-input-{}", uuid::Uuid::new_v4());
     let marker = tempdir.join(format!("{nonce}.log"));
     kill_at_semantic_point(&mut command, "turn_provider_mid_stream", &nonce, &marker).await;
-    let peer = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command("turn_peer_reclaim", &nonce, &marker).output(),
-    )
-    .await
-    .expect("pinned-active-input peer helper timed out")
-    .expect("spawn pinned-active-input peer helper");
+    let peer = helper_command(&mut command, "turn_peer_reclaim", &nonce, &marker)
+        .output()
+        .await
+        .expect("spawn pinned-active-input peer helper");
     assert!(
         peer.status.success(),
         "pinned-active-input peer helper failed: {}; stdout: {}",
         String::from_utf8_lossy(&peer.stderr),
         String::from_utf8_lossy(&peer.stdout)
     );
-    let recovered = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command("turn_recover", &nonce, &marker).output(),
-    )
-    .await
-    .expect("pinned-active-input recovery timed out")
-    .expect("spawn pinned-active-input recovery");
+    let recovered = helper_command(&mut command, "turn_recover", &nonce, &marker)
+        .output()
+        .await
+        .expect("spawn pinned-active-input recovery");
     let stdout = String::from_utf8_lossy(&recovered.stdout);
     let stderr = String::from_utf8_lossy(&recovered.stderr);
     assert!(
@@ -216,13 +235,10 @@ pub async fn assert_real_turn_kill_recovery(
     let nonce = format!("peer-reclaim-{}", uuid::Uuid::new_v4());
     let marker = tempdir.join(format!("{nonce}.log"));
     kill_at_semantic_point(&mut command, "turn_final_commit_boundary", &nonce, &marker).await;
-    let peer = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command("turn_peer_reclaim", &nonce, &marker).output(),
-    )
-    .await
-    .expect("peer-reclaim helper timed out")
-    .expect("spawn peer-reclaim helper");
+    let peer = helper_command(&mut command, "turn_peer_reclaim", &nonce, &marker)
+        .output()
+        .await
+        .expect("spawn peer-reclaim helper");
     assert!(
         peer.status.success(),
         "peer-reclaim helper failed: {}; stdout: {}",
@@ -235,13 +251,10 @@ pub async fn assert_real_turn_kill_recovery(
             .any(|line| line.starts_with("peer_claim row=")),
         "peer-reclaim helper did not report superseding authority"
     );
-    let recovered = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        command("turn_recover", &nonce, &marker).output(),
-    )
-    .await
-    .expect("peer-reclaim recovery timed out")
-    .expect("spawn peer-reclaim recovery");
+    let recovered = helper_command(&mut command, "turn_recover", &nonce, &marker)
+        .output()
+        .await
+        .expect("spawn peer-reclaim recovery");
     let stdout = String::from_utf8_lossy(&recovered.stdout);
     let stderr = String::from_utf8_lossy(&recovered.stderr);
     assert!(
@@ -265,15 +278,15 @@ async fn kill_at_semantic_point<F>(
 ) where
     F: FnMut(&str, &str, &std::path::Path) -> tokio::process::Command,
 {
-    let mut child = command(action, nonce, marker)
+    let mut child = helper_command(command, action, nonce, marker)
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap_or_else(|error| panic!("spawn {action} helper: {error}"));
     let stdout = child.stdout.take().expect("crash helper stdout");
     let mut lines = BufReader::new(stdout).lines();
-    let ready = tokio::time::timeout(std::time::Duration::from_secs(30), lines.next_line())
+    let ready = lines
+        .next_line()
         .await
-        .unwrap_or_else(|_| panic!("{action} helper did not reach its semantic crash point"))
         .expect("read crash helper signal")
         .unwrap_or_else(|| panic!("{action} helper exited before its crash point"));
     assert_eq!(ready, "crash_ready", "unexpected {action} helper signal");
