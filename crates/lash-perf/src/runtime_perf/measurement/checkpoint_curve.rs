@@ -129,11 +129,18 @@ struct DurableCheckpointCurveFixture {
     store: Arc<dyn lash_core::RuntimePersistence>,
 }
 
-async fn run_once_durable_checkpoint_curve(
+pub(super) async fn run_once_durable_checkpoint_curve(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
     config: &CheckpointCurveConfig,
+    postgres_database_url: Option<&str>,
 ) -> anyhow::Result<RuntimePerfRunResult> {
+    let postgres_database = match postgres_database_url {
+        Some(database_url) => {
+            Some(lash_postgres_store::testing::IsolatedDatabase::create(database_url).await)
+        }
+        None => None,
+    };
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
     let total_before_alloc = allocator_stats();
@@ -143,20 +150,10 @@ async fn run_once_durable_checkpoint_curve(
         .then(|| make_temp_bench_dir(&format!("lash-runtime-perf-{}", scenario.name())))
         .transpose()?;
     let (store_factory, store_metrics) = if scenario.uses_postgres() {
-        let Some(database_url) = configured_postgres_database_url() else {
-            if postgres_is_required() {
-                anyhow::bail!(
-                    "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
-                    scenario.name()
-                );
-            }
-            eprintln!(
-                "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
-                scenario.name()
-            );
-            return Ok(skipped_runtime_perf_result(scenario, chat_turns));
-        };
-        let postgres = lash_postgres_store::PostgresStorage::connect(&database_url)
+        let database = postgres_database
+            .as_ref()
+            .expect("PostgreSQL database created for PostgreSQL scenario");
+        let postgres = lash_postgres_store::PostgresStorage::connect(database.url())
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         durable_postgres_session_store_factory_without_commit_measurement(&postgres)

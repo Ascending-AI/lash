@@ -212,10 +212,29 @@ async fn run_once_inner(
     high_traffic: &HighTrafficConfig,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     if scenario.is_checkpoint_curve() {
+        let postgres_database_url = if scenario.uses_postgres() {
+            configured_postgres_database_url()
+        } else {
+            None
+        };
+        if scenario.uses_postgres() && postgres_database_url.is_none() {
+            if postgres_is_required() {
+                anyhow::bail!(
+                    "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL when LASH_REQUIRE_POSTGRES is set",
+                    scenario.name()
+                );
+            }
+            eprintln!(
+                "{}: skipped: no LASH_POSTGRES_DATABASE_URL or DATABASE_URL configured",
+                scenario.name()
+            );
+            return Ok(skipped_runtime_perf_result(scenario, chat_turns));
+        }
         return Box::pin(run_once_durable_checkpoint_curve(
             scenario,
             chat_turns,
             checkpoint_curve,
+            postgres_database_url.as_deref(),
         ))
         .await;
     }
@@ -282,7 +301,13 @@ async fn run_once_inner(
             return run_once_process_list_stress(chat_turns).await;
         }
         RuntimePerfScenario::StoreHardeningHotPaths => {
-            return run_once_store_hardening_hot_paths(chat_turns).await;
+            let postgres_database_url = configured_postgres_database_url().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL (the full perf workflows provide it)",
+                    scenario.name()
+                )
+            })?;
+            return run_once_store_hardening_hot_paths(chat_turns, &postgres_database_url).await;
         }
         RuntimePerfScenario::QueuedWorkClaimStress => {
             return Box::pin(run_once_queued_work_claim_stress(chat_turns)).await;
