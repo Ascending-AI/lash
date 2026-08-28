@@ -65,6 +65,9 @@ where
     let unwired = || make(None);
     let make = || make(Some(suite_executors() as Arc<dyn GroupExecutors>));
     let prefix = format!("group-conformance-{}", uuid::Uuid::new_v4().simple());
+    // Keep the drop-based cancellation witness first: it proves the host
+    // actually stops a live loser, not merely that it records Cancelled.
+    cancel_stops_the_losers_and_closes_the_caller_out(&make, &prefix).await;
     an_unregistered_host_reports_no_groups_and_refuses_all_three(&unwired, &prefix).await;
     a_refused_open_journals_nothing(&unwired, &make, &prefix).await;
     a_child_with_no_runner_refuses_the_open_and_refuses_the_retry(&make, &prefix).await;
@@ -77,7 +80,6 @@ where
     awaiting_past_the_last_child_is_refused(&make, &prefix).await;
     a_cancelled_await_leaves_the_rank_to_be_read_again(&make, &prefix).await;
     run_to_completion_losers_settle_after_the_caller_is_gone(&make, &prefix).await;
-    cancel_stops_the_losers_and_closes_the_caller_out(&make, &prefix).await;
     a_close_may_narrow_but_never_widen(&make, &prefix).await;
     closing_twice_under_one_disposition_succeeds(&make, &prefix).await;
     a_reopen_is_fenced_on_shape_and_runs_no_child_twice(&make, &prefix).await;

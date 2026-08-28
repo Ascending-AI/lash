@@ -10,6 +10,7 @@ pub(crate) mod context;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
@@ -17,12 +18,13 @@ use std::time::Duration;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectHost, ExecutionScope, PluginError, ProcessCommand, ProcessEffectOutcome,
-    ProcessExternalRef, ProcessRecord, ProcessRegistry, QueuedLaneAcquisition, QueuedLaneProbe,
-    Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectFailureDisposition,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, RuntimeInvocation, ScopedEffectController, TurnControlParticipation,
+    EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, PluginError,
+    ProcessCommand, ProcessEffectOutcome, ProcessExternalRef, ProcessRecord, ProcessRegistry,
+    QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+    RuntimeEffectFailureDisposition, RuntimeEffectGroup, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
+    RuntimeInvocation, ScopedEffectController, TurnControlParticipation,
     facade_support::CanonicalRuntimeEffectEnvelope, facade_support::RuntimeAwaitEventOptions,
     facade_support::RuntimeSleepOptions, facade_support::refuse_unhonored_group_membership,
     facade_support::validate_replayed_effect_envelope,
@@ -35,6 +37,14 @@ use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
     RestateTurnCancelRaceOutcome, restate_await_event_key, restate_await_event_key_is_valid,
     restate_durable_wait_request, restate_unknown_or_revoked,
+};
+use crate::effect_group::{
+    EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
+    EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
+    EffectGroupReadRankResponse, EffectGroupSettlementTerminal, EffectGroupShape,
+    EffectGroupWaitResolution, decode_wait_resolution, group_shape_error, payload_key,
+    rank_wait_request, ready_wait_request, settlement_from_payload,
 };
 use crate::process::RestateProcessCancelRequest;
 
@@ -261,6 +271,7 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     context: C,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
+    closed_effect_groups: Mutex<HashSet<String>>,
     _ctx: PhantomData<&'ctx ()>,
 }
 
@@ -274,6 +285,7 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             context,
             options,
             trace: None,
+            closed_effect_groups: Mutex::new(HashSet::new()),
             _ctx: PhantomData,
         }
     }
@@ -581,6 +593,269 @@ where
 {
     fn supports_concurrent_effects(&self) -> bool {
         false
+    }
+
+    fn supports_effect_groups(&self) -> bool {
+        true
+    }
+
+    async fn open_effect_group(
+        &self,
+        group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        let group_key = group.group_key().to_string();
+        let handle = EffectGroupHandle::new(&group);
+        let shape = EffectGroupShape::from_group(&group)?;
+        let probe = self
+            .context
+            .effect_group_probe(group_key.clone())
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/probe", error))?;
+        if matches!(probe, EffectGroupProbeResponse::Absent)
+            && let Some(position) = self
+                .context
+                .effect_group_preflight(group_key.clone(), group.children().to_vec())
+                .await
+                .map_err(|error| {
+                    effect_group_engine_error("EffectGroupDispatch/preflight", error)
+                })?
+        {
+            return Err(group_shape_error(format!(
+                "effect group {group_key} child {position} ({}) has no registered executor; refusing before group state is created",
+                shape.replay_keys[position]
+            )));
+        }
+        let opened = self
+            .context
+            .effect_group_open(
+                group_key.clone(),
+                EffectGroupOpenRequest {
+                    shape: shape.clone(),
+                },
+            )
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/open", error))?;
+        match opened {
+            EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
+                self.context
+                    .effect_group_submit(EffectGroupDispatchRequest {
+                        group_key: group_key.clone(),
+                        shape: shape.clone(),
+                        children: group.children().to_vec(),
+                    })
+                    .await
+                    .map_err(|error| effect_group_engine_error("EffectGroupDispatch/run", error))?;
+                let request = ready_wait_request(&shape.wait_scope, &group_key)?;
+                let resolution = self
+                    .context
+                    .await_effect_group_wait(request, tokio_util::sync::CancellationToken::new())
+                    .await
+                    .map_err(|error| {
+                        effect_group_engine_error(
+                            "LashDurableWaitWorkflow/await_resolution(READY)",
+                            error,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        group_shape_error(format!(
+                            "opening effect group {group_key} was cancelled while awaiting READY"
+                        ))
+                    })?;
+                match decode_wait_resolution(resolution)? {
+                    EffectGroupWaitResolution::Ready => Ok(handle),
+                    EffectGroupWaitResolution::Refused { reason } => Err(group_shape_error(
+                        format!("effect group {group_key} routing was refused: {reason:?}"),
+                    )),
+                    EffectGroupWaitResolution::Retired => Err(group_shape_error(format!(
+                        "effect group {group_key} was retired before it became ready"
+                    ))),
+                    other => Err(group_shape_error(format!(
+                        "effect group {group_key} READY wait resolved as {other:?}"
+                    ))),
+                }
+            }
+            EffectGroupOpenResponse::ReopenedReady => Ok(handle),
+            EffectGroupOpenResponse::ReopenedClosed { effective } => match effective {
+                EffectGroupCloseDisposition::Refused { reason } => Err(group_shape_error(format!(
+                    "effect group {group_key} routing was refused: {reason:?}"
+                ))),
+                EffectGroupCloseDisposition::RunToCompletion
+                | EffectGroupCloseDisposition::Cancel => Ok(handle),
+            },
+            EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
+                "effect group {group_key} is retired"
+            ))),
+            EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(
+                "effect group {group_key} was reopened with a different durable shape"
+            ))),
+        }
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut EffectGroupHandle,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        if handle.is_exhausted() {
+            return Err(group_shape_error(format!(
+                "effect group {} has no settlement after its {} children",
+                handle.group_key(),
+                handle.children()
+            )));
+        }
+        if self
+            .closed_effect_groups
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(handle.group_key())
+        {
+            return Err(group_shape_error(format!(
+                "effect group {} is closed to this caller",
+                handle.group_key()
+            )));
+        }
+        let rank = u64::try_from(handle.consumed() + 1).map_err(|error| {
+            group_shape_error(format!("effect group rank does not fit u64: {error}"))
+        })?;
+        let mut read = self
+            .context
+            .effect_group_read_rank(
+                handle.group_key().to_string(),
+                EffectGroupReadRankRequest { rank },
+            )
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
+        if matches!(read, EffectGroupReadRankResponse::NotSettled) {
+            let scope = ExecutionScope::runtime_operation(handle.group_key());
+            let request = rank_wait_request(&scope, handle.group_key(), rank)?;
+            let Some(resolution) = self
+                .context
+                .await_effect_group_wait(request, cancel)
+                .await
+                .map_err(|error| {
+                    effect_group_engine_error(
+                        "LashDurableWaitWorkflow/await_resolution(RANK)",
+                        error,
+                    )
+                })?
+            else {
+                return Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+                    format!(
+                        "awaiting effect group {} rank {rank} was cancelled",
+                        handle.group_key()
+                    ),
+                ));
+            };
+            match decode_wait_resolution(resolution)? {
+                EffectGroupWaitResolution::Rank => {}
+                EffectGroupWaitResolution::Retired => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} was retired while awaiting rank {rank}",
+                        handle.group_key()
+                    )));
+                }
+                other => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} rank {rank} wait resolved as {other:?}",
+                        handle.group_key()
+                    )));
+                }
+            }
+            read = self
+                .context
+                .effect_group_read_rank(
+                    handle.group_key().to_string(),
+                    EffectGroupReadRankRequest { rank },
+                )
+                .await
+                .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
+        }
+        let record = match read {
+            EffectGroupReadRankResponse::Settled { settlement } => settlement,
+            EffectGroupReadRankResponse::NotSettled => {
+                return Err(group_shape_error(format!(
+                    "effect group {} rank {rank} remained unsettled after its notification",
+                    handle.group_key()
+                )));
+            }
+            EffectGroupReadRankResponse::UnknownGroup => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is unknown",
+                    handle.group_key()
+                )));
+            }
+            EffectGroupReadRankResponse::Retired => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is retired",
+                    handle.group_key()
+                )));
+            }
+        };
+        let payload = if matches!(
+            record.terminal,
+            EffectGroupSettlementTerminal::StoredPayload
+        ) {
+            match self
+                .context
+                .effect_group_payload_get(payload_key(handle.group_key(), record.position))
+                .await
+                .map_err(|error| effect_group_engine_error("EffectGroupPayload/get", error))?
+            {
+                EffectGroupPayloadGetResponse::Stored { bytes } => Some(bytes),
+                EffectGroupPayloadGetResponse::Missing => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} rank {rank} refers to a missing payload",
+                        handle.group_key()
+                    )));
+                }
+                EffectGroupPayloadGetResponse::Retired => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} payload was retired",
+                        handle.group_key()
+                    )));
+                }
+            }
+        } else {
+            None
+        };
+        let settlement = settlement_from_payload(record, payload)?;
+        handle.advance()?;
+        Ok(settlement)
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: EffectGroupHandle,
+        disposition: LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let group_key = handle.group_key().to_string();
+        let response = self
+            .context
+            .effect_group_close(group_key.clone(), EffectGroupCloseRequest { disposition })
+            .await
+            .map_err(|error| effect_group_engine_error("EffectGroupIndex/close", error))?;
+        match response {
+            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => {
+                self.closed_effect_groups
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(group_key);
+                Ok(())
+            }
+            EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
+                "effect group {group_key} close attempted to widen its declared loser disposition"
+            ))),
+            EffectGroupCloseResponse::NotReady => Err(group_shape_error(format!(
+                "effect group {group_key} cannot close before registration"
+            ))),
+            EffectGroupCloseResponse::UnknownGroup => Err(group_shape_error(format!(
+                "effect group {group_key} is unknown"
+            ))),
+            EffectGroupCloseResponse::Retired => Err(group_shape_error(format!(
+                "effect group {group_key} is retired"
+            ))),
+        }
     }
 
     async fn runtime_effect_failure_disposition(
@@ -923,6 +1198,15 @@ where
             }
         }
     }
+}
+
+fn effect_group_engine_error(
+    operation: &str,
+    error: TerminalError,
+) -> RuntimeEffectControllerError {
+    group_shape_error(format!(
+        "Restate effect-group operation {operation} failed (verify the required services are registered): {error}"
+    ))
 }
 
 fn resolution_trace_label(resolution: &Resolution) -> lash_trace::TraceDurableWaitResolution {

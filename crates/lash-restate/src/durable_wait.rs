@@ -457,6 +457,11 @@ pub trait LashDurableWaitIndex {
     async fn resolve(
         request: Json<RestateDurableWaitResolveRequest>,
     ) -> HandlerResult<Json<ResolveOutcome>>;
+    /// Wake any current waiter and retain this resolution for every later
+    /// registration, even when the wait workflow had an earlier notification.
+    async fn retain_resolution(
+        request: Json<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Json<()>>;
     async fn cancel_all() -> HandlerResult<Json<()>>;
     async fn revoke_all() -> HandlerResult<Json<()>>;
 }
@@ -722,6 +727,31 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if address.classification == RestateDurableWaitClassification::DurableWait {
             ctx.clear(&durable_wait_index_state_key(&address));
         }
+        Ok(Json(()))
+    }
+
+    async fn retain_resolution(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Json<()>> {
+        let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
+        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let workflow_key = address.workflow_key.clone();
+        let Json(_) = ctx
+            .workflow_client::<LashDurableWaitWorkflowClient>(workflow_key)
+            .resolve(Json(request.clone()))
+            .call()
+            .await?;
+        // Retirement is a fence, not another first-write notification. Keep
+        // it in the index even when the workflow promise already held READY,
+        // RANK, CANCEL, or ADMIT so a later registration cannot park or revive
+        // the pre-retirement terminal.
+        ctx.set(
+            &durable_wait_index_resolution_key(&address),
+            Json(request.resolution),
+        );
+        ctx.clear(&durable_wait_index_state_key(&address));
         Ok(Json(()))
     }
 

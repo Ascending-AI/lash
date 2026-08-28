@@ -577,6 +577,33 @@ impl RestateIngressClient {
         Ok(())
     }
 
+    pub(crate) async fn call_object_empty_json<R>(
+        &self,
+        object: &str,
+        object_key: &str,
+        handler: &str,
+    ) -> Result<R, RestateHttpError>
+    where
+        R: DeserializeOwned,
+    {
+        let object = restate_path_component(object);
+        let object_key = restate_path_component(object_key);
+        let handler = restate_path_component(handler);
+        let path = format!("{object}/{object_key}/{handler}");
+        let url = format_restate_url(self.connection.ingress_url(), &path);
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Control,
+            "Restate object call",
+            HttpRequest::post(&url, ""),
+        )
+        .await?;
+        if !response.is_success() {
+            return Err(status_error("Restate object call", url, response).await);
+        }
+        decode_response("Restate object call", &url, response).await
+    }
+
     pub async fn send_service_json<T: Serialize + ?Sized>(
         &self,
         service: &str,

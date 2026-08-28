@@ -81,6 +81,10 @@ async fn execute_code_unbounded_for_tests(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    dead_code,
+    reason = "the bounded entrypoint is consumed by test and testing-feature harnesses"
+)]
 pub(crate) async fn execute_code_with_bounds(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,

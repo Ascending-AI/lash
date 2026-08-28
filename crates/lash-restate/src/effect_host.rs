@@ -6,21 +6,31 @@
 //! through the ingress and fails loudly for anything else instead of falling
 //! back to inline execution.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectHost, ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectFailureDisposition, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeError, RuntimeErrorCode, ScopedEffectController, ToolIntentOutcomeSink,
-    ToolIntentPreparation, TurnControlParticipation, facade_support::RuntimeAwaitEventOptions,
+    EffectGroupHandle, EffectHost, ExecutionScope, GroupSettlement, LoserPolicy, Resolution,
+    ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectFailureDisposition, RuntimeEffectGroup,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
+    ScopedEffectController, ToolIntentOutcomeSink, ToolIntentPreparation, TurnControlParticipation,
+    facade_support::RuntimeAwaitEventOptions,
 };
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, durable_wait_index_object_key,
     restate_await_event_key, restate_await_event_key_is_valid, restate_durable_wait_request,
     restate_unknown_or_revoked,
+};
+use crate::effect_group::{
+    EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
+    EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
+    EffectGroupReadRankResponse, EffectGroupSettlementTerminal, EffectGroupShape,
+    EffectGroupWaitResolution, decode_wait_resolution, group_shape_error, payload_key,
+    rank_wait_request, ready_wait_request, settlement_from_payload,
 };
 use crate::ingress::{RestateConnection, RestateIngressClient};
 
@@ -44,6 +54,7 @@ impl RestateEffectHost {
                 await_event_ingress: RestateAwaitEventIngress {
                     ingress: RestateIngressClient::new(connection),
                 },
+                closed_effect_groups: Mutex::new(HashSet::new()),
             }),
         }
     }
@@ -280,6 +291,16 @@ async fn await_restate_await_event_via_ingress(
 }
 struct RestateEffectHostController {
     await_event_ingress: RestateAwaitEventIngress,
+    closed_effect_groups: Mutex<HashSet<String>>,
+}
+
+fn ingress_group_error(
+    operation: &str,
+    error: crate::RestateHttpError,
+) -> RuntimeEffectControllerError {
+    group_shape_error(format!(
+        "Restate effect-group operation {operation} failed (verify the required services are registered): {error}"
+    ))
 }
 
 #[async_trait::async_trait]
@@ -373,6 +394,297 @@ impl AwaitEventResolver for RestateEffectHostController {
 impl RuntimeEffectController for RestateEffectHostController {
     fn supports_concurrent_effects(&self) -> bool {
         false
+    }
+
+    fn supports_effect_groups(&self) -> bool {
+        true
+    }
+
+    async fn open_effect_group(
+        &self,
+        group: RuntimeEffectGroup,
+    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
+        let ingress = &self.await_event_ingress.ingress;
+        let group_key = group.group_key().to_string();
+        let handle = EffectGroupHandle::new(&group);
+        let shape = EffectGroupShape::from_group(&group)?;
+        let probe = ingress
+            .call_object_empty_json::<EffectGroupProbeResponse>(
+                "EffectGroupIndex",
+                &group_key,
+                "probe",
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/probe", error))?;
+        if matches!(probe, EffectGroupProbeResponse::Absent)
+            && let Some(position) = ingress
+                .call_workflow_json::<_, Option<usize>>(
+                    "EffectGroupDispatch",
+                    &group_key,
+                    "preflight",
+                    &group.children(),
+                )
+                .await
+                .map_err(|error| ingress_group_error("EffectGroupDispatch/preflight", error))?
+        {
+            return Err(group_shape_error(format!(
+                "effect group {group_key} child {position} ({}) has no registered executor; refusing before group state is created",
+                shape.replay_keys[position]
+            )));
+        }
+        let opened = ingress
+            .call_object_json::<_, EffectGroupOpenResponse>(
+                "EffectGroupIndex",
+                &group_key,
+                "open",
+                &EffectGroupOpenRequest {
+                    shape: shape.clone(),
+                },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/open", error))?;
+        match opened {
+            EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
+                ingress
+                    .send_workflow_json(
+                        "EffectGroupDispatch",
+                        &group_key,
+                        "run",
+                        &EffectGroupDispatchRequest {
+                            group_key: group_key.clone(),
+                            shape: shape.clone(),
+                            children: group.children().to_vec(),
+                        },
+                    )
+                    .await
+                    .map_err(|error| ingress_group_error("EffectGroupDispatch/run", error))?;
+                let request = ready_wait_request(&shape.wait_scope, &group_key)?;
+                let address = RestateDurableWaitAddress::for_key(&request.key);
+                let resolution = ingress
+                    .call_workflow_json::<_, Resolution>(
+                        "LashDurableWaitWorkflow",
+                        &address.workflow_key,
+                        "await_resolution",
+                        &request,
+                    )
+                    .await
+                    .map_err(|error| {
+                        ingress_group_error(
+                            "LashDurableWaitWorkflow/await_resolution(READY)",
+                            error,
+                        )
+                    })?;
+                match decode_wait_resolution(resolution)? {
+                    EffectGroupWaitResolution::Ready => Ok(handle),
+                    EffectGroupWaitResolution::Refused { reason } => Err(group_shape_error(
+                        format!("effect group {group_key} routing was refused: {reason:?}"),
+                    )),
+                    EffectGroupWaitResolution::Retired => Err(group_shape_error(format!(
+                        "effect group {group_key} was retired before it became ready"
+                    ))),
+                    other => Err(group_shape_error(format!(
+                        "effect group {group_key} READY wait resolved as {other:?}"
+                    ))),
+                }
+            }
+            EffectGroupOpenResponse::ReopenedReady => Ok(handle),
+            EffectGroupOpenResponse::ReopenedClosed { effective } => match effective {
+                EffectGroupCloseDisposition::Refused { reason } => Err(group_shape_error(format!(
+                    "effect group {group_key} routing was refused: {reason:?}"
+                ))),
+                EffectGroupCloseDisposition::RunToCompletion
+                | EffectGroupCloseDisposition::Cancel => Ok(handle),
+            },
+            EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
+                "effect group {group_key} is retired"
+            ))),
+            EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(
+                "effect group {group_key} was reopened with a different durable shape"
+            ))),
+        }
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut EffectGroupHandle,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
+        if handle.is_exhausted() {
+            return Err(group_shape_error(format!(
+                "effect group {} has no settlement after its {} children",
+                handle.group_key(),
+                handle.children()
+            )));
+        }
+        if self
+            .closed_effect_groups
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(handle.group_key())
+        {
+            return Err(group_shape_error(format!(
+                "effect group {} is closed to this caller",
+                handle.group_key()
+            )));
+        }
+        let ingress = &self.await_event_ingress.ingress;
+        let rank = u64::try_from(handle.consumed() + 1).map_err(|error| {
+            group_shape_error(format!("effect group rank does not fit u64: {error}"))
+        })?;
+        let mut read = ingress
+            .call_object_json::<_, EffectGroupReadRankResponse>(
+                "EffectGroupIndex",
+                handle.group_key(),
+                "read_rank",
+                &EffectGroupReadRankRequest { rank },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
+        if matches!(read, EffectGroupReadRankResponse::NotSettled) {
+            let scope = ExecutionScope::runtime_operation(handle.group_key());
+            let request = rank_wait_request(&scope, handle.group_key(), rank)?;
+            let address = RestateDurableWaitAddress::for_key(&request.key);
+            let wait = ingress.call_workflow_json::<_, Resolution>(
+                "LashDurableWaitWorkflow",
+                &address.workflow_key,
+                "await_resolution",
+                &request,
+            );
+            tokio::pin!(wait);
+            let resolution = tokio::select! {
+                result = &mut wait => Some(result.map_err(|error| ingress_group_error(
+                    "LashDurableWaitWorkflow/await_resolution(RANK)", error
+                ))?),
+                _ = cancel.cancelled() => None,
+            };
+            let Some(resolution) = resolution else {
+                return Err(RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled,
+                    format!(
+                        "awaiting effect group {} rank {rank} was cancelled",
+                        handle.group_key()
+                    ),
+                ));
+            };
+            match decode_wait_resolution(resolution)? {
+                EffectGroupWaitResolution::Rank => {}
+                EffectGroupWaitResolution::Retired => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} was retired while awaiting rank {rank}",
+                        handle.group_key()
+                    )));
+                }
+                other => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} rank {rank} wait resolved as {other:?}",
+                        handle.group_key()
+                    )));
+                }
+            }
+            read = ingress
+                .call_object_json::<_, EffectGroupReadRankResponse>(
+                    "EffectGroupIndex",
+                    handle.group_key(),
+                    "read_rank",
+                    &EffectGroupReadRankRequest { rank },
+                )
+                .await
+                .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
+        }
+        let record = match read {
+            EffectGroupReadRankResponse::Settled { settlement } => settlement,
+            EffectGroupReadRankResponse::NotSettled => {
+                return Err(group_shape_error(format!(
+                    "effect group {} rank {rank} remained unsettled after its notification",
+                    handle.group_key()
+                )));
+            }
+            EffectGroupReadRankResponse::UnknownGroup => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is unknown",
+                    handle.group_key()
+                )));
+            }
+            EffectGroupReadRankResponse::Retired => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is retired",
+                    handle.group_key()
+                )));
+            }
+        };
+        let payload = if matches!(
+            record.terminal,
+            EffectGroupSettlementTerminal::StoredPayload
+        ) {
+            match ingress
+                .call_object_empty_json::<EffectGroupPayloadGetResponse>(
+                    "EffectGroupPayload",
+                    &payload_key(handle.group_key(), record.position),
+                    "get",
+                )
+                .await
+                .map_err(|error| ingress_group_error("EffectGroupPayload/get", error))?
+            {
+                EffectGroupPayloadGetResponse::Stored { bytes } => Some(bytes),
+                EffectGroupPayloadGetResponse::Missing => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} rank {rank} refers to a missing payload",
+                        handle.group_key()
+                    )));
+                }
+                EffectGroupPayloadGetResponse::Retired => {
+                    return Err(group_shape_error(format!(
+                        "effect group {} payload was retired",
+                        handle.group_key()
+                    )));
+                }
+            }
+        } else {
+            None
+        };
+        let settlement = settlement_from_payload(record, payload)?;
+        handle.advance()?;
+        Ok(settlement)
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: EffectGroupHandle,
+        disposition: LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let group_key = handle.group_key().to_string();
+        let response = self
+            .await_event_ingress
+            .ingress
+            .call_object_json::<_, EffectGroupCloseResponse>(
+                "EffectGroupIndex",
+                &group_key,
+                "close",
+                &EffectGroupCloseRequest { disposition },
+            )
+            .await
+            .map_err(|error| ingress_group_error("EffectGroupIndex/close", error))?;
+        match response {
+            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => {
+                self.closed_effect_groups
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(group_key);
+                Ok(())
+            }
+            EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
+                "effect group {group_key} close attempted to widen its declared loser disposition"
+            ))),
+            EffectGroupCloseResponse::NotReady => Err(group_shape_error(format!(
+                "effect group {group_key} cannot close before registration"
+            ))),
+            EffectGroupCloseResponse::UnknownGroup => Err(group_shape_error(format!(
+                "effect group {group_key} is unknown"
+            ))),
+            EffectGroupCloseResponse::Retired => Err(group_shape_error(format!(
+                "effect group {group_key} is retired"
+            ))),
+        }
     }
 
     async fn runtime_effect_failure_disposition(

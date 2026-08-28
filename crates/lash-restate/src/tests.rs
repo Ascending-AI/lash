@@ -63,6 +63,7 @@ use std::sync::{Mutex, RwLock};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+mod effect_group_conformance;
 mod effect_group_sdk_preconditions;
 mod endpoint_protocol;
 mod process_tool_replay;
