@@ -875,6 +875,10 @@
               "budget_ms": 5.572,
               "required": true
             },
+            "commit_admission.product_attempt": {
+              "budget_ms": 13.179,
+              "required": true
+            },
             "committed_turn": {
               "budget_ms": 12.27,
               "required": true
@@ -945,6 +949,10 @@
           "phases": {
             "before_turn_hooks": {
               "budget_ms": 5.572,
+              "required": true
+            },
+            "commit_admission.product_attempt": {
+              "budget_ms": 14.188,
               "required": true
             },
             "committed_turn": {
