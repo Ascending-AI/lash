@@ -19,9 +19,6 @@ use crate::config::McpServerConfig;
 use crate::error::McpError;
 use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
 
-pub(crate) const STDIO_GRACEFUL_SHUTDOWN_PERIOD: Duration = Duration::from_secs(3);
-const STDIO_POST_KILL_WAIT_BOUND: Duration = Duration::from_secs(1);
-
 struct ManagedChildTransport {
     io: AsyncRwTransport<RoleClient, tokio::fs::File, tokio::fs::File>,
 }
@@ -243,9 +240,13 @@ impl StdioChildGuard {
         }
     }
 
-    pub(crate) async fn reap_after_graceful_close(mut self) -> std::io::Result<()> {
+    pub(crate) async fn reap_after_graceful_close(
+        mut self,
+        graceful_period: Duration,
+        post_kill_wait: Duration,
+    ) -> std::io::Result<()> {
         self.explicit_abandonment = true;
-        let deadline = Instant::now() + STDIO_GRACEFUL_SHUTDOWN_PERIOD;
+        let deadline = Instant::now() + graceful_period;
         loop {
             if self.try_wait()?.is_some() {
                 self.reaped = true;
@@ -258,7 +259,7 @@ impl StdioChildGuard {
         }
 
         let kill_error = self.child.kill().err();
-        let reap_deadline = Instant::now() + STDIO_POST_KILL_WAIT_BOUND;
+        let reap_deadline = Instant::now() + post_kill_wait;
         loop {
             if self.try_wait()?.is_some() {
                 self.reaped = true;
@@ -271,8 +272,8 @@ impl StdioChildGuard {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
                     format!(
-                        "MCP stdio child PID {} did not exit within 1s after the kill request{kill_context}",
-                        self.pid
+                        "MCP stdio child PID {} did not exit within {post_kill_wait:?} after the kill request{kill_context}",
+                        self.pid,
                     ),
                 ));
             }
