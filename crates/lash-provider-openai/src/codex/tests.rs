@@ -1756,8 +1756,7 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
     )
     .with_options(ProviderOptions {
         reliability: ProviderReliability::codex()
-            .request_timeout(Some(RequestTimeout::Millis(5_000)))
-            .stream_chunk_timeout_ms(Some(50)),
+            .request_timeout(Some(RequestTimeout::Millis(5_000))),
         response_metadata_headers: vec!["X-Request-Cost".to_string()],
         ..ProviderOptions::default()
     });
