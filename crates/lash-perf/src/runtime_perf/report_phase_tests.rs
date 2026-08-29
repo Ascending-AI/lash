@@ -10,8 +10,10 @@ use crate::perf_support::stack::StackProfile;
 use crate::runtime_perf::measurement::{
     CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY, CheckpointCurveAxis, CheckpointCurveConfig,
     HighTrafficConfig, RuntimePerfPhaseProbe, checkpoint_curve_points, phase_name, run_once,
+    run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths,
 };
 use lash_core::runtime::RuntimeTurnPhaseProbe;
+use lash_core::{SessionListFilter, SessionStoreFactory};
 
 const STABLE_DURABLE_PHASES: [&str; 5] = [
     "prepared_turn",
@@ -50,6 +52,58 @@ fn require_postgres() -> bool {
         );
     }
     configured
+}
+
+fn postgres_database_url() -> String {
+    ["LASH_POSTGRES_DATABASE_URL", "DATABASE_URL"]
+        .into_iter()
+        .find_map(|name| {
+            std::env::var(name)
+                .ok()
+                .filter(|database_url| !database_url.trim().is_empty())
+        })
+        .expect("PostgreSQL URL checked by require_postgres")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn affected_postgres_scenarios_leave_base_database_clean() {
+    if !require_postgres() {
+        return;
+    }
+
+    let base_database =
+        lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;
+    let base_storage = lash_postgres_store::PostgresStorage::connect(base_database.url())
+        .await
+        .expect("provision clean PostgreSQL base database");
+    let base_factory = base_storage.session_store_factory_with_shared_process_registry();
+    let before = base_factory
+        .list_sessions(&SessionListFilter::default())
+        .await
+        .expect("list base sessions before perf runs")
+        .len();
+
+    run_once_durable_checkpoint_curve(
+        RuntimePerfScenario::DurableCheckpointCurvePostgres,
+        1,
+        &checkpoint_curve_config(),
+        Some(base_database.url()),
+    )
+    .await
+    .expect("durable checkpoint curve PostgreSQL run");
+    run_once_store_hardening_hot_paths(1, base_database.url())
+        .await
+        .expect("store hardening PostgreSQL run");
+
+    let after = base_factory
+        .list_sessions(&SessionListFilter::default())
+        .await
+        .expect("list base sessions after perf runs")
+        .len();
+    assert_eq!(
+        after, before,
+        "affected perf runs must not accumulate sessions in the supplied base database: before={before}, after={after}"
+    );
 }
 
 #[test]

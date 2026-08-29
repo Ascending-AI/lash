@@ -44,20 +44,14 @@ const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseN
     append_receipt_replay: "store_hardening.postgres.append_receipt_replay",
 };
 
-async fn run_once_store_hardening_hot_paths(
+pub(super) async fn run_once_store_hardening_hot_paths(
     chat_turns: usize,
+    postgres_url: &str,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let scenario = RuntimePerfScenario::StoreHardeningHotPaths;
     let run_id = uuid::Uuid::new_v4().simple().to_string();
-    let postgres_url = std::env::var("LASH_POSTGRES_DATABASE_URL").map_err(|_| ());
-    let postgres_url = postgres_url
-        .or_else(|_| std::env::var("DATABASE_URL").map_err(|_| ()))
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL (the full perf workflows provide it)",
-                scenario.name()
-            )
-        })?;
+    let postgres_database =
+        lash_postgres_store::testing::IsolatedDatabase::create(postgres_url).await;
     let total_started = Instant::now();
     let before_memory = process_memory_sample();
     let total_before_alloc = allocator_stats();
@@ -68,7 +62,7 @@ async fn run_once_store_hardening_hot_paths(
     let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
     let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root);
     let postgres = lash_postgres_store::PostgresStorage::connect_with(
-        &postgres_url,
+        postgres_database.url(),
         lash_postgres_store::PostgresStoreConfig {
             min_connections: 1,
             max_connections: 4,

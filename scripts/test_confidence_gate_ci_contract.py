@@ -28,14 +28,14 @@ PUSH_GATE = ROOT / "scripts" / "push-gate.sh"
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
 QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
-PERF_STORE_HARDENING_RS = (
+PERF_PHASE_PROBE_RS = (
     ROOT
     / "crates"
     / "lash-perf"
     / "src"
     / "runtime_perf"
     / "measurement"
-    / "store_hardening.rs"
+    / "phase_probe.rs"
 )
 CARGO_TOML = ROOT / "Cargo.toml"
 JUSTFILE = ROOT / "justfile"
@@ -881,15 +881,23 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # without the URL instead of degrading to a SQLite-only measurement.
         # Pin both halves — a deleted scenario would leave the service
         # decorative, and a softened refusal would turn a missing database into
-        # a green perf report with silently fewer phases.
+        # a green perf report with silently fewer phases. The refusal lives in
+        # the scenario dispatch (phase_probe.rs), which errors unconditionally
+        # for store-hardening when no URL is configured.
         perf_scenarios = PERF_SCENARIOS_RS.read_text(encoding="utf-8")
-        perf_store_hardening = PERF_STORE_HARDENING_RS.read_text(encoding="utf-8")
+        perf_phase_probe = PERF_PHASE_PROBE_RS.read_text(encoding="utf-8")
         self.assertIn('"store_hardening_hot_paths"', perf_scenarios)
         self.assertIn(
-            'std::env::var("LASH_POSTGRES_DATABASE_URL").map_err(',
-            perf_store_hardening,
+            "requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL "
+            "(the full perf workflows provide it)",
+            perf_phase_probe,
         )
-        self.assertNotIn("skipping", perf_store_hardening)
+        self.assertIn(
+            "RuntimePerfScenario::StoreHardeningHotPaths => {\n"
+            "            let postgres_database_url = "
+            "configured_postgres_database_url().ok_or_else(|| {",
+            perf_phase_probe,
+        )
 
     def test_secret_bearing_workflows_pin_external_actions_by_sha(self) -> None:
         for path in (RELEASE_WORKFLOW, DOCS_PAGES_WORKFLOW):
