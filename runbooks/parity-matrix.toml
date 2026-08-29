@@ -35,10 +35,8 @@ frontier = ["openai/gpt-5.6-sol"]
 # so a reordering moves rows between shards.
 [scenarios]
 agent-service-branching = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
-docs-quickstart = { tier = "deterministic", model = "scripted-provider" }
 graceful-drain = { tier = "deterministic", model = "scripted-provider" }
 process-operations = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the `just process-operations-e2e` companion, the FIG-1292 preflight, and Phases 0-8; only the five FIG-1293 tool rows call a provider" }
-request-abandon = { tier = "deterministic", model = "scripted-provider" }
 rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 session-lease-triage = { tier = "deterministic", model = "scripted-provider" }
 tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
@@ -72,13 +70,15 @@ workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider
 [typescript_only]
 typescript-codemode-parity = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 
-# Standard-mode reference hosts: `LashCore::standard_builder`, a native tool
-# loop, no RLM session and therefore no dialect to pin. Running them twice would
-# buy two identical judged runs and two identical bills, and the second row's
-# `dialect` label would be a claim about a session that does not exist. They get
-# one dialect-neutral row each, emitted with `dialect = "standard"` — the mode,
-# not a language — which is also their artifact directory.
-[standard_mode_only]
+# Scenarios that open no RLM session have no dialect to pin. Running them twice
+# would buy two identical judged runs and two identical bills, and the second
+# row's `dialect` label would be a claim about a session that does not exist.
+# They get one dialect-neutral row each, emitted with `dialect = "standard"` —
+# the mode, not a language — which is also their artifact directory. This is a
+# behavioral predicate: a standard-mode host is one example, not the definition.
+[no_rlm_session_only]
+docs-quickstart = { tier = "deterministic", model = "scripted-provider" }
+request-abandon = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 
 # Deterministic, hermetic harnesses that CI executes rather than judges. They

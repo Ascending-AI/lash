@@ -53,11 +53,11 @@ def rows(config: dict[str, object]) -> list[dict[str, str]]:
         row(config, "typescript_only", scenario, "typescript")
         for scenario in config["typescript_only"]
     )
-    # Standard-mode hosts have no RLM session, so they have no dialect to pin
-    # and no honest twin: one row each, labelled with the mode.
+    # Scenarios that open no RLM session have no dialect to pin and no honest
+    # twin: one row each, labelled with the mode.
     result.extend(
-        row(config, "standard_mode_only", scenario, "standard")
-        for scenario in config["standard_mode_only"]
+        row(config, "no_rlm_session_only", scenario, "standard")
+        for scenario in config["no_rlm_session_only"]
     )
     return result
 
@@ -72,7 +72,12 @@ def tier_violations(config: dict[str, object]) -> list[str]:
     """
     tiers = config["tiers"]
     problems = []
-    for group in ("scenarios", "typescript_only", "standard_mode_only", "deterministic_only"):
+    for group in (
+        "scenarios",
+        "typescript_only",
+        "no_rlm_session_only",
+        "deterministic_only",
+    ):
         for scenario, entry in config[group].items():
             tier = entry.get("tier")
             if tier not in tiers:

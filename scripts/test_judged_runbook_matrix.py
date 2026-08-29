@@ -22,7 +22,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         excluded = (
             set(config["typescript_only"])
             | set(config["deterministic_only"])
-            | set(config["standard_mode_only"])
+            | set(config["no_rlm_session_only"])
         )
         discovered = {
             path.parent.name
@@ -46,7 +46,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
                 "scenarios",
                 "typescript_only",
                 "deterministic_only",
-                "standard_mode_only",
+                "no_rlm_session_only",
             )
             for name in config.get(key, {})
         ]
@@ -57,15 +57,14 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         repeated = sorted({key for key in keys if keys.count(key) > 1})
         self.assertEqual(repeated, [], f"the matrix emits {repeated} more than once")
 
-    def test_standard_mode_hosts_get_exactly_one_dialect_neutral_row(self) -> None:
-        # A standard-mode host runs `LashCore::standard_builder`: a native tool
-        # loop with no RLM session, so it has no dialect to pin. A second row
-        # would buy an identical judged run and label it with a language the
+    def test_no_rlm_session_scenarios_get_one_dialect_neutral_row(self) -> None:
+        # A scenario that opens no RLM session has no dialect to pin. A second
+        # row would buy an identical judged run and label it with a language the
         # session never had.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         rows = MATRIX.rows(config)
-        for scenario in config["standard_mode_only"]:
+        for scenario in config["no_rlm_session_only"]:
             emitted = [row for row in rows if row["scenario"] == scenario]
             self.assertEqual(
                 [row["dialect"] for row in emitted],
@@ -83,10 +82,10 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         expected = (
             len(config["scenarios"]) * len(config["dialects"])
             + len(config["typescript_only"])
-            + len(config["standard_mode_only"])
+            + len(config["no_rlm_session_only"])
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 64)
+        self.assertEqual(expected, 62)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is
@@ -107,9 +106,11 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         # assertion that only reads the shipped file cannot pass vacuously.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        config["scenarios"]["docs-quickstart"]["model"] = config["tiers"]["frontier"][0]
+        config["no_rlm_session_only"]["docs-quickstart"]["model"] = config[
+            "tiers"
+        ]["frontier"][0]
         self.assertNotEqual(MATRIX.tier_violations(config), [])
-        config["scenarios"]["docs-quickstart"]["tier"] = "platinum"
+        config["no_rlm_session_only"]["docs-quickstart"]["tier"] = "platinum"
         self.assertNotEqual(MATRIX.tier_violations(config), [])
 
     def test_no_deterministic_scenario_names_a_paid_model(self) -> None:
