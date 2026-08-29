@@ -336,12 +336,20 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
             graph_delta_bytes,
             checkpoint_bytes,
             attachment_manifest_bytes,
+            queue_batch_bytes,
+            agent_frame_bytes,
+            usage_delta_bytes,
+            turn_result_bytes,
             total_bytes,
             max_bytes,
         }) if session_config_bytes == expected.session_config_bytes
             && graph_delta_bytes == expected.graph_delta_bytes
             && checkpoint_bytes == expected.checkpoint_bytes
             && attachment_manifest_bytes == expected.attachment_manifest_bytes
+            && queue_batch_bytes == expected.queue_batch_bytes
+            && agent_frame_bytes == expected.agent_frame_bytes
+            && usage_delta_bytes == expected.usage_delta_bytes
+            && turn_result_bytes == expected.turn_result_bytes
             && total_bytes == expected.total_bytes
             && max_bytes == RuntimeCommit::MAX_COMMIT_BUDGET_BYTES
     ));

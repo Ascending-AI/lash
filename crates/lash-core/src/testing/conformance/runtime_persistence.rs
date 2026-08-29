@@ -523,6 +523,11 @@ where
     commit_rejects_a_different_session_id(make("alpha")).await;
     commit_rejects_carried_nondefault_node_budget(make("root")).await;
     commit_rejects_carried_nondefault_byte_budget(make("root")).await;
+    commit_rejects_queue_batch_bytes_over_budget(make("root")).await;
+    commit_rejects_agent_frame_bytes_over_budget(make("root")).await;
+    commit_rejects_usage_delta_bytes_over_budget(make("root")).await;
+    commit_rejects_turn_result_bytes_over_budget(make("root")).await;
+    commit_with_every_payload_family_inside_budget_succeeds(make("root")).await;
     load_hydrates_checkpoint_and_usage(make("hydrated")).await;
     load_retains_reasoning_only_usage(make("root")).await;
     checkpoint_restore_rejects_turn_index_without_increment_headroom(make("root")).await;
@@ -831,6 +836,172 @@ async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn RuntimePer
             ..
         }
     ));
+}
+
+fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCommit {
+    let state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    RuntimeCommit::persisted_state_for_test_with_budget(
+        &state,
+        &[],
+        crate::CommitBudget::new(
+            crate::CommitBudgetLimit::bounded(byte_limit),
+            crate::CommitBudgetLimit::Unbounded,
+        ),
+    )
+}
+
+async fn commit_rejects_queue_batch_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+    const BYTE_LIMIT: usize = 2_048;
+    let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
+    commit
+        .validate_budget()
+        .expect("the commit without a queue batch must fit");
+    commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
+        "root",
+        DeliveryPolicy::AfterCurrentTurnCommit,
+        vec![QueuedWorkPayload::agent_frame_task(
+            crate::session_graph::frame_node_id("root", "oversized-queue-batch"),
+            "q".repeat(BYTE_LIMIT * 2),
+            None,
+        )],
+    )];
+
+    let error = store
+        .commit_runtime_state(commit)
+        .await
+        .expect_err("queue batch bytes alone must trip the commit budget");
+    assert!(matches!(
+        error,
+        StoreError::CommitByteBudgetExceeded {
+            queue_batch_bytes,
+            max_bytes: BYTE_LIMIT,
+            ..
+        } if queue_batch_bytes > BYTE_LIMIT
+    ));
+}
+
+async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+    const BYTE_LIMIT: usize = 2_048;
+    let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
+    commit
+        .validate_budget()
+        .expect("the commit without an agent frame must fit");
+    commit.current_frame_node_id = Some(crate::FrameNodeId::new("f".repeat(BYTE_LIMIT * 2)));
+
+    let error = store
+        .commit_runtime_state(commit)
+        .await
+        .expect_err("agent frame bytes alone must trip the commit budget");
+    assert!(matches!(
+        error,
+        StoreError::CommitByteBudgetExceeded {
+            agent_frame_bytes,
+            max_bytes: BYTE_LIMIT,
+            ..
+        } if agent_frame_bytes > BYTE_LIMIT
+    ));
+}
+
+async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+    const BYTE_LIMIT: usize = 2_048;
+    let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
+    commit
+        .validate_budget()
+        .expect("the commit without a usage delta must fit");
+    commit.usage_deltas = crate::store::RuntimeUsageDelta::for_operation(
+        &commit.turn_commit.operation,
+        &[TokenLedgerEntry {
+            source: "u".repeat(BYTE_LIMIT * 2),
+            model: "budget-model".to_string(),
+            usage: TokenUsage::default(),
+        }],
+    )
+    .expect("identify the oversized usage delta");
+
+    let error = store
+        .commit_runtime_state(commit)
+        .await
+        .expect_err("usage delta bytes alone must trip the commit budget");
+    assert!(matches!(
+        error,
+        StoreError::CommitByteBudgetExceeded {
+            usage_delta_bytes,
+            max_bytes: BYTE_LIMIT,
+            ..
+        } if usage_delta_bytes > BYTE_LIMIT
+    ));
+}
+
+async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+    const BYTE_LIMIT: usize = 2_048;
+    let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
+    commit
+        .validate_budget()
+        .expect("the commit with its ordinary turn result must fit");
+    commit.turn_commit = RuntimeTurnCommitStamp::new(crate::OperationId::new(
+        crate::ExecutionScope::runtime_operation("t".repeat(BYTE_LIMIT * 2)),
+        "commit",
+    ));
+
+    let error = store
+        .commit_runtime_state(commit)
+        .await
+        .expect_err("turn result bytes alone must trip the commit budget");
+    assert!(matches!(
+        error,
+        StoreError::CommitByteBudgetExceeded {
+            turn_result_bytes,
+            max_bytes: BYTE_LIMIT,
+            ..
+        } if turn_result_bytes > BYTE_LIMIT
+    ));
+}
+
+async fn commit_with_every_payload_family_inside_budget_succeeds(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    const BYTE_LIMIT: usize = 64 * 1024;
+    let mut state = RuntimeSessionState {
+        session_id: "root".to_string(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.ensure_agent_frame_initialized();
+    let usage = TokenLedgerEntry {
+        source: "all-families".to_string(),
+        model: "budget-model".to_string(),
+        usage: TokenUsage {
+            input_tokens: 1,
+            output_tokens: 2,
+            ..TokenUsage::default()
+        },
+    };
+    let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(
+        &state,
+        &[usage],
+        crate::CommitBudget::new(
+            crate::CommitBudgetLimit::bounded(BYTE_LIMIT),
+            crate::CommitBudgetLimit::Unbounded,
+        ),
+    );
+    commit.committed_attachment_ids =
+        vec![AttachmentId::parse("all-families-attachment").expect("valid attachment id")];
+    commit.enqueued_queue_batches = vec![QueuedWorkBatchDraft::new(
+        "root",
+        DeliveryPolicy::AfterCurrentTurnCommit,
+        vec![QueuedWorkPayload::agent_frame_task(
+            crate::session_graph::frame_node_id("root", "all-families-follow-up"),
+            "follow-up",
+            None,
+        )],
+    )];
+
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("a commit with every payload family inside the limit must succeed");
 }
 
 async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(

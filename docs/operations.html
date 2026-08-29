@@ -426,6 +426,15 @@ Ok(DurableScanPage {
       <p>Two migration notes carry over from the fence. Bulk enable or disable is a loop of per-key fenced commands, not one blanket statement, and each command's <code>operation_id</code> should be derived from the intent so a retried pass replays its receipts instead of re-evaluating against moved rows. A conflict is an ordinary outcome, not a backend failure: re-read the record and retry.</p>
       <p>The standing policy behind the cutover, and the supported read alternative for every other <code>lash_*</code> table, is under <a href="./persistence.html#private-tables">private tables</a>.</p>
     </div>
+    <div class="section" id="commit-budget">
+      <div class="section-header">
+        <h2>Commit Budget</h2>
+        <p>Every host supplies one <code>CommitBudget</code> to keep a complete atomic runtime transaction inside its backend latency envelope. The byte number bounds the whole logical persisted payload carried by <code>RuntimeCommit</code>, not a session-state subset.</p>
+      </div>
+      <p>The byte total includes session configuration, graph nodes, the hydrated checkpoint, attachment-manifest ids, queued-work batches, the selected Agent Frame, usage deltas, and the durable turn result. Each serialized family is measured before the backend transaction starts and contributes to the same saturating total. The node dimension remains the graph-node plus attachment-adoption row count; the queued-work action reserve is a separate token policy and does not consume this byte budget.</p>
+      <p><code>1 MiB</code> and <code>512</code> rows remain recommended starting points, not lash-owned defaults. Measure the complete transaction on the deployed backend, then tune both explicit limits to the host's latency target. An oversized commit is terminal until the host raises its configured bound or submits a smaller transaction.</p>
+    </div>
+
     <div class="section" id="lease-timings">
       <div class="section-header">
         <h2>Lease Timings</h2>

@@ -47,13 +47,17 @@ pub enum StoreError {
     )]
     CommitNodeBudgetExceeded { node_count: usize, max_nodes: usize },
     #[error(
-        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_manifest_bytes})"
+        "runtime commit carries {total_bytes} budgeted payload bytes, exceeding the {max_bytes}-byte transaction budget (session config: {session_config_bytes}, graph delta: {graph_delta_bytes}, checkpoint: {checkpoint_bytes}, attachment manifest: {attachment_manifest_bytes}, queue batches: {queue_batch_bytes}, agent frame: {agent_frame_bytes}, usage deltas: {usage_delta_bytes}, durable turn result: {turn_result_bytes})"
     )]
     CommitByteBudgetExceeded {
         session_config_bytes: usize,
         graph_delta_bytes: usize,
         checkpoint_bytes: usize,
         attachment_manifest_bytes: usize,
+        queue_batch_bytes: usize,
+        agent_frame_bytes: usize,
+        usage_delta_bytes: usize,
+        turn_result_bytes: usize,
         total_bytes: usize,
         max_bytes: usize,
     },

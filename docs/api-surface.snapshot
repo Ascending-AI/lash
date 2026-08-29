@@ -2558,12 +2558,16 @@ lash::persistence::StoreError::ClaimSettlementCountMismatch::claim_kind
 lash::persistence::StoreError::ClaimSettlementCountMismatch::completed_count
 lash::persistence::StoreError::ClaimSettlementCountMismatch::originating_count
 lash::persistence::StoreError::CommitByteBudgetExceeded
+lash::persistence::StoreError::CommitByteBudgetExceeded::agent_frame_bytes
 lash::persistence::StoreError::CommitByteBudgetExceeded::attachment_manifest_bytes
 lash::persistence::StoreError::CommitByteBudgetExceeded::checkpoint_bytes
 lash::persistence::StoreError::CommitByteBudgetExceeded::graph_delta_bytes
 lash::persistence::StoreError::CommitByteBudgetExceeded::max_bytes
+lash::persistence::StoreError::CommitByteBudgetExceeded::queue_batch_bytes
 lash::persistence::StoreError::CommitByteBudgetExceeded::session_config_bytes
 lash::persistence::StoreError::CommitByteBudgetExceeded::total_bytes
+lash::persistence::StoreError::CommitByteBudgetExceeded::turn_result_bytes
+lash::persistence::StoreError::CommitByteBudgetExceeded::usage_delta_bytes
 lash::persistence::StoreError::CommitNodeBudgetExceeded
 lash::persistence::StoreError::CommitNodeBudgetExceeded::max_nodes
 lash::persistence::StoreError::CommitNodeBudgetExceeded::node_count
