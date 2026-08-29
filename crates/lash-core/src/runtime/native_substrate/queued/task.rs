@@ -248,16 +248,19 @@ impl QueuedWorkTaskDriver {
                         error: err.to_string(),
                     };
                     match failure.disposition {
-                        QueuedWorkWakeOutcome::Retrying => tracing::warn!(
-                            target: "lash_core::queued_work",
-                            session_id = failure.session_id.as_deref(),
-                            reason = %failure.reason,
-                            attempt = failure.attempt,
-                            retry_after_ms = failure.retry_after_ms,
-                            error = %failure.error,
-                            event = "queued_work.wake_retry",
-                            "queued-work wake failed; retrying the pending-work claim"
-                        ),
+                        QueuedWorkWakeOutcome::Retrying => {
+                            crate::operational_metrics::record_queued_work_wake_retry();
+                            tracing::warn!(
+                                target: "lash_core::queued_work",
+                                session_id = failure.session_id.as_deref(),
+                                reason = %failure.reason,
+                                attempt = failure.attempt,
+                                retry_after_ms = failure.retry_after_ms,
+                                error = %failure.error,
+                                event = "queued_work.wake_retry",
+                                "queued-work wake failed; retrying the pending-work claim"
+                            );
+                        }
                         QueuedWorkWakeOutcome::Terminal => {
                             tracing::warn!(
                                 target: "lash_core::queued_work",

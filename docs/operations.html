@@ -483,6 +483,28 @@ let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .build(session_execution_owner)?;</code></pre>
     </div>
 
+    <div class="section" id="tuning-metrics">
+      <div class="section-header">
+        <h2>Tuning Metrics</h2>
+        <p>Enable the facade's <code>otel-trace</code> feature and install the process-global OpenTelemetry meter provider before constructing Lash runtime work. These instruments use the existing <code>lash-trace</code> meter and are absent from metrics-disabled builds. Tune from distributions and sustained rates, not from one sample.</p>
+      </div>
+      <div class="table">
+        <table>
+          <thead><tr><th>Stable metric</th><th>Type / unit</th><th>Host knob it informs</th><th>Reading</th></tr></thead>
+          <tbody>
+            <tr><td><code>lash.provider.retries</code></td><td>counter</td><td><code>ProviderRetryPolicy::{max_attempts, base_delay_ms, max_delay_ms}</code></td><td>One scheduled provider resubmission, split by <code>lash.provider</code> and <code>lash.provider.retry.kind</code> (<code>backoff</code> or <code>throttle</code>). A sustained rate says the retry ladder is carrying provider instability rather than merely bounding a rare failure.</td></tr>
+            <tr><td><code>lash.provider.throttle_wait.duration</code></td><td>histogram / <code>ms</code></td><td><code>ProviderRetryPolicy::{retry_after_cap_ms, throttle_wait_budget_ms}</code></td><td>Each provider-requested <code>Retry-After</code> Lash actually honors. Compare its tail and cumulative call-level exposure with the cap and budget; a 429 without an honored wait contributes only to the retry counter's <code>backoff</code> series.</td></tr>
+            <tr><td><code>lash.session_execution_lane.contention_wait.duration</code></td><td>histogram / <code>ms</code></td><td><code>LeaseTimings::{ttl, renew_interval}</code></td><td>One durable queued-drain contention episode, labeled <code>acquired</code>, <code>gave_up</code>, or <code>error</code>. The wait policy derives its slice and total budget from the stored lease term, so tune the lease timings only when this distribution agrees with the failover and false-takeover trade.</td></tr>
+            <tr><td><code>lash.session_execution_lane.give_ups</code></td><td>counter</td><td><code>LeaseTimings::{ttl, renew_interval}</code></td><td>Waits returned to engine-paced redrive, split by <code>holder_is_alive</code>, <code>wait_budget_exhausted</code>, or <code>cancelled_while_waiting</code>. Separate healthy live-holder contention from expired-budget and teardown outcomes before changing timings.</td></tr>
+            <tr><td><code>lash.queued_work.wake_retries</code></td><td>counter</td><td><code>WorkCadencePolicy::{retry_initial, retry_max, max_transient_attempts}</code></td><td>Transient native queued-work wake failures scheduled for another attempt. Terminal failures, exhausted attempts, and contention polls do not increment it.</td></tr>
+            <tr><td><code>lash.postgres.pool.acquire_wait.duration</code></td><td>histogram / <code>ms</code></td><td><code>PostgresStoreConfig::{min_connections, max_connections, acquire_timeout}</code></td><td>Every first-party runtime-store connection acquisition, labeled <code>success</code> or <code>error</code>. Tail growth near the timeout indicates pool pressure; confirm database capacity before raising <code>max_connections</code>.</td></tr>
+            <tr><td><code>lash.runtime_commit.budgeted_size</code></td><td>histogram / <code>By</code></td><td><code>CommitBudget::bytes</code></td><td>The logical payload bytes measured at the validation seam, labeled <code>admitted</code> or <code>rejected</code>. It is the exact measured total compared with the byte budget, not the backend's physical transaction or wire size.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The counter instruments are monotonic occurrences; histograms record one complete wait or validation decision. Provider names are the only potentially open-ended dimension. All other attributes are closed outcome vocabularies, so dashboards can aggregate them without session, turn, or row identifiers.</p>
+    </div>
+
     <div class="section" id="graceful-drain">
       <div class="section-header">
         <h2>Graceful Drain</h2>

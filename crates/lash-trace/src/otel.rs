@@ -15,7 +15,7 @@ use crate::{TraceContext, TraceEvent, TraceRecord, TraceSink, TraceSinkError, Tr
 
 mod metrics;
 #[doc(hidden)]
-pub use metrics::{ToolIntentMetrics, WorkerCapacityMetrics};
+pub use metrics::{RuntimeTuningMetrics, ToolIntentMetrics, WorkerCapacityMetrics};
 
 const INSTRUMENTATION_NAME: &str = "lash-trace";
 

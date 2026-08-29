@@ -78,11 +78,25 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 
 async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Postgres>, StoreError> {
     #[cfg(feature = "perf-witness")]
-    let started_at = std::time::Instant::now();
-    let connection = pool.acquire().await.map_err(store_sqlx_error)?;
+    let perf_started_at = std::time::Instant::now();
+    let metrics_started_at =
+        lash_core::facade_support::RUNTIME_TUNING_METRICS_ENABLED.then(std::time::Instant::now);
+    let connection = pool.acquire().await;
+    if let Some(started_at) = metrics_started_at {
+        lash_core::facade_support::record_postgres_pool_acquire_wait(
+            started_at.elapsed(),
+            if connection.is_ok() {
+                "success"
+            } else {
+                "error"
+            },
+        );
+    }
     #[cfg(feature = "perf-witness")]
-    lash_core::perf_witness::record_pool_checkout_wait(started_at.elapsed());
-    Ok(connection)
+    if connection.is_ok() {
+        lash_core::perf_witness::record_pool_checkout_wait(perf_started_at.elapsed());
+    }
+    connection.map_err(store_sqlx_error)
 }
 // Bumped to 9: ADR 0020 process-row `change_seq` now uses a transactional
 // clock row instead of a sequence. The schema is a reject-and-recreate

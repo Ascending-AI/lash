@@ -575,6 +575,8 @@ impl QueuedWorkRunHandle for FailOnceRunHandle {
 
 #[tokio::test]
 async fn best_effort_wake_reenters_pending_claim_without_an_external_event() {
+    #[cfg(feature = "otel-trace")]
+    let metrics = crate::operational_metrics::TestMetrics::install();
     let handle = Arc::new(FailOnceRunHandle {
         attempts: Arc::new(AtomicUsize::new(0)),
         accepted: tokio::sync::Notify::new(),
@@ -588,6 +590,8 @@ async fn best_effort_wake_reenters_pending_claim_without_an_external_event() {
         .await
         .expect("the failed wake must retry without another enqueue");
     assert_eq!(handle.attempts.load(Ordering::SeqCst), 2);
+    #[cfg(feature = "otel-trace")]
+    assert_eq!(metrics.counter_value("lash.queued_work.wake_retries"), 1);
 }
 
 struct AlwaysFailRunHandle {

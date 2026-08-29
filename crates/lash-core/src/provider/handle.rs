@@ -513,6 +513,11 @@ impl ProviderHandle {
                     if let Some((wait, charge)) = throttle_wait {
                         throttle_waited += charge;
                         courtesy_throttle_calls += 1;
+                        crate::operational_metrics::record_provider_retry(self.kind(), "throttle");
+                        crate::operational_metrics::record_provider_throttle_wait(
+                            self.kind(),
+                            wait,
+                        );
                         records.push(failure_attempt_record(
                             records.len() as u32 + 1,
                             started_at,
@@ -586,6 +591,7 @@ impl ProviderHandle {
                     let delay = reliability
                         .retry
                         .delay_for_attempt(attempt, failure.retry_after());
+                    crate::operational_metrics::record_provider_retry(self.kind(), "backoff");
                     records.push(failure_attempt_record(
                         records.len() as u32 + 1,
                         started_at,

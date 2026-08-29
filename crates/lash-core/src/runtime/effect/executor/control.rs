@@ -1209,17 +1209,48 @@ pub trait AwaitEventResolver: Send + Sync {
         cancel: CancellationToken,
     ) -> Result<QueuedLaneAcquisition, RuntimeError> {
         let mut wait = queued_lane_wait::QueuedLaneWait::default();
+        #[cfg(feature = "otel-trace")]
+        let mut contention_started: Option<tokio::time::Instant> = None;
         loop {
-            let acquisition = lane.try_acquire().await?;
+            let acquisition = match lane.try_acquire().await {
+                Ok(acquisition) => acquisition,
+                Err(error) => {
+                    #[cfg(feature = "otel-trace")]
+                    if let Some(started) = contention_started {
+                        crate::operational_metrics::record_session_lane_contention_wait(
+                            started.elapsed(),
+                            "error",
+                        );
+                    }
+                    return Err(error);
+                }
+            };
             match acquisition {
                 QueuedLaneAttempt::Acquired(guard) => {
+                    #[cfg(feature = "otel-trace")]
+                    if let Some(started) = contention_started {
+                        crate::operational_metrics::record_session_lane_contention_wait(
+                            started.elapsed(),
+                            "acquired",
+                        );
+                    }
                     return Ok(QueuedLaneAcquisition::Acquired(guard));
                 }
                 QueuedLaneAttempt::Busy(holder) => {
+                    #[cfg(feature = "otel-trace")]
+                    let started = *contention_started.get_or_insert_with(tokio::time::Instant::now);
                     let slice_ms = match wait.observe(&holder) {
                         queued_lane_wait::QueuedLaneWaitStep::Wait { slice_ms } => slice_ms,
                         queued_lane_wait::QueuedLaneWaitStep::GiveUp(give_up) => {
                             let waited_ms = wait.waited_ms();
+                            #[cfg(feature = "otel-trace")]
+                            crate::operational_metrics::record_session_lane_contention_wait(
+                                started.elapsed(),
+                                "gave_up",
+                            );
+                            crate::operational_metrics::record_session_lane_give_up(
+                                give_up.as_str(),
+                            );
                             queued_lane_wait::trace_busy_gave_up(&holder, give_up, waited_ms);
                             return Err(queued_lane_wait::lane_busy_error(
                                 &holder, give_up, waited_ms,
@@ -1233,6 +1264,14 @@ pub trait AwaitEventResolver: Send + Sync {
                         () = cancel.cancelled() => {
                             let give_up = queued_lane_wait::QueuedLaneGiveUp::CancelledWhileWaiting;
                             let waited_ms = wait.waited_ms();
+                            #[cfg(feature = "otel-trace")]
+                            crate::operational_metrics::record_session_lane_contention_wait(
+                                started.elapsed(),
+                                "gave_up",
+                            );
+                            crate::operational_metrics::record_session_lane_give_up(
+                                give_up.as_str(),
+                            );
                             queued_lane_wait::trace_busy_gave_up(
                                 &holder,
                                 give_up,
