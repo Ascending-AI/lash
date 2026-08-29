@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prototype compiler-derived example coverage for the Lash facade.
+"""Compiler-derived example coverage for Lash choreography facades.
 
 The prototype deliberately reports only what rustdoc's scrape-examples pass
 can prove: a typechecked, direct function or method call.  It never turns
@@ -38,6 +38,7 @@ DEFAULT_EXAMPLE_PACKAGES = (
     "agent-workbench",
     "slack-clone",
 )
+EXAMPLE_FEATURES = ("agent-service/restate",)
 SCRAPED_MARKER = 'class="docblock scraped-example-list"'
 SCRAPED_TITLE = re.compile(r'<div class="scraped-example-title">(.*?) \(<a ', re.S)
 METHOD_SECTION = re.compile(r'<section id="(?:ty)?method\.([^"-]+)" class="([^"]+)"')
@@ -55,6 +56,24 @@ class CallEvidence(NamedTuple):
     identity: str
     call_kind: str
     example_paths: tuple[str, ...]
+
+
+class FacadeSpec(NamedTuple):
+    crate: str
+    root_path: str
+    hidden_items: bool = True
+    excluded_root_exports: frozenset[str] = frozenset()
+
+
+FACADE_SPECS = (
+    FacadeSpec("lash", "lash"),
+    FacadeSpec(
+        "lash_restate",
+        "lash_restate",
+        hidden_items=False,
+        excluded_root_exports=frozenset({"restate_sdk"}),
+    ),
+)
 
 
 def run(
@@ -82,18 +101,26 @@ def cargo_metadata() -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
-def canonical_surface() -> list[SurfaceItem]:
+def canonical_surface(spec: FacadeSpec, package: str) -> list[SurfaceItem]:
     # Import the existing oracle rather than reimplementing its re-export and
     # member-identity rules.  The prototype needs one representative feature
     # configuration, so it deliberately avoids the gate's second all-features
     # build and availability merge.
-    raw_surface = api_surface.lash_surface(
-        api_surface.rustdoc("lash-runtime", "lash", False), False
+    raw_surface = api_surface.public_surface(
+        api_surface.rustdoc(
+            package,
+            spec.crate,
+            False,
+            hidden_items=spec.hidden_items,
+        ),
+        spec.root_path,
+        False,
+        excluded_root_exports=spec.excluded_root_exports,
     )
     items: list[SurfaceItem] = []
     for (identity, kind), paths in api_surface.api_items(raw_surface).items():
         primary = api_surface.primary_path(paths)
-        if not primary.startswith("lash::"):
+        if not primary.startswith(f"{spec.root_path}::"):
             continue
         items.append(
             SurfaceItem(
@@ -204,11 +231,15 @@ def opt_in_example_package(snapshot: Path, package: dict[str, Any]) -> str:
     return preferred["name"]
 
 
-def facade_package(crate_to_package: dict[str, str]) -> str:
-    try:
-        return crate_to_package["lash"]
-    except KeyError as error:
-        raise RuntimeError("cargo metadata has no library target named lash") from error
+def facade_packages(
+    crate_to_package: dict[str, str], specs: tuple[FacadeSpec, ...] = FACADE_SPECS
+) -> list[tuple[FacadeSpec, str]]:
+    missing = [spec.crate for spec in specs if spec.crate not in crate_to_package]
+    if missing:
+        raise RuntimeError(
+            "cargo metadata has no library target(s): " + ", ".join(missing)
+        )
+    return [(spec, crate_to_package[spec.crate]) for spec in specs]
 
 
 def docs_target(environment: dict[str, str]) -> Path:
@@ -221,8 +252,9 @@ def docs_target(environment: dict[str, str]) -> Path:
 def rustdoc_scrape(
     snapshot: Path,
     target: Path,
-    facade: str,
+    facades: list[str],
     examples: list[str],
+    features: tuple[str, ...],
     environment: dict[str, str],
 ) -> float:
     command = [
@@ -233,8 +265,10 @@ def rustdoc_scrape(
         "-Zrustdoc-scrape-examples",
         "--no-deps",
     ]
-    for package in sorted({facade, *examples}):
+    for package in sorted({*facades, *examples}):
         command += ["-p", package]
+    if features:
+        command += ["--features", ",".join(features)]
 
     scrape_environment = environment.copy()
     scrape_environment["CARGO_TARGET_DIR"] = str(target)
@@ -341,6 +375,9 @@ def print_report(
     example_packages: list[dict[str, Any]],
     elapsed: float,
     sample_limit: int,
+    *,
+    enforce: bool,
+    all_gaps: bool,
 ) -> int:
     surface_functions = [item for item in surface if item.kind == "function"]
     functions_by_path = {
@@ -387,13 +424,26 @@ def print_report(
         if item.kind != "function":
             non_derivable[item.kind].append(item)
 
-    print("FIG-2090 compiler-derived facade call evidence")
+    print("Compiler-derived choreography facade call evidence")
     print(f"scrape wall time: {elapsed:.2f}s")
-    print(f"default-feature canonical facade inventory: {len(surface)} item(s)")
+    print("facade inventories:")
+    roots = sorted({item.symbol.split("::", 1)[0] for item in surface})
+    for root in roots:
+        root_items = [item for item in surface if item.symbol.startswith(f"{root}::")]
+        root_functions = [item for item in root_items if item.kind == "function"]
+        root_covered = [
+            item
+            for item, _ in covered
+            if item.symbol.startswith(f"{root}::")
+        ]
+        print(
+            f"  {root}: {len(root_items)} item(s), "
+            f"{len(root_covered)}/{len(root_functions)} direct-call candidates covered"
+        )
     print("example contributors:")
     for package in example_packages:
         name = package["name"]
-        print(f"  {name}: {contributors[name]} facade call item(s)")
+        print(f"  {name}: {contributors[name]} covered facade call item(s)")
     print()
     print(f"COVERED direct calls ({len(covered)} total; sampled by call kind):")
     covered_groups: dict[str, list[tuple[SurfaceItem, CallEvidence]]] = defaultdict(list)
@@ -418,9 +468,10 @@ def print_report(
     print()
     print(
         f"UNCOVERED direct-call candidates ({len(uncovered)}; "
-        f"first {sample_limit} shown):"
+        + ("all shown):" if all_gaps else f"first {sample_limit} shown):")
     )
-    for item in uncovered[:sample_limit]:
+    shown_uncovered = uncovered if all_gaps else uncovered[:sample_limit]
+    for item in shown_uncovered:
         print(f"  [function] {item.symbol} (identity {item.identity}) <- none")
 
     print()
@@ -462,9 +513,25 @@ def print_report(
 
     missing_contributors = [name for name, count in contributors.items() if count == 0]
     if missing_contributors:
+        sys.stdout.flush()
         print(
             "error: no matched facade call was derived for: "
             + ", ".join(missing_contributors),
+            file=sys.stderr,
+        )
+        return 1
+    if enforce and uncovered:
+        gaps_by_root = {
+            root: sum(item.symbol.startswith(f"{root}::") for item in uncovered)
+            for root in roots
+        }
+        details = ", ".join(
+            f"{root}={count}" for root, count in gaps_by_root.items() if count
+        )
+        sys.stdout.flush()
+        print(
+            f"error: {len(uncovered)} uncovered direct-call candidate(s) "
+            f"remain ({details})",
             file=sys.stderr,
         )
         return 1
@@ -484,6 +551,16 @@ def main() -> int:
         type=int,
         default=8,
         help="maximum uncovered/non-derivable samples to print per group",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="fail when any direct-call candidate lacks compiled example evidence",
+    )
+    parser.add_argument(
+        "--all-gaps",
+        action="store_true",
+        help="print every uncovered direct-call candidate",
     )
     parser.add_argument(
         "--target-dir",
@@ -514,9 +591,13 @@ def main() -> int:
     if outside_examples:
         parser.error("not under examples/: " + ", ".join(outside_examples))
 
-    print("Deriving default-feature canonical facade identities...", file=sys.stderr)
-    surface = canonical_surface()
-    facade = facade_package(crate_to_package)
+    print("Deriving canonical choreography facade identities...", file=sys.stderr)
+    facades = facade_packages(crate_to_package)
+    surface = [
+        item
+        for spec, package in facades
+        for item in canonical_surface(spec, package)
+    ]
 
     target = (args.target_dir or docs_target(environment)).resolve()
     target.mkdir(parents=True, exist_ok=True)
@@ -530,11 +611,22 @@ def main() -> int:
         for package in example_rows:
             opt_in_example_package(snapshot, package)
         elapsed = rustdoc_scrape(
-            snapshot, target, facade, requested, environment
+            snapshot,
+            target,
+            [package for _, package in facades],
+            requested,
+            EXAMPLE_FEATURES,
+            environment,
         )
-        calls = parse_calls(target, {"lash"}, snapshot)
+        calls = parse_calls(target, {spec.crate for spec, _ in facades}, snapshot)
         return print_report(
-            surface, calls, example_rows, elapsed, args.sample_limit
+            surface,
+            calls,
+            example_rows,
+            elapsed,
+            args.sample_limit,
+            enforce=args.check,
+            all_gaps=args.all_gaps,
         )
 
 

@@ -243,18 +243,24 @@ def add_export(
         add_members(surface, path, canonical, item_id, member_index)
 
 
-def lash_surface(
-    document: dict[str, Any], all_features: bool
+def public_surface(
+    document: dict[str, Any],
+    root_path: str,
+    all_features: bool,
+    *,
+    excluded_root_exports: frozenset[str] = frozenset(),
 ) -> dict[tuple[str, str], str]:
-    """Walk every public export in the app-facing `lash` crate."""
+    """Walk public exports from a crate root using the facade identity rules."""
     index = document["index"]
     paths = document["paths"]
     surface: dict[tuple[str, str], str] = {}
 
-    def walk(module_id: str, prefix: str) -> None:
+    def walk(module_id: str, prefix: str, *, at_root: bool = False) -> None:
         for child_id in index[module_id]["inner"]["module"]["items"]:
             child = index[str(child_id)]
             if not public(child["visibility"]):
+                continue
+            if at_root and exported_name(child) in excluded_root_exports:
                 continue
             path = export_path(prefix, child)
             if item_kind(child) == "module":
@@ -262,8 +268,15 @@ def lash_surface(
             else:
                 add_export(surface, path, child, index, paths, all_features)
 
-    walk(str(document["root"]), "lash")
+    walk(str(document["root"]), root_path, at_root=True)
     return surface
+
+
+def lash_surface(
+    document: dict[str, Any], all_features: bool
+) -> dict[tuple[str, str], str]:
+    """Walk every public export in the app-facing `lash` crate."""
+    return public_surface(document, "lash", all_features)
 
 
 def referenced_ids(node: Any, found: set[str]) -> None:
