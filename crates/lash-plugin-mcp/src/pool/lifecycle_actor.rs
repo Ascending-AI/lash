@@ -16,10 +16,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, timeout};
 
 use super::{McpEntry, McpToolListRefresh, PublishedService, import_tools};
+use crate::config::McpShutdownPolicy;
 use crate::error::McpError;
-use crate::service_lifecycle::{
-    ConnectingService, STDIO_GRACEFUL_SHUTDOWN_PERIOD, StdioChildGuard, connect_service,
-};
+use crate::service_lifecycle::{ConnectingService, StdioChildGuard, connect_service};
 
 pub(super) enum LifecycleCommand {
     Establish {
@@ -48,6 +47,7 @@ pub(super) struct LifecycleActor {
     commands: mpsc::UnboundedReceiver<LifecycleCommand>,
     published: watch::Sender<Option<Arc<PublishedService>>>,
     active_pid: Arc<AtomicU32>,
+    shutdown_policy: McpShutdownPolicy,
     generation: u64,
     reconnect_backoff: Duration,
     reconnect_attempts: u64,
@@ -67,6 +67,7 @@ impl LifecycleActor {
         commands: mpsc::UnboundedReceiver<LifecycleCommand>,
         published: watch::Sender<Option<Arc<PublishedService>>>,
         active_pid: Arc<AtomicU32>,
+        shutdown_policy: McpShutdownPolicy,
         reconnect_initial_backoff: Duration,
         keepalive_interval: Duration,
     ) -> Self {
@@ -75,6 +76,7 @@ impl LifecycleActor {
             commands,
             published,
             active_pid,
+            shutdown_policy,
             generation: 0,
             reconnect_backoff: reconnect_initial_backoff,
             reconnect_attempts: 0,
@@ -629,20 +631,21 @@ impl LifecycleActor {
         cancellation.cancel();
         let entry = self.entry.clone();
         let active_pid = Arc::clone(&self.active_pid);
+        let shutdown_policy = self.shutdown_policy;
         let cleanup = async move {
             if child.is_some() {
                 // Host request cancellation cannot delay process cleanup: the
-                // two bounded shutdown responsibilities advance concurrently.
+                // two shutdown responsibilities advance concurrently.
                 let (_, ()) = tokio::join!(
                     request_tasks.shutdown(),
-                    reap_child(entry, active_pid, server_name, child),
+                    reap_child(entry, active_pid, server_name, child, shutdown_policy,),
                 );
             } else {
-                // HTTP has no child to reap, but still gets the same bounded
+                // HTTP has no child to reap, but still gets the configured
                 // grace for its transport task to drain.
                 let (_, _) = tokio::join!(
                     request_tasks.shutdown(),
-                    timeout(STDIO_GRACEFUL_SHUTDOWN_PERIOD, waiting.as_mut()),
+                    timeout(shutdown_policy.graceful_period, waiting.as_mut()),
                 );
             }
         };
@@ -654,9 +657,8 @@ impl LifecycleActor {
                 () = &mut cleanup => return shutdown_observed,
                 command = self.commands.recv(), if !shutdown_observed => match command {
                     Some(LifecycleCommand::Shutdown) | None => {
-                        // Keep the already-running reap future alive. Observing
-                        // shutdown now guarantees its full 3s + 1s bounds fit
-                        // beneath the entry's outer five-second deadline.
+                        // Keep the already-running reap future alive. The entry
+                        // deadline includes both policy durations plus margin.
                         shutdown_observed = true;
                     }
                     Some(LifecycleCommand::Establish { reply }) => {
@@ -681,6 +683,7 @@ impl LifecycleActor {
             Arc::clone(&self.active_pid),
             server_name,
             child,
+            self.shutdown_policy,
         )
         .await;
     }
@@ -855,13 +858,20 @@ async fn reap_child(
     active_pid: Arc<AtomicU32>,
     server_name: &str,
     child: Option<StdioChildGuard>,
+    shutdown_policy: McpShutdownPolicy,
 ) {
     let Some(child) = child else {
         active_pid.store(0, Ordering::SeqCst);
         return;
     };
     let pid = child.pid();
-    if let Err(error) = child.reap_after_graceful_close().await {
+    if let Err(error) = child
+        .reap_after_graceful_close(
+            shutdown_policy.graceful_period,
+            shutdown_policy.post_kill_wait,
+        )
+        .await
+    {
         let reason = format!(
             "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: {error}"
         );

@@ -315,6 +315,7 @@ fn direct_server_config(api_base_url: &str) -> McpServerConfig {
             call_timeout_ms: 5_000,
             ..Default::default()
         },
+        shutdown_policy: Default::default(),
         binary_content_attachments: false,
     }
 }
@@ -341,6 +342,7 @@ fn wrapped_server_config(api_base_url: &str, pid_file: &std::path::Path) -> McpS
             call_timeout_ms: 5_000,
             ..Default::default()
         },
+        shutdown_policy: Default::default(),
         binary_content_attachments: false,
     }
 }

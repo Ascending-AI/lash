@@ -434,6 +434,7 @@ mod tests {
                     call_timeout_ms: 10_000,
                     ..Default::default()
                 },
+                shutdown_policy: Default::default(),
                 binary_content_attachments: false,
             },
         );
@@ -562,6 +563,7 @@ mod tests {
                     call_timeout_ms: 5_000,
                     ..Default::default()
                 },
+                shutdown_policy: Default::default(),
                 binary_content_attachments: false,
             },
         )]);

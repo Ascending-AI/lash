@@ -211,14 +211,17 @@ HTTP headers are static across reconnects: Lash does not enable rmcp OAuth or
 token refresh, so a deployment that rotates tokens must rebuild or reattach the
 server config with a host-managed credential.
 
-Each stdio or streamable-HTTP server has the same timeout, liveness, and reconnect
-policy knobs. In Rust these fields live in `McpCallPolicy`, one flattened
-`call_policy` field on either transport variant; serialized configuration keeps
-the flat shape shown below.
+Each stdio or streamable-HTTP server has the same timeout, liveness, reconnect,
+and shutdown policy knobs. In Rust, timeout, liveness, and reconnect fields live
+in `McpCallPolicy`, while graceful-close and forced-reap timings live in
+`McpShutdownPolicy`; both are flattened into either transport variant, so
+serialized configuration keeps the flat shape shown below.
 
 | Field | Default | Behavior |
 | --- | ---: | --- |
 | `startup_timeout_ms` | `10_000` | Bounds initialization and tool discovery. Initialization is never cancelled. |
+| `graceful_period_ms` | `3_000` | Gives a server time to exit after graceful transport closure before forced cleanup. |
+| `post_kill_wait_ms` | `1_000` | Waits for a killed stdio child to be reaped. |
 | `call_timeout_ms` | `60_000` | Idle clock for a tool call. Matching progress notifications reset it by default. |
 | `call_max_total_timeout_ms` | `600_000` | Mandatory wall-clock cap, regardless of progress. |
 | `reset_call_timeout_on_progress` | `true` | Lets a progressing call extend past the idle clock. |

@@ -654,6 +654,7 @@ fn scripted_servers(trace: &std::path::Path, scenario: &str) -> BTreeMap<String,
                 call_timeout_ms: 10_000,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     )])

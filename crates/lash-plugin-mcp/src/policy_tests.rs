@@ -246,6 +246,7 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
                 .unwrap_or(options.reconnect_initial_ms),
             reconnect_max_attempts: options.reconnect_max_attempts,
         },
+        shutdown_policy: Default::default(),
         binary_content_attachments: false,
     }
 }
@@ -1072,7 +1073,7 @@ async fn shutdown_all_joins_actor_reaping_stdio_child() {
     eprintln!("actor-reap shutdown elapsed: {elapsed:?}");
     assert!(
         elapsed >= Duration::from_secs(3),
-        "close-ignoring child did not receive the literal three-second grace: {elapsed:?}"
+        "close-ignoring child did not receive the configured three-second default grace: {elapsed:?}"
     );
     assert!(
         elapsed < Duration::from_secs(5),
@@ -1169,7 +1170,7 @@ async fn shutdown_during_live_handshake_reaps_actor_owned_child() {
     let elapsed = started.elapsed();
     assert!(
         elapsed < Duration::from_secs(5),
-        "live-handshake shutdown exceeded the literal five-second bound: {elapsed:?}"
+        "live-handshake shutdown exceeded the configured five-second default bound: {elapsed:?}"
     );
     assert!(matches!(
         attaching.await.expect("attach task panicked"),
@@ -1215,11 +1216,11 @@ async fn non_finishing_child_reap_records_literal_pid_at_cleanup_deadline() {
     let elapsed = started.elapsed();
     assert!(
         elapsed >= Duration::from_secs(4),
-        "non-finishing reap returned before the literal 3s + 1s cleanup deadline: {elapsed:?}"
+        "non-finishing reap returned before the default 3s + 1s cleanup deadline: {elapsed:?}"
     );
     assert!(
         elapsed < Duration::from_secs(5),
-        "non-finishing reap exceeded the literal five-second entry bound: {elapsed:?}"
+        "non-finishing reap exceeded the default five-second entry bound: {elapsed:?}"
     );
     assert_eq!(
         current_entry.last_error.read_recover().as_deref(),
@@ -1266,11 +1267,11 @@ async fn shutdown_preempts_in_flight_keepalive_probe_and_reaps_child() {
     let elapsed = started.elapsed();
     assert!(
         elapsed >= Duration::from_millis(2_900),
-        "close-ignoring child did not receive its literal three-second grace: {elapsed:?}"
+        "close-ignoring child did not receive its configured three-second default grace: {elapsed:?}"
     );
     assert!(
         elapsed < Duration::from_secs(5),
-        "probe-preempting shutdown exceeded the literal five-second bound: {elapsed:?}"
+        "probe-preempting shutdown exceeded the configured five-second default bound: {elapsed:?}"
     );
     assert_eq!(process_state(pid), None);
 }
@@ -1373,6 +1374,46 @@ async fn shutdown_all_bounds_an_actor_that_never_finishes() {
             "MCP stdio child PID 424242 abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
         ),
         "captured trace: {trace}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_policy_shortens_shutdown_all_budget() {
+    let root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let shutdown_policy = McpShutdownPolicy {
+        graceful_period: Duration::from_millis(50),
+        post_kill_wait: Duration::from_millis(50),
+    };
+    let entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(root.path(), MockOptions::default()).with_shutdown_policy(shutdown_policy),
+        McpHostServices::default(),
+    )
+    .with_shutdown_wedge(424_242);
+    assert!(pool.install("mock".to_string(), Arc::clone(&entry)).is_ok());
+
+    let started = Instant::now();
+    pool.shutdown_all().await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed >= Duration::from_millis(900),
+        "custom shutdown budget returned before its one-second scheduling margin: {elapsed:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "sub-second shutdown policy did not shorten shutdown_all: {elapsed:?}"
+    );
+    assert_eq!(pool.entries.read_recover().len(), 0);
+    let reason = entry
+        .last_error
+        .read_recover()
+        .clone()
+        .expect("shortened shutdown must record the abandoned actor");
+    assert!(
+        reason.contains("within the 1.1s per-entry total shutdown deadline"),
+        "unexpected shortened shutdown reason: {reason}"
     );
 }
 

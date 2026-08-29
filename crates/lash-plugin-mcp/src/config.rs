@@ -13,6 +13,8 @@ const DEFAULT_LIVENESS_PROBE_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_CONSECUTIVE_TIMEOUTS_BEFORE_DISCONNECT: u64 = 3;
 const DEFAULT_RECONNECT_INITIAL_BACKOFF_MS: u64 = 500;
 const DEFAULT_RECONNECT_MAX_BACKOFF_MS: u64 = 30_000;
+const DEFAULT_GRACEFUL_PERIOD: Duration = Duration::from_secs(3);
+const DEFAULT_POST_KILL_WAIT: Duration = Duration::from_secs(1);
 
 /// How an idle tool-call timeout affects the MCP connection.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +31,14 @@ pub enum TimeoutDisconnectPolicy {
 
 fn default_startup_timeout_ms() -> u64 {
     DEFAULT_STARTUP_TIMEOUT_MS
+}
+
+fn default_graceful_period() -> Duration {
+    DEFAULT_GRACEFUL_PERIOD
+}
+
+fn default_post_kill_wait() -> Duration {
+    DEFAULT_POST_KILL_WAIT
 }
 
 fn default_call_timeout_ms() -> u64 {
@@ -61,6 +71,14 @@ fn default_reconnect_initial_backoff_ms() -> u64 {
 
 fn default_reconnect_max_backoff_ms() -> u64 {
     DEFAULT_RECONNECT_MAX_BACKOFF_MS
+}
+
+fn is_default_graceful_period(value: &Duration) -> bool {
+    *value == DEFAULT_GRACEFUL_PERIOD
+}
+
+fn is_default_post_kill_wait(value: &Duration) -> bool {
+    *value == DEFAULT_POST_KILL_WAIT
 }
 
 fn is_default_startup_timeout_ms(value: &u64) -> bool {
@@ -105,6 +123,69 @@ fn is_zero(value: &u64) -> bool {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+mod duration_millis_serde {
+    use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S>(value: &Duration, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let milliseconds = u64::try_from(value.as_millis()).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_u64(milliseconds)
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Duration::from_millis(u64::deserialize(deserializer)?))
+    }
+}
+
+/// Graceful and forced-cleanup timing for one MCP server lifecycle.
+///
+/// The fields are typed as `Duration` for Rust integrators. In serialized
+/// MCP server configuration, each value is an integer number of milliseconds,
+/// matching the existing timeout fields. The graceful period applies while a
+/// server can exit normally; the post-kill wait applies only after a stdio
+/// child has been forcefully killed. Both defaults preserve the existing
+/// three-second graceful and one-second post-kill behavior.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpShutdownPolicy {
+    /// How long a server gets to exit after graceful transport closure.
+    /// Default: three seconds. Increase this for servers that flush state on
+    /// close; decrease it when deployment drain latency matters more than a
+    /// slow server's orderly exit.
+    #[serde(
+        rename = "graceful_period_ms",
+        default = "default_graceful_period",
+        with = "duration_millis_serde",
+        skip_serializing_if = "is_default_graceful_period"
+    )]
+    pub graceful_period: Duration,
+    /// How long to wait for a killed stdio child to be reaped. Default: one
+    /// second. Increase this for hosts under process pressure; decrease it
+    /// when a bounded deployment drain should abandon a child sooner.
+    #[serde(
+        rename = "post_kill_wait_ms",
+        default = "default_post_kill_wait",
+        with = "duration_millis_serde",
+        skip_serializing_if = "is_default_post_kill_wait"
+    )]
+    pub post_kill_wait: Duration,
+}
+
+impl Default for McpShutdownPolicy {
+    fn default() -> Self {
+        Self {
+            graceful_period: default_graceful_period(),
+            post_kill_wait: default_post_kill_wait(),
+        }
+    }
 }
 
 /// Timeout, liveness, and reconnect behavior shared by every MCP transport.
@@ -238,6 +319,9 @@ pub enum McpServerConfig {
         startup_timeout_ms: u64,
         #[serde(flatten)]
         call_policy: McpCallPolicy,
+        /// Graceful-close and forced-reap timing for this server.
+        #[serde(flatten)]
+        shutdown_policy: McpShutdownPolicy,
         /// Persist non-image MCP binary content as model attachments.
         #[serde(default, skip_serializing_if = "is_false")]
         binary_content_attachments: bool,
@@ -258,6 +342,9 @@ pub enum McpServerConfig {
         startup_timeout_ms: u64,
         #[serde(flatten)]
         call_policy: McpCallPolicy,
+        /// Graceful-close and forced-reap timing for this server.
+        #[serde(flatten)]
+        shutdown_policy: McpShutdownPolicy,
         /// Persist non-image MCP binary content as model attachments.
         #[serde(default, skip_serializing_if = "is_false")]
         binary_content_attachments: bool,
@@ -274,6 +361,7 @@ impl McpServerConfig {
             cwd: None,
             startup_timeout_ms: default_startup_timeout_ms(),
             call_policy: McpCallPolicy::default(),
+            shutdown_policy: McpShutdownPolicy::default(),
             binary_content_attachments: false,
         }
     }
@@ -285,6 +373,7 @@ impl McpServerConfig {
             headers: BTreeMap::new(),
             startup_timeout_ms: default_startup_timeout_ms(),
             call_policy: McpCallPolicy::default(),
+            shutdown_policy: McpShutdownPolicy::default(),
             binary_content_attachments: false,
         }
     }
@@ -425,6 +514,33 @@ impl McpServerConfig {
                 call_policy
             }
         }
+    }
+
+    /// Return the graceful-close and forced-reap timing for this server.
+    pub fn shutdown_policy(&self) -> &McpShutdownPolicy {
+        match self {
+            Self::Stdio {
+                shutdown_policy, ..
+            }
+            | Self::StreamableHttp {
+                shutdown_policy, ..
+            } => shutdown_policy,
+        }
+    }
+
+    /// Set the graceful-close and forced-reap timing for this server.
+    pub fn with_shutdown_policy(mut self, shutdown_policy: McpShutdownPolicy) -> Self {
+        match &mut self {
+            Self::Stdio {
+                shutdown_policy: configured,
+                ..
+            }
+            | Self::StreamableHttp {
+                shutdown_policy: configured,
+                ..
+            } => *configured = shutdown_policy,
+        }
+        self
     }
 
     pub fn with_binary_content_attachments(mut self, enabled: bool) -> Self {
@@ -579,6 +695,14 @@ mod tests {
                 Duration::from_millis(30_000)
             );
             assert_eq!(config.reconnect_max_attempts(), 0);
+            assert_eq!(
+                config.shutdown_policy().graceful_period,
+                Duration::from_secs(3)
+            );
+            assert_eq!(
+                config.shutdown_policy().post_kill_wait,
+                Duration::from_secs(1)
+            );
             assert_eq!(serde_json::to_value(config).unwrap(), json);
         }
 
@@ -593,7 +717,9 @@ mod tests {
             "liveness_probe_interval_ms": 44,
             "reconnect_initial_backoff_ms": 45,
             "reconnect_max_backoff_ms": 46,
-            "reconnect_max_attempts": 5
+            "reconnect_max_attempts": 5,
+            "graceful_period_ms": 47,
+            "post_kill_wait_ms": 48
         }))
         .unwrap();
         let encoded = serde_json::to_value(custom).unwrap();
@@ -602,6 +728,8 @@ mod tests {
         assert_eq!(encoded["timeout_disconnect_policy"], "consecutive_timeouts");
         assert_eq!(encoded["liveness_probe_interval_ms"], 44);
         assert_eq!(encoded["reconnect_max_attempts"], 5);
+        assert_eq!(encoded["graceful_period_ms"], 47);
+        assert_eq!(encoded["post_kill_wait_ms"], 48);
     }
 
     /// The accepted `transport` tags are exactly the two that can connect.

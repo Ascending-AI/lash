@@ -44,7 +44,7 @@ use lash_tool_support::ToolDefinitionBindingExt;
 
 #[cfg(test)]
 use crate::config::McpCallPolicy;
-use crate::config::{McpServerConfig, TimeoutDisconnectPolicy};
+use crate::config::{McpServerConfig, McpShutdownPolicy, TimeoutDisconnectPolicy};
 use crate::error::McpError;
 use crate::host::{McpHostServices, McpToolListChangedHandler};
 use crate::naming;
@@ -53,14 +53,20 @@ use crate::service_lifecycle::build_http_headers;
 use crate::service_lifecycle::{equal_jitter, is_connection_loss};
 use lifecycle_actor::{LifecycleActor, LifecycleCommand};
 
-/// One entry's complete explicit-shutdown budget. Every actor await that can
-/// precede cleanup is preempted by `Shutdown`, leaving the full three-second
-/// graceful close plus one-second post-kill reap and one second of scheduling
-/// margin: `3s + 1s + 1s = 5s`.
+/// Scheduling margin added to each entry's configured shutdown durations.
+const ENTRY_SHUTDOWN_SCHEDULING_MARGIN: Duration = Duration::from_secs(1);
+
+/// One entry's complete explicit-shutdown budget is its configured graceful
+/// period plus post-kill wait and this scheduling margin.
 ///
 /// All entry actors are joined concurrently, so `shutdown_all()` takes roughly
-/// one five-second bound rather than `entries * five seconds`.
-const ENTRY_SHUTDOWN_TOTAL_BOUND: Duration = Duration::from_secs(5);
+/// one configured bound rather than `entries` times that bound.
+fn entry_shutdown_total_bound(policy: &McpShutdownPolicy) -> Duration {
+    policy
+        .graceful_period
+        .saturating_add(policy.post_kill_wait)
+        .saturating_add(ENTRY_SHUTDOWN_SCHEDULING_MARGIN)
+}
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
 /// session plugin instance.
@@ -619,14 +625,14 @@ impl McpConnectionPool {
 
     /// Tear down all connections in parallel. Call this before dropping the
     /// pool for a graceful shutdown; `Drop` itself cannot await. Every actor is
-    /// sent `Shutdown` before the handles are joined concurrently. One literal
-    /// five-second per-entry total deadline covers graceful close, kill, and
-    /// bounded reap, so total pool shutdown is approximately five seconds, not
-    /// the number of entries multiplied by five seconds.
+    /// sent `Shutdown` before the handles are joined concurrently. Each entry's
+    /// deadline is its configured graceful period plus post-kill wait and one
+    /// second of scheduling margin, so total pool shutdown is approximately the
+    /// largest configured bound, not the number of entries multiplied by it.
     ///
     /// A child can be abandoned if it survives the actor's preemptive kill and
     /// bounded reap or if the entry deadline expires mid-reap. The deadline
-    /// abort branch reports the live `active_pid`; its literal PID and reason
+    /// abort branch reports the live `active_pid`; its PID and reason
     /// are recorded in `last_error` and tracing. No background waitpid sweep is
     /// retained.
     ///
@@ -725,6 +731,7 @@ impl McpEntry {
         let (actor_tx, actor_rx) = tokio::sync::mpsc::unbounded_channel();
         let (published_tx, service) = tokio::sync::watch::channel(None);
         let active_pid = Arc::new(AtomicU32::new(0));
+        let shutdown_policy = *config.shutdown_policy();
         let reconnect_initial_backoff = config.reconnect_initial_backoff();
         let keepalive_interval = config.liveness_probe_interval();
         Arc::new_cyclic(|weak| {
@@ -733,6 +740,7 @@ impl McpEntry {
                 actor_rx,
                 published_tx,
                 Arc::clone(&active_pid),
+                shutdown_policy,
                 reconnect_initial_backoff,
                 keepalive_interval,
             );
@@ -963,8 +971,9 @@ impl McpEntry {
         let Some(mut handle) = handle else {
             return;
         };
+        let shutdown_bound = entry_shutdown_total_bound(self.config.shutdown_policy());
         let mut abort_on_drop = AbortOnDrop::new(handle.abort_handle());
-        match timeout(ENTRY_SHUTDOWN_TOTAL_BOUND, &mut handle).await {
+        match timeout(shutdown_bound, &mut handle).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 let reason = format!("MCP lifecycle actor terminated with JoinError: {error}");
@@ -976,10 +985,12 @@ impl McpEntry {
                 handle.abort();
                 let _ = handle.await;
                 let reason = if pid == 0 {
-                    "MCP lifecycle actor abandoned: it did not finish within the 5s per-entry total shutdown deadline".to_string()
+                    format!(
+                        "MCP lifecycle actor abandoned: it did not finish within the {shutdown_bound:?} per-entry total shutdown deadline"
+                    )
                 } else {
                     format!(
-                        "MCP stdio child PID {pid} abandoned: lifecycle actor did not finish within the 5s per-entry total shutdown deadline"
+                        "MCP stdio child PID {pid} abandoned: lifecycle actor did not finish within the {shutdown_bound:?} per-entry total shutdown deadline"
                     )
                 };
                 *self.last_error.write_recover() = Some(reason.clone());

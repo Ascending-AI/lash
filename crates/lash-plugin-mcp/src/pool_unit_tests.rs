@@ -105,6 +105,7 @@ async fn connect_tolerates_unreachable_server() {
                 call_timeout_ms: 1_000,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     );
@@ -243,6 +244,7 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         cwd: None,
         startup_timeout_ms: 2_000,
         call_policy: McpCallPolicy::default(),
+        shutdown_policy: Default::default(),
         binary_content_attachments: false,
     };
     let pool = McpConnectionPool::connect(BTreeMap::from([("Docs".to_string(), config())]))
@@ -330,6 +332,7 @@ async fn eager_connects_start_in_parallel() {
         cwd: None,
         startup_timeout_ms: 1_000,
         call_policy: McpCallPolicy::default(),
+        shutdown_policy: Default::default(),
         binary_content_attachments: false,
     };
     let pool = McpConnectionPool::connect(BTreeMap::from([
@@ -388,6 +391,7 @@ async fn tools_list_changed_refreshes_the_live_catalog() {
             cwd: None,
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     )]))
@@ -472,6 +476,7 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
             cwd: None,
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     )]))
@@ -608,6 +613,7 @@ async fn deferred_grant_follows_native_identity_when_a_collision_adds_a_display_
             cwd: None,
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     )]))
@@ -705,6 +711,7 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
         cwd: None,
         startup_timeout_ms: 2_000,
         call_policy: McpCallPolicy::default(),
+        shutdown_policy: Default::default(),
         binary_content_attachments: false,
     };
     let common_env = || {
@@ -826,6 +833,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
                 call_timeout_ms: 2_000,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     )]);
@@ -927,6 +935,7 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
                 call_timeout_ms: 10_000,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     )]);
@@ -984,6 +993,7 @@ async fn shutdown_all_wakes_actor_sleeping_until_keepalive() {
                 liveness_probe_interval_ms: 60_000,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
         McpHostServices::default(),
@@ -1054,6 +1064,7 @@ async fn pool_reconnects_after_transport_death() {
                 timeout_disconnect_policy: TimeoutDisconnectPolicy::Never,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     );
@@ -1157,6 +1168,7 @@ async fn call_timeout_is_a_typed_retryable_failure() {
                 liveness_probe_timeout_ms: 50,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     )]);
@@ -1222,6 +1234,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
             call_timeout_ms: 10_000,
             ..Default::default()
         },
+        shutdown_policy: Default::default(),
         binary_content_attachments: false,
     };
 
@@ -1306,6 +1319,7 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
                 call_timeout_ms: 5_000,
                 ..Default::default()
             },
+            shutdown_policy: Default::default(),
             binary_content_attachments: false,
         },
     );
