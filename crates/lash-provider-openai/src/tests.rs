@@ -3,7 +3,7 @@ use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmJsonSchema, LlmMessage, LlmToolChoice, LlmToolSpec};
 use lash_core::provider::{
     CacheControlDialect, CacheRetention, ModelCapability, ProviderHandle, ProviderReliability,
-    ReasoningCapability, ReasoningEncoding,
+    ReasoningCapability, ReasoningEncoding, RequestTimeout,
 };
 use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;

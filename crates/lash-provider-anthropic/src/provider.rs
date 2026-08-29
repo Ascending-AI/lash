@@ -118,7 +118,11 @@ impl Provider for AnthropicProvider {
             .transport
             .send(
                 request,
-                response_start_timeout(timeouts.request_timeout, timeouts.chunk_timeout, true),
+                response_start_timeout(
+                    timeouts.request_timeout,
+                    timeouts.response_start_timeout,
+                    true,
+                ),
             )
             .await?;
 

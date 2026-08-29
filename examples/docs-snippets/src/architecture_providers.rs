@@ -226,6 +226,7 @@ mod asserted_examples {
 
         let reliability = ProviderReliability::codex()
             .request_timeout(Some(RequestTimeout::Millis(45_000)))
+            .response_start_timeout_ms(Some(2_500))
             .stream_chunk_timeout_ms(Some(7_500))
             .max_attempts(6)
             .base_delay_ms(125)
@@ -239,6 +240,7 @@ mod asserted_examples {
             reliability.request_timeout,
             Some(RequestTimeout::Millis(45_000))
         );
+        assert_eq!(reliability.response_start_timeout, Some(2_500));
         assert_eq!(reliability.chunk_timeout, Some(7_500));
         assert_eq!(reliability.retry.max_attempts, 6);
         assert_eq!(reliability.retry.base_delay_ms, 125);
@@ -254,6 +256,10 @@ mod asserted_examples {
         assert_eq!(reliability.rate_limits.token_window_ms, Some(60_000));
         let timeouts = ProviderReliability::llm_timeouts(&reliability);
         assert_eq!(timeouts.request_timeout, Some(Duration::from_secs(45)));
+        assert_eq!(
+            timeouts.response_start_timeout,
+            Duration::from_millis(2_500)
+        );
         assert_eq!(timeouts.chunk_timeout, Duration::from_millis(7_500));
 
         let disabled =
@@ -281,6 +287,7 @@ mod asserted_examples {
         let options = ProviderOptions {
             reliability: ProviderReliability {
                 request_timeout: Some(RequestTimeout::Millis(9_000)),
+                response_start_timeout: None,
                 chunk_timeout: Some(3_000),
                 retry,
                 rate_limits,

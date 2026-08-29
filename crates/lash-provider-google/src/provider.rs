@@ -74,7 +74,7 @@ impl GoogleOAuthProvider {
                 http_request,
                 response_start_timeout(
                     timeouts.request_timeout,
-                    timeouts.chunk_timeout,
+                    timeouts.response_start_timeout,
                     stream_events.is_some(),
                 ),
             )

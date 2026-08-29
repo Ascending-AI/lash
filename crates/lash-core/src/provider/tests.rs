@@ -922,6 +922,7 @@ fn provider_options_serialize_only_reliability_shape() {
     let options = ProviderOptions {
         reliability: ProviderReliability::default()
             .request_timeout(Some(RequestTimeout::Millis(1_234)))
+            .response_start_timeout_ms(Some(345))
             .stream_chunk_timeout_ms(Some(567))
             .max_attempts(2),
         ..ProviderOptions::default()
@@ -935,8 +936,51 @@ fn provider_options_serialize_only_reliability_shape() {
         serde_json::json!(1234)
     );
     assert_eq!(
+        value["reliability"]["response_start_timeout"],
+        serde_json::json!(345)
+    );
+    assert_eq!(
         value["reliability"]["chunk_timeout"],
         serde_json::json!(567)
+    );
+}
+
+#[test]
+fn provider_reliability_resolves_response_start_timeout_independently() {
+    let explicit = ProviderReliability::default()
+        .request_timeout(Some(RequestTimeout::Millis(300_000)))
+        .response_start_timeout_ms(Some(20_000))
+        .stream_chunk_timeout_ms(Some(120_000))
+        .llm_timeouts();
+    assert_eq!(
+        explicit.response_start_timeout,
+        Duration::from_secs(20),
+        "an explicit response-start timeout must not inherit the chunk timeout"
+    );
+    assert_eq!(explicit.chunk_timeout, Duration::from_secs(120));
+}
+
+#[test]
+fn provider_reliability_without_response_start_timeout_preserves_derived_bound() {
+    let defaults = ProviderReliability::default().llm_timeouts();
+    assert_eq!(
+        defaults.response_start_timeout,
+        Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS)
+    );
+
+    let request_wins = ProviderReliability::default()
+        .request_timeout(Some(RequestTimeout::Millis(5_000)))
+        .stream_chunk_timeout_ms(Some(7_500))
+        .llm_timeouts();
+    assert_eq!(request_wins.response_start_timeout, Duration::from_secs(5));
+
+    let chunk_wins = ProviderReliability::default()
+        .request_timeout(Some(RequestTimeout::Disabled))
+        .stream_chunk_timeout_ms(Some(7_500))
+        .llm_timeouts();
+    assert_eq!(
+        chunk_wins.response_start_timeout,
+        Duration::from_millis(7_500)
     );
 }
 

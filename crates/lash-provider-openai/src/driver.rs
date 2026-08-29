@@ -347,7 +347,11 @@ pub(crate) async fn complete(
         .transport
         .send(
             http_request,
-            response_start_timeout(timeouts.request_timeout, timeouts.chunk_timeout, stream),
+            response_start_timeout(
+                timeouts.request_timeout,
+                timeouts.response_start_timeout,
+                stream,
+            ),
         )
         .await
     {
