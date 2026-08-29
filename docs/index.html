@@ -394,6 +394,8 @@ fn hello_lash_core(provider: ProviderHandle, model: ModelSpec) -&gt; lash::Resul
         .process_env_store(Arc::new(
             lash::persistence::InMemoryProcessExecutionEnvStore::new(),
         ))
+        // Attachment size is separate host policy; `None` keeps puts unbounded.
+        .max_attachment_bytes(Some(10 * 1024 * 1024))
         // Start bounded; tune both limits for your backend's latency envelope.
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
