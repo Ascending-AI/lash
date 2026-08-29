@@ -1,8 +1,11 @@
 use super::*;
 
-async fn open_factory_catalog(root: &Path) -> Result<SqliteConnection, lash_core::StoreError> {
+async fn open_factory_catalog(
+    root: &Path,
+    policy: SqliteConnectionPolicy,
+) -> Result<SqliteConnection, lash_core::StoreError> {
     std::fs::create_dir_all(root).map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
-    let conn = SqliteConnection::open(&root.join(DURABLE_CORE_DB_FILE))
+    let conn = SqliteConnection::open_with_policy(&root.join(DURABLE_CORE_DB_FILE), policy)
         .await
         .map_err(|err| lash_core::StoreError::Backend(err.to_string()))?;
     ensure_schema(&conn).await.map_err(sqlite_error)?;
@@ -54,8 +57,9 @@ fn retained_fork_config_conn(
 pub(super) async fn pin_in_catalog(
     root: &Path,
     node_id: &str,
+    policy: SqliteConnectionPolicy,
 ) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
-    let conn = open_factory_catalog(root).await?;
+    let conn = open_factory_catalog(root, policy).await?;
     let node_id = node_id.to_string();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core::ForkPoint, lash_core::StoreError> = (|| {
@@ -134,8 +138,9 @@ pub(super) async fn pin_in_catalog(
 pub(super) async fn unpin_in_catalog(
     root: &Path,
     node_id: &str,
+    policy: SqliteConnectionPolicy,
 ) -> Result<(), lash_core::StoreError> {
-    let conn = open_factory_catalog(root).await?;
+    let conn = open_factory_catalog(root, policy).await?;
     let node_id = node_id.to_string();
     conn.write_flow(move |tx| {
         let outcome: Result<(), lash_core::StoreError> = (|| {
@@ -161,8 +166,9 @@ pub(super) async fn unpin_in_catalog(
 
 pub(super) async fn fork_points_in_catalog(
     root: &Path,
+    policy: SqliteConnectionPolicy,
 ) -> Result<Vec<lash_core::ForkPoint>, lash_core::StoreError> {
-    let conn = open_factory_catalog(root).await?;
+    let conn = open_factory_catalog(root, policy).await?;
     conn.call(|conn| {
         let tx = conn.transaction()?;
         let outcome: Result<Vec<lash_core::ForkPoint>, lash_core::StoreError> = (|| {
@@ -229,8 +235,9 @@ pub(super) async fn fork_at_in_catalog(
     root: &Path,
     request: &lash_core::ForkSessionRequest,
     created_at_ms: u64,
+    policy: SqliteConnectionPolicy,
 ) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
-    let conn = open_factory_catalog(root).await?;
+    let conn = open_factory_catalog(root, policy).await?;
     let request = request.clone();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core::ForkSessionReceipt, lash_core::StoreError> = (|| {
@@ -471,4 +478,40 @@ pub(super) async fn fork_at_in_catalog(
     })
     .await
     .map_err(sqlite_error)?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn factory_catalog_connection_uses_requested_policy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let policy = SqliteConnectionPolicy {
+            busy_timeout: std::time::Duration::from_millis(321),
+            synchronous: SqliteSynchronous::Full,
+            wal_autocheckpoint_pages: 17,
+            cache_size: -4096,
+        };
+        let conn = open_factory_catalog(dir.path(), policy)
+            .await
+            .expect("open factory catalog with connection policy");
+
+        let pragmas = conn
+            .call(|connection| {
+                Ok((
+                    connection.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))?,
+                    connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?,
+                    connection
+                        .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get::<_, i64>(0))?,
+                    connection.query_row("PRAGMA cache_size", [], |row| row.get::<_, i64>(0))?,
+                    connection
+                        .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?,
+                ))
+            })
+            .await
+            .expect("read factory catalog connection policy");
+
+        assert_eq!(pragmas, (321, 2, 17, -4096, "wal".to_string()));
+    }
 }
