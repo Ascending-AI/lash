@@ -168,6 +168,71 @@ impl fmt::Debug for HttpResponseBody {
     }
 }
 
+/// Host-owned connection and pooling policy for the shared reqwest client
+/// builder.
+///
+/// The defaults preserve the existing shared builder's ten-second connect
+/// timeout and sixty-second TCP keepalive while making reqwest's current
+/// ninety-second pool idle timeout and unlimited per-host idle pool explicit.
+/// Build a client with `http_client_builder_with` when a deployment needs
+/// different transport bounds, proxy routing, or additional trust roots.
+#[derive(Clone)]
+pub struct HttpTransportPolicy {
+    /// Maximum time allowed for establishing a TCP connection. Defaults to ten
+    /// seconds; lower it for fail-fast deployments or raise it for networks
+    /// with predictably slower connection setup.
+    pub connect_timeout: Duration,
+    /// TCP keepalive interval for an otherwise idle connection. Defaults to 60
+    /// seconds; change it to stay below a deployment's load-balancer or NAT
+    /// idle expiry when pooled connections must remain reusable.
+    pub tcp_keepalive: Duration,
+    /// Maximum time a connection may remain idle in the pool. Defaults to 90
+    /// seconds, matching reqwest's current client-builder default; lower it to
+    /// release idle sockets sooner or raise it to favor connection reuse.
+    pub pool_idle_timeout: Duration,
+    /// Maximum number of idle connections retained for one host. Defaults to
+    /// `usize::MAX`, matching reqwest's unlimited default; lower it when file
+    /// descriptors or idle socket memory must be bounded per host.
+    pub pool_max_idle_per_host: usize,
+    /// Optional explicit proxy applied to requests. Defaults to `None`, which
+    /// preserves reqwest's automatic system-proxy behavior; set it when the
+    /// deployment requires a specific egress proxy.
+    pub proxy: Option<reqwest::Proxy>,
+    /// Additional server root certificates merged into reqwest's rustls trust
+    /// store. Defaults to an empty list; add host-controlled CA certificates
+    /// when connecting to services signed by a private or otherwise absent CA.
+    pub extra_root_certificates: Vec<reqwest::Certificate>,
+}
+
+impl fmt::Debug for HttpTransportPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HttpTransportPolicy")
+            .field("connect_timeout", &self.connect_timeout)
+            .field("tcp_keepalive", &self.tcp_keepalive)
+            .field("pool_idle_timeout", &self.pool_idle_timeout)
+            .field("pool_max_idle_per_host", &self.pool_max_idle_per_host)
+            .field("proxy", &self.proxy.as_ref().map(|_| "configured"))
+            .field(
+                "extra_root_certificates",
+                &self.extra_root_certificates.len(),
+            )
+            .finish()
+    }
+}
+
+impl Default for HttpTransportPolicy {
+    fn default() -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(10),
+            tcp_keepalive: Duration::from_secs(60),
+            pool_idle_timeout: Duration::from_secs(90),
+            pool_max_idle_per_host: usize::MAX,
+            proxy: None,
+            extra_root_certificates: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ReqwestHttpTransport {
     client: reqwest::Client,
@@ -320,9 +385,26 @@ pub fn build_http_client() -> reqwest::Client {
 /// Build a reqwest client with Lash's shared connection safeguards while
 /// leaving authentication and other host policy configurable.
 pub fn http_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .tcp_keepalive(Duration::from_secs(60))
+    http_client_builder_with(&HttpTransportPolicy::default())
+}
+
+/// Build a reqwest client builder with shared transport safeguards and the
+/// host-supplied connection, pooling, proxy, and trust-root policy.
+pub fn http_client_builder_with(policy: &HttpTransportPolicy) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(policy.connect_timeout)
+        .tcp_keepalive(policy.tcp_keepalive)
+        .pool_idle_timeout(policy.pool_idle_timeout)
+        .pool_max_idle_per_host(policy.pool_max_idle_per_host);
+
+    if let Some(proxy) = policy.proxy.clone() {
+        builder = builder.proxy(proxy);
+    }
+    for certificate in &policy.extra_root_certificates {
+        builder = builder.add_root_certificate(certificate.clone());
+    }
+
+    builder
 }
 
 pub fn header_pairs(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
@@ -418,5 +500,43 @@ mod tests {
         assert_eq!(err.message, "request timed out");
         assert_eq!(err.code.as_deref(), Some("timeout"));
         assert_eq!(err.retry_verdict, TransportRetryVerdict::RetryableTransient);
+    }
+
+    #[test]
+    fn builder_accepts_non_default_transport_policy() {
+        let policy = HttpTransportPolicy {
+            connect_timeout: Duration::from_secs(2),
+            tcp_keepalive: Duration::from_secs(15),
+            pool_idle_timeout: Duration::from_secs(30),
+            pool_max_idle_per_host: 4,
+            proxy: Some(reqwest::Proxy::all("http://127.0.0.1:3128").expect("valid proxy")),
+            extra_root_certificates: Vec::new(),
+        };
+
+        let client = http_client_builder_with(&policy)
+            .build()
+            .expect("non-default transport policy builds");
+        let transport = ReqwestHttpTransport::from_client(client);
+
+        assert!(transport.client().get("http://example.com").build().is_ok());
+    }
+
+    #[test]
+    fn zero_arg_builder_uses_default_transport_policy() {
+        let policy = HttpTransportPolicy::default();
+
+        assert_eq!(policy.connect_timeout, Duration::from_secs(10));
+        assert_eq!(policy.tcp_keepalive, Duration::from_secs(60));
+        assert_eq!(policy.pool_idle_timeout, Duration::from_secs(90));
+        assert_eq!(policy.pool_max_idle_per_host, usize::MAX);
+        assert!(policy.proxy.is_none());
+        assert!(policy.extra_root_certificates.is_empty());
+
+        http_client_builder()
+            .build()
+            .expect("zero-arg builder builds");
+        http_client_builder_with(&policy)
+            .build()
+            .expect("default policy builder builds");
     }
 }

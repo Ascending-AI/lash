@@ -27,3 +27,6 @@ httpdate = { workspace = true }
 reqwest = { workspace = true, features = ["json", "query", "stream", "rustls", "http2"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }
