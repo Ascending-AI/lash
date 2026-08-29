@@ -28,6 +28,7 @@
 //!   `rusqlite::Error` to feed through `sqlite_error` / `process_sqlite_error`.
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
+use std::time::Duration;
 use tokio_rusqlite::Connection as AsyncConnection;
 
 /// Outcome a write flow returns to decide commit vs rollback while still
@@ -44,19 +45,87 @@ pub(crate) enum TxOutcome<T> {
 /// 15-second window so cross-process writers wait rather than fail fast.
 pub(crate) const BUSY_TIMEOUT_MS: u32 = 15_000;
 
+/// SQLite synchronous setting selected for a connection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SqliteSynchronous {
+    /// Do not wait for filesystem synchronization. This minimizes write
+    /// latency but gives up SQLite's protection against power-loss corruption;
+    /// use only when the deployment accepts that durability trade-off.
+    Off,
+    /// Synchronize at the normal durability/performance balance. This is the
+    /// default and is appropriate for the store's usual local deployment.
+    #[default]
+    Normal,
+    /// Synchronize every committed transaction for the strongest power-loss
+    /// durability at the cost of higher write latency; use on deployments
+    /// where that durability guarantee outweighs throughput.
+    Full,
+}
+
+impl SqliteSynchronous {
+    fn as_pragma_value(self) -> &'static str {
+        match self {
+            Self::Off => "OFF",
+            Self::Normal => "NORMAL",
+            Self::Full => "FULL",
+        }
+    }
+}
+
+/// Deployment policy for the SQLite connection owned by a store handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SqliteConnectionPolicy {
+    /// How long a contending SQLite operation waits before returning busy.
+    /// Longer waits reduce transient contention failures but can hold up a
+    /// caller; the default is 15 seconds, and change it when the deployment's
+    /// write-lock duration or request deadline is materially different.
+    pub busy_timeout: Duration,
+    /// Filesystem synchronization strength. `Normal` is the default; choose
+    /// `Full` when power-loss durability matters more than write latency, or
+    /// `Off` only when the deployment explicitly accepts weaker durability.
+    pub synchronous: SqliteSynchronous,
+    /// WAL pages written before SQLite attempts an automatic checkpoint. The
+    /// default is SQLite's 1,000-page setting; `0` disables automatic
+    /// checkpointing. Lower it to bound WAL growth, or raise it when
+    /// checkpoint overhead matters more than reader lag.
+    pub wal_autocheckpoint_pages: u32,
+    /// SQLite cache-size pragma value, preserving SQLite's sign overload. The
+    /// default is SQLite's `-2000` value (approximately 2,000 KiB); negative
+    /// values count KiB and positive values count pages, so change it to match
+    /// the deployment's memory budget and page size.
+    pub cache_size: i32,
+}
+
+impl Default for SqliteConnectionPolicy {
+    fn default() -> Self {
+        Self {
+            busy_timeout: Duration::from_millis(BUSY_TIMEOUT_MS as u64),
+            synchronous: SqliteSynchronous::Normal,
+            wal_autocheckpoint_pages: 1_000,
+            cache_size: -2_000,
+        }
+    }
+}
+
 /// PRAGMAs applied on the connection thread immediately after open. WAL is the
 /// reason this crate exists: it uses the `-wal`/`-shm` sidecars and supports
 /// multi-process readers + a single writer, which the prior store's single-file mvcc mode
 /// did not give us across processes.
-fn open_pragmas() -> String {
+fn open_pragmas(policy: SqliteConnectionPolicy) -> String {
     // The `journal_mode=WAL` conversion is applied separately via
     // [`set_wal_journal_mode`] because SQLite does *not* invoke the busy handler
     // for `journal_mode` changes, so concurrent first-openers must retry it by
     // hand.
     format!(
-        "PRAGMA busy_timeout={BUSY_TIMEOUT_MS};\
-         PRAGMA synchronous=NORMAL;\
-         PRAGMA foreign_keys=ON;"
+        "PRAGMA busy_timeout={};\
+         PRAGMA synchronous={};\
+         PRAGMA wal_autocheckpoint={};\
+         PRAGMA cache_size={};\
+         PRAGMA foreign_keys=ON;",
+        policy.busy_timeout.as_millis(),
+        policy.synchronous.as_pragma_value(),
+        policy.wal_autocheckpoint_pages,
+        policy.cache_size,
     )
 }
 
@@ -68,9 +137,8 @@ fn open_pragmas() -> String {
 /// on that conversion and all but one get `SQLITE_BUSY`/"database is locked".
 /// We therefore retry the conversion ourselves with a short backoff until the
 /// busy-timeout budget is exhausted.
-fn set_wal_journal_mode(c: &Connection) -> rusqlite::Result<()> {
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(BUSY_TIMEOUT_MS as u64);
+fn set_wal_journal_mode(c: &Connection, busy_timeout: Duration) -> rusqlite::Result<()> {
+    let deadline = std::time::Instant::now() + busy_timeout;
     let mut backoff = std::time::Duration::from_millis(1);
     loop {
         match c.pragma_update(None, "journal_mode", "WAL") {
@@ -119,8 +187,16 @@ impl SqliteConnection {
     /// Open (or create) a file-backed database, applying WAL + busy-timeout
     /// PRAGMAs on the connection thread.
     pub(crate) async fn open(path: &std::path::Path) -> tokio_rusqlite::Result<Self> {
+        Self::open_with_policy(path, SqliteConnectionPolicy::default()).await
+    }
+
+    pub(crate) async fn open_with_policy(
+        path: &std::path::Path,
+        policy: SqliteConnectionPolicy,
+    ) -> tokio_rusqlite::Result<Self> {
         Self::open_configured(
             path,
+            policy,
             #[cfg(feature = "testing")]
             None,
         )
@@ -130,25 +206,27 @@ impl SqliteConnection {
     #[cfg(feature = "testing")]
     pub(crate) async fn open_with_fault_injector(
         path: &std::path::Path,
+        policy: SqliteConnectionPolicy,
         fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_configured(path, fault_injector).await
+        Self::open_configured(path, policy, fault_injector).await
     }
 
     async fn open_configured(
         path: &std::path::Path,
+        policy: SqliteConnectionPolicy,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         let inner = AsyncConnection::open(path).await?;
-        let pragmas = open_pragmas();
+        let pragmas = open_pragmas(policy);
         inner
             .call(move |c| {
                 // Install the busy handler through the rusqlite API *before* the
                 // WAL conversion so ordinary write contention waits on it.
-                c.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS as u64))?;
+                c.busy_timeout(policy.busy_timeout)?;
                 // The WAL switch is not covered by the busy handler, so it gets
                 // its own bounded retry loop (see `set_wal_journal_mode`).
-                set_wal_journal_mode(c)?;
+                set_wal_journal_mode(c, policy.busy_timeout)?;
                 c.execute_batch(&pragmas)?;
                 Ok(())
             })
@@ -163,12 +241,18 @@ impl SqliteConnection {
     /// Open a private in-memory database (used by `Store::memory` and the test
     /// suites). WAL is skipped because `:memory:` does not support it.
     pub(crate) async fn open_in_memory() -> tokio_rusqlite::Result<Self> {
+        Self::open_in_memory_with_policy(SqliteConnectionPolicy::default()).await
+    }
+
+    pub(crate) async fn open_in_memory_with_policy(
+        policy: SqliteConnectionPolicy,
+    ) -> tokio_rusqlite::Result<Self> {
         let inner = AsyncConnection::open_in_memory().await?;
         // `:memory:` databases cannot use WAL, so only the tuning pragmas apply.
-        let pragmas = open_pragmas();
+        let pragmas = open_pragmas(policy);
         inner
             .call(move |c| {
-                c.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS as u64))?;
+                c.busy_timeout(policy.busy_timeout)?;
                 c.execute_batch(&pragmas)?;
                 Ok(())
             })

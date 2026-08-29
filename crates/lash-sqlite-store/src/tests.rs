@@ -12,6 +12,43 @@ fn public_session_schema_version_tracks_the_internal_schema_version() {
     assert_eq!(SESSION_SCHEMA_VERSION, crate::schema::SCHEMA_VERSION);
 }
 
+#[tokio::test]
+async fn store_options_apply_connection_policy_on_connection_thread() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("policy.db");
+    let store = Store::open_with_options(
+        &path,
+        StoreOptions {
+            blob_profile: BuiltinBlobProfile::Balanced,
+            connection_policy: SqliteConnectionPolicy {
+                busy_timeout: std::time::Duration::from_millis(321),
+                synchronous: SqliteSynchronous::Full,
+                wal_autocheckpoint_pages: 17,
+                cache_size: -4096,
+            },
+        },
+    )
+    .await
+    .expect("open store with connection policy");
+
+    let pragmas = store
+        .conn
+        .call(|connection| {
+            Ok((
+                connection.query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))?,
+                connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))?,
+                connection
+                    .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get::<_, i64>(0))?,
+                connection.query_row("PRAGMA cache_size", [], |row| row.get::<_, i64>(0))?,
+                connection.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))?,
+            ))
+        })
+        .await
+        .expect("read connection policy pragmas on connection thread");
+
+    assert_eq!(pragmas, (321, 2, 17, -4096, "wal".to_string()));
+}
+
 fn count_checkpoint_data_statement(event: rusqlite::trace::TraceEvent<'_>) {
     if let rusqlite::trace::TraceEvent::Stmt(_, sql) = event {
         let sql = sql.trim_start();

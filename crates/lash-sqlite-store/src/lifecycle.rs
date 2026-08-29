@@ -87,11 +87,15 @@ impl Store {
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
-        let conn = SqliteConnection::open_with_fault_injector(path, fault_injector).await?;
+        let conn = SqliteConnection::open_with_fault_injector(
+            path,
+            options.connection_policy,
+            fault_injector,
+        )
+        .await?;
         #[cfg(not(feature = "testing"))]
-        let conn = SqliteConnection::open(path).await?;
+        let conn = SqliteConnection::open_with_policy(path, options.connection_policy).await?;
         ensure_schema(&conn).await?;
-        apply_pragmas(&conn, StoreBacking::File).await?;
         let process_registry_attached = if let Some(process_registry_path) = process_registry_path {
             if !process_registry_path.exists() {
                 return Err(tokio_rusqlite::Error::Error(
@@ -109,7 +113,7 @@ impl Store {
                 conn.execute("ATTACH DATABASE ?1 AS process_registry", params![path])?;
                 let expected_version = crate::schema::PROCESS_SCHEMA_VERSION;
                 let deadline = std::time::Instant::now()
-                    + std::time::Duration::from_millis(crate::conn::BUSY_TIMEOUT_MS as u64);
+                    + options.connection_policy.busy_timeout;
                 loop {
                     let version: i32 = conn.query_row(
                         "PRAGMA process_registry.user_version",
@@ -194,6 +198,7 @@ impl Store {
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options(StoreOptions {
             blob_profile: BuiltinBlobProfile::LowLatency,
+            ..StoreOptions::default()
         })
         .await
     }
@@ -204,6 +209,7 @@ impl Store {
         Self::memory_with_options_and_clock(
             StoreOptions {
                 blob_profile: BuiltinBlobProfile::LowLatency,
+                ..StoreOptions::default()
             },
             clock,
         )
@@ -222,9 +228,8 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open_in_memory().await?;
+        let conn = SqliteConnection::open_in_memory_with_policy(options.connection_policy).await?;
         ensure_schema(&conn).await?;
-        apply_pragmas(&conn, StoreBacking::Memory).await?;
         Ok(Self {
             conn,
             session_id: OnceLock::new(),

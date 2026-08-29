@@ -114,6 +114,8 @@ mod session_meta;
 pub mod testing;
 mod triggers;
 
+pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
+
 /// File name of the one durable-core database under a session-store root.
 ///
 /// Named once so the factory that creates it and the preflight that reads it
@@ -534,7 +536,14 @@ pub enum BuiltinBlobProfile {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StoreOptions {
+    /// Blob compression profile. This controls storage size and CPU use for
+    /// persisted payloads independently of the connection policy.
     pub blob_profile: BuiltinBlobProfile,
+    /// SQLite connection behavior for stores opened with these options.
+    /// Defaults preserve the current 15-second, normal-synchronous, WAL
+    /// autocheckpoint, and cache-size behavior; change it for a deployment
+    /// with different lock, durability, WAL-growth, or memory constraints.
+    pub connection_policy: SqliteConnectionPolicy,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -864,7 +873,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         if !path.exists() {
             return Ok(false);
         }
-        let conn = SqliteConnection::open(&path)
+        let conn = SqliteConnection::open_with_policy(&path, self.options.connection_policy)
             .await
             .map_err(|err| err.to_string())?;
         ensure_schema(&conn).await.map_err(|err| err.to_string())?;
@@ -886,37 +895,49 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         session_id: &str,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        let report = delete_session_from_catalog(&self.root, session_id).await?;
+        let report =
+            delete_session_from_catalog(&self.root, session_id, self.options.connection_policy)
+                .await?;
         if let Some(process_registry_path) = self.process_registry_path.as_deref() {
-            delete_wake_allocation_floors_from_process_registry(process_registry_path, session_id)
-                .await
-                .map_err(|message| {
-                    lash_core::MaintenanceFailure::failed(
-                        lash_core::StoreError::Backend(message),
-                        report.clone(),
-                    )
-                })?;
+            delete_wake_allocation_floors_from_process_registry(
+                process_registry_path,
+                session_id,
+                self.options.connection_policy,
+            )
+            .await
+            .map_err(|message| {
+                lash_core::MaintenanceFailure::failed(
+                    lash_core::StoreError::Backend(message),
+                    report.clone(),
+                )
+            })?;
         }
         Ok(report)
     }
 
     async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
-        pin_in_catalog(&self.root, node_id).await
+        pin_in_catalog(&self.root, node_id, self.options.connection_policy).await
     }
 
     async fn unpin(&self, node_id: &str) -> Result<(), lash_core::StoreError> {
-        unpin_in_catalog(&self.root, node_id).await
+        unpin_in_catalog(&self.root, node_id, self.options.connection_policy).await
     }
 
     async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, lash_core::StoreError> {
-        fork_points_in_catalog(&self.root).await
+        fork_points_in_catalog(&self.root, self.options.connection_policy).await
     }
 
     async fn fork_at(
         &self,
         request: &lash_core::ForkSessionRequest,
     ) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
-        fork_at_in_catalog(&self.root, request, self.clock.timestamp_ms()).await
+        fork_at_in_catalog(
+            &self.root,
+            request,
+            self.clock.timestamp_ms(),
+            self.options.connection_policy,
+        )
+        .await
     }
 }
 
@@ -1148,17 +1169,20 @@ fn warn_process_registry_not_wired() {
 async fn delete_session_from_catalog(
     root: &Path,
     session_id: &str,
+    policy: SqliteConnectionPolicy,
 ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
     let path = root.join(DURABLE_CORE_DB_FILE);
     if !path.exists() {
         return Ok(lash_core::SessionBlobReclaimReport::default());
     }
     let session_id = session_id.to_string();
-    let conn = SqliteConnection::open(&path).await.map_err(|err| {
-        lash_core::MaintenanceFailure::failed_before_any_work(lash_core::StoreError::Backend(
-            err.to_string(),
-        ))
-    })?;
+    let conn = SqliteConnection::open_with_policy(&path, policy)
+        .await
+        .map_err(|err| {
+            lash_core::MaintenanceFailure::failed_before_any_work(lash_core::StoreError::Backend(
+                err.to_string(),
+            ))
+        })?;
     ensure_schema(&conn)
         .await
         .map_err(|err| lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(err)))?;
@@ -1450,11 +1474,12 @@ async fn delete_session_from_catalog(
 async fn delete_wake_allocation_floors_from_process_registry(
     process_registry_path: &Path,
     target_session_id: &str,
+    policy: SqliteConnectionPolicy,
 ) -> Result<(), String> {
     if !process_registry_path.exists() {
         return Ok(());
     }
-    let conn = SqliteConnection::open(process_registry_path)
+    let conn = SqliteConnection::open_with_policy(process_registry_path, policy)
         .await
         .map_err(|err| err.to_string())?;
     ensure_process_schema(&conn)
