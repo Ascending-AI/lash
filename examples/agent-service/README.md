@@ -155,6 +155,14 @@ report from the Restate index. Run ids are one-shot workflow identities;
 reusing one is rejected instead of attaching a new example request to old
 durable state.
 
+The same live E2E also exercises a directly cancelled await-event through the
+public `RestateEffectHost` and `AwaitEventResolver` APIs. This is deliberately
+separate from the group report: a `Cancelled` group member proves the group
+index classified a loser, while the direct witness proves the await-event
+terminal itself was persisted. It peeks `Cancelled` from a fresh call,
+re-awaits without hanging, and verifies that a late completion observes
+`AlreadyResolved { terminal: Cancelled }` instead of replacing the terminal.
+
 Every message response includes that stable id in the `x-lash-turn-id` header.
 An authenticated host can request cooperative cancellation from any process,
 without retaining the session handle that submitted the turn:
