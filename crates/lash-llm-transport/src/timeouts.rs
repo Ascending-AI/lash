@@ -8,6 +8,9 @@ pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmTimeouts {
     pub request_timeout: Option<Duration>,
+    /// Maximum wait for a streaming response to start. The whole-request
+    /// timeout still wins when it is shorter.
+    pub response_start_timeout: Duration,
     pub chunk_timeout: Duration,
 }
 
@@ -15,22 +18,27 @@ impl Default for LlmTimeouts {
     fn default() -> Self {
         Self {
             request_timeout: Some(Duration::from_millis(DEFAULT_REQUEST_TIMEOUT_MS)),
+            response_start_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
             chunk_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
         }
     }
 }
 
+/// Resolves the timeout applied while waiting for an HTTP response to start.
+///
+/// Streaming calls use `response_start_timeout`, capped by the remaining
+/// whole-request timeout. Non-streaming calls retain the whole-request bound.
 pub fn response_start_timeout(
     request_timeout: Option<Duration>,
-    chunk_timeout: Duration,
+    response_start_timeout: Duration,
     streaming: bool,
 ) -> Option<Duration> {
     if !streaming {
         return request_timeout;
     }
     Some(match request_timeout {
-        Some(timeout) => timeout.min(chunk_timeout),
-        None => chunk_timeout,
+        Some(timeout) => timeout.min(response_start_timeout),
+        None => response_start_timeout,
     })
 }
 
@@ -40,13 +48,13 @@ mod tests {
     use lash_core::facade_support::LlmTransportError;
 
     #[test]
-    fn streaming_response_start_timeout_prefers_chunk_deadline() {
+    fn streaming_response_start_timeout_honors_explicit_bound() {
         let timeout = response_start_timeout(
             Some(Duration::from_secs(300)),
-            Duration::from_secs(120),
+            Duration::from_secs(20),
             true,
         );
-        assert_eq!(timeout, Some(Duration::from_secs(120)));
+        assert_eq!(timeout, Some(Duration::from_secs(20)));
     }
 
     #[test]
@@ -57,6 +65,29 @@ mod tests {
             false,
         );
         assert_eq!(timeout, Some(Duration::from_secs(300)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_stream_start_uses_timeout_error_classification() {
+        let result = run_with_timeout(
+            async {
+                tokio::time::sleep(Duration::from_secs(21)).await;
+                Ok::<_, LlmTransportError>(())
+            },
+            response_start_timeout(
+                Some(Duration::from_secs(300)),
+                Duration::from_secs(20),
+                true,
+            ),
+            "response start timed out",
+        )
+        .await;
+
+        let error = result.expect_err("slow response start must time out");
+        assert_eq!(error.kind, lash_core::ProviderFailureKind::Timeout);
+        assert_eq!(error.code.as_deref(), Some("timeout"));
+        assert_eq!(error.message, "response start timed out");
+        assert!(error.is_retryable());
     }
 
     #[tokio::test]

@@ -20,6 +20,9 @@ pub(crate) const MAX_COURTESY_THROTTLE_CALLS: usize = 8;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmTimeouts {
     pub request_timeout: Option<Duration>,
+    /// Maximum wait for a streaming response to start. The whole-request
+    /// timeout still wins when it is shorter.
+    pub response_start_timeout: Duration,
     pub chunk_timeout: Duration,
 }
 
@@ -27,6 +30,7 @@ impl Default for LlmTimeouts {
     fn default() -> Self {
         Self {
             request_timeout: Some(Duration::from_millis(DEFAULT_REQUEST_TIMEOUT_MS)),
+            response_start_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
             chunk_timeout: Duration::from_millis(DEFAULT_CHUNK_TIMEOUT_MS),
         }
     }
@@ -220,6 +224,16 @@ pub struct ProviderReliability {
     /// use [`RequestTimeout::Disabled`] to wait indefinitely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_timeout: Option<RequestTimeout>,
+    /// Streaming response-start timeout in milliseconds. `None` (or `0`)
+    /// preserves the legacy bound derived as the minimum of the whole-request
+    /// and inter-chunk timeouts. Once the response starts, only the
+    /// whole-request and inter-chunk timeouts apply. "Start" is the response
+    /// headers on HTTP/SSE providers and the first response frame on the
+    /// Codex WebSocket path: an HTTP provider that returns headers promptly
+    /// and then stalls before the first body byte is bounded by the
+    /// inter-chunk timeout, not this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_start_timeout: Option<u64>,
     /// Inter-chunk stream timeout in milliseconds. `None` (or `0`) applies
     /// [`DEFAULT_CHUNK_TIMEOUT_MS`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -263,14 +277,33 @@ impl ProviderReliability {
             .chunk_timeout
             .filter(|value| *value > 0)
             .unwrap_or(DEFAULT_CHUNK_TIMEOUT_MS);
+        let chunk_timeout = Duration::from_millis(chunk_timeout_ms);
+        let derived_response_start_timeout = match request_timeout {
+            Some(timeout) => timeout.min(chunk_timeout),
+            None => chunk_timeout,
+        };
+        let response_start_timeout = self
+            .response_start_timeout
+            .filter(|value| *value > 0)
+            .map(Duration::from_millis)
+            .unwrap_or(derived_response_start_timeout);
         LlmTimeouts {
             request_timeout,
-            chunk_timeout: Duration::from_millis(chunk_timeout_ms),
+            response_start_timeout,
+            chunk_timeout,
         }
     }
 
     pub fn request_timeout(mut self, timeout: Option<RequestTimeout>) -> Self {
         self.request_timeout = timeout;
+        self
+    }
+
+    /// Sets the streaming response-start bound in milliseconds. `None` (or
+    /// `0`) restores the legacy derived bound; this does not change the
+    /// inter-chunk timeout after the response starts.
+    pub fn response_start_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        self.response_start_timeout = timeout_ms;
         self
     }
 

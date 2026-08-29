@@ -9,7 +9,6 @@
 //! from the first to the second only while no stream events have been seen.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -21,7 +20,7 @@ use lash_core::llm::types::{
     ExecutionEvidence, LlmRequest, LlmResponse, LlmStreamEvent, LlmStreamEvidence,
     LlmTerminalReason, LlmUsage, ProviderRouteIdentity,
 };
-use lash_core::provider::{Provider, ProviderOptions, StreamTermination};
+use lash_core::provider::{LlmTimeouts, Provider, ProviderOptions, StreamTermination};
 use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response, emit_stream_progress};
 use lash_llm_transport::timeouts::response_start_timeout;
 use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
@@ -136,9 +135,13 @@ impl CodexProvider {
             .build_request_body(&req, true)
             .map_err(CodexWebSocketAttemptError::before_send)?;
         let timeouts = self.options.llm_timeouts();
-        let connect_timeout =
-            response_start_timeout(timeouts.request_timeout, timeouts.chunk_timeout, true)
-                .unwrap_or(timeouts.chunk_timeout);
+        // WebSocket connection policy is separate from the response-start
+        // wait. Preserve its existing request/chunk-derived bound here.
+        let connect_timeout = timeouts
+            .request_timeout
+            .map_or(timeouts.chunk_timeout, |timeout| {
+                timeout.min(timeouts.chunk_timeout)
+            });
         let mut retry_state = CodexWebsocketRetryState::default();
         let mut allow_cached_context = self.websocket_continuation_enabled();
         loop {
@@ -152,14 +155,7 @@ impl CodexProvider {
                 allow_cached_context && lease.reusable,
             );
             match self
-                .run_websocket_attempt(
-                    &req,
-                    &full_body,
-                    lease,
-                    &plan,
-                    retry_state,
-                    timeouts.chunk_timeout,
-                )
+                .run_websocket_attempt(&req, &full_body, lease, &plan, retry_state, timeouts)
                 .await
             {
                 Ok(response) => return Ok(response),
@@ -203,7 +199,7 @@ impl CodexProvider {
         lease: CodexWebsocketLease,
         plan: &CodexWebsocketRequestPlan,
         retry_state: CodexWebsocketRetryState,
-        read_timeout: Duration,
+        timeouts: LlmTimeouts,
     ) -> Result<LlmResponse, CodexWebSocketAttemptError> {
         let mut attempt = CodexWebsocketAttemptGuard::new(self, lease);
         let stream_events = req.stream_events.clone();
@@ -256,14 +252,31 @@ impl CodexProvider {
         }
 
         let expose_thinking = self.options.expose_thinking;
+        let stream_start_timeout = response_start_timeout(
+            timeouts.request_timeout,
+            timeouts.response_start_timeout,
+            true,
+        )
+        .unwrap_or(timeouts.response_start_timeout);
+        let response_start_deadline = tokio::time::Instant::now() + stream_start_timeout;
         loop {
+            let read_deadline = if events_seen {
+                tokio::time::Instant::now() + timeouts.chunk_timeout
+            } else {
+                response_start_deadline
+            };
             let next_message =
-                tokio::time::timeout(read_timeout, attempt.lease_mut().websocket.next()).await;
+                tokio::time::timeout_at(read_deadline, attempt.lease_mut().websocket.next()).await;
             let Some(message) = (match next_message {
                 Ok(message) => message,
                 Err(_) => {
+                    let message = if events_seen {
+                        "Codex WebSocket stream chunk timed out"
+                    } else {
+                        "Codex WebSocket response start timed out"
+                    };
                     return Err(CodexWebSocketAttemptError::during_stream(
-                        LlmTransportError::new("Codex WebSocket stream chunk timed out")
+                        LlmTransportError::new(message)
                             .with_kind(ProviderFailureKind::Timeout)
                             .with_request_body(request_body.clone())
                             .with_retry_verdict(TransportRetryVerdict::RetryableTransient)
@@ -744,7 +757,7 @@ impl Provider for CodexProvider {
                 http_request,
                 response_start_timeout(
                     timeouts.request_timeout,
-                    timeouts.chunk_timeout,
+                    timeouts.response_start_timeout,
                     stream_events.is_some(),
                 ),
             )

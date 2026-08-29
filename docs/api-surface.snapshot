@@ -5438,6 +5438,7 @@ lash::provider::LlmStreamEvidence::response_metadata
 lash::provider::LlmTimeouts
 lash::provider::LlmTimeouts::chunk_timeout
 lash::provider::LlmTimeouts::request_timeout
+lash::provider::LlmTimeouts::response_start_timeout
 lash::provider::LlmTransportError
 lash::provider::ModelCapability
 lash::provider::ModelCapability::allows_caller_temperature
@@ -5555,6 +5556,8 @@ lash::provider::ProviderReliability::max_delay_ms
 lash::provider::ProviderReliability::rate_limits
 lash::provider::ProviderReliability::request_timeout
 lash::provider::ProviderReliability::requests_per_window
+lash::provider::ProviderReliability::response_start_timeout
+lash::provider::ProviderReliability::response_start_timeout_ms
 lash::provider::ProviderReliability::retry
 lash::provider::ProviderReliability::retry_after_cap_ms
 lash::provider::ProviderReliability::stream_chunk_timeout_ms

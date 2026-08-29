@@ -8,7 +8,7 @@
 //! separate emission calls.
 
 use super::*;
-use lash_llm_transport::{LlmByteStream, LlmHttpResponse};
+use lash_llm_transport::{LlmByteStream, LlmHttpResponse, run_with_timeout};
 
 /// One scripted step of a response body: either bytes, or the transport-level
 /// failure that models a server hanging up mid-stream.
@@ -16,6 +16,7 @@ use lash_llm_transport::{LlmByteStream, LlmHttpResponse};
 enum ScriptedByteEvent {
     Chunk(bytes::Bytes),
     Abort(LlmTransportError),
+    Pending,
 }
 
 #[derive(Debug)]
@@ -29,8 +30,32 @@ impl LlmByteStream for ScriptedByteStream {
         match self.events.pop_front() {
             Some(ScriptedByteEvent::Chunk(chunk)) => Ok(Some(chunk)),
             Some(ScriptedByteEvent::Abort(error)) => Err(error),
+            Some(ScriptedByteEvent::Pending) => std::future::pending().await,
             None => Ok(None),
         }
+    }
+}
+
+#[derive(Debug)]
+struct SlowStartTransport;
+
+#[async_trait]
+impl LlmHttpTransport for SlowStartTransport {
+    async fn send(
+        &self,
+        request: LlmHttpRequest,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<LlmHttpResponse, LlmTransportError> {
+        let timeout_message = request
+            .response_start_timeout_message
+            .as_deref()
+            .unwrap_or("response start timed out");
+        run_with_timeout(
+            std::future::pending::<Result<LlmHttpResponse, LlmTransportError>>(),
+            timeout,
+            timeout_message,
+        )
+        .await
     }
 }
 
@@ -160,6 +185,66 @@ fn sse_chunk(payload: &str) -> ScriptedByteEvent {
 }
 
 const CHAT_TOOL_CALL_CHUNK: &str = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abort","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"x\"}"}}]}}]}"#;
+
+#[tokio::test(start_paused = true)]
+async fn slow_stream_start_uses_response_start_timeout_classification() {
+    let mut provider = openrouter_provider()
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::default()
+                .request_timeout(Some(RequestTimeout::Millis(300_000)))
+                .response_start_timeout_ms(Some(20_000))
+                .stream_chunk_timeout_ms(Some(120_000)),
+            ..ProviderOptions::default()
+        })
+        .with_transport(Arc::new(SlowStartTransport));
+
+    let error = provider
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
+        .await
+        .expect_err("slow response start must fail at the start timeout");
+
+    assert_eq!(error.kind, ProviderFailureKind::Timeout);
+    assert_eq!(error.code.as_deref(), Some("timeout"));
+    assert_eq!(
+        error.message,
+        "OpenAI-compatible chat response start timed out"
+    );
+    assert!(error.is_retryable());
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_mid_stream_uses_chunk_timeout_classification() {
+    let transport = AbortingSseTransport::new(vec![
+        sse_chunk(CHAT_TOOL_CALL_CHUNK),
+        ScriptedByteEvent::Pending,
+    ]);
+    let mut provider = openrouter_provider()
+        .with_options(ProviderOptions {
+            reliability: ProviderReliability::default()
+                .request_timeout(Some(RequestTimeout::Millis(300_000)))
+                .response_start_timeout_ms(Some(20_000))
+                .stream_chunk_timeout_ms(Some(1_000)),
+            ..ProviderOptions::default()
+        })
+        .with_transport(transport);
+
+    let error = provider
+        .complete(streamed_request(Arc::new(
+            std::sync::Mutex::new(Vec::new()),
+        )))
+        .await
+        .expect_err("slow mid-stream response must fail at the chunk timeout");
+
+    assert_eq!(error.kind, ProviderFailureKind::Timeout);
+    assert_eq!(error.code.as_deref(), Some("timeout"));
+    assert_eq!(
+        error.message,
+        "OpenAI-compatible chat stream chunk timed out"
+    );
+    assert!(error.is_retryable());
+}
 
 /// A chat stream that aborts right after a complete tool call has arrived must
 /// still have handed that tool call to the caller — the driver emits completed

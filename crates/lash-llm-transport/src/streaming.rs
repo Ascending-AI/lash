@@ -359,19 +359,27 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct PendingStream;
+    struct SlowMidStream {
+        delivered_first_chunk: bool,
+    }
 
     #[async_trait::async_trait]
-    impl crate::http::LlmByteStream for PendingStream {
+    impl crate::http::LlmByteStream for SlowMidStream {
         async fn next_chunk(&mut self) -> Result<Option<bytes::Bytes>, LlmTransportError> {
+            if !self.delivered_first_chunk {
+                self.delivered_first_chunk = true;
+                return Ok(Some(bytes::Bytes::from_static(b"data: started\n\n")));
+            }
             std::future::pending().await
         }
     }
 
     #[tokio::test]
-    async fn stream_chunk_timeout_uses_timeout_envelope() {
+    async fn slow_mid_stream_uses_chunk_timeout_error_classification() {
         let result = drive_sse_response(
-            LlmHttpBody::streamed(PendingStream),
+            LlmHttpBody::streamed(SlowMidStream {
+                delivered_first_chunk: false,
+            }),
             Duration::from_millis(1),
             bounds(1024, 4096),
             "stream chunk timed out",
@@ -384,6 +392,7 @@ mod tests {
         let err = result.expect_err("stream read should time out");
         assert_eq!(err.kind, ProviderFailureKind::Timeout);
         assert_eq!(err.code.as_deref(), Some("timeout"));
+        assert_eq!(err.message, "stream chunk timed out");
         assert!(err.is_retryable());
     }
 
