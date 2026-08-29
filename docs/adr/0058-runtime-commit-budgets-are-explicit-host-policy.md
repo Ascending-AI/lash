@@ -22,8 +22,10 @@ and enforces a lever without choosing deployment policy for the host.
 
 Every host supplies one required `CommitBudget`. Its byte and node fields each
 explicitly choose either a non-zero bound or `Unbounded`; `CommitBudget` has no
-`Default`. Bytes are the logical persisted payload. The node field bounds rows
-written by the commit: graph-node rows plus attachment-intent adoption rows.
+`Default`. Bytes are the complete logical persisted payload carried by the
+runtime commit, including queued-work batches, the selected Agent Frame, usage
+deltas, and its durable turn result. The node field bounds rows written by the
+commit: graph-node rows plus attachment-intent adoption rows.
 The host resolves that value once as part of runtime construction, and every
 `RuntimeCommit` carries it separately from semantic commit identity. The facade
 and the in-memory, SQLite, and PostgreSQL backends all enter the shared

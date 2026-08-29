@@ -375,6 +375,10 @@ mod store_commit_error_tests {
             graph_delta_bytes: 900_000,
             checkpoint_bytes: 150_000,
             attachment_manifest_bytes: 1,
+            queue_batch_bytes: 0,
+            agent_frame_bytes: 0,
+            usage_delta_bytes: 0,
+            turn_result_bytes: 0,
             total_bytes: 1_050_001,
             max_bytes: 1_048_576,
         });
