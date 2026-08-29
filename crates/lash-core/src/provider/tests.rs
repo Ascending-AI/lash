@@ -996,6 +996,54 @@ fn provider_options_default_omits_and_restores_shared_output_fields() {
 }
 
 #[test]
+fn provider_retry_default_uses_bounded_nonzero_jitter() {
+    let retry = ProviderRetryPolicy::default();
+
+    assert!(
+        retry.jitter_ms > 0 && retry.jitter_ms <= retry.base_delay_ms,
+        "default jitter must be within (0, base delay], got {} for {}",
+        retry.jitter_ms,
+        retry.base_delay_ms
+    );
+}
+
+#[test]
+fn provider_retry_jitter_varies_across_samples() {
+    let retry = ProviderRetryPolicy::default();
+    let samples = (0..64)
+        .map(|_| retry.delay_for_attempt(0, None))
+        .collect::<Vec<_>>();
+
+    assert!(samples.iter().all(|delay| {
+        (Duration::from_millis(2_000)..=Duration::from_millis(2_500)).contains(delay)
+    }));
+    assert!(
+        samples.windows(2).any(|pair| pair[0] != pair[1]),
+        "64 retry jitter samples must not all be identical: {samples:?}"
+    );
+}
+
+#[test]
+fn provider_retry_zero_jitter_preserves_deterministic_ladder() {
+    let retry = ProviderRetryPolicy {
+        jitter_ms: 0,
+        ..ProviderRetryPolicy::default()
+    };
+
+    assert_eq!(
+        (0..4)
+            .map(|attempt| retry.delay_for_attempt(attempt, None))
+            .collect::<Vec<_>>(),
+        [
+            Duration::from_millis(2_000),
+            Duration::from_millis(4_000),
+            Duration::from_millis(8_000),
+            Duration::from_millis(10_000),
+        ]
+    );
+}
+
+#[test]
 fn generation_policy_prefers_request_then_provider_then_default() {
     let provider_options = ProviderOptions {
         max_output_tokens: Some(8_192),
@@ -1744,7 +1792,11 @@ async fn provider_handle_repeated_past_http_dates_are_attempt_bounded() {
             .iter()
             .all(|attempt| attempt.retry_budget_consumed)
     );
-    assert_eq!(clock.slept(), Duration::from_secs(14));
+    let slept = clock.slept();
+    assert!(
+        (Duration::from_secs(14)..=Duration::from_secs(16)).contains(&slept),
+        "retry sleep must stay within the bounded jitter envelope, got {slept:?}"
+    );
 }
 
 #[tokio::test]

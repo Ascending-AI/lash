@@ -252,7 +252,14 @@ async fn provider_execution_evidence_scenarios() -> serde_json::Value {
             .as_ref()
             .expect("failed first attempt records its retry decision");
         assert!(retry.scheduled);
-        assert_eq!(retry.delay, Some(Duration::ZERO));
+        assert!(
+            retry
+                .delay
+                .is_some_and(|delay| (Duration::ZERO..=Duration::from_millis(500))
+                    .contains(&delay)),
+            "retry delay must stay within the bounded jitter envelope, got {:?}",
+            retry.delay
+        );
         assert_eq!(first_record.attempts[1].ordinal, 2);
         assert_eq!(
             first_record.attempts[1].outcome,

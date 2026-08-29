@@ -644,9 +644,7 @@ mod tests {
             .into_iter()
             .map(|bytes| String::from_utf8(bytes).expect("trace bytes are UTF-8"))
             .collect();
-        assert_eq!(
-            actual,
-            vec![
+        let expected = [
                 r#"{"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","request":{"messages":[{"blocks":[{"kind":"text","text":"trace success"}],"role":"user"}],"model":"trace-model","stream":false,"tool_choice":"none"},"schema_version":10,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_started"}"#
                     .to_string(),
                 r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"id":"trace-id","response":{"duration_ms":0,"parts":[{"text":"direct success","type":"text"}],"terminal_reason":"stop","text":"direct success"},"schema_version":10,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_completed","usage":{"cache_read_input_tokens":0,"cache_write_input_tokens":0,"input_tokens":11,"output_tokens":3,"reasoning_output_tokens":0}}"#
@@ -659,8 +657,58 @@ mod tests {
                     .to_string(),
                 r#"{"attempts":[{"duration_ms":0,"ordinal":1,"outcome":"completed"}],"context":{"graph_node_id":"llm:llm-call-id","llm_call_id":"llm-call-id"},"error":{"code":"invalid_structured_output","message":"invalid response: \"answer\" is a required property","retryable":false,"terminal_reason":"provider_error"},"id":"trace-id","schema_version":10,"timestamp":"1970-01-01T00:00:00+00:00","type":"llm_call_failed"}"#
                     .to_string(),
-            ],
-            "direct trace records are the byte-level compatibility contract"
+            ];
+
+        {
+            let failure_trace: serde_json::Value =
+                serde_json::from_str(&actual[3]).expect("failed trace record is JSON");
+            let attempts = failure_trace["attempts"]
+                .as_array()
+                .expect("failed trace record has attempts");
+            for (index, (attempt, (minimum, maximum))) in attempts
+                .iter()
+                .take(3)
+                .zip([(2_000, 2_500), (4_000, 4_500), (8_000, 8_500)])
+                .enumerate()
+            {
+                let delay_ms = attempt["delay_ms"]
+                    .as_u64()
+                    .expect("retry attempt has a delay");
+                assert!(
+                    (minimum..=maximum).contains(&delay_ms),
+                    "retry delay for attempt {index} must stay within the bounded jitter envelope, got {delay_ms} ms"
+                );
+            }
+        }
+
+        let mut actual_failure: serde_json::Value =
+            serde_json::from_str(&actual[3]).expect("failed trace record is JSON");
+        let mut expected_failure: serde_json::Value =
+            serde_json::from_str(&expected[3]).expect("expected failed trace record is JSON");
+        for trace in [&mut actual_failure, &mut expected_failure] {
+            for attempt in trace["attempts"]
+                .as_array_mut()
+                .expect("trace record has attempts")
+                .iter_mut()
+                .take(3)
+            {
+                attempt
+                    .as_object_mut()
+                    .expect("attempt is an object")
+                    .remove("delay_ms");
+            }
+        }
+
+        assert_eq!(
+            &actual[..3],
+            &expected[..3],
+            "stable direct trace records are the byte-level compatibility contract"
+        );
+        assert_eq!(actual_failure, expected_failure);
+        assert_eq!(
+            &actual[4..],
+            &expected[4..],
+            "stable direct trace records are the byte-level compatibility contract"
         );
     }
 

@@ -1,4 +1,6 @@
 use super::support::*;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
 
 pub const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 300_000;
 pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
@@ -328,6 +330,8 @@ pub struct ProviderRetryPolicy {
     pub max_attempts: u32,
     pub base_delay_ms: u64,
     pub max_delay_ms: u64,
+    /// Upper bound for uniform random jitter added to ordinary retry backoff
+    /// on each attempt. The default is 500 ms; set to `0` to disable jitter.
     pub jitter_ms: u64,
     /// Maximum provider-stated `Retry-After` honored by the host. `None`
     /// deliberately accepts an unbounded provider duration; selecting it means
@@ -365,7 +369,7 @@ impl Default for ProviderRetryPolicy {
             max_attempts: 4,
             base_delay_ms: 2_000,
             max_delay_ms: 10_000,
-            jitter_ms: 0,
+            jitter_ms: 500,
             retry_after_cap_ms: Some(60_000),
             throttle_wait_budget_ms: DEFAULT_THROTTLE_WAIT_BUDGET_MS,
         }
@@ -418,7 +422,35 @@ impl ProviderRetryPolicy {
             .base_delay_ms
             .saturating_mul(multiplier)
             .min(self.max_delay_ms);
-        Duration::from_millis(delay_ms.saturating_add(self.jitter_ms))
+        Duration::from_millis(delay_ms.saturating_add(self.sample_jitter_ms(retry_index)))
+    }
+
+    fn sample_jitter_ms(&self, retry_index: u32) -> u64 {
+        if self.jitter_ms == 0 {
+            return 0;
+        }
+
+        let entropy = RandomState::new();
+        let mut draw = 0u64;
+        loop {
+            let mut hasher = entropy.build_hasher();
+            hasher.write_u64(self.base_delay_ms);
+            hasher.write_u64(self.max_delay_ms);
+            hasher.write_u64(self.jitter_ms);
+            hasher.write_u32(retry_index);
+            hasher.write_u64(draw);
+            let sample = hasher.finish();
+
+            if self.jitter_ms == u64::MAX {
+                return sample;
+            }
+            let width = self.jitter_ms + 1;
+            let unbiased_zone = u64::MAX - u64::MAX % width;
+            if sample < unbiased_zone {
+                return sample % width;
+            }
+            draw = draw.wrapping_add(1);
+        }
     }
 }
 
