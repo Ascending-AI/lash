@@ -318,7 +318,8 @@ pub struct PostgresStoreConfig {
     pub max_connections: u32,
     /// Minimum idle connections kept warm. Default 0.
     pub min_connections: u32,
-    /// How long `acquire` waits for a free connection before erroring. Default 30s.
+    /// How long `acquire` may take before erroring, including pool waits and
+    /// establishing a fresh TCP/TLS/Postgres connection. Default 30s.
     pub acquire_timeout: Duration,
     /// Close a connection after this idle period. Default 10m.
     pub idle_timeout: Option<Duration>,
@@ -355,6 +356,20 @@ impl Default for PostgresStoreConfig {
     }
 }
 
+fn postgres_pool_options(config: &PostgresStoreConfig) -> PgPoolOptions {
+    let mut options = PgPoolOptions::new()
+        .max_connections(config.max_connections)
+        .min_connections(config.min_connections)
+        .acquire_timeout(config.acquire_timeout);
+    if let Some(timeout) = config.idle_timeout {
+        options = options.idle_timeout(timeout);
+    }
+    if let Some(timeout) = config.max_lifetime {
+        options = options.max_lifetime(timeout);
+    }
+    options
+}
+
 impl PostgresStorage {
     /// Connect with [`PostgresStoreConfig::default`] pool/timeout settings.
     pub async fn connect(database_url: &str) -> Result<Self, StoreError> {
@@ -370,17 +385,7 @@ impl PostgresStorage {
         let statement_ms = config
             .statement_timeout
             .map(|d| d.as_millis().max(1) as u64);
-        let mut options = PgPoolOptions::new()
-            .max_connections(config.max_connections)
-            .min_connections(config.min_connections)
-            .acquire_timeout(config.acquire_timeout);
-        if let Some(timeout) = config.idle_timeout {
-            options = options.idle_timeout(timeout);
-        }
-        if let Some(timeout) = config.max_lifetime {
-            options = options.max_lifetime(timeout);
-        }
-        let pool = options
+        let pool = postgres_pool_options(&config)
             .after_connect(move |conn, _meta| {
                 Box::pin(async move {
                     if let Some(ms) = lock_ms {
@@ -844,3 +849,37 @@ mod postgres_test_support;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod acquire_timeout_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn acquire_timeout_bounds_a_stalled_postgres_handshake() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind stalled Postgres peer");
+        let port = listener.local_addr().expect("read listener address").port();
+        let stalled_peer = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.expect("accept Postgres connection");
+            std::future::pending::<()>().await;
+        });
+        let config = PostgresStoreConfig {
+            acquire_timeout: Duration::from_millis(100),
+            ..PostgresStoreConfig::default()
+        };
+        let database_url = format!("postgres://postgres@127.0.0.1:{port}/postgres");
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(400),
+            postgres_pool_options(&config).connect(&database_url),
+        )
+        .await;
+        stalled_peer.abort();
+
+        assert!(
+            matches!(result, Ok(Err(sqlx::Error::PoolTimedOut))),
+            "acquire timeout did not bound the stalled handshake: {result:?}"
+        );
+    }
+}
