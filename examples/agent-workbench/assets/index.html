@@ -2825,7 +2825,7 @@
         sessionSelect.appendChild(option);
       }
       const dialects = listing?.dialects || [];
-      if (dialects.join(" ") !== knownDialects.join(" ")) {
+      if (dialects.join("\x00") !== knownDialects.join("\x00")) {
         knownDialects = dialects;
         newSessionDialect.innerHTML = "";
         for (const dialect of dialects) {
