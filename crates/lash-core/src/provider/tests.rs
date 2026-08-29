@@ -1774,6 +1774,80 @@ async fn provider_handle_records_usage_and_evidence_for_any_provider_kind() {
     );
 }
 
+#[test]
+fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
+    let call_record = crate::LlmCallRecord {
+        call_id: crate::LlmCallId("trace-attempt".to_string()),
+        label: None,
+        replay_drops: Vec::new(),
+        attempts: vec![crate::AttemptRecord {
+            ordinal: 1,
+            started_at: 0,
+            duration: std::time::Duration::from_millis(7),
+            outcome: crate::AttemptOutcome::Completed,
+            protocol_position: crate::ProtocolPosition::TerminalObserved,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: None,
+            evidence: None,
+            generation_disposition: Some(crate::GenerationReceipt {
+                temperature: crate::GenerationOptionOutcome::Applied,
+                seed: crate::GenerationOptionOutcome::OmittedUnsupported,
+                ..crate::GenerationReceipt::default()
+            }),
+            usage: Some(LlmUsage {
+                input_tokens: 11,
+                output_tokens: 5,
+                ..LlmUsage::default()
+            }),
+        }],
+    };
+    let attempts = crate::trace::trace_llm_attempts(Some(&call_record));
+    let record = lash_trace::TraceRecord::new(
+        lash_trace::TraceContext::default(),
+        lash_trace::TraceEvent::LlmCallCompleted {
+            response: crate::trace::trace_llm_response(
+                "ok".to_string(),
+                0,
+                Some(crate::LlmTerminalReason::Stop),
+                None,
+                None,
+            ),
+            usage: None,
+            provider_usage: None,
+            stream_summary: None,
+            attempts,
+        },
+    );
+
+    let wire = serde_json::to_string(&record).expect("serialize trace stream record");
+    let consumed: serde_json::Value =
+        serde_json::from_str(&wire).expect("trace consumer decodes JSONL record");
+    assert_eq!(consumed["attempts"][0]["outcome"], "completed");
+    assert_eq!(
+        consumed["attempts"][0]["generation_disposition"],
+        serde_json::json!({
+            "output_token_cap": "not_requested",
+            "temperature": "applied",
+            "seed": "omitted_unsupported",
+            "stop_sequences": "not_requested",
+            "cache": "not_requested",
+        }),
+        "the trace stream must carry the completed attempt's generation disposition",
+    );
+    assert_eq!(
+        consumed["attempts"][0]["usage"],
+        serde_json::json!({
+            "input_tokens": 11,
+            "output_tokens": 5,
+            "cache_read_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "reasoning_output_tokens": 0,
+        }),
+        "the trace stream must carry the completed attempt's provider-reported usage",
+    );
+}
+
 #[tokio::test]
 async fn provider_handle_stops_on_non_retryable_failure() {
     let attempts = Arc::new(AtomicUsize::new(0));
