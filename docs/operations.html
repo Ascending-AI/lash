@@ -17,7 +17,7 @@
 <script src="./docs.js?v=7" defer></script>
 <script src="./syntax.js" defer></script>
 </head>
-<body class="docs-page" data-cover-source="<code>crates/lash-core/src/store/lease_timings.rs</code>, <code>crates/lash-core/src/runtime/session_execution_lease.rs</code>, <code>crates/lash/src/session.rs</code>, <code>crates/lash/src/session_lease.rs</code>, <code>crates/lash/src/core.rs</code>, <code>crates/lash/src/process_admin.rs</code>, <code>crates/lash-core/src/runtime/process_worker/mod.rs</code>, <code>docs/adr/0014-operational-policy-stays-with-the-host.md</code>, <code>docs/adr/0019-process-recovery-obeys-declared-disposition.md</code>, <code>docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md</code>, <code>examples/agent-service</code>.">
+<body class="docs-page" data-cover-source="<code>crates/lash-core/src/store/lease_timings.rs</code>, <code>crates/lash-core/src/store/commit_budget.rs</code>, <code>crates/lash-core/src/runtime/session_execution_lease.rs</code>, <code>crates/lash-core/src/runtime/turn_queue.rs</code>, <code>crates/lash-core/src/runtime/host.rs</code>, <code>crates/lash-core/src/runtime/native_substrate/policy.rs</code>, <code>crates/lash-core/src/provider/options.rs</code>, <code>crates/lash-postgres-store/src/lib.rs</code>, <code>crates/lash-plugin-mcp/src/config.rs</code>, <code>crates/lash/src/session.rs</code>, <code>crates/lash/src/session_lease.rs</code>, <code>crates/lash/src/core.rs</code>, <code>crates/lash/src/core/worker_capacity.rs</code>, <code>crates/lash/src/process_admin.rs</code>, <code>crates/lash-core/src/runtime/process_worker/mod.rs</code>, <code>docs/adr/0014-operational-policy-stays-with-the-host.md</code>, <code>docs/adr/0019-process-recovery-obeys-declared-disposition.md</code>, <code>docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md</code>, <code>examples/agent-service</code>.">
   <a class="skip-link" href="#content">skip to content</a>
 <section class="opener">
     <h1 class="opener__title">operations<span class="slash">/</span>production</h1>
@@ -75,6 +75,117 @@ let core = builder.build(owner)?;</code></pre>
         <strong>Gotcha</strong>
         <p>A turn id is not a worker identity, and a process identity is not an executor identity. Per-turn host owners make a replacement boot look unrelated to its predecessor; omitting the runtime-minted executor discriminator would make two concurrent opens reenter and revoke one another. Keep the stable host owner, fresh boot incarnation, and fresh per-open executor together. A <code>session_execution_lease.busy</code> event whose claimant and holder share owner/incarnation but differ in executor is healthy in-process exclusion, not foreign routing.</p>
       </aside>
+    </div>
+
+    <div class="section" id="sizing-server-deployment">
+      <div class="section-header">
+        <h2>Sizing A Server Deployment</h2>
+        <p>Start with the code defaults below, measure queueing and backend latency under the deployment's real workload, then change one boundary at a time. A default of <em>required</em> means the builder deliberately has no implicit value: the host must choose it. These are the server-sizing levers present in this build, not promises about knobs proposed for later releases.</p>
+      </div>
+
+      <h3>Postgres connections</h3>
+      <p>Each <code>PostgresStorage</code> owns a SQLx pool. Count every pool in a worker when comparing these per-pool values with the database's connection ceiling.</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Knob</th><th>Config field</th><th>Default</th><th>Tradeoff</th></tr></thead>
+          <tbody>
+            <tr><td>Pool ceiling</td><td><code>PostgresStoreConfig::max_connections</code></td><td><code>16</code></td><td>More connections permit more concurrent store operations, but multiply database sessions and can move contention into Postgres.</td></tr>
+            <tr><td>Warm pool floor</td><td><code>PostgresStoreConfig::min_connections</code></td><td><code>0</code></td><td>A larger floor avoids connection setup on bursts while consuming database connections during idle periods.</td></tr>
+            <tr><td>Pool acquire timeout</td><td><code>PostgresStoreConfig::acquire_timeout</code></td><td><code>30s</code></td><td>A shorter wait sheds saturated work sooner; a longer wait tolerates bursts while increasing tail latency.</td></tr>
+            <tr><td>Idle connection timeout</td><td><code>PostgresStoreConfig::idle_timeout</code></td><td><code>Some(10m)</code></td><td>Shorter retirement returns idle capacity sooner but causes more reconnect churn; <code>None</code> disables idle retirement.</td></tr>
+            <tr><td>Connection lifetime</td><td><code>PostgresStoreConfig::max_lifetime</code></td><td><code>Some(30m)</code></td><td>Shorter recycling refreshes server and network state sooner but increases reconnect churn; <code>None</code> disables lifetime recycling.</td></tr>
+            <tr><td>Postgres lock wait</td><td><code>PostgresStoreConfig::lock_timeout</code></td><td><code>Some(10s)</code></td><td>A shorter limit surfaces contention sooner; a longer limit tolerates slow holders while tying up a pooled connection. <code>None</code> disables the backstop.</td></tr>
+            <tr><td>Postgres statement runtime</td><td><code>PostgresStoreConfig::statement_timeout</code></td><td><code>Some(30s)</code></td><td>A shorter limit prevents wedged queries from occupying the pool but can abort legitimate slow work. <code>None</code> disables the backstop.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Turn and queued-work bounds</h3>
+      <div class="table">
+        <table>
+          <thead><tr><th>Knob</th><th>Config field</th><th>Default</th><th>Tradeoff</th></tr></thead>
+          <tbody>
+            <tr><td>Commit bytes</td><td><code>CommitBudget::bytes</code></td><td><em>required; no default</em></td><td>A larger limit admits bigger atomic commits but raises serialization, transaction, and backend-latency cost. The examples start at 1 MiB.</td></tr>
+            <tr><td>Commit rows</td><td><code>CommitBudget::nodes</code></td><td><em>required; no default</em></td><td>A larger limit admits wider graph and attachment-intent commits but increases transaction work. The examples start at 512 rows.</td></tr>
+            <tr><td>Model-action reserve</td><td><code>QueuedWorkBatchingConfig::action_token_reserve</code></td><td><em>required; no default</em></td><td>The value remains a context-window misconfiguration check and is passed to custom drain policy; shipped drain modes do no token arithmetic.</td></tr>
+            <tr><td>Fresh-claim row cap</td><td><code>QueuedWorkBatchingConfig::max_rows</code></td><td><code>64</code></td><td>A larger cap exposes more compatible FIFO rows to the drain policy and can improve batching, at the cost of larger claims and turns. Interrupted claims keep their journaled composition even above the current cap.</td></tr>
+            <tr><td>Oldest-row batching age</td><td><code>QueuedWorkBatchingConfig::max_pending_age</code></td><td><code>30s</code></td><td>A shorter age bounds head-row batching latency sooner; a longer age leaves more opportunity to coalesce. Reaching the age claims the oldest row alone; it never expires or drops it.</td></tr>
+            <tr><td>Drain selection</td><td><code>QueuedWorkBatchingConfig::drain_policy</code></td><td><code>DrainMode::OneAtATime</code></td><td>One-at-a-time minimizes per-turn context pressure. <code>DrainMode::All</code> or a custom policy can increase throughput while producing larger turns.</td></tr>
+            <tr><td>Managed child turns</td><td><code>RuntimeControlConfig::managed_turn_concurrency_limit</code></td><td><code>100</code></td><td>A larger per-runtime opened-session-registry cap admits more child turns and their buffered streams; a smaller cap bounds memory and rejects excess admission sooner. Internal rolling-history compaction is exempt.</td></tr>
+            <tr><td>Lease TTL</td><td><code>LeaseTimings::ttl</code></td><td><code>30s</code></td><td>A shorter TTL fails over sooner after owner loss; a longer TTL tolerates slow renewal with less false-takeover risk.</td></tr>
+            <tr><td>Lease renewal cadence</td><td><code>LeaseTimings::renew_interval</code></td><td><code>10s</code></td><td>More frequent renewal reduces expiry risk but writes more often. <code>LeaseTimings::new</code> requires <code>ttl &gt;= 3 * renew_interval</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Native worker admission and pacing</h3>
+      <p>The two fixed concurrency limits are per worker. Installing one <code>WorkerSlotSupplier</code> replaces both fixed semaphores; sharing or externally coordinating that supplier is the seam for a deployment-wide budget. Restate-backed ports own their own pacing and do not read <code>NativeSubstrateConfig</code>.</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Knob</th><th>Config field</th><th>Default</th><th>Tradeoff</th></tr></thead>
+          <tbody>
+            <tr><td>Native process executions</td><td><code>LashCoreBuilder::process_execution_concurrency</code></td><td><code>64</code> per worker</td><td>A larger bound increases runnable process throughput and concurrent provider/store load. Parked processes release their slots.</td></tr>
+            <tr><td>Native queued-work executions</td><td><code>LashCoreBuilder::queued_work_execution_concurrency</code></td><td><code>64</code> per worker</td><td>A larger bound drains more session notifications concurrently and raises provider/store pressure; same-session work remains serialized by its lane.</td></tr>
+            <tr><td>Shared worker admission</td><td><code>LashCoreBuilder::worker_slot_supplier</code></td><td><code>None</code>; use the two fixed limits</td><td>A host supplier can enforce one process/queued-work budget across workers. Its permits must be cancel-safe and RAII-released, so a remote fleet coordinator also needs a loss-safe permit implementation.</td></tr>
+            <tr><td>Process intake page</td><td><code>WorkerSweepPolicy::intake_page</code></td><td><code>256</code></td><td>Larger pages discover more pending processes per scan at the cost of larger registry reads and intake buffers.</td></tr>
+            <tr><td>Process fetch attempts</td><td><code>WorkerSweepPolicy::fetch_attempts</code></td><td><code>3</code></td><td>More attempts tolerate transient registry reads but keep a sweep occupied longer before it reports failure.</td></tr>
+            <tr><td>Process fetch retry base</td><td><code>WorkerSweepPolicy::fetch_retry_base</code></td><td><code>10ms</code></td><td>A shorter base retries discovery sooner and increases registry pressure; a longer base reduces pressure but delays recovery.</td></tr>
+            <tr><td>Wake retry initial delay</td><td><code>WorkCadencePolicy::retry_initial</code></td><td><code>25ms</code></td><td>Shorter retries reduce transient/contended wake latency while increasing retry pressure.</td></tr>
+            <tr><td>Wake retry ceiling</td><td><code>WorkCadencePolicy::retry_max</code></td><td><code>1s</code></td><td>A lower ceiling recovers faster from contention but polls the failing dependency more aggressively.</td></tr>
+            <tr><td>Transient wake attempts</td><td><code>WorkCadencePolicy::max_transient_attempts</code></td><td><code>8</code></td><td>More attempts tolerate longer transient failures while delaying the terminal worker-fault report.</td></tr>
+            <tr><td>Slow-wake threshold</td><td><code>WorkCadencePolicy::slow_wake_threshold</code></td><td><code>30s</code></td><td>A shorter threshold detects and reports a slow in-flight wake sooner, with more frequent liveness telemetry.</td></tr>
+            <tr><td>Await/delivery poll start</td><td><code>WorkCadencePolicy::poll_initial</code></td><td><code>25ms</code></td><td>A shorter initial poll lowers wake-notification fallback latency while increasing polling load.</td></tr>
+            <tr><td>Await/delivery poll ceiling</td><td><code>WorkCadencePolicy::poll_max</code></td><td><code>1s</code></td><td>A lower ceiling notices missed notifications sooner while sustaining more idle polls.</td></tr>
+            <tr><td>Wake-delivery scan batch</td><td><code>WorkCadencePolicy::delivery_batch</code></td><td><code>32</code></td><td>Larger batches reconcile more deliveries per pass at the cost of longer passes and larger registry reads.</td></tr>
+            <tr><td>Delivery retry initial delay</td><td><code>WorkCadencePolicy::delivery_retry_initial</code></td><td><code>50ms</code></td><td>A shorter delay retries failed delivery sooner while putting more pressure on a degraded dependency.</td></tr>
+            <tr><td>Delivery retry ceiling</td><td><code>WorkCadencePolicy::delivery_retry_max</code></td><td><code>5m</code></td><td>A lower ceiling reduces the longest gap between delivery retries; a higher ceiling backs off more under a prolonged outage.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Provider reliability and admission</h3>
+      <p>These values are per <code>ProviderHandle</code>. The request and token windows default to 60 seconds only when their corresponding limit is set without an explicit window.</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Knob</th><th>Config field</th><th>Default</th><th>Tradeoff</th></tr></thead>
+          <tbody>
+            <tr><td>Whole-request timeout</td><td><code>ProviderReliability::request_timeout</code></td><td><code>None</code> resolves to <code>300s</code></td><td>A shorter timeout releases resources sooner on a stuck call but can abort a valid long generation. <code>RequestTimeout::Disabled</code> waits indefinitely.</td></tr>
+            <tr><td>Stream chunk timeout</td><td><code>ProviderReliability::chunk_timeout</code></td><td><code>None</code> resolves to <code>120s</code></td><td>A shorter timeout detects stalled streams sooner but tolerates less provider silence between chunks.</td></tr>
+            <tr><td>Retry switch</td><td><code>ProviderRetryPolicy::enabled</code></td><td><code>true</code></td><td>Disabling avoids retry amplification when an outer workflow owns retries, but surfaces the first retryable failure.</td></tr>
+            <tr><td>Provider attempts</td><td><code>ProviderRetryPolicy::max_attempts</code></td><td><code>4</code></td><td>More attempts improve tolerance of transient failures while increasing worst-case calls and latency.</td></tr>
+            <tr><td>Retry base delay</td><td><code>ProviderRetryPolicy::base_delay_ms</code></td><td><code>2,000ms</code></td><td>A shorter base retries sooner and increases load during failures; a longer base slows recovery.</td></tr>
+            <tr><td>Retry delay ceiling</td><td><code>ProviderRetryPolicy::max_delay_ms</code></td><td><code>10,000ms</code></td><td>A lower ceiling reduces retry latency while increasing sustained pressure on a degraded provider.</td></tr>
+            <tr><td>Retry jitter allowance</td><td><code>ProviderRetryPolicy::jitter_ms</code></td><td><code>0ms</code></td><td>A larger value adds that many milliseconds to each computed retry delay, trading faster recovery for more spacing.</td></tr>
+            <tr><td><code>Retry-After</code> cap</td><td><code>ProviderRetryPolicy::retry_after_cap_ms</code></td><td><code>Some(60,000ms)</code></td><td>A lower cap refuses excessive provider-directed sleeps sooner; <code>None</code> accepts an unbounded provider duration.</td></tr>
+            <tr><td>Throttle wait budget</td><td><code>ProviderRetryPolicy::throttle_wait_budget_ms</code></td><td><code>90,000ms</code></td><td>A larger per-call budget honors more qualified throttle waits without spending attempts, but extends worst-case latency; zero disables this deference.</td></tr>
+            <tr><td>Provider concurrency</td><td><code>ProviderRateLimitPolicy::max_concurrency</code></td><td><code>None</code> (unlimited)</td><td>A lower cap bounds simultaneous requests and queues locally; a higher cap improves burst throughput and increases provider pressure.</td></tr>
+            <tr><td>Requests per window</td><td><code>ProviderRateLimitPolicy::requests_per_window</code></td><td><code>None</code> (unlimited)</td><td>A finite count smooths request admission to the provider's quota at the cost of local waits.</td></tr>
+            <tr><td>Request window</td><td><code>ProviderRateLimitPolicy::request_window_ms</code></td><td><code>None</code>; <code>60,000ms</code> when a count is set</td><td>A shorter window permits a faster burst cadence; a longer window spreads the same request count over more time.</td></tr>
+            <tr><td>Tokens per window</td><td><code>ProviderRateLimitPolicy::tokens_per_window</code></td><td><code>None</code> (unlimited)</td><td>A finite estimate budget smooths prompt-token admission but may delay requests whose provider-side accounting would differ.</td></tr>
+            <tr><td>Token window</td><td><code>ProviderRateLimitPolicy::token_window_ms</code></td><td><code>None</code>; <code>60,000ms</code> when a token limit is set</td><td>A shorter window replenishes estimated-token capacity sooner; a longer one applies a steadier rate.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>MCP calls and reconnects</h3>
+      <p><code>McpCallPolicy</code> is flattened into every <code>McpServerConfig</code> transport. The idle timeout may reset on matching progress, but the total timeout never does.</p>
+      <div class="table">
+        <table>
+          <thead><tr><th>Knob</th><th>Config field</th><th>Default</th><th>Tradeoff</th></tr></thead>
+          <tbody>
+            <tr><td>Call idle timeout</td><td><code>McpCallPolicy::call_timeout_ms</code></td><td><code>60,000ms</code></td><td>A shorter timeout frees a silent call sooner but tolerates less server inactivity.</td></tr>
+            <tr><td>Call total timeout</td><td><code>McpCallPolicy::call_max_total_timeout_ms</code></td><td><code>600,000ms</code></td><td>A shorter cap bounds total resource occupancy but can end a progressing long call.</td></tr>
+            <tr><td>Progress resets idle timeout</td><td><code>McpCallPolicy::reset_call_timeout_on_progress</code></td><td><code>true</code></td><td>Resetting preserves legitimately progressing calls; disabling makes progress notifications irrelevant to the idle clock.</td></tr>
+            <tr><td>Timeout connection action</td><td><code>McpCallPolicy::timeout_disconnect_policy</code></td><td><code>TimeoutDisconnectPolicy::PingProbe</code></td><td>Ping probing distinguishes a slow call from a dead peer but adds a liveness round trip; the other policies never disconnect or use a consecutive-timeout threshold.</td></tr>
+            <tr><td>Liveness probe timeout</td><td><code>McpCallPolicy::liveness_probe_timeout_ms</code></td><td><code>5,000ms</code></td><td>A shorter probe fails over sooner but tolerates less latency from a healthy peer.</td></tr>
+            <tr><td>Consecutive timeout threshold</td><td><code>McpCallPolicy::consecutive_timeouts_before_disconnect</code></td><td><code>3</code></td><td>A lower threshold reconnects sooner after repeated idle calls but risks more churn when calls are merely slow.</td></tr>
+            <tr><td>Background liveness interval</td><td><code>McpCallPolicy::liveness_probe_interval_ms</code></td><td><code>0</code> (disabled)</td><td>A nonzero interval detects dead idle peers before the next call at the cost of periodic traffic.</td></tr>
+            <tr><td>Reconnect initial ceiling</td><td><code>McpCallPolicy::reconnect_initial_backoff_ms</code></td><td><code>500ms</code></td><td>A lower start reconnects faster and can amplify an outage; a higher start reduces pressure and delays recovery.</td></tr>
+            <tr><td>Reconnect maximum ceiling</td><td><code>McpCallPolicy::reconnect_max_backoff_ms</code></td><td><code>30,000ms</code></td><td>A lower ceiling checks recovery more often; a higher ceiling reduces persistent reconnect traffic.</td></tr>
+            <tr><td>Reconnect attempts</td><td><code>McpCallPolicy::reconnect_max_attempts</code></td><td><code>0</code> (unlimited)</td><td>A finite bound stops reconnect work after repeated failure; keepalive can re-arm an exhausted loop when its interval is enabled.</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="section" id="schema-compatibility">

@@ -183,7 +183,7 @@
         {
           title: "Running in production",
           href: "operations.html",
-          summary: "Compose the host-owned operational levers: deployment topologies, worker identity, lease timings, graceful drain, failure classification, backpressure, and monitoring.",
+          summary: "Compose the host-owned operational levers: deployment topologies, server sizing, worker identity, lease timings, graceful drain, failure classification, backpressure, and monitoring.",
           kind: "guide",
         },
         {
