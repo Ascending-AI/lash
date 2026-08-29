@@ -128,7 +128,7 @@ flowchart LR
   Model --> History["chronological / rolling history"]
             </div>
           </div>
-          <p>Defaults: <code>ToolOutputBudgetMode::Bytes</code> at 16 KiB and 400 lines, configurable via <code>ToolOutputBudgetConfig</code>. RLM piggybacks on the same projector for its <code>print</code> observations.</p>
+          <p>Defaults: <code>ToolOutputBudgetMode::Bytes</code> at 16 KiB and 400 lines, configurable via <code>ToolOutputBudgetConfig</code>. Full-output spilling is disabled by default (<code>spill: None</code>); a host can opt in with <code>SpillPolicy</code> and its directory plus optional age/byte retention, which is pruned oldest-first after each spill. RLM piggybacks on the same projector for its <code>print</code> observations.</p>
         </div>
 
         <div class="section">

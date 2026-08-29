@@ -158,7 +158,7 @@ let config = ToolOutputBudgetConfig {
 let plugins = runtime_plugin_stack().configure(|plugins| {
     plugins.replace(Arc::new(ToolOutputBudgetPluginFactory::new(config)));
 });</code></pre>
-          <p>Defaults are <strong>16 KiB and 400 lines per tool output</strong> (the size cap is bytes by default; <code>ToolOutputBudgetMode::Tokens</code> switches it to an approximate token count). Outputs under both caps pass through untouched; outputs over either cap keep a preview window wrapped in a "<code>...N bytes truncated...</code>" marker; the unit reads <code>bytes</code> (or <code>tokens</code>) when the size cap binds, <code>lines</code> when the line cap binds.</p>
+          <p>Defaults are <strong>16 KiB and 400 lines per tool output</strong> (the size cap is bytes by default; <code>ToolOutputBudgetMode::Tokens</code> switches it to an approximate token count). Outputs under both caps pass through untouched; outputs over either cap keep a preview window wrapped in a "<code>...N bytes truncated...</code>" marker; the unit reads <code>bytes</code> (or <code>tokens</code>) when the size cap binds, <code>lines</code> when the line cap binds. Full-output spilling is disabled by default: set <code>spill: Some(SpillPolicy { dir, max_age, max_bytes })</code> when the host wants a file, and the plugin prunes its spill files oldest-first after each write.</p>
           <p>The plugin registers a tool-result projector that applies at three points:</p>
           <ul class="bullets">
             <li><strong>Dispatch projection</strong>: what the runtime returns to the calling code as the tool's immediate result.</li>

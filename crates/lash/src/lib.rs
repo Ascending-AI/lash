@@ -458,7 +458,7 @@ pub mod plugins {
         facade_support::TurnTransformContext,
     };
     pub use lash_plugin_tool_output_budget::{
-        ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
+        SpillPolicy, ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
         tool_output_budget_stack as runtime_plugin_stack,
     };
     /// Default chat projector installed by [`TurnDriverConfig::chat`].

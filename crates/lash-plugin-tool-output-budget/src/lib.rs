@@ -1,6 +1,8 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
@@ -22,12 +24,25 @@ pub enum ToolOutputBudgetMode {
     Tokens,
 }
 
+/// Host-owned destination and retention policy for full tool-output spills.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SpillPolicy {
+    /// Directory in which the plugin writes full tool outputs.
+    pub dir: PathBuf,
+    /// Remove plugin spill files at least this old after each spill.
+    pub max_age: Option<Duration>,
+    /// Keep the plugin's spill files within this aggregate byte limit after each spill.
+    pub max_bytes: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ToolOutputBudgetConfig {
     pub mode: ToolOutputBudgetMode,
     pub limit: usize,
     pub max_lines: usize,
+    /// `None` disables new full-output spills; truncation still occurs.
+    pub spill: Option<SpillPolicy>,
 }
 
 impl Default for ToolOutputBudgetConfig {
@@ -36,6 +51,7 @@ impl Default for ToolOutputBudgetConfig {
             mode: ToolOutputBudgetMode::Bytes,
             limit: DEFAULT_TOOL_OUTPUT_BUDGET_LIMIT_BYTES,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            spill: None,
         }
     }
 }
@@ -223,12 +239,15 @@ fn char_floor(text: &str, max: usize) -> usize {
 
 pub struct ToolOutputBudgetPluginFactory {
     budget: Budget,
+    spill: Option<SpillPolicy>,
 }
 
 impl ToolOutputBudgetPluginFactory {
     pub fn new(config: ToolOutputBudgetConfig) -> Self {
+        let budget = Budget::from(&config);
         Self {
-            budget: Budget::from(config),
+            budget,
+            spill: config.spill,
         }
     }
 }
@@ -253,12 +272,14 @@ impl PluginFactory for ToolOutputBudgetPluginFactory {
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(ToolOutputBudgetPlugin {
             budget: self.budget,
+            spill: self.spill.clone(),
         }))
     }
 }
 
 struct ToolOutputBudgetPlugin {
     budget: Budget,
+    spill: Option<SpillPolicy>,
 }
 
 impl SessionPlugin for ToolOutputBudgetPlugin {
@@ -267,21 +288,35 @@ impl SessionPlugin for ToolOutputBudgetPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        register_projector(reg, self.budget)
+        register_projector(reg, self.budget, self.spill.clone())
     }
 }
 
-fn register_projector(reg: &mut PluginRegistrar, budget: Budget) -> Result<(), PluginError> {
+fn register_projector(
+    reg: &mut PluginRegistrar,
+    budget: Budget,
+    spill: Option<SpillPolicy>,
+) -> Result<(), PluginError> {
     reg.tool_results().projector(Arc::new(move |ctx| {
-        Box::pin(async move { project_tool_result(&budget, ctx) })
+        let spill = spill.clone();
+        Box::pin(async move { project_tool_result_with_spill(&budget, spill.as_ref(), ctx) })
     }))
 }
 
+#[cfg(test)]
 fn project_tool_result(
     budget: &Budget,
     ctx: ToolResultProjectionContext,
 ) -> Result<ModelToolReturn, PluginError> {
-    let parts = project_model_parts(budget, &ctx)?;
+    project_tool_result_with_spill(budget, None, ctx)
+}
+
+fn project_tool_result_with_spill(
+    budget: &Budget,
+    spill: Option<&SpillPolicy>,
+    ctx: ToolResultProjectionContext,
+) -> Result<ModelToolReturn, PluginError> {
+    let parts = project_model_parts(budget, spill, &ctx)?;
     Ok(ModelToolReturn {
         call_id: ctx.call_id.clone(),
         tool_name: ctx.tool_name.clone(),
@@ -291,17 +326,18 @@ fn project_tool_result(
 
 fn project_model_parts(
     budget: &Budget,
+    spill: Option<&SpillPolicy>,
     ctx: &ToolResultProjectionContext,
 ) -> Result<Vec<ModelToolReturnPart>, PluginError> {
     if ctx.tool_name == "batch" {
-        let value = project_batch_value(budget, ctx)?;
+        let value = project_batch_value(budget, spill, ctx)?;
         return Ok(vec![ModelToolReturnPart::text(
             render_projected_model_value(&value),
         )]);
     }
 
     Ok(match &ctx.output.outcome {
-        ToolCallOutcome::Success(value) => project_tool_value_parts(budget, ctx, value),
+        ToolCallOutcome::Success(value) => project_tool_value_parts(budget, spill, ctx, value),
         ToolCallOutcome::Failure(failure) => {
             let mut parts = vec![ModelToolReturnPart::text(
                 lash_core::session_model::format_tool_output_content(&ctx.output),
@@ -340,28 +376,27 @@ fn render_projected_model_value(value: &serde_json::Value) -> String {
 
 fn project_tool_value_parts(
     budget: &Budget,
+    spill: Option<&SpillPolicy>,
     ctx: &ToolResultProjectionContext,
     value: &ToolValue,
 ) -> Vec<ModelToolReturnPart> {
     let mut parts = Vec::new();
     match value {
-        ToolValue::String(text) => {
-            parts.push(ModelToolReturnPart::text(project_text(text, budget, ctx)))
-        }
+        ToolValue::String(text) => parts.push(ModelToolReturnPart::text(project_text_with_spill(
+            text, budget, ctx, spill,
+        ))),
         ToolValue::Attachment(reference) => {
             parts.push(ModelToolReturnPart::Attachment(reference.clone()));
         }
-        ToolValue::UntrustedJson(value) => parts.push(ModelToolReturnPart::text(project_text(
-            &render_projected_model_value(value),
-            budget,
-            ctx,
-        ))),
+        ToolValue::UntrustedJson(value) => parts.push(ModelToolReturnPart::text(
+            project_text_with_spill(&render_projected_model_value(value), budget, ctx, spill),
+        )),
         ToolValue::Null
         | ToolValue::Bool(_)
         | ToolValue::Number(_)
         | ToolValue::Array(_)
         | ToolValue::Object(_) => {
-            push_projected_tool_value_parts(value, &mut parts, budget, ctx);
+            push_projected_tool_value_parts(value, &mut parts, budget, spill, ctx);
         }
     }
     parts
@@ -371,6 +406,7 @@ fn push_projected_tool_value_parts(
     value: &ToolValue,
     parts: &mut Vec<ModelToolReturnPart>,
     budget: &Budget,
+    spill: Option<&SpillPolicy>,
     ctx: &ToolResultProjectionContext,
 ) {
     match value {
@@ -379,7 +415,7 @@ fn push_projected_tool_value_parts(
         ToolValue::Number(value) => push_text_part(parts, value.to_string()),
         ToolValue::String(text) => push_text_part(
             parts,
-            serde_json::to_string(&project_text(text, budget, ctx))
+            serde_json::to_string(&project_text_with_spill(text, budget, ctx, spill))
                 .unwrap_or_else(|_| "\"\"".to_string()),
         ),
         ToolValue::Attachment(reference) => {
@@ -387,10 +423,11 @@ fn push_projected_tool_value_parts(
         }
         ToolValue::UntrustedJson(value) => push_text_part(
             parts,
-            project_text(
+            project_text_with_spill(
                 &serde_json::to_string(value).unwrap_or_else(|_| "null".to_string()),
                 budget,
                 ctx,
+                spill,
             ),
         ),
         ToolValue::Array(items) => {
@@ -399,7 +436,7 @@ fn push_projected_tool_value_parts(
                 if index > 0 {
                     push_text_part(parts, ",");
                 }
-                push_projected_tool_value_parts(item, parts, budget, ctx);
+                push_projected_tool_value_parts(item, parts, budget, spill, ctx);
             }
             push_text_part(parts, "]");
         }
@@ -414,7 +451,7 @@ fn push_projected_tool_value_parts(
                     serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string()),
                 );
                 push_text_part(parts, ":");
-                push_projected_tool_value_parts(value, parts, budget, ctx);
+                push_projected_tool_value_parts(value, parts, budget, spill, ctx);
             }
             push_text_part(parts, "}");
         }
@@ -433,7 +470,17 @@ fn push_text_part(parts: &mut Vec<ModelToolReturnPart>, text: impl Into<String>)
     }
 }
 
+#[cfg(test)]
 fn project_text(text: &str, budget: &Budget, ctx: &ToolResultProjectionContext) -> String {
+    project_text_with_spill(text, budget, ctx, None)
+}
+
+fn project_text_with_spill(
+    text: &str,
+    budget: &Budget,
+    ctx: &ToolResultProjectionContext,
+    spill: Option<&SpillPolicy>,
+) -> String {
     if !needs_truncation(text, budget) {
         return text.to_string();
     }
@@ -442,6 +489,7 @@ fn project_text(text: &str, budget: &Budget, ctx: &ToolResultProjectionContext) 
         budget,
         tool_projection_direction(&ctx.tool_name),
         Some(ctx),
+        spill,
     )
 }
 
@@ -454,8 +502,14 @@ fn truncate_text(
     budget: &Budget,
     direction: TruncationDirection,
     ctx: Option<&ToolResultProjectionContext>,
+    spill: Option<&SpillPolicy>,
 ) -> String {
-    truncate_text_with_hint(text, budget, direction, truncation_hint(ctx, text))
+    truncate_text_with_hint(
+        text,
+        budget,
+        direction,
+        truncation_hint_with_spill(ctx, text, spill),
+    )
 }
 
 fn truncate_text_with_hint(
@@ -506,10 +560,21 @@ fn tool_projection_direction(tool_name: &str) -> TruncationDirection {
     }
 }
 
+#[cfg(test)]
 fn truncation_hint(ctx: Option<&ToolResultProjectionContext>, text: &str) -> String {
-    let output_path = ctx
-        .and_then(existing_tool_output_path)
-        .or_else(|| ctx.and_then(|ctx| spill_tool_output(&ctx.tool_name, &ctx.args, text)));
+    truncation_hint_with_spill(ctx, text, None)
+}
+
+fn truncation_hint_with_spill(
+    ctx: Option<&ToolResultProjectionContext>,
+    text: &str,
+    spill: Option<&SpillPolicy>,
+) -> String {
+    let output_path = ctx.and_then(existing_tool_output_path).or_else(|| {
+        spill.and_then(|spill| {
+            ctx.and_then(|ctx| spill_tool_output(spill, &ctx.tool_name, &ctx.args, text))
+        })
+    });
     match output_path {
         Some(path) => format!(
             "The tool output was truncated. Full output saved to: {}\nUse the shell tool or host-provided file access to inspect specific sections instead of reading the whole file at once.",
@@ -529,12 +594,12 @@ fn existing_tool_output_path(ctx: &ToolResultProjectionContext) -> Option<PathBu
 }
 
 fn spill_tool_output(
+    spill: &SpillPolicy,
     tool_name: &str,
     args: &serde_json::Value,
     full_output: &str,
 ) -> Option<PathBuf> {
-    let dir = std::env::temp_dir().join("lash-tool-output");
-    if fs::create_dir_all(&dir).is_err() {
+    if fs::create_dir_all(&spill.dir).is_err() {
         return None;
     }
 
@@ -554,11 +619,94 @@ fn spill_tool_output(
             }
         })
         .collect::<String>();
-    let path = dir.join(format!("{stem}-{}.txt", &digest[..12]));
+    let path = spill.dir.join(format!("{stem}-{}.txt", &digest[..12]));
     if write_if_changed(&path, full_output).is_err() {
         return None;
     }
+    prune_spill_directory(spill, &path);
     Some(path)
+}
+
+struct SpillFile {
+    path: PathBuf,
+    modified: SystemTime,
+    bytes: u64,
+}
+
+fn prune_spill_directory(policy: &SpillPolicy, exempt_path: &Path) {
+    let Ok(entries) = fs::read_dir(&policy.dir) else {
+        return;
+    };
+    let mut files = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !is_plugin_spill_file(&path) {
+                return None;
+            }
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            Some(SpillFile {
+                path,
+                modified: metadata.modified().ok()?,
+                bytes: metadata.len(),
+            })
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| {
+        left.modified
+            .cmp(&right.modified)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    if let Some(max_age) = policy.max_age {
+        let now = SystemTime::now();
+        files.retain(|file| {
+            let expired = now
+                .duration_since(file.modified)
+                .is_ok_and(|age| age >= max_age);
+            if expired && file.path.as_path() != exempt_path {
+                fs::remove_file(&file.path).is_err()
+            } else {
+                true
+            }
+        });
+    }
+
+    if let Some(max_bytes) = policy.max_bytes {
+        let mut total_bytes = files
+            .iter()
+            .fold(0_u64, |total, file| total.saturating_add(file.bytes));
+        for file in files {
+            if total_bytes <= max_bytes {
+                break;
+            }
+            if file.path.as_path() == exempt_path {
+                continue;
+            }
+            if fs::remove_file(&file.path).is_ok() {
+                total_bytes = total_bytes.saturating_sub(file.bytes);
+            }
+        }
+    }
+}
+
+fn is_plugin_spill_file(path: &Path) -> bool {
+    let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+        return false;
+    };
+    if extension != "txt" {
+        return false;
+    }
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    let Some((_, digest)) = stem.rsplit_once('-') else {
+        return false;
+    };
+    digest.len() == 12 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
@@ -566,19 +714,43 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
         Ok(existing) => existing != content,
         Err(_) => true,
     };
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true);
     if should_write {
-        fs::write(path, content)?;
+        options.create(true).truncate(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+
+    if should_write {
+        file.write_all(content.as_bytes())?;
+    } else {
+        file.set_modified(SystemTime::now())?;
     }
     Ok(())
 }
 
 fn project_batch_value(
     budget: &Budget,
+    spill: Option<&SpillPolicy>,
     ctx: &ToolResultProjectionContext,
 ) -> Result<serde_json::Value, PluginError> {
     let value = ctx.output.value_for_projection();
     let Some(map) = value.as_object() else {
-        return Ok(project_json_value(&value, budget, ctx));
+        return Ok(project_json_value(&value, budget, spill, ctx));
     };
 
     let mut projected = serde_json::Map::new();
@@ -591,7 +763,7 @@ fn project_batch_value(
             |items| {
                 items
                     .iter()
-                    .map(|item| project_batch_child_value(item, budget, ctx))
+                    .map(|item| project_batch_child_value(item, budget, spill, ctx))
                     .collect::<Result<Vec<_>, PluginError>>()
             },
         )?;
@@ -602,6 +774,7 @@ fn project_batch_value(
 fn project_batch_child_value(
     item: &serde_json::Value,
     budget: &Budget,
+    spill: Option<&SpillPolicy>,
     ctx: &ToolResultProjectionContext,
 ) -> Result<serde_json::Value, PluginError> {
     let row = serde_json::from_value::<lash_protocol_standard::BatchResultRow>(item.clone())
@@ -610,10 +783,11 @@ fn project_batch_child_value(
     let child_args = batch_child_args(&ctx.args, row.index);
 
     let projected_child = if row.tool == "batch" || !row.success {
-        project_json_value(&child_value, budget, ctx)
+        project_json_value(&child_value, budget, spill, ctx)
     } else {
-        let model_return = project_tool_result(
+        let model_return = project_tool_result_with_spill(
             budget,
+            spill,
             ToolResultProjectionContext {
                 session_id: ctx.session_id.clone(),
                 call_id: format!("{}.{}", ctx.call_id, row.index),
@@ -678,21 +852,22 @@ fn render_model_return_parts(parts: &[ModelToolReturnPart]) -> String {
 fn project_json_value(
     value: &serde_json::Value,
     budget: &Budget,
+    spill: Option<&SpillPolicy>,
     ctx: &ToolResultProjectionContext,
 ) -> serde_json::Value {
     match value {
         serde_json::Value::String(text) => {
-            serde_json::Value::String(project_text(text, budget, ctx))
+            serde_json::Value::String(project_text_with_spill(text, budget, ctx, spill))
         }
         serde_json::Value::Array(items) => serde_json::Value::Array(
             items
                 .iter()
-                .map(|item| project_json_value(item, budget, ctx))
+                .map(|item| project_json_value(item, budget, spill, ctx))
                 .collect(),
         ),
         serde_json::Value::Object(map) => serde_json::Value::Object(
             map.iter()
-                .map(|(key, value)| (key.clone(), project_json_value(value, budget, ctx)))
+                .map(|(key, value)| (key.clone(), project_json_value(value, budget, spill, ctx)))
                 .collect(),
         ),
         other => other.clone(),
@@ -713,6 +888,31 @@ fn batch_child_args(batch_args: &serde_json::Value, index: usize) -> serde_json:
 mod tests {
     use super::*;
     use serde_json::json;
+
+    struct TestSpillDirectory {
+        path: PathBuf,
+    }
+
+    impl TestSpillDirectory {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = PathBuf::from("target").join(format!(
+                "fig2220-tool-output-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("create test spill directory");
+            Self { path }
+        }
+    }
+
+    impl Drop for TestSpillDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn windowed_truncation_truncates_over_long_single_line_instead_of_dropping_it() {
@@ -780,6 +980,7 @@ mod tests {
             mode: ToolOutputBudgetMode::Tokens,
             limit: 5,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            spill: None,
         };
         let got = project_text(
             "this is an example of a long output that should be truncated",
@@ -794,7 +995,208 @@ mod tests {
             },
         );
         assert!(got.contains("tokens truncated"));
-        assert!(got.contains("Full output saved to:"));
+        assert!(got.contains("Re-run the tool with narrower arguments"));
+        assert!(!got.contains("Full output saved to:"));
+    }
+
+    #[test]
+    fn default_config_truncates_without_spilling_to_the_filesystem() {
+        let text = "x".repeat(DEFAULT_TOOL_OUTPUT_BUDGET_LIMIT_BYTES + 1);
+        let ctx = ToolResultProjectionContext {
+            session_id: "root".to_string(),
+            call_id: "call".to_string(),
+            tool_name: "grep".to_string(),
+            args: json!({}),
+            output: lash_core::ToolCallOutput::success(json!("unused")),
+            duration_ms: 1,
+        };
+
+        let got = project_text(
+            &text,
+            &Budget::from(ToolOutputBudgetConfig::default()),
+            &ctx,
+        );
+
+        assert!(!got.contains("Full output saved to:"), "{got}");
+        assert!(got.contains("Re-run the tool with narrower arguments"));
+    }
+
+    #[test]
+    fn configured_spill_uses_the_host_directory_and_preserves_the_hint_format() {
+        let directory = TestSpillDirectory::new();
+        let config = ToolOutputBudgetConfig {
+            mode: ToolOutputBudgetMode::Bytes,
+            limit: 4,
+            max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            spill: Some(SpillPolicy {
+                dir: directory.path.clone(),
+                max_age: None,
+                max_bytes: None,
+            }),
+        };
+        let ctx = ToolResultProjectionContext {
+            session_id: "root".to_string(),
+            call_id: "call".to_string(),
+            tool_name: "grep".to_string(),
+            args: json!({"query": "needle"}),
+            output: lash_core::ToolCallOutput::success(json!("unused")),
+            duration_ms: 1,
+        };
+
+        let got = project_text_with_spill(
+            "full output",
+            &Budget::from(&config),
+            &ctx,
+            config.spill.as_ref(),
+        );
+        let files = fs::read_dir(&directory.path)
+            .expect("read configured spill directory")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read configured spill entries");
+
+        assert_eq!(files.len(), 1);
+        let path = files[0].path();
+        assert_eq!(
+            fs::read_to_string(&path).expect("read spill"),
+            "full output"
+        );
+        assert!(got.contains(&format!("Full output saved to: {}", path.display())));
+        assert!(got.contains("Use the shell tool or host-provided file access"));
+    }
+
+    #[test]
+    fn byte_retention_keeps_current_output_when_it_exceeds_the_cap() {
+        let directory = TestSpillDirectory::new();
+        let policy = SpillPolicy {
+            dir: directory.path.clone(),
+            max_age: None,
+            max_bytes: Some(1),
+        };
+        let config = ToolOutputBudgetConfig {
+            mode: ToolOutputBudgetMode::Bytes,
+            limit: 4,
+            max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            spill: Some(policy.clone()),
+        };
+        let ctx = ToolResultProjectionContext {
+            session_id: "root".to_string(),
+            call_id: "call".to_string(),
+            tool_name: "grep".to_string(),
+            args: json!({"query": "needle"}),
+            output: lash_core::ToolCallOutput::success(json!("unused")),
+            duration_ms: 1,
+        };
+
+        let hint =
+            project_text_with_spill("full output", &Budget::from(&config), &ctx, Some(&policy));
+        let path = fs::read_dir(&directory.path)
+            .expect("read configured spill directory")
+            .next()
+            .expect("current spill file should remain")
+            .expect("read spill entry")
+            .path();
+
+        assert!(path.exists(), "advertised spill path should exist");
+        assert!(hint.contains(&format!("Full output saved to: {}", path.display())));
+    }
+
+    #[test]
+    fn repeated_identical_spill_refreshes_mtime_and_survives_age_pruning() {
+        let directory = TestSpillDirectory::new();
+        let policy = SpillPolicy {
+            dir: directory.path.clone(),
+            max_age: Some(Duration::from_secs(1)),
+            max_bytes: None,
+        };
+        let path = spill_tool_output(&policy, "repeat", &json!({}), "same output")
+            .expect("write initial spill");
+        let stale = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open initial spill")
+            .set_modified(stale)
+            .expect("age initial spill");
+
+        let repeated = spill_tool_output(&policy, "repeat", &json!({}), "same output")
+            .expect("write repeated spill");
+
+        assert_eq!(repeated, path);
+        assert!(repeated.exists(), "repeated spill should survive pruning");
+        let modified = fs::metadata(&repeated)
+            .expect("read repeated spill metadata")
+            .modified()
+            .expect("read repeated spill mtime");
+        assert!(
+            modified > stale,
+            "repeated spill should refresh mtime: {modified:?} !> {stale:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spill_files_are_created_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestSpillDirectory::new();
+        let policy = SpillPolicy {
+            dir: directory.path.clone(),
+            max_age: None,
+            max_bytes: None,
+        };
+        let path = spill_tool_output(&policy, "permissions", &json!({}), "private output")
+            .expect("write spill");
+        let mode = fs::metadata(path)
+            .expect("read spill metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(mode, 0o600, "spill file mode should be 0600, got {mode:o}");
+    }
+
+    #[test]
+    fn age_retention_removes_expired_spills_and_keeps_the_new_spill() {
+        let directory = TestSpillDirectory::new();
+        let policy = SpillPolicy {
+            dir: directory.path.clone(),
+            max_age: Some(Duration::from_millis(50)),
+            max_bytes: None,
+        };
+        let old =
+            spill_tool_output(&policy, "old", &json!({}), "old output").expect("write old spill");
+        std::thread::sleep(Duration::from_millis(100));
+
+        let recent = spill_tool_output(&policy, "recent", &json!({}), "recent output")
+            .expect("write recent spill");
+
+        assert!(!old.exists(), "expired spill should be pruned");
+        assert!(recent.exists(), "current spill should be retained");
+    }
+
+    #[test]
+    fn byte_retention_removes_oldest_spills_until_the_cap_is_met() {
+        let directory = TestSpillDirectory::new();
+        let policy = SpillPolicy {
+            dir: directory.path.clone(),
+            max_age: None,
+            max_bytes: Some(8),
+        };
+        let oldest =
+            spill_tool_output(&policy, "oldest", &json!({}), "1111").expect("write oldest spill");
+        std::thread::sleep(Duration::from_millis(20));
+        let middle =
+            spill_tool_output(&policy, "middle", &json!({}), "2222").expect("write middle spill");
+        std::thread::sleep(Duration::from_millis(20));
+        let newest =
+            spill_tool_output(&policy, "newest", &json!({}), "3333").expect("write newest spill");
+
+        assert!(!oldest.exists(), "oldest spill should be pruned first");
+        assert!(middle.exists(), "middle spill should remain");
+        assert!(newest.exists(), "newest spill should remain");
+        let total_bytes = fs::metadata(&middle).expect("middle metadata").len()
+            + fs::metadata(&newest).expect("newest metadata").len();
+        assert_eq!(total_bytes, 8);
     }
 
     #[test]
@@ -841,6 +1243,7 @@ mod tests {
             mode: ToolOutputBudgetMode::Bytes,
             limit: 40,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            spill: None,
         };
         let projected = project_tool_result(
             &Budget::from(&config),
@@ -963,11 +1366,13 @@ mod tests {
             mode: ToolOutputBudgetMode::Bytes,
             limit: 0,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            spill: None,
         };
         let token_config = ToolOutputBudgetConfig {
             mode: ToolOutputBudgetMode::Tokens,
             limit: 0,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            spill: None,
         };
         let ctx = ToolResultProjectionContext {
             session_id: "root".to_string(),
@@ -992,11 +1397,13 @@ mod tests {
             mode: ToolOutputBudgetMode::Tokens,
             limit: 10,
             max_lines: 100,
+            spill: None,
         };
         let byte_config = ToolOutputBudgetConfig {
             mode: ToolOutputBudgetMode::Bytes,
             limit: 40,
             max_lines: 100,
+            spill: None,
         };
 
         let token_budget = Budget::from(&token_config);
