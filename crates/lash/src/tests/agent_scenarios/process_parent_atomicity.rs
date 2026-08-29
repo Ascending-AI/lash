@@ -629,12 +629,12 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                 identity: lash_core::ToolIntentIdentity {
                     session_id: "process-env:pg-segmented-process-parent".to_string(),
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
-                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bbd6394550add548fb55bdb2:1".to_string(),
+                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1".to_string(),
                     intent_index: 0,
-                    replay_key: "tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1".to_string(),
+                    replay_key: "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113".to_string(),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1".to_string(),
+                    process_id: "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113".to_string(),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
@@ -642,12 +642,12 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                 identity: lash_core::ToolIntentIdentity {
                     session_id: "process-env:pg-segmented-process-parent".to_string(),
                     execution_scope_id: "pg-segmented-process-parent".to_string(),
-                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:72e3a75b3c41ad500af8debc:1".to_string(),
+                    tool_call_id: "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bafd89a81de63475643c98aa:1".to_string(),
                     intent_index: 0,
-                    replay_key: "tool-intent:v1:blake3:edf5d0d85e288f5fb575eb34baf23a5c25e0359e5aa8d30d3dde120fba665898".to_string(),
+                    replay_key: "tool-intent:v1:blake3:4454df073582e09e241c6b424b24bcf90f9f6be7bd9e5eccf6e3ca3fc8191929".to_string(),
                 },
                 parent_end: lash_core::ToolIntentParentEnd {
-                    process_id: "tool-intent:v1:blake3:edf5d0d85e288f5fb575eb34baf23a5c25e0359e5aa8d30d3dde120fba665898".to_string(),
+                    process_id: "tool-intent:v1:blake3:4454df073582e09e241c6b424b24bcf90f9f6be7bd9e5eccf6e3ca3fc8191929".to_string(),
                     policy: lash_core::ProcessParentEndPolicy::Cancel,
                 },
             },
@@ -736,7 +736,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                     "scope": {"session_id": "process-env:pg-segmented-process-parent"},
                     "subject": {
                         "type": "effect",
-                        "effect_id": "process:parent-end:tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1",
+                        "effect_id": "process:parent-end:tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113",
                         "kind": "process"
                     },
                     "caused_by": {
@@ -745,15 +745,15 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                         "effect_id": "tool-intent-parent-end:0"
                     },
                     "replay": {
-                        "key": "tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1:parent-end:process:parent-end:tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1",
+                        "key": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113:parent-end:process:parent-end:tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113",
                         "attribution": {
                             "kind": "tool_intent",
                             "identity": {
                                 "session_id": "process-env:pg-segmented-process-parent",
                                 "execution_scope_id": "pg-segmented-process-parent",
-                                "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bbd6394550add548fb55bdb2:1",
+                                "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1",
                                 "intent_index": 0,
-                                "replay_key": "tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1"
+                                "replay_key": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113"
                             }
                         }
                     }
@@ -765,11 +765,11 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
                         "identity": {
                             "session_id": "process-env:pg-segmented-process-parent",
                             "execution_scope_id": "pg-segmented-process-parent",
-                            "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:bbd6394550add548fb55bdb2:1",
+                            "tool_call_id": "lashlang:pg-segmented-process-parent:resource:tool:pg_process_parent_intent:resource_operation:a843718765fe3d88a33b88ad:1",
                             "intent_index": 0,
-                            "replay_key": "tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1"
+                            "replay_key": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113"
                         },
-                        "process_id": "tool-intent:v1:blake3:180fb1713f0a1245e999f4fd497f8460edb584e763bc375546fcc060ad2e86d1",
+                        "process_id": "tool-intent:v1:blake3:0fcee5e819176c296f7d29e6e0ce488d0ae0944e38078c3213310a61d2b3f113",
                         "policy": "cancel",
                         "reason": "recorded start intent parent ended with cancel policy"
                     }
@@ -939,7 +939,7 @@ async fn public_process_parents_are_literal_and_crash_atomic_on_postgres() {
         tool_call_id: "pg-tool-call-parent-call".to_string(),
         intent_index: 0,
         replay_key:
-            "tool-intent:v1:blake3:d46203f8fd7fca96390cb009026f221aa98455b4d0e9bdaeaefd7b20184f10d2"
+            "tool-intent:v1:blake3:1be9324a1697dfce44d6d9b2760bbd63c34736c5ca4c50d2b9243ed134e79458"
                 .to_string(),
     };
     assert_eq!(
