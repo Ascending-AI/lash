@@ -923,7 +923,7 @@ jobs:
           node-version: 24
 
       - name: Restore cargo cache
-        uses: useblacksmith/rust-cache@f53e7f127245d2a269b3d90879ccf259876842d5 # v3.0.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           shared-key: linux-debug
