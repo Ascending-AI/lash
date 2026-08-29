@@ -922,6 +922,7 @@ fn normalize_legacy_tool_result(payload: &mut serde_json::Value) {
     {
         return;
     }
+    // This legacy heuristic unwraps a genuine user value if it is exactly this two-key wrapper.
     let Some(value) = wrapper.get("value").cloned() else {
         return;
     };
@@ -1018,9 +1019,19 @@ mod tests {
         )
         .expect("persist completed tool call");
 
-        let messages = db.list_messages(&chat.id).expect("replay transcript");
-        let replayed_result =
-            &messages[0].payload.as_ref().expect("tool payload")["output"]["outcome"]["payload"];
+        let stored_payload: String = db
+            .conn
+            .query_row(
+                "SELECT payload FROM messages
+                 WHERE chat_id = ?1 AND kind = 'tool_call'
+                 ORDER BY id DESC LIMIT 1",
+                params![&chat.id],
+                |row| row.get(0),
+            )
+            .expect("read persisted tool payload");
+        let stored_payload: serde_json::Value =
+            serde_json::from_str(&stored_payload).expect("parse persisted tool payload");
+        let replayed_result = &stored_payload["output"]["outcome"]["payload"];
 
         assert_eq!(
             replayed_result,
