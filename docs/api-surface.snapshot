@@ -3651,6 +3651,10 @@ lash::plugins::SnapshotReader
 lash::plugins::SnapshotReader::read_blob
 lash::plugins::SnapshotWriter
 lash::plugins::SnapshotWriter::write_blob
+lash::plugins::SpillPolicy
+lash::plugins::SpillPolicy::dir
+lash::plugins::SpillPolicy::max_age
+lash::plugins::SpillPolicy::max_bytes
 lash::plugins::StaticPluginFactory
 lash::plugins::StaticPluginFactory::new
 lash::plugins::SubagentSessionContext
@@ -3692,6 +3696,7 @@ lash::plugins::ToolOutputBudgetConfig
 lash::plugins::ToolOutputBudgetConfig::limit
 lash::plugins::ToolOutputBudgetConfig::max_lines
 lash::plugins::ToolOutputBudgetConfig::mode
+lash::plugins::ToolOutputBudgetConfig::spill
 lash::plugins::ToolOutputBudgetMode
 lash::plugins::ToolOutputBudgetMode::Bytes
 lash::plugins::ToolOutputBudgetMode::Tokens

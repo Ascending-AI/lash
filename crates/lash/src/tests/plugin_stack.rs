@@ -274,6 +274,7 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
                 mode: crate::plugins::ToolOutputBudgetMode::Bytes,
                 limit: 12,
                 max_lines: 4,
+                spill: None,
             },
         ));
         let observed_tool_results = Arc::new(TokioMutex::new(Vec::<String>::new()));
@@ -353,7 +354,8 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             .iter()
             .find(|content| content.contains("bytes truncated"))
             .expect("projected model observation");
-        assert!(model_observation.contains("Full output saved to:"));
+        assert!(model_observation.contains("Re-run the tool with narrower arguments"));
+        assert!(!model_observation.contains("Full output saved to:"));
 
         #[cfg(feature = "rlm")]
         {

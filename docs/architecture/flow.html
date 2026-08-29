@@ -118,7 +118,7 @@ flowchart LR
               </tbody>
             </table>
           </div>
-          <p>Limits are configured via <code>ToolOutputBudgetConfig</code> (<code>ToolOutputBudgetMode::{Bytes, Tokens}</code>; defaults: 16 KiB, 400 lines). RLM budgets its own <code>print</code> observation history with a separate <code>BudgetedJsonProjector</code> built by <code>print_history_projector</code>.</p>
+          <p>Limits are configured via <code>ToolOutputBudgetConfig</code> (<code>ToolOutputBudgetMode::{Bytes, Tokens}</code>; defaults: 16 KiB, 400 lines). Full-output spilling is host-supplied through <code>SpillPolicy</code> and defaults to <code>None</code>, so truncation does not create files unless the host opts in; configured spill files are pruned oldest-first. RLM budgets its own <code>print</code> observation history with a separate <code>BudgetedJsonProjector</code> built by <code>print_history_projector</code>.</p>
         </div>
 
         <div class="section">
