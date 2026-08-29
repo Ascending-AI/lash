@@ -53,6 +53,11 @@ impl AttachmentSourcePolicy for OpenAttachmentSourcePolicy {
 pub enum AttachmentStoreError {
     #[error("attachment `{0}` was not found")]
     NotFound(AttachmentId),
+    /// A session put exceeded the host's configured attachment byte limit.
+    #[error(
+        "attachment is {byte_len} bytes, exceeding the configured {max_bytes}-byte attachment limit"
+    )]
+    SizeLimitExceeded { byte_len: u64, max_bytes: u64 },
     #[error("attachment store I/O failed at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -1003,6 +1008,7 @@ pub struct SessionAttachmentStore {
     backend: Arc<dyn AttachmentStore>,
     manifest: Arc<dyn AttachmentManifest>,
     session_id: String,
+    max_attachment_bytes: Option<u64>,
     owner: Mutex<Option<AttachmentOwner>>,
     clock: Arc<dyn crate::Clock>,
 }
@@ -1045,6 +1051,7 @@ impl SessionAttachmentStore {
             backend,
             manifest,
             session_id: session_id.into(),
+            max_attachment_bytes: None,
             owner: Mutex::new(None),
             clock,
         }
@@ -1072,6 +1079,37 @@ impl SessionAttachmentStore {
 
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    /// Configure the host-selected maximum bytes accepted by one put.
+    ///
+    /// `None` preserves unbounded attachment puts. `Some(max_bytes)` rejects a
+    /// larger `put` with [`AttachmentStoreError::SizeLimitExceeded`] before
+    /// recording a manifest intent or calling the backend.
+    pub fn with_max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
+        self.max_attachment_bytes = max_attachment_bytes;
+        self
+    }
+
+    /// Return the host-selected attachment byte limit.
+    ///
+    /// `None` means attachment puts are unbounded.
+    pub fn max_attachment_bytes(&self) -> Option<u64> {
+        self.max_attachment_bytes
+    }
+
+    pub(crate) fn reconfigured_max_attachment_bytes(
+        &self,
+        max_attachment_bytes: Option<u64>,
+    ) -> Self {
+        Self {
+            backend: Arc::clone(&self.backend),
+            manifest: Arc::clone(&self.manifest),
+            session_id: self.session_id.clone(),
+            max_attachment_bytes,
+            owner: Mutex::new(self.owner.lock_recover().clone()),
+            clock: Arc::clone(&self.clock),
+        }
     }
 
     pub fn persistence(&self) -> AttachmentStorePersistence {
@@ -1140,6 +1178,15 @@ impl SessionAttachmentStore {
         bytes: Vec<u8>,
         meta: AttachmentCreateMeta,
     ) -> Result<AttachmentRef, AttachmentStoreError> {
+        let byte_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if let Some(max_bytes) = self.max_attachment_bytes
+            && byte_len > max_bytes
+        {
+            return Err(AttachmentStoreError::SizeLimitExceeded {
+                byte_len,
+                max_bytes,
+            });
+        }
         let attachment_id = content_id(&bytes);
         let owner = self.owner.lock_recover().clone();
         let intent = AttachmentIntent {

@@ -44,7 +44,10 @@ impl LashCoreBuilder {
         }
         if let Some(attachment_store) = self.attachment_store.take() {
             core.durability.attachment_store = Arc::new(
-                facade_support::SessionAttachmentStore::ephemeral(attachment_store),
+                facade_support::SessionAttachmentStore::ephemeral(attachment_store)
+                    .with_max_attachment_bytes(
+                        core.durability.attachment_store.max_attachment_bytes(),
+                    ),
             );
         }
         if let Some(process_env_store) = self.process_env_store.take() {
@@ -52,6 +55,9 @@ impl LashCoreBuilder {
         }
         if let Some(commit_budget) = self.commit_budget.take() {
             core.durability.commit_budget = commit_budget;
+        }
+        if let Some(max_attachment_bytes) = self.max_attachment_bytes.take() {
+            core = core.with_max_attachment_bytes(max_attachment_bytes);
         }
         if let Some(queued_work_batching) = self.queued_work_batching.take() {
             core.durability.queued_work_batching = queued_work_batching;

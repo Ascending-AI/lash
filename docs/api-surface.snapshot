@@ -197,6 +197,7 @@ lash::LashCoreBuilder::effect_host
 lash::LashCoreBuilder::generation
 lash::LashCoreBuilder::lease_timings
 lash::LashCoreBuilder::live_replay_store
+lash::LashCoreBuilder::max_attachment_bytes
 lash::LashCoreBuilder::model
 lash::LashCoreBuilder::native_substrate_config
 lash::LashCoreBuilder::no_progress_budget
@@ -1383,6 +1384,7 @@ lash::durability::RuntimeHostConfig::with_attachment_source_policy
 lash::durability::RuntimeHostConfig::with_clock
 lash::durability::RuntimeHostConfig::with_lease_timings
 lash::durability::RuntimeHostConfig::with_managed_turn_concurrency_limit
+lash::durability::RuntimeHostConfig::with_max_attachment_bytes
 lash::durability::RuntimeHostConfig::with_process_engine
 lash::durability::RuntimeHostConfig::with_process_env_store
 lash::durability::RuntimeHostConfig::with_process_tool_visibility_filter
@@ -1777,6 +1779,9 @@ lash::persistence::AttachmentStoreError::NotFound::0
 lash::persistence::AttachmentStoreError::ReclamationInFlight
 lash::persistence::AttachmentStoreError::ReclamationInFlight::attachment_id
 lash::persistence::AttachmentStoreError::ReclamationInFlight::attempts
+lash::persistence::AttachmentStoreError::SizeLimitExceeded
+lash::persistence::AttachmentStoreError::SizeLimitExceeded::byte_len
+lash::persistence::AttachmentStoreError::SizeLimitExceeded::max_bytes
 lash::persistence::AttachmentStorePersistence
 lash::persistence::AttachmentStorePersistence::Durable
 lash::persistence::AttachmentStorePersistence::Ephemeral
@@ -2298,10 +2303,12 @@ lash::persistence::SessionAttachmentStore::ephemeral
 lash::persistence::SessionAttachmentStore::get
 lash::persistence::SessionAttachmentStore::in_memory
 lash::persistence::SessionAttachmentStore::manifest
+lash::persistence::SessionAttachmentStore::max_attachment_bytes
 lash::persistence::SessionAttachmentStore::new
 lash::persistence::SessionAttachmentStore::persistence
 lash::persistence::SessionAttachmentStore::put
 lash::persistence::SessionAttachmentStore::session_id
+lash::persistence::SessionAttachmentStore::with_max_attachment_bytes
 lash::persistence::SessionBinding
 lash::persistence::SessionBinding::from_create_request
 lash::persistence::SessionBinding::relation
@@ -3981,6 +3988,7 @@ lash::prelude::LashCoreBuilder::effect_host
 lash::prelude::LashCoreBuilder::generation
 lash::prelude::LashCoreBuilder::lease_timings
 lash::prelude::LashCoreBuilder::live_replay_store
+lash::prelude::LashCoreBuilder::max_attachment_bytes
 lash::prelude::LashCoreBuilder::model
 lash::prelude::LashCoreBuilder::native_substrate_config
 lash::prelude::LashCoreBuilder::no_progress_budget

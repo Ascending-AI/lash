@@ -848,6 +848,7 @@ pub struct LashCoreBuilder {
     attachment_store: Option<Arc<dyn AttachmentStore>>,
     process_env_store: Option<Arc<dyn ProcessExecutionEnvStore>>,
     commit_budget: Option<facade_support::CommitBudget>,
+    max_attachment_bytes: Option<Option<u64>>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     native_substrate: NativeSubstrateConfig,
@@ -894,6 +895,7 @@ impl LashCoreBuilder {
             attachment_store: None,
             process_env_store: None,
             commit_budget: None,
+            max_attachment_bytes: None,
             queued_work_batching: None,
             process_wake_delivery_policy: None,
             native_substrate: NativeSubstrateConfig::default(),
@@ -985,6 +987,16 @@ impl LashCoreBuilder {
     /// both dimensions.
     pub fn commit_budget(mut self, commit_budget: facade_support::CommitBudget) -> Self {
         self.commit_budget = Some(commit_budget);
+        self
+    }
+
+    /// Configure the maximum bytes accepted by one attachment put.
+    ///
+    /// The default `None` preserves unbounded attachment puts. `Some(max_bytes)`
+    /// rejects larger puts before the configured attachment backend is called.
+    /// This deployment limit is independent from [`Self::commit_budget`].
+    pub fn max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
+        self.max_attachment_bytes = Some(max_attachment_bytes);
         self
     }
 

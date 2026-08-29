@@ -200,8 +200,15 @@ impl RuntimeEnvironmentBuilder {
     }
 
     pub fn with_attachment_store(mut self, store: Arc<dyn crate::AttachmentStore>) -> Self {
-        self.env.core.durability.attachment_store =
-            Arc::new(crate::SessionAttachmentStore::ephemeral(store));
+        self.env.core.durability.attachment_store = Arc::new(
+            crate::SessionAttachmentStore::ephemeral(store).with_max_attachment_bytes(
+                self.env
+                    .core
+                    .durability
+                    .attachment_store
+                    .max_attachment_bytes(),
+            ),
+        );
         self
     }
 

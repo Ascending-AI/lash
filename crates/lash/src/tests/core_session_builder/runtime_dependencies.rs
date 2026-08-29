@@ -390,6 +390,35 @@ async fn explicit_ephemeral_facets_build_successfully() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn attachment_limit_is_optional_host_policy_on_the_facade_builder() -> Result<()> {
+    let unbounded = explicit_ephemeral_facets(peer_coherence_builder())
+        .build(crate::testing::runtime_lease_owner())?;
+    assert_eq!(
+        unbounded
+            .env
+            .core
+            .durability
+            .attachment_store
+            .max_attachment_bytes(),
+        None
+    );
+
+    let bounded = explicit_ephemeral_facets(peer_coherence_builder())
+        .max_attachment_bytes(Some(4096))
+        .build(crate::testing::runtime_lease_owner())?;
+    assert_eq!(
+        bounded
+            .env
+            .core
+            .durability
+            .attachment_store
+            .max_attachment_bytes(),
+        Some(4096)
+    );
+    Ok(())
+}
+
 struct NoopProcessWork;
 
 #[async_trait]
