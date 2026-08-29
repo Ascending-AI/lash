@@ -208,6 +208,10 @@ pub async fn cold_process_real_turn_driver(
         let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
             loop {
                 super::super::bind_conformance_session(&store, &identity.session_id).await;
+                // The killed helper ran on a term wide enough that no
+                // scheduling delay could lapse it before the crash point;
+                // expire what it abandoned rather than waiting the term out.
+                super::collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
                 let outcome = store
                     .try_claim_session_execution_lease(
                         &identity.session_id,
@@ -260,6 +264,10 @@ pub async fn cold_process_real_turn_driver(
         tokio::time::timeout(RECOVERY_TIMEOUT, async {
             loop {
                 super::super::bind_conformance_session(&store, &identity.session_id).await;
+                // Same collapse as the peer-reclaim probe above: the crashed
+                // helper's lease is expired on demand, so displacement stays a
+                // real store decision instead of a wall-clock race.
+                super::collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
                 let outcome = store
                     .try_claim_session_execution_lease(
                         &identity.session_id,

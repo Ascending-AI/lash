@@ -20,6 +20,18 @@
 //! drained input. Pinning that path keeps it covered on every run rather than
 //! only when a loaded runner happens to starve the renewal.
 //!
+//! That starvation is the *only* lease lapse this suite admits. Every turn the
+//! matrix crashes runs on a lease term wide enough that no scheduling delay can
+//! close it before the injected crash ([`crashed_turn_timings`]), because an
+//! incidental lapse silently rewrites the case: the crashed turn's checkpoint
+//! claim becomes advisory, so it holds fewer claims than the ruled end state was
+//! written for, and recovery legally delivers the demoted input inside the
+//! recovered turn — a second protocol iteration and a second terminal assistant
+//! output that no deferral accounts for. Recovery never waits that wide term
+//! out: [`collapse_crashed_executor_lease`] expires the abandoned lease on
+//! demand, so displacement stays a real store decision and no ruled outcome
+//! depends on wall clock (FIG-2290).
+//!
 //! Trace drift covers the operations explicitly decorated by this module.
 //! Durable-store methods that [`SeamStore`] passes through undecorated are
 //! outside that seam-coverage boundary until they are deliberately modeled.
@@ -80,8 +92,13 @@ const OUTCOME_TABLE: &str = include_str!("turn_crash_outcomes.json");
 const RECOVERY_TTL: Duration = Duration::from_millis(300);
 const RECOVERY_RENEW: Duration = Duration::from_millis(100);
 const NOMINAL_RECOVERY_TTL: Duration = Duration::from_secs(5);
+const CRASHED_TURN_TTL: Duration = Duration::from_secs(60);
 const HIT_TIMEOUT: Duration = Duration::from_secs(60);
 const RECOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Host owner id every runtime built by this harness leases under
+/// ([`crate::testing::runtime_lease_owner`]), so the recovery probe can tell a
+/// crashed turn's abandoned lease from its own.
+const CRASHED_EXECUTOR_OWNER_ID: &str = "lash-core-test-worker";
 
 #[derive(Clone, Debug)]
 struct ReferenceIdentity {
@@ -1204,6 +1221,56 @@ fn recovery_timings() -> crate::LeaseTimings {
         .expect("300ms TTL / 100ms renew satisfies ttl >= 3x renew")
 }
 
+/// Lease timings for a scripted turn that is about to be crashed.
+///
+/// The term must not lapse *before* the injected crash. A lapsed lease makes
+/// the turn's checkpoint claim advisory (ADR 0029), so the crashed turn silently
+/// holds fewer claims than the case was written for and recovery legally
+/// delivers the demoted input inside the recovered turn — a second protocol
+/// iteration, and a second terminal assistant output, with nothing deferred for
+/// the drain turn to account for. Whether that happens is decided by the
+/// runner's scheduler (a renewal task missing a 100ms deadline against a 300ms
+/// term), not by the crash under test, so the term is wide enough that no
+/// scheduling delay can close it.
+///
+/// Recovery does not wait the term out: the abandoned lease is expired on
+/// demand by [`collapse_crashed_executor_lease`]. Deliberate lease starvation
+/// stays available to cases that want it ([`RenewalPressure::Starved`], which
+/// runs its turn on [`recovery_timings`]).
+fn crashed_turn_timings() -> crate::LeaseTimings {
+    crate::LeaseTimings::new(CRASHED_TURN_TTL, RECOVERY_RENEW)
+        .expect("60s TTL / 100ms renew satisfies ttl >= 3x renew")
+}
+
+/// Expire the lease an executor abandoned when it crashed, so recovery
+/// displaces it without waiting out its term.
+///
+/// The harness reads the row and renews it to the shortest legal term, acting
+/// as the ghost of the crashed executor: displacement stays a real store
+/// decision about an expired lease, it just stops being a wall-clock race.
+/// Returns whether a lease held by [`CRASHED_EXECUTOR_OWNER_ID`] was collapsed;
+/// an absent, released, or already-lapsed lease is not an error, because in each
+/// of those states the next claim already succeeds.
+pub(crate) async fn collapse_crashed_executor_lease(
+    store: &dyn RuntimePersistence,
+    session_id: &str,
+) -> bool {
+    let lease = store
+        .get_session_execution_lease(session_id)
+        .await
+        .expect("read the crashed turn's session execution lease");
+    let Some(lease) = lease else {
+        return false;
+    };
+    if lease.owner.owner_id != CRASHED_EXECUTOR_OWNER_ID {
+        return false;
+    }
+    store
+        .renew_session_execution_lease(&lease.authority(), 1)
+        .await
+        .is_ok()
+}
+
 fn nominal_recovery_timings() -> crate::LeaseTimings {
     // The scripted provider deliberately awaits the first completed renewal.
     // Keep that nominal successor turn's lease window independent from the
@@ -1258,7 +1325,7 @@ async fn build_runtime(
         executions,
         identity,
         trace_tool,
-        recovery_timings(),
+        crashed_turn_timings(),
     )
     .await
 }
@@ -1640,6 +1707,11 @@ async fn wait_for_recovery_lease<F>(
     super::bind_conformance_session(&store, &identity.session_id).await;
     tokio::time::timeout(RECOVERY_TIMEOUT, async {
         loop {
+            // The crashed turn ran on a term wide enough that no scheduling
+            // delay could lapse it mid-turn; expire what it abandoned here
+            // instead. Repeated per iteration so a renewal that was already in
+            // flight when the turn was aborted cannot re-extend it.
+            collapse_crashed_executor_lease(store.as_ref(), &identity.session_id).await;
             let outcome = store
                 .try_claim_session_execution_lease(
                     &identity.session_id,
