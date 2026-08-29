@@ -10,7 +10,6 @@ pub(crate) mod context;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 
-use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
@@ -271,7 +270,6 @@ pub struct RestateRuntimeEffectController<'ctx, C> {
     context: C,
     options: RestateEffectControllerOptions,
     trace: Option<RestateTraceObserver>,
-    closed_effect_groups: Mutex<HashSet<String>>,
     _ctx: PhantomData<&'ctx ()>,
 }
 
@@ -285,7 +283,6 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             context,
             options,
             trace: None,
-            closed_effect_groups: Mutex::new(HashSet::new()),
             _ctx: PhantomData,
         }
     }
@@ -708,17 +705,6 @@ where
                 handle.children()
             )));
         }
-        if self
-            .closed_effect_groups
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(handle.group_key())
-        {
-            return Err(group_shape_error(format!(
-                "effect group {} is closed to this caller",
-                handle.group_key()
-            )));
-        }
         let rank = u64::try_from(handle.consumed() + 1).map_err(|error| {
             group_shape_error(format!("effect group rank does not fit u64: {error}"))
         })?;
@@ -784,6 +770,12 @@ where
                     handle.group_key()
                 )));
             }
+            EffectGroupReadRankResponse::Closed => {
+                return Err(group_shape_error(format!(
+                    "effect group {} is closed to this caller",
+                    handle.group_key()
+                )));
+            }
             EffectGroupReadRankResponse::UnknownGroup => {
                 return Err(group_shape_error(format!(
                     "effect group {} is unknown",
@@ -841,13 +833,7 @@ where
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/close", error))?;
         match response {
-            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => {
-                self.closed_effect_groups
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(group_key);
-                Ok(())
-            }
+            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => Ok(()),
             EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
                 "effect group {group_key} close attempted to widen its declared loser disposition"
             ))),

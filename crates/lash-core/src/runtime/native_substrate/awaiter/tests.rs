@@ -64,18 +64,18 @@ fn success(value: serde_json::Value) -> ProcessAwaitOutput {
     ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
 }
 
-/// ADR 0016 pins the awaiter's polling cadence: a 25ms floor, doubling
-/// backoff, and a 1s cap. Changing any of the three alters every store-only
-/// deployment's wait economics, so the exact schedule is asserted here.
+/// ADR 0016 pins the default awaiter cadence while allowing native deployments
+/// to tune both bounds through `WorkCadencePolicy`.
 #[test]
-fn backoff_schedule_has_25ms_floor_doubling_to_1s_cap() {
-    assert_eq!(AWAIT_BACKOFF_MIN, Duration::from_millis(25));
-    assert_eq!(AWAIT_BACKOFF_MAX, Duration::from_secs(1));
+fn backoff_schedule_uses_work_cadence_poll_bounds() {
+    let defaults = WorkCadencePolicy::default();
+    assert_eq!(defaults.poll_initial, Duration::from_millis(25));
+    assert_eq!(defaults.poll_max, Duration::from_secs(1));
 
-    let mut backoff = AWAIT_BACKOFF_MIN;
+    let mut backoff = defaults.poll_initial;
     let mut schedule = vec![backoff];
-    while backoff < AWAIT_BACKOFF_MAX {
-        backoff = next_backoff(backoff);
+    while backoff < defaults.poll_max {
+        backoff = next_backoff(backoff, defaults.poll_max);
         schedule.push(backoff);
     }
     assert_eq!(
@@ -87,10 +87,58 @@ fn backoff_schedule_has_25ms_floor_doubling_to_1s_cap() {
         "the backoff doubles from the 25ms floor and saturates at the 1s cap"
     );
     assert_eq!(
-        next_backoff(AWAIT_BACKOFF_MAX),
-        AWAIT_BACKOFF_MAX,
+        next_backoff(defaults.poll_max, defaults.poll_max),
+        defaults.poll_max,
         "the cap is absorbing"
     );
+
+    let custom_max = Duration::from_millis(90);
+    assert_eq!(
+        next_backoff(Duration::from_millis(60), custom_max),
+        custom_max,
+        "a configured poll cap, rather than a hidden constant, bounds the awaiter"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn polling_awaiter_uses_configured_work_cadence_floor() {
+    let registry = Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+    registry
+        .register_process(registration("configured-cadence"))
+        .await
+        .expect("register");
+    let work_cadence = WorkCadencePolicy {
+        poll_initial: Duration::from_secs(2),
+        poll_max: Duration::from_secs(3),
+        ..WorkCadencePolicy::default()
+    };
+    let awaiter =
+        NativeProcessAwaiter::for_registry(Arc::clone(&registry)).with_work_cadence(work_cadence);
+    let waiter =
+        crate::task::spawn(async move { awaiter.await_terminal("configured-cadence").await });
+    tokio::task::yield_now().await;
+
+    registry
+        .complete_process(
+            "configured-cadence",
+            success(serde_json::json!("done")),
+            crate::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete");
+    tokio::time::advance(Duration::from_millis(1_999)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        !waiter.is_finished(),
+        "the awaiter must not poll before the configured initial delay"
+    );
+
+    tokio::time::advance(Duration::from_millis(1)).await;
+    let output = waiter
+        .await
+        .expect("configured-cadence waiter joins")
+        .expect("configured-cadence wait resolves");
+    assert_eq!(output, success(serde_json::json!("done")));
 }
 
 /// ADR 0017: the decorator delegates `prune_terminal_processes` without a

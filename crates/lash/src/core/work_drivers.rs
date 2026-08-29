@@ -250,7 +250,15 @@ impl NativeSubstrateSlot {
                 };
                 let (process, drive_process_on_open) = match &self.setup.process {
                     ProcessPortSetup::None => (None, false),
-                    ProcessPortSetup::External { wiring } => (Some(wiring.clone()), false),
+                    ProcessPortSetup::External { wiring } => (
+                        Some(
+                            wiring
+                                .clone()
+                                .with_work_cadence(self.setup.config.work_cadence.clone())
+                                .expect("native substrate config was validated at build"),
+                        ),
+                        false,
+                    ),
                     ProcessPortSetup::NativeDefault { config, watched } => {
                         // The worker only forwards notifications through this port;
                         // the outer dispatcher remains the sole native-lane owner.
@@ -262,7 +270,10 @@ impl NativeSubstrateSlot {
                             .expect("native substrate config was validated at build");
                         let port: Arc<dyn ProcessWorkSubstrate> =
                             Arc::new(NativeProcessWork::new(&watched, worker));
-                        (Some(ProcessWorkWiring::new(watched, port)), true)
+                        let wiring = ProcessWorkWiring::new(watched, port)
+                            .with_work_cadence(self.setup.config.work_cadence.clone())
+                            .expect("native substrate config was validated at build");
+                        (Some(wiring), true)
                     }
                 };
                 let queued = Arc::new(ResolvedQueuedWork::new(queued_port));

@@ -223,7 +223,7 @@ impl CommitAdmissionCoordinator {
         let outcome = tokio::select! {
             () = waiter.admitted.notified() => WaitOutcome::Admitted,
             () = cancellation.cancelled() => WaitOutcome::Cancelled,
-            // clock-exempt: process-local admission TTL, not durable runtime time
+            // Substrate-boundary allowlist: process-local TTL, not durable time.
             () = tokio::time::sleep(self.inner.wait_ttl) => WaitOutcome::TimedOut,
         };
 

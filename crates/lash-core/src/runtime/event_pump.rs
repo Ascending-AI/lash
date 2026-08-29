@@ -38,7 +38,7 @@ where
                         on_event(state, event).await;
                     }
                 }
-                // clock-exempt: cooperative scheduler yield, no time decision
+                // Substrate-boundary allowlist: cooperative yield, no time decision.
                 tokio::task::yield_now().await;
             }
         }

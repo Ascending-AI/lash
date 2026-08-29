@@ -498,6 +498,7 @@ pub enum EffectGroupReadRankResponse {
         settlement: EffectGroupSettlementRecord,
     },
     NotSettled,
+    Closed,
     UnknownGroup,
     Retired,
 }
@@ -1130,11 +1131,13 @@ impl EffectGroupIndex {
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Json(EffectGroupReadRankResponse::Retired));
         }
-        Ok(Json(match record.live()?.settlements.get(&request.rank) {
-            Some(settlement) => EffectGroupReadRankResponse::Settled {
-                settlement: settlement.clone(),
-            },
-            None => EffectGroupReadRankResponse::NotSettled,
+        let settlement = record.live()?.settlements.get(&request.rank).cloned();
+        if let Some(settlement) = settlement {
+            return Ok(Json(EffectGroupReadRankResponse::Settled { settlement }));
+        }
+        Ok(Json(match record.lifecycle {
+            EffectGroupLifecycle::Closed { .. } => EffectGroupReadRankResponse::Closed,
+            _ => EffectGroupReadRankResponse::NotSettled,
         }))
     }
 

@@ -47,12 +47,28 @@ pub trait WakeDeliveryOrderingGroupFaultInjector: Send + Sync {
     async fn discard_without_reason(&self, delivery_id: &str);
 }
 
+/// Expected attachment geometry for a process-terminal control embedded in a
+/// wake-delivery conformance run.
+///
+/// Native ports settle through their watched registry in one attachment.
+/// Engine ports use [`Reattach`](Self::Reattach) to prove that a bounded
+/// transport attachment can expire without losing the durable process wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessTerminalWaitWitness {
+    /// The process port must return the terminal outcome directly.
+    Direct,
+    /// The process port must request at least one bounded reattachment before
+    /// returning the terminal outcome.
+    Reattach,
+}
+
 /// Proves that blocking, non-blocking, and reasonless discarded heads have the same ordering-group
 /// behavior on every process-registry backend.
 pub async fn wake_delivery_ordering_group_conformance(
     registry: Arc<dyn crate::ProcessRegistry>,
     injector: Arc<dyn WakeDeliveryOrderingGroupFaultInjector>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
+    terminal_wait_witness: ProcessTerminalWaitWitness,
 ) {
     ordering_group_discard_case(
         &registry,
@@ -71,13 +87,20 @@ pub async fn wake_delivery_ordering_group_conformance(
     )
     .await;
     ordering_group_discard_case(&registry, &injector, "reasonless", None, false).await;
-    assert_process_terminal_wait(&registry, &process_work, "wake-ordering-terminal").await;
+    assert_process_terminal_wait(
+        &registry,
+        &process_work,
+        "wake-ordering-terminal",
+        terminal_wait_witness,
+    )
+    .await;
 }
 
 async fn assert_process_terminal_wait(
     registry: &Arc<dyn crate::ProcessRegistry>,
     process_work: &Arc<dyn crate::ProcessWorkSubstrate>,
     process_id: &str,
+    witness: ProcessTerminalWaitWitness,
 ) {
     registry
         .register_process(process_registry::registration(process_id))
@@ -97,7 +120,9 @@ async fn assert_process_terminal_wait(
                     .await
                     .expect("wait for terminal process through peer substrate")
                 {
-                    crate::ProcessTerminalWait::Terminal(output) => break output,
+                    crate::ProcessTerminalWait::Terminal(output) => {
+                        break (output, reattachments);
+                    }
                     crate::ProcessTerminalWait::Reattach => {
                         reattachments += 1;
                         assert!(
@@ -118,8 +143,18 @@ async fn assert_process_terminal_wait(
         )
         .await
         .expect("complete terminal-wait conformance process");
-    let observed = wait.await.expect("terminal-wait task joins");
+    let (observed, reattachments) = wait.await.expect("terminal-wait task joins");
     assert_eq!(observed, terminal);
+    match witness {
+        ProcessTerminalWaitWitness::Direct => assert_eq!(
+            reattachments, 0,
+            "a direct process-terminal control must not request reattachment"
+        ),
+        ProcessTerminalWaitWitness::Reattach => assert!(
+            reattachments > 0,
+            "a Reattach control must exercise at least one bounded reattachment"
+        ),
+    }
 }
 
 async fn ordering_group_discard_case(
@@ -216,6 +251,7 @@ pub async fn wake_delivery_crash_matrix(
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
+    terminal_wait_witness: ProcessTerminalWaitWitness,
 ) {
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
@@ -970,7 +1006,13 @@ pub async fn wake_delivery_crash_matrix(
         Arc::clone(&clock),
     )
     .await;
-    assert_process_terminal_wait(&registry, &process_work, "wake-crash-terminal").await;
+    assert_process_terminal_wait(
+        &registry,
+        &process_work,
+        "wake-crash-terminal",
+        terminal_wait_witness,
+    )
+    .await;
     expired_is_a_typed_discard(factory, registry, clock).await;
 }
 

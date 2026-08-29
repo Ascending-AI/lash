@@ -484,14 +484,17 @@ impl DurableProcessWorker {
     }
 
     fn process_wiring(&self) -> crate::ProcessWorkWiring {
-        match &self.config.process_work {
+        let wiring = match &self.config.process_work {
             WorkerProcessWork::SelfNative(watched) => {
                 let port: Arc<dyn crate::ProcessWorkSubstrate> =
                     Arc::new(crate::NativeProcessWork::new(watched, self.clone()));
                 crate::ProcessWorkWiring::new(watched.clone(), port)
             }
             WorkerProcessWork::External(wiring) => wiring.clone(),
-        }
+        };
+        wiring
+            .with_work_cadence(self.config.native_substrate.work_cadence.clone())
+            .expect("native substrate config was validated when the worker was built")
     }
 
     /// Run exactly one engine segment. Durable substrates use this method so a

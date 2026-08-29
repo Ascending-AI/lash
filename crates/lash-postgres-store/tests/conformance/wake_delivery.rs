@@ -58,6 +58,7 @@ async fn postgres_wake_delivery_crash_matrix_when_configured() {
         registry,
         clock,
         process_work,
+        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
     ))
     .await;
 }
@@ -82,6 +83,7 @@ async fn postgres_wake_delivery_ordering_group_conformance_when_configured() {
             pool: storage.pool().clone(),
         }),
         process_work,
+        lash_core::testing::conformance::ProcessTerminalWaitWitness::Direct,
     )
     .await;
 }

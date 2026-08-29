@@ -567,7 +567,7 @@ impl RuntimeExecutionContext<'_> {
         let projection_args = outcome.record.args.clone();
         let projection_duration_ms = outcome.record.duration_ms;
         let projection_call_id = call_id.clone();
-        // clock-exempt: cooperative scheduler yield, no time decision
+        // Substrate-boundary allowlist: cooperative yield, no time decision.
         tokio::task::yield_now().await;
         let plugins = std::sync::Arc::clone(&self.dispatch.plugins);
         let projection_context = crate::plugin::ToolResultProjectionContext {

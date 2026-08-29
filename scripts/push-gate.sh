@@ -197,6 +197,9 @@ run_rust_source_guards() {
   step "Core/UI boundary guard"
   bash scripts/check-core-ui-boundary.sh
 
+  step "Substrate boundary guard"
+  bash scripts/check-substrate-boundary.sh
+
   step "Workflow graph model guard"
   bash scripts/check-workflow-graph-model.sh
 
