@@ -253,6 +253,11 @@ async fn read_effect_group_report(
                     "effect group {group_key} is not terminal: rank {rank} has not settled"
                 )));
             }
+            EffectGroupReadRankResponse::Closed => {
+                return Err(AppError::internal(format!(
+                    "effect group {group_key} closed without settling rank {rank}"
+                )));
+            }
             EffectGroupReadRankResponse::UnknownGroup => {
                 return Err(AppError::bad_request(format!(
                     "effect-group run_id `{run_id}` does not exist"
