@@ -85,5 +85,6 @@ slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 # make no model call, so they have no dialect to pin and no judged row to pair;
 # listing them here keeps discovery honest without inventing paid twin runs.
 [deterministic_only]
+agent-service-effect-group-retirement = { tier = "deterministic", model = "scripted-provider" }
 agent-service-effect-groups = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-deterministic = { tier = "deterministic", model = "scripted-provider" }
