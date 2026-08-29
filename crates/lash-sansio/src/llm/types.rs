@@ -1487,6 +1487,59 @@ pub struct RetryDecision {
     pub delay: Option<std::time::Duration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Typed host risk-appetite decision when a retry would purchase a second
+    /// generation without an idempotency or resume guarantee.
+    #[serde(skip)]
+    pub charge_safety: Option<ChargeSafetyDecision>,
+}
+
+/// Why host charge-safety policy denied an otherwise transport-retryable
+/// generation.
+///
+/// # Integrator class
+///
+/// Runtime and reporting implementors exhaustively render these host-policy
+/// outcomes; provider adapters never construct them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChargeSafetyDenialReason {
+    /// Host policy requires a provider idempotency or resume guarantee.
+    GuaranteeRequired,
+    /// The per-call unsafe retry allowance is exhausted.
+    UnsafeRetryLimitExceeded,
+    /// Provider-reported tokens exceed the host's duplicate-cost bound.
+    DuplicateCostLimitExceeded,
+    /// The provider's requested retry delay exceeds the host cap.
+    RetryAfterExceedsCap,
+}
+
+/// Typed outcome of consulting host charge-safety policy for one prospective
+/// unsafe retry.
+///
+/// # Integrator class
+///
+/// Runtime and reporting implementors consume this evidence. Host
+/// applications configure `ChargeSafetyPolicy` instead of constructing an
+/// outcome directly.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum ChargeSafetyDecision {
+    /// Host policy permits this otherwise unsafe retry.
+    Authorized {
+        /// Provider-reported tokens billed for the abandoned generation.
+        tokens_at_stake: u64,
+        /// One-based unsafe retry number within this logical LLM call.
+        attempt_number: u8,
+    },
+    /// Host policy refuses this otherwise unsafe retry.
+    Denied {
+        /// Provider-reported tokens billed for the abandoned generation.
+        tokens_at_stake: u64,
+        /// One-based unsafe retry number within this logical LLM call.
+        attempt_number: u8,
+        /// Typed policy bound that refused the retry.
+        reason: ChargeSafetyDenialReason,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

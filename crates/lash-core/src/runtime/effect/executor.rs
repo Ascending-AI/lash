@@ -208,6 +208,7 @@ pub(super) struct LocalTurnEffectRunner {
 
 pub(super) struct LocalDirectEffectRunner {
     provider: ProviderHandle,
+    charge_safety: crate::ChargeSafetyPolicy,
     attachment_store: Arc<crate::SessionAttachmentStore>,
 }
 
@@ -639,6 +640,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
 
     pub(in crate::runtime) fn direct(
         provider: ProviderHandle,
+        charge_safety: crate::ChargeSafetyPolicy,
         attachment_store: Arc<crate::SessionAttachmentStore>,
         replay_trace: Option<super::RuntimeEffectReplayTrace>,
     ) -> Self {
@@ -646,6 +648,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
                 LocalDirectEffectRunner {
                     provider,
+                    charge_safety,
                     attachment_store,
                 },
             ))),
@@ -1363,11 +1366,15 @@ impl LocalDirectEffectRunner {
                 );
             }
         };
-        match self.provider.complete(request).await {
+        match self
+            .provider
+            .complete_with_charge_safety(request, self.charge_safety.clone())
+            .await
+        {
             Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
             Err(failure) => (
                 Err(llm_call_error_from_transport(failure.error)),
-                Some(failure.call_record),
+                Some(*failure.call_record),
             ),
         }
     }

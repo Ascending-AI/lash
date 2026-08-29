@@ -9,6 +9,8 @@
 //! Runtime persistence records provider identity separately; a host that
 //! keeps provider configuration on disk owns rebuilding the handle from it.
 
+#[cfg(test)]
+mod charge_safety_tests;
 mod handle;
 mod options;
 mod rate_limit;

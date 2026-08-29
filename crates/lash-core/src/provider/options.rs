@@ -7,9 +7,10 @@ pub const DEFAULT_CHUNK_TIMEOUT_MS: u64 = 120_000;
 pub const DEFAULT_THROTTLE_WAIT_BUDGET_MS: u64 = 90_000;
 
 /// Minimum provider-stated wait eligible for attempt-free throttle deference.
-/// A shorter `Retry-After` (including a past HTTP-date or a zero
-/// [`retry_after_cap_ms`]) consumes the ordinary retry ladder and uses its
-/// backoff instead of spinning the courtesy loop.
+/// A shorter `Retry-After` (including a past HTTP-date) consumes the ordinary
+/// retry ladder and uses its backoff instead of spinning the courtesy loop.
+/// A delay above [`retry_after_cap_ms`] fails immediately; a zero cap therefore
+/// refuses every positive server-stated delay.
 ///
 /// [`retry_after_cap_ms`]: ProviderRetryPolicy::retry_after_cap_ms
 pub(crate) const MIN_FREE_THROTTLE_WAIT: Duration = Duration::from_secs(1);
@@ -366,9 +367,11 @@ pub struct ProviderRetryPolicy {
     /// Upper bound for uniform random jitter added to ordinary retry backoff
     /// on each attempt. The default is 500 ms; set to `0` to disable jitter.
     pub jitter_ms: u64,
-    /// Maximum provider-stated `Retry-After` honored by the host. `None`
-    /// deliberately accepts an unbounded provider duration; selecting it means
-    /// the host accepts that a hostile header can stall a completion.
+    /// Maximum provider-stated `Retry-After` honored by the host. A longer
+    /// delay fails the attempt immediately instead of being truncated or
+    /// slept. `None` deliberately accepts an unbounded provider duration;
+    /// selecting it means the host accepts that a hostile header can stall a
+    /// completion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_cap_ms: Option<u64>,
     /// Cumulative time [`ProviderHandle::complete`](super::ProviderHandle::complete)
@@ -430,24 +433,25 @@ impl ProviderRetryPolicy {
         }
     }
 
-    /// A provider-stated `Retry-After`, bounded by
-    /// [`retry_after_cap_ms`](Self::retry_after_cap_ms) when one is set.
-    pub(crate) fn cap_retry_after(&self, retry_after: Duration) -> Duration {
+    /// Return a provider-stated delay only when it is within the host cap.
+    /// `None` means the server asked the host to wait beyond that bound and
+    /// the attempt must fail immediately.
+    pub(crate) fn retry_after_within_cap(&self, retry_after: Duration) -> Option<Duration> {
         self.retry_after_cap_ms
             .map(Duration::from_millis)
-            .map(|cap| retry_after.min(cap))
-            .unwrap_or(retry_after)
+            .is_none_or(|cap| retry_after <= cap)
+            .then_some(retry_after)
     }
 
     pub(crate) fn delay_for_attempt(
         &self,
         retry_index: u32,
         retry_after: Option<Duration>,
-    ) -> Duration {
+    ) -> Option<Duration> {
         if let Some(retry_after) = retry_after {
-            let retry_after = self.cap_retry_after(retry_after);
+            let retry_after = self.retry_after_within_cap(retry_after)?;
             if retry_after >= MIN_FREE_THROTTLE_WAIT {
-                return retry_after;
+                return Some(retry_after);
             }
         }
         let multiplier = 1u64.checked_shl(retry_index).unwrap_or(u64::MAX);
@@ -455,7 +459,9 @@ impl ProviderRetryPolicy {
             .base_delay_ms
             .saturating_mul(multiplier)
             .min(self.max_delay_ms);
-        Duration::from_millis(delay_ms.saturating_add(self.sample_jitter_ms(retry_index)))
+        Some(Duration::from_millis(
+            delay_ms.saturating_add(self.sample_jitter_ms(retry_index)),
+        ))
     }
 
     fn sample_jitter_ms(&self, retry_index: u32) -> u64 {

@@ -635,13 +635,13 @@ pub use attachments::{
     StoredBlobRef,
 };
 pub use lash_sansio::llm::types::{
-    AttachmentSource, AttemptOutcome, AttemptRecord, ExecutionEvidence,
-    ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, GenerationOptionOutcome,
-    GenerationOptions, GenerationReceipt, LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest,
-    LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64,
-    NormalizedError, ProtocolPosition, ProviderEndpointError, ProviderFileScope,
-    ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
-    RetryDecision,
+    AttachmentSource, AttemptOutcome, AttemptRecord, ChargeSafetyDecision,
+    ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
+    ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
+    LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestScope, LlmResponse,
+    LlmStreamEvidence, LlmTerminalReason, NonNegativeFiniteF64, NormalizedError, ProtocolPosition,
+    ProviderEndpointError, ProviderFileScope, ProviderReplayDrop, ProviderReplayDropReason,
+    ProviderReplayKind, ProviderRouteIdentity, RetryDecision,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, CheckpointDelivery,
@@ -1010,12 +1010,13 @@ pub type TurnMachineConfig = lash_sansio::TurnMachineConfig<HostTurnProtocol>;
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelTraceOptions, OtelTraceSink};
 pub use lash_trace::{
-    TraceAttachment, TraceContentBlock, TraceContext, TraceEffectEnvelopeDiffEntry,
-    TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
-    TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
-    TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
-    TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
-    TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolSpec,
+    TraceAttachment, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason, TraceContentBlock,
+    TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
+    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLlmMessage, TraceLlmRequest,
+    TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
+    TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
+    TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
+    TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};
@@ -1142,7 +1143,7 @@ pub use session_graph::{
 };
 pub(crate) use session_model::RuntimeSessionPolicy;
 
-pub use session_model::{NoProgressBudget, SessionPolicy, TurnBudget};
+pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
     AppendRequestIdentity, AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent,

@@ -600,6 +600,7 @@ impl From<core_llm::RetryDecision> for RemoteRetryDecision {
             scheduled,
             delay,
             reason,
+            charge_safety: _,
         } = value;
         Self {
             scheduled,

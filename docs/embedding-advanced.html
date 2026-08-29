@@ -421,6 +421,10 @@ let factory = lash::rlm::RlmProtocolPluginFactory::new(
         .build(),
     artifact_store.clone(),
 );
+let bounded_charge_risk = lash::ChargeSafetyPolicy::AcceptDuplicateBilling {
+    max_unsafe_retries: 1,
+    max_duplicate_cost_tokens: Some(8_192),
+};
 let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     .with_native_queued_work()
     .provider(provider)
@@ -446,7 +450,11 @@ let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
     // turn may fail to do any. This one defaults to bounded — name it to
     // change it, or to opt out with `NoProgressBudget::Unbounded`.
     .no_progress_budget(lash::NoProgressBudget::bounded(12))
+    // Default is `RequireGuarantee`. This host deliberately accepts one
+    // duplicate purchase only while reported abandoned usage is &lt;= 8K.
+    .charge_safety(bounded_charge_risk)
     .build(crate::example_process_owner())?;</code></pre>
+          <p><code>ChargeSafetyPolicy</code> is host risk appetite, not a provider guarantee. The default refuses a second purchase after output starts unless the provider promises idempotent replay or resume. An opt-in waiver still cannot override a forbidden failure, provider pushback, the five-retry hard clamp, its token bound, or the host&rsquo;s <code>Retry-After</code> cap.</p>
           <p>Streaming is semantic: <code>TurnBuilder::stream</code> emits <code>TurnActivity</code> and resolves to a <code>TurnReport</code>. Raw runtime telemetry belongs in tracing, not the app surface.</p>
           <p><code>QueuedWorkBatchingConfig</code> also names how much queued work one wake drains. Lash decides which rows <em>may</em> share a turn — merge key, delivery boundary, authority, kind, row and age bounds — and the host decides how many of that strictly FIFO prefix actually drain. The default is <code>DrainMode::OneAtATime</code>: one queued row per drain, no token arithmetic. <code>with_drain_mode(DrainMode::All)</code> drains every compatible pending row for large-window hosts that want throughput, and <code>with_drain_policy(...)</code> takes a custom <code>QueuedDrainPolicy</code> for anything else; the policy sees each row's conservative projection and the window budget. A single row that renders larger than the whole context window can never drain, so it is refused with a typed <code>SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow</code> naming the row and the window it needs, and stays queued for host recovery. The policy sizes <em>automatic</em> drains only: a selection your host names explicitly (<code>queued_turn().batch_ids(...)</code>) already states the composition, so it drains exactly the rows you asked for.</p>
         </div>

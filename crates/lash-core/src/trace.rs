@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use lash_trace::{
-    TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceExecutionEvidence,
-    TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TraceRecord, TraceRetryAttempt, TraceSink,
-    TraceTokenUsage, TraceToolSpec, sha256_hex,
+    TraceAttachment, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason, TraceContentBlock,
+    TraceContext, TraceEvent, TraceExecutionEvidence, TraceLlmMessage, TraceLlmRequest,
+    TraceLlmResponse, TraceRecord, TraceRetryAttempt, TraceSink, TraceTokenUsage, TraceToolSpec,
+    sha256_hex,
 };
 
 use crate::llm::types::{
@@ -640,6 +641,11 @@ pub(crate) fn trace_llm_attempts(
                         }),
                     }
                 }),
+                charge_safety: attempt
+                    .retry_decision
+                    .as_ref()
+                    .and_then(|decision| decision.charge_safety.as_ref())
+                    .map(trace_charge_safety_decision),
             })
             .collect(),
     )
@@ -667,6 +673,44 @@ pub(crate) fn trace_tool_attempt(
         reason,
         delay_ms,
         execution_evidence: None,
+        charge_safety: None,
+    }
+}
+
+fn trace_charge_safety_decision(
+    decision: &crate::ChargeSafetyDecision,
+) -> TraceChargeSafetyDecision {
+    let denial_reason = |reason| match reason {
+        crate::ChargeSafetyDenialReason::GuaranteeRequired => {
+            TraceChargeSafetyDenialReason::GuaranteeRequired
+        }
+        crate::ChargeSafetyDenialReason::UnsafeRetryLimitExceeded => {
+            TraceChargeSafetyDenialReason::UnsafeRetryLimitExceeded
+        }
+        crate::ChargeSafetyDenialReason::DuplicateCostLimitExceeded => {
+            TraceChargeSafetyDenialReason::DuplicateCostLimitExceeded
+        }
+        crate::ChargeSafetyDenialReason::RetryAfterExceedsCap => {
+            TraceChargeSafetyDenialReason::RetryAfterExceedsCap
+        }
+    };
+    match decision {
+        crate::ChargeSafetyDecision::Authorized {
+            tokens_at_stake,
+            attempt_number,
+        } => TraceChargeSafetyDecision::Authorized {
+            tokens_at_stake: *tokens_at_stake,
+            attempt_number: *attempt_number,
+        },
+        crate::ChargeSafetyDecision::Denied {
+            tokens_at_stake,
+            attempt_number,
+            reason,
+        } => TraceChargeSafetyDecision::Denied {
+            tokens_at_stake: *tokens_at_stake,
+            attempt_number: *attempt_number,
+            reason: denial_reason(*reason),
+        },
     }
 }
 
@@ -891,6 +935,7 @@ mod span_identity_tests {
                         scheduled: true,
                         delay: Some(std::time::Duration::from_millis(250)),
                         reason: Some("provider_retry_after".to_string()),
+                        charge_safety: None,
                     }),
                     error: Some(crate::NormalizedError {
                         class: "rate_limited".to_string(),

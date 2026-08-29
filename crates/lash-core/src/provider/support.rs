@@ -9,9 +9,10 @@ pub(super) use crate::llm::transport::{
     LlmTransportError, ProviderFailure, ProviderFailureKind, TransportRetryVerdict,
 };
 pub(super) use crate::llm::types::{
-    AttemptOutcome, AttemptRecord, ExecutionEvidence, LlmCallId, LlmCallRecord, LlmContentBlock,
-    LlmRequest, LlmResponse, LlmTerminalReason, NormalizedError, ProtocolPosition,
-    ProviderReplayOriginConflict, ProviderRouteIdentity, RetryDecision,
+    AttemptOutcome, AttemptRecord, ChargeSafetyDecision, ChargeSafetyDenialReason,
+    ExecutionEvidence, LlmCallId, LlmCallRecord, LlmContentBlock, LlmRequest, LlmResponse,
+    LlmTerminalReason, NormalizedError, ProtocolPosition, ProviderReplayOriginConflict,
+    ProviderRouteIdentity, RetryDecision,
 };
 
 #[cfg(test)]

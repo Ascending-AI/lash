@@ -1224,6 +1224,9 @@ impl From<lash_core::SessionPolicy> for RemoteProcessExecutionPolicy {
             // it would be a `REMOTE_PROTOCOL_VERSION` shape change for a knob
             // the peer's own host configuration already supplies.
             no_progress_budget: _,
+            // Charge appetite is likewise host-owned live policy. A remote
+            // peer resolves its own safe default unless its host opts in.
+            charge_safety: _,
             prompt,
             generation,
         } = value;
@@ -1277,6 +1280,7 @@ impl TryFrom<RemoteProcessExecutionPolicy> for lash_core::SessionPolicy {
             autonomous,
             turn_budget: turn_budget.into(),
             no_progress_budget: lash_core::NoProgressBudget::default(),
+            charge_safety: lash_core::ChargeSafetyPolicy::default(),
             prompt: prompt.into(),
             generation: generation.try_into()?,
         })

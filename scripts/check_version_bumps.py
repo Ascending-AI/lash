@@ -106,8 +106,12 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
         "sha256:8ae2ee20e8e39f2c17b3ef1ee78d399ef75d2d588ed35f04cf40fc084ce528a2"
     ),
+    # FIG-2144: ChargeSafetyPolicy is live host configuration deliberately
+    # omitted from SessionPolicyWire, and RetryDecision.charge_safety is
+    # serde-skipped. Both guarded Rust shapes changed while the persisted
+    # session-node body stays byte-identical, so version 3 remains current.
     "crates/lash-core/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION": (
-        "sha256:6b74366597e750eba28ae339771f9641f15bc78295cb3fcc00712d3e89899d02"
+        "sha256:b3b1b326e2b8a29da91388b4dfc7f6531a45338f50ffed061d04861166017632"
     ),
     "crates/lash-core/src/runtime/process/validation.rs:"
     "PROCESS_REGISTRATION_FAMILY_VERSION": (

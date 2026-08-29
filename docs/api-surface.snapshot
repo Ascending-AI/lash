@@ -32,6 +32,11 @@ lash::CancellationToken::is_cancelled
 lash::CancellationToken::new
 lash::CancellationToken::run_until_cancelled
 lash::CancellationToken::run_until_cancelled_owned
+lash::ChargeSafetyPolicy
+lash::ChargeSafetyPolicy::AcceptDuplicateBilling
+lash::ChargeSafetyPolicy::AcceptDuplicateBilling::max_duplicate_cost_tokens
+lash::ChargeSafetyPolicy::AcceptDuplicateBilling::max_unsafe_retries
+lash::ChargeSafetyPolicy::RequireGuarantee
 lash::CommitBudget
 lash::CommitBudget::bounded
 lash::CommitBudget::bytes
@@ -189,6 +194,7 @@ lash::LashCoreBuilder
 lash::LashCoreBuilder::advanced
 lash::LashCoreBuilder::attachment_store
 lash::LashCoreBuilder::build
+lash::LashCoreBuilder::charge_safety
 lash::LashCoreBuilder::child_store_factory
 lash::LashCoreBuilder::clock
 lash::LashCoreBuilder::commit_budget
@@ -598,6 +604,7 @@ lash::SessionRelationKind::Child
 lash::SessionRelationKind::Fork
 lash::SessionRelationKind::Root
 lash::SessionSpec
+lash::SessionSpec::charge_safety
 lash::SessionSpec::clear_generation
 lash::SessionSpec::generation
 lash::SessionSpec::inherit
@@ -3863,6 +3870,11 @@ lash::preflight::probe_store
 lash::prelude::AdvancedToolAdmin
 lash::prelude::AdvancedToolAdmin::apply_state
 lash::prelude::AdvancedToolAdmin::restore_state
+lash::prelude::ChargeSafetyPolicy
+lash::prelude::ChargeSafetyPolicy::AcceptDuplicateBilling
+lash::prelude::ChargeSafetyPolicy::AcceptDuplicateBilling::max_duplicate_cost_tokens
+lash::prelude::ChargeSafetyPolicy::AcceptDuplicateBilling::max_unsafe_retries
+lash::prelude::ChargeSafetyPolicy::RequireGuarantee
 lash::prelude::CoreTriggerAdmin
 lash::prelude::CoreTriggerAdmin::emit
 lash::prelude::CoreTriggerAdmin::subscriptions
@@ -3980,6 +3992,7 @@ lash::prelude::LashCoreBuilder
 lash::prelude::LashCoreBuilder::advanced
 lash::prelude::LashCoreBuilder::attachment_store
 lash::prelude::LashCoreBuilder::build
+lash::prelude::LashCoreBuilder::charge_safety
 lash::prelude::LashCoreBuilder::child_store_factory
 lash::prelude::LashCoreBuilder::clock
 lash::prelude::LashCoreBuilder::commit_budget
@@ -4238,6 +4251,7 @@ lash::prelude::SessionRelationKind::Child
 lash::prelude::SessionRelationKind::Fork
 lash::prelude::SessionRelationKind::Root
 lash::prelude::SessionSpec
+lash::prelude::SessionSpec::charge_safety
 lash::prelude::SessionSpec::clear_generation
 lash::prelude::SessionSpec::generation
 lash::prelude::SessionSpec::inherit
@@ -5524,6 +5538,7 @@ lash::provider::ProviderFailureKind::code
 lash::provider::ProviderHandle
 lash::provider::ProviderHandle::close
 lash::provider::ProviderHandle::complete
+lash::provider::ProviderHandle::complete_with_charge_safety
 lash::provider::ProviderHandle::kind
 lash::provider::ProviderHandle::new
 lash::provider::ProviderHandle::options
@@ -8014,6 +8029,7 @@ lash::runtime::SessionHandle::policy
 lash::runtime::SessionHandle::session_id
 lash::runtime::SessionPolicy
 lash::runtime::SessionPolicy::autonomous
+lash::runtime::SessionPolicy::charge_safety
 lash::runtime::SessionPolicy::context_window_tokens
 lash::runtime::SessionPolicy::generation
 lash::runtime::SessionPolicy::model
@@ -9508,6 +9524,19 @@ lash::tracing::TraceAttachment::source
 lash::tracing::TraceBranchSelection
 lash::tracing::TraceBranchSelection::Else
 lash::tracing::TraceBranchSelection::Then
+lash::tracing::TraceChargeSafetyDecision
+lash::tracing::TraceChargeSafetyDecision::Authorized
+lash::tracing::TraceChargeSafetyDecision::Authorized::attempt_number
+lash::tracing::TraceChargeSafetyDecision::Authorized::tokens_at_stake
+lash::tracing::TraceChargeSafetyDecision::Denied
+lash::tracing::TraceChargeSafetyDecision::Denied::attempt_number
+lash::tracing::TraceChargeSafetyDecision::Denied::reason
+lash::tracing::TraceChargeSafetyDecision::Denied::tokens_at_stake
+lash::tracing::TraceChargeSafetyDenialReason
+lash::tracing::TraceChargeSafetyDenialReason::DuplicateCostLimitExceeded
+lash::tracing::TraceChargeSafetyDenialReason::GuaranteeRequired
+lash::tracing::TraceChargeSafetyDenialReason::RetryAfterExceedsCap
+lash::tracing::TraceChargeSafetyDenialReason::UnsafeRetryLimitExceeded
 lash::tracing::TraceContentBlock
 lash::tracing::TraceContentBlock::Attachment
 lash::tracing::TraceContentBlock::Attachment::attachment_idx

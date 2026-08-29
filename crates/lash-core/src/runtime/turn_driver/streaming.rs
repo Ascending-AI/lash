@@ -335,9 +335,10 @@ impl RuntimeTurnDriver<'_> {
         let mut call_provider = self.policy.provider().clone();
         let completion_sideband = call_provider.prepare_completion(&mut llm_request);
         let task_sideband = completion_sideband.clone();
+        let charge_safety = self.policy.charge_safety.clone();
         let mut llm_task = crate::task::spawn(async move {
             let result = call_provider
-                .complete_prepared(llm_request, task_sideband)
+                .complete_prepared(llm_request, task_sideband, charge_safety)
                 .await;
             (result, call_provider)
         });
@@ -453,7 +454,7 @@ impl RuntimeTurnDriver<'_> {
                                         error,
                                         call_record: failed_call_record,
                                     } = error;
-                                    call_record = Some(failed_call_record);
+                                    call_record = Some(*failed_call_record);
                                     if completion_sideband.origin_conflict().is_some() {
                                         break Err(
                                             crate::runtime::effect::llm_call_error_from_transport(
@@ -533,6 +534,7 @@ impl RuntimeTurnDriver<'_> {
                                         scheduled: false,
                                         delay: None,
                                         reason: Some("not_retryable".to_string()),
+                                        charge_safety: None,
                                     }),
                                     error: Some(crate::NormalizedError {
                                         class: crate::ProviderFailureKind::Unknown.code().to_string(),
@@ -620,7 +622,7 @@ impl RuntimeTurnDriver<'_> {
                                 error: e,
                                 call_record: failed_call_record,
                             } = e;
-                            call_record = Some(failed_call_record);
+                            call_record = Some(*failed_call_record);
                             let retryable = e.is_retryable();
                             break Err(LlmCallError {
                                 message: e.message,

@@ -65,9 +65,9 @@ pub use lash_core::facade_support::{
 };
 pub use lash_core::runtime::ExternalCompletionError;
 pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, CommitBudget, CommitBudgetLimit, DrainMode,
-    DrainModePolicy, FrameKey, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError, ModelSpec,
-    ModelSpecBuilder, NoProgressBudget, PendingTurnInput, PendingTurnInputCancelOutcome,
+    AwaitEventKey, AwaitEventWaitIdentity, ChargeSafetyPolicy, CommitBudget, CommitBudgetLimit,
+    DrainMode, DrainModePolicy, FrameKey, InputItem, LlmCallRecord, ModelLimits, ModelLimitsError,
+    ModelSpec, ModelSpecBuilder, NoProgressBudget, PendingTurnInput, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputSuffixCancelOutcome, QueuedDrainCandidate, QueuedDrainPolicy,
     QueuedDrainRequest, QueuedDrainSelection, QueuedWorkBatchingConfig, QueuedWorkClaimRefusal,
@@ -95,10 +95,10 @@ pub use tokio_util::sync::CancellationToken;
 /// from the crate root.
 pub mod prelude {
     pub use crate::{
-        AdvancedToolAdmin, CoreTriggerAdmin, DeploymentDrainStatus, EmbedError, EnqueueTurnBuilder,
-        InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits, ModelLimitsError,
-        ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession, ParkedSession,
-        PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
+        AdvancedToolAdmin, ChargeSafetyPolicy, CoreTriggerAdmin, DeploymentDrainStatus, EmbedError,
+        EnqueueTurnBuilder, InputItem, LashCore, LashCoreBuilder, LashSession, ModelLimits,
+        ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget, ObservableSession,
+        ParkedSession, PendingTurnInputCancelOutcome, PluginBinding, PluginOperations, PluginStack,
         PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder, SessionCommand,
         SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest,
         SessionDeleteReport, SessionListFilter, SessionRelationKind, SessionSpec,
@@ -795,12 +795,13 @@ pub mod tracing {
     #[cfg(feature = "otel-trace")]
     pub use lash_core::{OtelTraceOptions, OtelTraceSink};
     pub use lash_core::{
-        TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry,
-        TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue, TraceError, TraceEvent,
-        TraceLlmMessage, TraceLlmRequest, TraceLlmResponse, TracePromptComponent,
-        TraceProviderReplayDropEvent, TraceProviderReplayDropReason, TraceProviderReplayKind,
-        TraceProviderRequestEvent, TraceProviderRouteIdentity, TraceProviderStreamEvent,
-        TraceRuntimeStreamEvent, TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
+        TraceAttachment, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason,
+        TraceContentBlock, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
+        TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceLlmMessage, TraceLlmRequest,
+        TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
+        TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
+        TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
+        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
         facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
         facade_support::TraceRecord, facade_support::TraceRuntimeScope,
         facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,

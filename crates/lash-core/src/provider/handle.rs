@@ -191,7 +191,7 @@ impl std::ops::Deref for ProviderCompletion {
 pub struct ProviderCompletionError {
     #[source]
     pub error: LlmTransportError,
-    pub call_record: LlmCallRecord,
+    pub call_record: Box<LlmCallRecord>,
 }
 
 impl std::ops::Deref for ProviderCompletionError {
@@ -239,16 +239,27 @@ impl ProviderHandle {
         self.components.provider.requires_streaming()
     }
 
-    #[allow(
-        clippy::result_large_err,
-        reason = "boxing ProviderCompletionError would change this public provider API"
-    )]
     pub async fn complete(
         &mut self,
         mut request: LlmRequest,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let sideband = self.prepare_completion(&mut request);
-        self.complete_prepared(request, sideband).await
+        self.complete_prepared(request, sideband, crate::ChargeSafetyPolicy::default())
+            .await
+    }
+
+    /// Completes a request under an explicit live charge-safety policy.
+    ///
+    /// Prefer [`Self::complete`] unless the host has deliberately accepted a
+    /// bounded duplicate-billing risk for this call.
+    pub async fn complete_with_charge_safety(
+        &mut self,
+        mut request: LlmRequest,
+        charge_safety: crate::ChargeSafetyPolicy,
+    ) -> Result<ProviderCompletion, ProviderCompletionError> {
+        let sideband = self.prepare_completion(&mut request);
+        self.complete_prepared(request, sideband, charge_safety)
+            .await
     }
 
     pub(crate) fn prepare_completion(
@@ -285,14 +296,11 @@ impl ProviderHandle {
         sideband
     }
 
-    #[allow(
-        clippy::result_large_err,
-        reason = "this internal half preserves the public complete error type"
-    )]
     pub(crate) async fn complete_prepared(
         &mut self,
         request: LlmRequest,
         sideband: ProviderCompletionSideband,
+        charge_safety: crate::ChargeSafetyPolicy,
     ) -> Result<ProviderCompletion, ProviderCompletionError> {
         let serving_route = sideband.serving_route();
         if let Err(error) = serving_route.validate_endpoint() {
@@ -301,7 +309,7 @@ impl ProviderHandle {
                 .with_code("invalid_provider_endpoint")
                 .with_retry_verdict(TransportRetryVerdict::Forbidden);
             return Err(ProviderCompletionError {
-                call_record: synthetic_terminal_call_record(
+                call_record: Box::new(synthetic_terminal_call_record(
                     self.components.rate_limiter.clock().timestamp_ms(),
                     Duration::ZERO,
                     AttemptOutcome::Failed,
@@ -309,7 +317,7 @@ impl ProviderHandle {
                     false,
                     ProtocolPosition::NoResponse,
                     sideband.replay_drops(),
-                ),
+                )),
                 error,
             });
         }
@@ -323,6 +331,7 @@ impl ProviderHandle {
         let throttle_budget = Duration::from_millis(reliability.retry.throttle_wait_budget_ms);
         let mut throttle_waited = Duration::ZERO;
         let mut courtesy_throttle_calls = 0;
+        let mut unsafe_retries = 0u8;
         loop {
             let _permit = self.components.rate_limiter.admit(&request).await;
             let clock = self.components.rate_limiter.clock();
@@ -404,20 +413,61 @@ impl ProviderHandle {
                         .generation_retry_guarantee(&request);
                     let retry_class =
                         automatic_retry_class(&failure, protocol_position, retry_guarantee);
+                    let retry_after_exceeds_cap =
+                        failure.retry_after().is_some_and(|retry_after| {
+                            reliability
+                                .retry
+                                .retry_after_within_cap(retry_after)
+                                .is_none()
+                        });
                     let throttle_wait = if let TransportRetryVerdict::RetryableThrottle {
                         retry_after: Some(retry_after),
                     } = failure.retry_verdict
                     {
-                        let wait = reliability.retry.cap_retry_after(retry_after);
-                        let charge = wait;
-                        (wait >= MIN_FREE_THROTTLE_WAIT
-                            && courtesy_throttle_calls < MAX_COURTESY_THROTTLE_CALLS
-                            && throttle_waited.saturating_add(charge) <= throttle_budget)
-                            .then_some((wait, charge))
+                        reliability
+                            .retry
+                            .retry_after_within_cap(retry_after)
+                            .and_then(|wait| {
+                                let charge = wait;
+                                (wait >= MIN_FREE_THROTTLE_WAIT
+                                    && courtesy_throttle_calls < MAX_COURTESY_THROTTLE_CALLS
+                                    && throttle_waited.saturating_add(charge) <= throttle_budget)
+                                    .then_some((wait, charge))
+                            })
                     } else {
                         None
                     };
                     let counted_retry_available = attempt + 1 < attempts;
+                    let mut charge_safety_decision =
+                        if failure.is_retryable() && retry_class.is_none() {
+                            match charge_safety_decision(
+                                failure.retry_verdict,
+                                retry_guarantee,
+                                &charge_safety,
+                                failure
+                                    .partial_response
+                                    .as_deref()
+                                    .map(|response| &response.usage),
+                                unsafe_retries.saturating_add(1),
+                            ) {
+                                ChargeSafetyEvaluation::Evaluated(decision) => Some(decision),
+                                ChargeSafetyEvaluation::NotEvaluated(_) => None,
+                            }
+                        } else {
+                            None
+                        };
+                    if retry_after_exceeds_cap
+                        && let Some(ChargeSafetyDecision::Authorized {
+                            tokens_at_stake,
+                            attempt_number,
+                        }) = charge_safety_decision.clone()
+                    {
+                        charge_safety_decision = Some(ChargeSafetyDecision::Denied {
+                            tokens_at_stake,
+                            attempt_number,
+                            reason: ChargeSafetyDenialReason::RetryAfterExceedsCap,
+                        });
+                    }
 
                     // A retryable transport classification is necessary but
                     // not sufficient to buy another generation. These are the
@@ -442,8 +492,9 @@ impl ProviderHandle {
                     // In particular, `OutputStarted` never qualifies through
                     // position or emptiness. It requires the provider guarantee
                     // above; none of Lash's bundled providers declares one.
-                    if failure.is_retryable() && retry_class.is_none() {
-                        let refusal_reason = retry_refusal_reason(protocol_position);
+                    if let Some(decision @ ChargeSafetyDecision::Denied { reason, .. }) =
+                        charge_safety_decision.clone()
+                    {
                         let retry_after_header_present = failure
                             .headers
                             .iter()
@@ -473,7 +524,7 @@ impl ProviderHandle {
                             throttle_retry_available = throttle_wait.is_some(),
                             counted_retry_available,
                             decision = "deny",
-                            reason = refusal_reason,
+                            reason = charge_safety_retry_reason(reason, protocol_position),
                             "provider retry denied because another generation is not proven charge-safe"
                         );
                         records.push(failure_attempt_record(
@@ -486,17 +537,46 @@ impl ProviderHandle {
                             Some(RetryDecision {
                                 scheduled: false,
                                 delay: None,
-                                reason: Some(refusal_reason.to_string()),
+                                reason: Some(
+                                    charge_safety_retry_reason(reason, protocol_position)
+                                        .to_string(),
+                                ),
+                                charge_safety: Some(decision),
                             }),
                         ));
                         return Err(ProviderCompletionError {
-                            error: unsafe_retry_refusal(failure, protocol_position),
-                            call_record: LlmCallRecord {
+                            error: charge_safety_refusal(failure, protocol_position, reason),
+                            call_record: Box::new(LlmCallRecord {
                                 call_id,
                                 label: None,
                                 replay_drops: sideband.replay_drops(),
                                 attempts: records,
-                            },
+                            }),
+                        });
+                    }
+                    if failure.is_retryable() && retry_after_exceeds_cap {
+                        records.push(failure_attempt_record(
+                            records.len() as u32 + 1,
+                            started_at,
+                            clock.now().saturating_duration_since(started),
+                            recorded_failure,
+                            true,
+                            protocol_position,
+                            Some(RetryDecision {
+                                scheduled: false,
+                                delay: None,
+                                reason: Some("retry_after_exceeds_cap".to_string()),
+                                charge_safety: charge_safety_decision,
+                            }),
+                        ));
+                        return Err(ProviderCompletionError {
+                            error: failure,
+                            call_record: Box::new(LlmCallRecord {
+                                call_id,
+                                label: None,
+                                replay_drops: sideband.replay_drops(),
+                                attempts: records,
+                            }),
                         });
                     }
                     // Throttle deference: when the adapter's typed throttle
@@ -511,6 +591,9 @@ impl ProviderHandle {
                     // never defers: there is no meaningful server-stated wait
                     // to honor, so the normal backoff-and-count ladder applies.
                     if let Some((wait, charge)) = throttle_wait {
+                        if charge_safety_decision.is_some() {
+                            unsafe_retries = unsafe_retries.saturating_add(1);
+                        }
                         throttle_waited += charge;
                         courtesy_throttle_calls += 1;
                         crate::operational_metrics::record_provider_retry(self.kind(), "throttle");
@@ -529,6 +612,7 @@ impl ProviderHandle {
                                 scheduled: true,
                                 delay: Some(wait),
                                 reason: Some("provider_retry_after".to_string()),
+                                charge_safety: charge_safety_decision,
                             }),
                         ));
                         tracing::debug!(
@@ -572,16 +656,17 @@ impl ProviderHandle {
                                 scheduled: false,
                                 delay: None,
                                 reason: Some(reason.to_string()),
+                                charge_safety: charge_safety_decision,
                             }),
                         ));
                         let completion_error = ProviderCompletionError {
                             error: failure,
-                            call_record: LlmCallRecord {
+                            call_record: Box::new(LlmCallRecord {
                                 call_id,
                                 label: None,
                                 replay_drops: sideband.replay_drops(),
                                 attempts: records,
-                            },
+                            }),
                         };
                         if let Some(payload) = panic_payload {
                             crate::panic_containment::enforce_loudness(payload);
@@ -590,8 +675,12 @@ impl ProviderHandle {
                     }
                     let delay = reliability
                         .retry
-                        .delay_for_attempt(attempt, failure.retry_after());
+                        .delay_for_attempt(attempt, failure.retry_after())
+                        .expect("Retry-After was checked against the cap before scheduling");
                     crate::operational_metrics::record_provider_retry(self.kind(), "backoff");
+                    if charge_safety_decision.is_some() {
+                        unsafe_retries = unsafe_retries.saturating_add(1);
+                    }
                     records.push(failure_attempt_record(
                         records.len() as u32 + 1,
                         started_at,
@@ -603,6 +692,7 @@ impl ProviderHandle {
                             scheduled: true,
                             delay: Some(delay),
                             reason: retry_class.map(|class| class.reason().to_string()),
+                            charge_safety: charge_safety_decision,
                         }),
                     ));
                     tracing::debug!(
@@ -683,6 +773,80 @@ pub(super) enum AutomaticRetryClass {
     RejectedHttpResponse,
     EmptyStreamPartial,
     ProviderGuarantee(GenerationRetryGuarantee),
+}
+
+pub(super) const MAX_UNSAFE_RETRIES: u8 = 5;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ChargeSafetyPrecedence {
+    Forbidden,
+    ServerPushback,
+    ProviderGuarantee,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ChargeSafetyEvaluation {
+    NotEvaluated(ChargeSafetyPrecedence),
+    Evaluated(ChargeSafetyDecision),
+}
+
+pub(super) fn charge_safety_decision(
+    retry_verdict: TransportRetryVerdict,
+    guarantee: GenerationRetryGuarantee,
+    policy: &crate::ChargeSafetyPolicy,
+    usage: Option<&crate::llm::types::LlmUsage>,
+    attempt_number: u8,
+) -> ChargeSafetyEvaluation {
+    match retry_verdict {
+        TransportRetryVerdict::Forbidden => {
+            return ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::Forbidden);
+        }
+        TransportRetryVerdict::NotRetryable => {
+            return ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::ServerPushback);
+        }
+        TransportRetryVerdict::RetryableThrottle { .. }
+        | TransportRetryVerdict::RetryableTransient => {}
+    }
+    if guarantee != GenerationRetryGuarantee::None {
+        return ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::ProviderGuarantee);
+    }
+
+    let tokens_at_stake = usage.map(duplicate_cost_tokens).unwrap_or_default();
+    let denied = |reason| {
+        ChargeSafetyEvaluation::Evaluated(ChargeSafetyDecision::Denied {
+            tokens_at_stake,
+            attempt_number,
+            reason,
+        })
+    };
+    match policy {
+        crate::ChargeSafetyPolicy::RequireGuarantee => {
+            denied(ChargeSafetyDenialReason::GuaranteeRequired)
+        }
+        crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries,
+            max_duplicate_cost_tokens,
+        } => {
+            if attempt_number > (*max_unsafe_retries).min(MAX_UNSAFE_RETRIES) {
+                return denied(ChargeSafetyDenialReason::UnsafeRetryLimitExceeded);
+            }
+            if max_duplicate_cost_tokens.is_some_and(|maximum| tokens_at_stake > maximum) {
+                return denied(ChargeSafetyDenialReason::DuplicateCostLimitExceeded);
+            }
+            ChargeSafetyEvaluation::Evaluated(ChargeSafetyDecision::Authorized {
+                tokens_at_stake,
+                attempt_number,
+            })
+        }
+    }
+}
+
+fn duplicate_cost_tokens(usage: &crate::llm::types::LlmUsage) -> u64 {
+    let total = i128::from(usage.input_tokens)
+        + i128::from(usage.output_tokens)
+        + i128::from(usage.cache_read_input_tokens)
+        + i128::from(usage.cache_write_input_tokens);
+    total.clamp(0, i128::from(u64::MAX)) as u64
 }
 
 impl AutomaticRetryClass {
@@ -840,6 +1004,48 @@ fn unsafe_retry_refusal(
         ),
     };
     failure.message = message;
+    failure.code = Some(code.to_string());
+    failure.retry_verdict = TransportRetryVerdict::Forbidden;
+    failure
+}
+
+fn charge_safety_denial_reason(reason: ChargeSafetyDenialReason) -> &'static str {
+    match reason {
+        ChargeSafetyDenialReason::GuaranteeRequired => "charge_safety_guarantee_required",
+        ChargeSafetyDenialReason::UnsafeRetryLimitExceeded => {
+            "charge_safety_unsafe_retry_limit_exceeded"
+        }
+        ChargeSafetyDenialReason::DuplicateCostLimitExceeded => {
+            "charge_safety_duplicate_cost_limit_exceeded"
+        }
+        ChargeSafetyDenialReason::RetryAfterExceedsCap => "retry_after_exceeds_cap",
+    }
+}
+
+fn charge_safety_retry_reason(
+    reason: ChargeSafetyDenialReason,
+    position: ProtocolPosition,
+) -> &'static str {
+    if reason == ChargeSafetyDenialReason::GuaranteeRequired {
+        retry_refusal_reason(position)
+    } else {
+        charge_safety_denial_reason(reason)
+    }
+}
+
+fn charge_safety_refusal(
+    failure: LlmTransportError,
+    position: ProtocolPosition,
+    reason: ChargeSafetyDenialReason,
+) -> LlmTransportError {
+    if reason == ChargeSafetyDenialReason::GuaranteeRequired {
+        return unsafe_retry_refusal(failure, position);
+    }
+    let mut failure = failure;
+    let original_message = std::mem::take(&mut failure.message);
+    let code = charge_safety_denial_reason(reason);
+    failure.message =
+        format!("host charge-safety policy denied the retry ({code}): {original_message}");
     failure.code = Some(code.to_string());
     failure.retry_verdict = TransportRetryVerdict::Forbidden;
     failure
