@@ -120,8 +120,11 @@ impl EmbeddedRuntimeBuilder {
         mut self,
         attachment_store: Arc<dyn crate::AttachmentStore>,
     ) -> Self {
-        self.core.durability.attachment_store =
-            Arc::new(crate::SessionAttachmentStore::ephemeral(attachment_store));
+        self.core.durability.attachment_store = Arc::new(
+            crate::SessionAttachmentStore::ephemeral(attachment_store).with_max_attachment_bytes(
+                self.core.durability.attachment_store.max_attachment_bytes(),
+            ),
+        );
         self
     }
 

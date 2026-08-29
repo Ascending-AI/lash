@@ -48,6 +48,12 @@ turn settlement, public append, and park; retrying the same commit unchanged
 cannot succeed, so a host must increase its configured bound or submit a
 smaller commit.
 
+Attachment admission is a separate deployment decision. Hosts may configure
+`max_attachment_bytes: Option<u64>` beside the commit budget; `None` preserves
+unbounded puts, while `Some(max_bytes)` makes the session attachment facade
+reject a larger in-memory payload with a typed error before any manifest or
+backend call. Attachment bytes are not folded into the commit budget.
+
 ### Reference sizing curve
 
 The reference target is a **60 ms p95 physical commit interval** at the 1 MiB

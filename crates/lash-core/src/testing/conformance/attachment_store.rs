@@ -25,6 +25,53 @@ where
     attachment_list_enumerates_stored_blobs(make()).await;
     attachment_head_agrees_with_list(make()).await;
     attachment_reports_declared_persistence(make(), expected_persistence);
+    session_attachment_store_enforces_host_size_limit(make).await;
+}
+
+async fn session_attachment_store_enforces_host_size_limit<F>(make: F)
+where
+    F: Fn() -> Arc<dyn AttachmentStore>,
+{
+    const MAX_ATTACHMENT_BYTES: u64 = 4;
+
+    let bounded_backend = make();
+    let bounded = crate::SessionAttachmentStore::ephemeral(Arc::clone(&bounded_backend))
+        .with_max_attachment_bytes(Some(MAX_ATTACHMENT_BYTES));
+    let error = bounded
+        .put(vec![1; 5], attachment_meta())
+        .await
+        .expect_err("an attachment over the host limit must be rejected");
+    assert!(
+        matches!(
+            error,
+            AttachmentStoreError::SizeLimitExceeded {
+                byte_len: 5,
+                max_bytes: MAX_ATTACHMENT_BYTES,
+            }
+        ),
+        "oversize rejection must retain the measured and configured byte counts, got {error:?}"
+    );
+    assert!(
+        bounded_backend
+            .list()
+            .await
+            .expect("list backend after rejected put")
+            .is_empty(),
+        "an oversize rejection must not write a backend blob"
+    );
+
+    let at_limit = bounded
+        .put(vec![2; MAX_ATTACHMENT_BYTES as usize], attachment_meta())
+        .await
+        .expect("an attachment exactly at the host limit must succeed");
+    assert_eq!(at_limit.byte_len, MAX_ATTACHMENT_BYTES);
+
+    let unbounded = crate::SessionAttachmentStore::ephemeral(make());
+    let default_put = unbounded
+        .put(vec![3; 5], attachment_meta())
+        .await
+        .expect("the default attachment policy must remain unbounded");
+    assert_eq!(default_put.byte_len, 5);
 }
 
 /// Run the full [`AttachmentStore`] suite plus durable reopen checks.

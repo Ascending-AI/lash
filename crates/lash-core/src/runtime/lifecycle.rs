@@ -208,12 +208,15 @@ impl LashRuntime {
             // rebuilds or managed-child materialization.
             let previous_attachment_store = Arc::clone(&host.core.durability.attachment_store);
             let backend = Arc::clone(previous_attachment_store.backend());
-            let scoped = Arc::new(crate::SessionAttachmentStore::new_with_clock(
-                backend,
-                manifest,
-                state.session_id.clone(),
-                Arc::clone(&host.core.clock),
-            ));
+            let scoped = Arc::new(
+                crate::SessionAttachmentStore::new_with_clock(
+                    backend,
+                    manifest,
+                    state.session_id.clone(),
+                    Arc::clone(&host.core.clock),
+                )
+                .with_max_attachment_bytes(previous_attachment_store.max_attachment_bytes()),
+            );
             host.core.durability.attachment_store = scoped;
         }
         let services = services

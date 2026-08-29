@@ -152,6 +152,20 @@ impl RuntimeHostConfig {
         self
     }
 
+    /// Configure the maximum bytes accepted by one attachment put.
+    ///
+    /// `None` is the default and preserves unbounded attachment puts. A
+    /// configured limit is independent from the runtime commit budget and is
+    /// enforced before the attachment backend is called.
+    pub fn with_max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
+        self.durability.attachment_store = Arc::new(
+            self.durability
+                .attachment_store
+                .reconfigured_max_attachment_bytes(max_attachment_bytes),
+        );
+        self
+    }
+
     pub fn with_attachment_source_policy(
         mut self,
         policy: Arc<dyn crate::AttachmentSourcePolicy>,
@@ -453,5 +467,23 @@ mod tests {
             DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT
         );
         assert_eq!(DEFAULT_MANAGED_TURN_CONCURRENCY_LIMIT, 100);
+    }
+
+    #[test]
+    fn attachment_limit_defaults_unbounded_and_accepts_host_override() {
+        let unbounded = RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
+        assert_eq!(
+            unbounded.durability.attachment_store.max_attachment_bytes(),
+            None
+        );
+
+        let bounded = unbounded.with_max_attachment_bytes(Some(4096));
+        assert_eq!(
+            bounded.durability.attachment_store.max_attachment_bytes(),
+            Some(4096)
+        );
     }
 }
