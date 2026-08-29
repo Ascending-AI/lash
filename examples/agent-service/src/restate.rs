@@ -346,17 +346,22 @@ mod restate_tests {
     use crate::state::AgentServiceDurability;
     use axum::Router;
     use axum::routing::{get, post};
-    use lash::LashCore;
-    use lash::PluginBinding;
     use lash::direct::LlmOutputPart;
     use lash::provider::LlmResponse;
-    use lash_restate::{LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow};
+    use lash::runtime::{AwaitEventResolver, ExecutionScope};
+    use lash::{
+        AwaitEventWaitIdentity, CancellationToken, LashCore, PluginBinding, Resolution,
+        ResolveOutcome,
+    };
+    use lash_restate::{
+        LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow, RestateEffectHost,
+    };
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
     #[test]
     #[ignore = "requires a running Restate server; set RESTATE_INGRESS_URL and run with --ignored"]
-    fn live_restate_ingress_runs_agent_turn_and_process_workflow_end_to_end() {
+    fn live_restate_ingress_runs_agent_turn_and_process_workflow_end_to_end_durable_await_cancel() {
         std::thread::Builder::new()
             .name("agent-service-restate-e2e".to_string())
             .stack_size(STACK_BUDGET_BYTES)
@@ -366,17 +371,14 @@ mod restate_tests {
                     .enable_all()
                     .build()
                     .expect("build live Restate E2E runtime")
-                    .block_on(
-                        live_restate_ingress_runs_agent_turn_and_process_workflow_end_to_end_async(
-                        ),
-                    )
+                    .block_on(run_live_restate_e2e())
             })
             .expect("spawn live Restate E2E thread")
             .join()
             .expect("live Restate E2E thread");
     }
 
-    async fn live_restate_ingress_runs_agent_turn_and_process_workflow_end_to_end_async() {
+    async fn run_live_restate_e2e() {
         // This test is `#[ignore]`d, so it only runs when the recipe asked for
         // it. Skipping on an absent ingress URL would report the live E2E green
         // having exercised nothing; fail instead, as the workbench recovery
@@ -632,6 +634,96 @@ mod restate_tests {
         println!(
             "AGENT_SERVICE_EFFECT_GROUP group={} settings=OK preflight=ABSENT ranks={:?} cancelled_losers={} durable_read=MATCH duplicate=REFUSED unchanged=MATCH terminal=PASS",
             group_report.group_key, group_report.settlements, group_report.cancelled_losers
+        );
+
+        // The group report above proves that Restate recorded two cancelled
+        // members. This separate wait proves the underlying await-event
+        // terminal itself is durable: a fresh observer sees `Cancelled`, a
+        // second await returns immediately, and a late completion cannot win.
+        let wait_host = RestateEffectHost::new(ingress_url);
+        let wait_scope = ExecutionScope::turn(
+            format!("agent-service-await-session-{}", uuid::Uuid::new_v4()),
+            "cancelled-await-event",
+        );
+        let wait_key = wait_host
+            .await_event_key(
+                &wait_scope,
+                AwaitEventWaitIdentity::Custom {
+                    key: "worked-cancelled-await".to_string(),
+                },
+            )
+            .await
+            .expect("derive public Restate await-event key");
+        let cancellation = CancellationToken::new();
+        let pending_host = wait_host.clone();
+        let pending_key = wait_key.clone();
+        let pending_cancellation = cancellation.clone();
+        let pending_wait = tokio::spawn(async move {
+            pending_host
+                .await_await_event(&pending_key, pending_cancellation, None)
+                .await
+        });
+
+        let pending_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            assert!(
+                !pending_wait.is_finished(),
+                "await-event finished before cancellation"
+            );
+            match wait_host.peek_await_event(&wait_key).await {
+                Ok(None) => break,
+                Ok(Some(terminal)) => {
+                    panic!("await-event terminalized before cancellation: {terminal:?}")
+                }
+                Err(_) if std::time::Instant::now() < pending_deadline => {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                Err(error) => panic!("await-event did not become observable: {error}"),
+            }
+        }
+
+        cancellation.cancel();
+        let cancelled = tokio::time::timeout(std::time::Duration::from_secs(5), pending_wait)
+            .await
+            .expect("cancelled await-event must settle promptly")
+            .expect("join cancelled await-event")
+            .expect("cancelled await-event returns its durable terminal");
+        assert_eq!(cancelled, Resolution::Cancelled);
+        assert_eq!(
+            wait_host
+                .peek_await_event(&wait_key)
+                .await
+                .expect("read cancelled await-event terminal"),
+            Some(Resolution::Cancelled)
+        );
+
+        let reawaited = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            wait_host.await_await_event(&wait_key, CancellationToken::new(), None),
+        )
+        .await
+        .expect("durably terminal await-event must not remain dangling")
+        .expect("re-await cancelled await-event");
+        assert_eq!(reawaited, Resolution::Cancelled);
+        assert_eq!(
+            wait_host
+                .resolve_await_event(&wait_key, Resolution::Ok(json!({ "completion": "late" })),)
+                .await
+                .expect("attempt late await-event completion"),
+            ResolveOutcome::AlreadyResolved {
+                terminal: Resolution::Cancelled,
+            }
+        );
+        assert_eq!(
+            wait_host
+                .peek_await_event(&wait_key)
+                .await
+                .expect("re-read cancelled await-event terminal"),
+            Some(Resolution::Cancelled)
+        );
+        println!(
+            "AGENT_SERVICE_AWAIT_EVENT_CANCELLATION wait={} pending=OBSERVED cancel_return=CANCELLED durable_peek=CANCELLED reawait=CANCELLED late_completion=REFUSED terminal=PASS",
+            wait_key.promise_key()
         );
 
         let _ = app_shutdown_tx.send(());
