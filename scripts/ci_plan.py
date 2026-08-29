@@ -30,9 +30,11 @@ GATED_JOBS = {
     "functional-e2e": "functional_e2e",
 }
 
-# Jobs deferred to trunk runs (push / workflow_dispatch): their job-level
-# conditions skip them on pull_request and merge_group events per the
-# 2026-08-25 CI-scope ruling; reassess after the FIG-2169 test-prune sweep.
+# Jobs deferred entirely to trunk runs (push / workflow_dispatch): their
+# job-level conditions skip them on pull_request and merge_group events per
+# the 2026-08-25 CI-scope ruling; reassess after the FIG-2169 test-prune sweep.
+# postgres-store is intentionally absent: its focused runtime Agent Scenario
+# runs on pull requests and merge groups while its heavier steps remain trunk-only.
 TRUNK_ONLY_JOBS = {
     "heavy-tests",
     "semver-advisory",
@@ -42,7 +44,6 @@ TRUNK_ONLY_JOBS = {
     "stack-budget",
     "confidence-fast",
     "confidence-fast-summary",
-    "postgres-store",
     "s3-store",
     "functional-e2e",
 }

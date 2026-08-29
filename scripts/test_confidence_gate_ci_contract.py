@@ -168,7 +168,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "stack-budget",
             "confidence-fast",
             "confidence-fast-summary",
-            "postgres-store",
             "s3-store",
             "functional-e2e",
         }
@@ -1331,12 +1330,29 @@ derive_mutation_jobs() {{
         # `assertIn` cannot see that: the sibling step still carries the flag.
         for step_name in (
             "Test Postgres store (conformance)",
+            "Test runtime pool-wait binding",
+            "Test runtime Postgres agent scenarios",
             "Test cross-backend store differential",
         ):
             with self.subTest(step=step_name):
                 step = workflow_step_block(postgres_store_job, step_name)
                 self.assertIn("LASH_POSTGRES_DATABASE_URL:", step)
                 self.assertIn('LASH_REQUIRE_POSTGRES: "1"', step)
+
+        runtime_scenarios = workflow_step_block(
+            postgres_store_job, "Test runtime Postgres agent scenarios"
+        )
+        self.assertIn("if: matrix.postgres == '16'", runtime_scenarios)
+        self.assertIn(
+            "cargo nextest run --profile ci -p lash-runtime --features rlm",
+            runtime_scenarios,
+        )
+        self.assertIn(
+            "test(agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres)",
+            runtime_scenarios,
+        )
+        self.assertIn("github.event_name == 'pull_request'", postgres_store_job)
+        self.assertIn("github.event_name == 'merge_group'", postgres_store_job)
 
         # The differential's skip reason and its `compared_backends` inventory
         # go to stderr, which libtest swallows for a passing test: uncaptured

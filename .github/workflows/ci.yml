@@ -1300,9 +1300,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: plan
-    # Deferred to trunk runs (push/dispatch) per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && needs.plan.outputs.stores == 'true'
+    # The focused runtime Agent Scenario is a pull-request and merge-queue gate.
+    # The heavier store/perf coverage below remains deferred to relevant trunk
+    # runs per the 2026-08-25 CI-scope ruling.
+    if: >-
+      github.event_name == 'pull_request'
+      || github.event_name == 'merge_group'
+      || needs.plan.outputs.stores == 'true'
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -1388,13 +1392,28 @@ jobs:
       # That guard is per-process, so this must stay `cargo test` — nextest's
       # process-per-test model would race the suites against each other.
       - name: Test Postgres store (conformance)
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: cargo test -p lash-internal-postgres-store --locked
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
 
       - name: Test runtime pool-wait binding
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: cargo nextest run -p lash-perf -E 'test(pool_wait)' --locked
+        env:
+          LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
+          LASH_REQUIRE_POSTGRES: "1"
+
+      # crates/lash currently has one Agent Scenario gated by the shared
+      # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. Keep this
+      # focused on the exact test instead of rerunning the runtime suite.
+      - name: Test runtime Postgres agent scenarios
+        if: matrix.postgres == '16'
+        run: >-
+          cargo nextest run --profile ci -p lash-runtime --features rlm
+          --locked -E
+          'test(agent_scenario_public_process_parents_are_literal_and_crash_atomic_on_postgres)'
         env:
           LASH_POSTGRES_DATABASE_URL: postgres://lash:lash@localhost:5432/lash
           LASH_REQUIRE_POSTGRES: "1"
@@ -1402,7 +1421,7 @@ jobs:
       # The differential compares backend semantics, not catalog rendering, so it
       # runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
-        if: matrix.postgres == '16'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group' && matrix.postgres == '16'
         run: >-
           cargo nextest run --profile ci -p lash-sim
           --test cross_backend_store_differential
