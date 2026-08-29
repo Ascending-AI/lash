@@ -16,6 +16,7 @@ pub mod direct;
 mod identity_json;
 pub mod llm;
 mod model;
+mod operational_metrics;
 pub mod panic_containment;
 #[cfg(feature = "perf-witness")]
 #[doc(hidden)]
@@ -450,6 +451,14 @@ pub mod facade_support {
     pub use crate::runtime::registry_transitions;
     #[doc(hidden)]
     pub use crate::runtime::release_process_execution_permit_while;
+    /// Whether this build records the runtime-tuning OpenTelemetry metrics.
+    #[doc(hidden)]
+    pub const RUNTIME_TUNING_METRICS_ENABLED: bool = cfg!(feature = "otel-trace");
+    /// Record one first-party PostgreSQL runtime-connection acquisition wait.
+    #[doc(hidden)]
+    pub fn record_postgres_pool_acquire_wait(wait: std::time::Duration, outcome: &'static str) {
+        crate::operational_metrics::record_postgres_pool_acquire_wait(wait, outcome);
+    }
     pub use crate::runtime::state::facade_ops::RuntimeSessionStateFacadeOps;
     pub use crate::runtime::system_time_from_epoch_ms;
     pub use crate::runtime::terminal_append_request;

@@ -150,6 +150,14 @@ impl RuntimeCommit {
             return Ok(());
         };
         let measurement = self.measure_budget()?;
+        crate::operational_metrics::record_runtime_commit_budgeted_size(
+            measurement.total_bytes,
+            if measurement.total_bytes > max_bytes.get() {
+                "rejected"
+            } else {
+                "admitted"
+            },
+        );
         if measurement.total_bytes > max_bytes.get() {
             tracing::warn!(
                 target: "lash.runtime_commit.budget",
@@ -324,6 +332,8 @@ mod tests {
 
     #[test]
     fn keyed_budget_counts_root_and_changed_bodies_but_excludes_unchanged_refs() {
+        #[cfg(feature = "otel-trace")]
+        let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState {
             session_id: "budget-bytes".to_string(),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
@@ -399,6 +409,11 @@ mod tests {
                         + expected_attachment_bytes
                 && max_bytes == 128
         ));
+        #[cfg(feature = "otel-trace")]
+        assert_eq!(
+            metrics.histogram_count("lash.runtime_commit.budgeted_size"),
+            1
+        );
     }
 
     #[test]

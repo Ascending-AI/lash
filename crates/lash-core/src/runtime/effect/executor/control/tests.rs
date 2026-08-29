@@ -287,6 +287,8 @@ async fn provided_wait_retries_a_crashed_looking_holder_until_acquired() {
 
 #[tokio::test]
 async fn provided_wait_reports_a_renewing_holder_as_typed_retryable_busy() {
+    #[cfg(feature = "otel-trace")]
+    let metrics = crate::operational_metrics::TestMetrics::install();
     let probe = Arc::new(FakeQueuedLaneProbe::new([
         QueuedLaneAttempt::Busy(queued_lane_holder(7_400)),
         QueuedLaneAttempt::Busy(queued_lane_holder(7_401)),
@@ -306,6 +308,17 @@ async fn provided_wait_reports_a_renewing_holder_as_typed_retryable_busy() {
     assert!(error.is_retryable());
     assert_eq!(probe.try_calls(), 2);
     assert_eq!(probe.pause_calls(), 1);
+    #[cfg(feature = "otel-trace")]
+    {
+        assert_eq!(
+            metrics.histogram_count("lash.session_execution_lane.contention_wait.duration"),
+            1
+        );
+        assert_eq!(
+            metrics.counter_value("lash.session_execution_lane.give_ups"),
+            1
+        );
+    }
 }
 
 async fn acquire_through_task_controller(

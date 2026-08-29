@@ -1433,6 +1433,8 @@ async fn map_provider_installs_transport_decorator() {
 
 #[tokio::test]
 async fn provider_handle_retries_retryable_failures_in_shared_executor() {
+    #[cfg(feature = "otel-trace")]
+    let metrics = crate::operational_metrics::TestMetrics::install();
     let attempts = Arc::new(AtomicUsize::new(0));
     let provider = FailingProvider {
         options: ProviderOptions {
@@ -1476,6 +1478,8 @@ async fn provider_handle_retries_retryable_failures_in_shared_executor() {
             .all(|attempt| attempt.retry_budget_consumed)
     );
     assert_eq!(completion.call_record.attempts[2].evidence, None);
+    #[cfg(feature = "otel-trace")]
+    assert_eq!(metrics.counter_value("lash.provider.retries"), 2);
 }
 
 /// A non-OpenAI provider kind that reports both usage and execution evidence
@@ -1616,6 +1620,8 @@ async fn provider_handle_set_options_affects_retry_behavior() {
 
 #[tokio::test]
 async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
+    #[cfg(feature = "otel-trace")]
+    let metrics = crate::operational_metrics::TestMetrics::install();
     let attempts = Arc::new(AtomicUsize::new(0));
     let clock = Arc::new(RecordingClock::default());
     let provider = StatusFailingProvider {
@@ -1652,6 +1658,14 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
             .all(|attempt| !attempt.retry_budget_consumed)
     );
     assert!(completion.call_record.attempts[3].retry_budget_consumed);
+    #[cfg(feature = "otel-trace")]
+    {
+        assert_eq!(metrics.counter_value("lash.provider.retries"), 3);
+        assert_eq!(
+            metrics.histogram_count("lash.provider.throttle_wait.duration"),
+            3
+        );
+    }
 }
 
 #[tokio::test]
