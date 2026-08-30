@@ -3,8 +3,8 @@ use std::sync::Arc;
 use lash_trace::{
     TraceAttachment, TraceChargeSafetyDecision, TraceChargeSafetyDenialReason, TraceContentBlock,
     TraceContext, TraceEvent, TraceExecutionEvidence, TraceLlmMessage, TraceLlmRequest,
-    TraceLlmResponse, TraceRecord, TraceRetryAttempt, TraceSink, TraceTokenUsage, TraceToolSpec,
-    sha256_hex,
+    TraceLlmResponse, TraceRecord, TraceRetryAttempt, TraceRetryAttemptOutcome, TraceSink,
+    TraceTokenUsage, TraceToolSpec, sha256_hex,
 };
 
 use crate::llm::types::{
@@ -604,12 +604,11 @@ pub(crate) fn trace_llm_attempts(
             .map(|attempt| TraceRetryAttempt {
                 ordinal: attempt.ordinal,
                 outcome: match attempt.outcome {
-                    crate::AttemptOutcome::Completed => "completed",
-                    crate::AttemptOutcome::Failed => "failed",
-                    crate::AttemptOutcome::Aborted => "aborted",
-                    crate::AttemptOutcome::Interrupted => "interrupted",
-                }
-                .to_string(),
+                    crate::AttemptOutcome::Completed => TraceRetryAttemptOutcome::Completed,
+                    crate::AttemptOutcome::Failed => TraceRetryAttemptOutcome::Failed,
+                    crate::AttemptOutcome::Aborted => TraceRetryAttemptOutcome::Aborted,
+                    crate::AttemptOutcome::Interrupted => TraceRetryAttemptOutcome::Interrupted,
+                },
                 duration_ms: attempt.duration.as_millis().try_into().unwrap_or(u64::MAX),
                 reason: trace_llm_attempt_reason(attempt),
                 delay_ms: attempt
@@ -646,6 +645,8 @@ pub(crate) fn trace_llm_attempts(
                     .as_ref()
                     .and_then(|decision| decision.charge_safety.as_ref())
                     .map(trace_charge_safety_decision),
+                generation_disposition: attempt.generation_disposition,
+                usage: attempt.usage.as_ref().map(trace_usage_from_llm),
             })
             .collect(),
     )
@@ -657,23 +658,26 @@ pub(crate) fn trace_tool_attempt(
     delay_ms: Option<u64>,
 ) -> TraceRetryAttempt {
     let (outcome, reason) = match &record.output.outcome {
-        crate::ToolCallOutcome::Success(_) => ("completed", None),
+        crate::ToolCallOutcome::Success(_) => (TraceRetryAttemptOutcome::Completed, None),
         crate::ToolCallOutcome::Failure(failure) => (
-            "failed",
+            TraceRetryAttemptOutcome::Failed,
             Some(format!("{}: {}", failure.code, failure.message)),
         ),
-        crate::ToolCallOutcome::Cancelled(cancellation) => {
-            ("cancelled", Some(cancellation.message.clone()))
-        }
+        crate::ToolCallOutcome::Cancelled(cancellation) => (
+            TraceRetryAttemptOutcome::Cancelled,
+            Some(cancellation.message.clone()),
+        ),
     };
     TraceRetryAttempt {
         ordinal,
-        outcome: outcome.to_string(),
+        outcome,
         duration_ms: record.duration_ms,
         reason,
         delay_ms,
         execution_evidence: None,
         charge_safety: None,
+        generation_disposition: None,
+        usage: None,
     }
 }
 
@@ -1000,7 +1004,7 @@ mod span_identity_tests {
         let ladder = attempts.expect("emitted attempt ladder");
         assert_eq!(ladder.len(), 2);
         assert_eq!(ladder[0].ordinal, 1);
-        assert_eq!(ladder[0].outcome, "failed");
+        assert_eq!(ladder[0].outcome, TraceRetryAttemptOutcome::Failed);
         assert!(ladder[0].reason.as_deref().is_some_and(|reason| {
             reason.contains("rate_limited")
                 && reason.contains("http 429")
@@ -1009,7 +1013,7 @@ mod span_identity_tests {
         }));
         assert_eq!(ladder[0].delay_ms, Some(250));
         assert_eq!(ladder[1].ordinal, 2);
-        assert_eq!(ladder[1].outcome, "completed");
+        assert_eq!(ladder[1].outcome, TraceRetryAttemptOutcome::Completed);
         assert_eq!(ladder[1].delay_ms, None);
     }
 

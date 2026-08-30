@@ -1608,7 +1608,10 @@ async fn retry_ladder_survives_a_later_pending_completion() {
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(pending.attempts.len(), 1);
     assert_eq!(pending.attempts[0].ordinal, 1);
-    assert_eq!(pending.attempts[0].outcome, "failed");
+    assert_eq!(
+        pending.attempts[0].outcome,
+        lash_trace::TraceRetryAttemptOutcome::Failed
+    );
 
     let attachment_store = Arc::clone(&context.attachment_store);
     let execution = crate::RuntimeExecutionContext::new(
@@ -1631,7 +1634,10 @@ async fn retry_ladder_survives_a_later_pending_completion() {
         .await;
     assert_eq!(completed.attempts.len(), 2);
     assert_eq!(completed.attempts[1].ordinal, 2);
-    assert_eq!(completed.attempts[1].outcome, "completed");
+    assert_eq!(
+        completed.attempts[1].outcome,
+        lash_trace::TraceRetryAttemptOutcome::Completed
+    );
 }
 
 #[tokio::test]
@@ -1896,7 +1902,10 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
     assert_eq!(attempts.load(Ordering::SeqCst), 2);
     assert_eq!(outcome.attempts.len(), 2);
     assert_eq!(outcome.attempts[0].ordinal, 1);
-    assert_eq!(outcome.attempts[0].outcome, "failed");
+    assert_eq!(
+        outcome.attempts[0].outcome,
+        lash_trace::TraceRetryAttemptOutcome::Failed
+    );
     assert!(
         outcome.attempts[0]
             .reason
@@ -1905,7 +1914,10 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
     );
     assert_eq!(outcome.attempts[0].delay_ms, Some(0));
     assert_eq!(outcome.attempts[1].ordinal, 2);
-    assert_eq!(outcome.attempts[1].outcome, "completed");
+    assert_eq!(
+        outcome.attempts[1].outcome,
+        lash_trace::TraceRetryAttemptOutcome::Completed
+    );
     assert_eq!(outcome.attempts[1].delay_ms, None);
     let directory = tempfile::tempdir().expect("trace tempdir");
     let path = directory.path().join("tool-retry.trace.jsonl");

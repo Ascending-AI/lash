@@ -36,6 +36,7 @@ mod lashlang_graph;
 pub mod otel;
 
 pub use lash_sansio::TextProjectionMetadata;
+pub use lash_sansio::llm::types::GenerationReceipt;
 pub use lashlang_graph::{
     TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
     TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
@@ -77,8 +78,10 @@ pub use lashlang_graph::{
 /// exec's tool-call roll-up, and removes the redundant `tool_call_count` and
 /// `terminal_finish_present` fields. Version 10 renames the exec completion's
 /// projection metadata list to match the merged observation representation.
-/// Version 11 adds typed charge-safety decisions to retry attempts.
-pub const TRACE_SCHEMA_VERSION: u32 = 11;
+/// Version 11 adds typed charge-safety decisions to retry attempts. Version 12
+/// types retry-attempt outcomes and adds generation disposition and
+/// provider-reported usage to each LLM attempt projection.
+pub const TRACE_SCHEMA_VERSION: u32 = 12;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -452,9 +455,7 @@ pub enum TraceEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceRetryAttempt {
     pub ordinal: u32,
-    /// Free-form by explicit FIG-1827 carve-out; typing it is tracked as
-    /// FIG-1832 and requires its own schema ruling.
-    pub outcome: String,
+    pub outcome: TraceRetryAttemptOutcome,
     pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -466,6 +467,33 @@ pub struct TraceRetryAttempt {
     /// otherwise unsafe duplicate generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub charge_safety: Option<TraceChargeSafetyDecision>,
+    /// Which caller-requested generation options this attempt carried.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_disposition: Option<GenerationReceipt>,
+    /// Provider-reported usage for this attempt. Absence is not zero usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TraceTokenUsage>,
+}
+
+/// Terminal state of one provider or tool attempt in a trace retry ladder.
+///
+/// # Integrator class
+///
+/// Trace consumers exhaustively render these outcomes when explaining which
+/// attempt completed a call and why earlier attempts did not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceRetryAttemptOutcome {
+    /// The attempt completed successfully.
+    Completed,
+    /// The attempt failed.
+    Failed,
+    /// Protocol handling aborted after observing the provider response.
+    Aborted,
+    /// The attempt was interrupted before it could complete.
+    Interrupted,
+    /// A tool attempt was cancelled.
+    Cancelled,
 }
 
 /// Why host charge-safety policy denied an otherwise transport-retryable
