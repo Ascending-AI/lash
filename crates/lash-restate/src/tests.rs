@@ -7264,6 +7264,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 #[derive(Default)]
 struct ReplayableRecordingContext {
     sleeps: Mutex<Vec<u64>>,
+    park_sleeps: AtomicBool,
+    sleep_started: tokio::sync::Notify,
+    sleep_release: tokio::sync::Notify,
     runs: Mutex<Vec<String>>,
     records: Mutex<HashMap<String, Vec<u8>>>,
     replaying: AtomicBool,
@@ -7611,6 +7614,19 @@ async fn capture_tool_intent_journal_corpus_from_real_endpoint_interruptions() {
 }
 
 impl ReplayableRecordingContext {
+    fn park_sleeps(&self) {
+        self.park_sleeps.store(true, Ordering::SeqCst);
+    }
+
+    async fn await_sleep_started(&self) {
+        self.sleep_started.notified().await;
+    }
+
+    fn release_sleep(&self) {
+        self.park_sleeps.store(false, Ordering::SeqCst);
+        self.sleep_release.notify_one();
+    }
+
     fn start_replay(&self) {
         self.replaying.store(true, Ordering::SeqCst);
         self.append_missing_on_replay.store(false, Ordering::SeqCst);
@@ -7929,7 +7945,14 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         'ctx: 'run,
     {
         self.sleeps.lock_recover().push(duration.as_millis() as u64);
-        Box::pin(async { Ok(()) })
+        let context = Arc::clone(self);
+        Box::pin(async move {
+            if context.park_sleeps.load(Ordering::SeqCst) {
+                context.sleep_started.notify_one();
+                context.sleep_release.notified().await;
+            }
+            Ok(())
+        })
     }
 
     fn sleep_or_turn_cancel<'run>(
@@ -14525,6 +14548,296 @@ async fn typescript_process_registration(process_id: &str) -> ProcessRegistratio
         process,
     ))
     .with_execution_env_ref(Some(env_ref))
+}
+
+async fn sleeping_process_registration(
+    process_id: &str,
+    dialect: lashlang::CompilationDialect,
+) -> ProcessRegistration {
+    let environment = lashlang::LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        lashlang::LashlangAbilities::all(),
+    );
+    let linked = match dialect {
+        lashlang::CompilationDialect::Lashlang => lashlang::LinkedModule::link(
+            lashlang::parse(
+                r#"
+                process worker() {
+                  sleep for "5m"
+                  finish "completed after wake"
+                }
+                "#,
+            )
+            .expect("parse sleeping Lashlang process"),
+            environment,
+        )
+        .expect("link sleeping Lashlang process"),
+        lashlang::CompilationDialect::Typescript => lash_typescript::link(
+            r#"
+            const worker = defineProcess({
+              name: "worker",
+              signals: {},
+              run: async () => {
+                await sleep(300000);
+                return "completed after wake";
+              }
+            });
+            finish(null);
+            "#,
+            &environment,
+        )
+        .expect("link sleeping TypeScript process"),
+    };
+    assert_eq!(linked.artifact.compilation_dialect, dialect);
+    lashlang::LashlangArtifactStore::put_module_artifact(
+        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &linked.artifact,
+    )
+    .await
+    .expect("store sleeping process artifact");
+    let env_ref = persist_recovery_env_ref().await;
+    ProcessRegistration::new(
+        process_id,
+        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: linked.module_ref,
+            process_ref: linked
+                .artifact
+                .process_ref("worker")
+                .expect("worker process ref")
+                .clone(),
+            host_requirements_ref: linked.host_requirements_ref,
+            process_name: "worker".to_string(),
+            args: serde_json::Map::new(),
+        }),
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+    )
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
+    .with_execution_env_ref(Some(env_ref))
+}
+
+#[tokio::test]
+async fn process_sleep_wake_settles_recorded_cancel_before_resuming_either_dialect() {
+    for dialect in [
+        lashlang::CompilationDialect::Lashlang,
+        lashlang::CompilationDialect::Typescript,
+    ] {
+        let dialect_label = match dialect {
+            lashlang::CompilationDialect::Lashlang => "lashlang",
+            lashlang::CompilationDialect::Typescript => "typescript",
+        };
+        let process_id = format!("sleep-cancel-{dialect_label}");
+        let (registry, continuations) = process_stores();
+        let registration = sleeping_process_registration(&process_id, dialect).await;
+        registry
+            .register_process(registration.clone())
+            .await
+            .expect("register sleeping process");
+        let worker = recovery_worker(
+            Arc::clone(&registry),
+            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        );
+        let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+            Arc::new(RestateCoreProcessRunner::new(worker)),
+            Arc::clone(&registry),
+            continuations,
+        ));
+        let context = Arc::new(ReplayableRecordingContext::default());
+        context.park_sleeps();
+        let execution_id = format!("sleep-cancel-invocation-{dialect_label}");
+        let execution_write_authority =
+            lash_core::ProcessExecutionWriteAuthority::invocation(&process_id, &execution_id);
+        let run = {
+            let workflow = Arc::clone(&workflow);
+            let context = Arc::clone(&context);
+            let process_id = process_id.clone();
+            tokio::spawn(async move {
+                let controller = RestateRuntimeEffectController::new(context);
+                workflow
+                    .run_registration(
+                        registration,
+                        ProcessExecutionContext::default()
+                            .with_execution_write_authority(execution_write_authority),
+                        controller
+                            .scoped_effect_controller(ExecutionScope::process(&process_id))
+                            .expect("sleeping process scope"),
+                        0,
+                        None,
+                        pending_process_cancel_signal(),
+                    )
+                    .await
+            })
+        };
+
+        context.await_sleep_started().await;
+        registry
+            .append_event(
+                &process_id,
+                lash_core::ProcessEventAppendRequest::cancel_requested(
+                    &process_id,
+                    Some("operator stopped sleeping process".to_string()),
+                ),
+            )
+            .await
+            .expect("commit cancel before wake");
+        context.release_sleep();
+
+        let outcome = run
+            .await
+            .expect("join sleeping process")
+            .expect("run sleeping process");
+        assert!(
+            matches!(
+                outcome,
+                lash_core::ProcessRunOutcome::Terminal { ref output, .. }
+                    if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+            ),
+            "{} process resumed past its wake and produced {outcome:#?}",
+            dialect_label
+        );
+        assert_eq!(
+            registry
+                .get_process(&process_id)
+                .await
+                .expect("read sleeping process")
+                .expect("sleeping process remains registered")
+                .status,
+            lash_core::ProcessStatus::Cancelled,
+            "{} process terminal status",
+            dialect_label
+        );
+    }
+}
+
+#[tokio::test]
+async fn process_sleep_wake_registry_failure_retries_before_settling_recorded_cancel() {
+    let process_id = "sleep-cancel-read-retry";
+    let storage = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = Arc::clone(&storage) as Arc<dyn ProcessRegistry>;
+    let continuations = Arc::clone(&storage) as Arc<dyn lash_core::ProcessContinuationStore>;
+    let registration =
+        sleeping_process_registration(process_id, lashlang::CompilationDialect::Lashlang).await;
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register sleeping process");
+    let worker = recovery_worker(
+        Arc::clone(&registry),
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+    );
+    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+        Arc::new(RestateCoreProcessRunner::new(worker)),
+        Arc::clone(&registry),
+        continuations,
+    ));
+    let context = Arc::new(ReplayableRecordingContext::default());
+    context.park_sleeps();
+    let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id,
+        "sleep-cancel-read-retry-invocation",
+    );
+    let first_run = {
+        let workflow = Arc::clone(&workflow);
+        let context = Arc::clone(&context);
+        let registration = registration.clone();
+        let execution_write_authority = execution_write_authority.clone();
+        tokio::spawn(async move {
+            let controller = RestateRuntimeEffectController::new(context);
+            workflow
+                .run_registration(
+                    registration,
+                    ProcessExecutionContext::default()
+                        .with_execution_write_authority(execution_write_authority),
+                    controller
+                        .scoped_effect_controller(ExecutionScope::process(process_id))
+                        .expect("sleeping process scope"),
+                    0,
+                    None,
+                    pending_process_cancel_signal(),
+                )
+                .await
+        })
+    };
+
+    context.await_sleep_started().await;
+    registry
+        .append_event(
+            process_id,
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                process_id,
+                Some("operator stopped sleeping process".to_string()),
+            ),
+        )
+        .await
+        .expect("commit cancel before wake");
+    storage
+        .set_process_events_read_error_for_testing(lash_core::PluginError::Runtime(
+            lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::RuntimeStore,
+                "simulated transient wake-boundary registry failure",
+            ),
+        ))
+        .await;
+    context.release_sleep();
+
+    let first_error = tokio::time::timeout(Duration::from_secs(5), first_run)
+        .await
+        .expect("first attempt must leave the guest after the registry failure")
+        .expect("join first sleeping process attempt")
+        .expect_err("registry failure must abort the handler instead of settling the process");
+    let first_error_debug = format!("{first_error:?}");
+    assert!(
+        first_error_debug.contains("Retryable")
+            && first_error_debug.contains("simulated transient wake-boundary registry failure"),
+        "wake-boundary registry failure must request Restate redelivery: {first_error_debug}"
+    );
+    assert_eq!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("read process after retryable failure")
+            .expect("sleeping process remains registered")
+            .status,
+        lash_core::ProcessStatus::Running,
+        "retryable registry failure must not terminalize the process"
+    );
+
+    context.start_replay();
+    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let retry = tokio::time::timeout(
+        Duration::from_secs(5),
+        workflow.run_registration(
+            registration,
+            ProcessExecutionContext::default()
+                .with_execution_write_authority(execution_write_authority),
+            controller
+                .scoped_effect_controller(ExecutionScope::process(process_id))
+                .expect("sleeping process retry scope"),
+            0,
+            None,
+            pending_process_cancel_signal(),
+        ),
+    )
+    .await
+    .expect("redelivery must not park on the already completed sleep")
+    .expect("redeliver sleeping process after transient registry failure");
+    assert!(
+        matches!(
+            retry,
+            lash_core::ProcessRunOutcome::Terminal { ref output, .. }
+                if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+        ),
+        "redelivered process must settle the committed cancellation: {retry:#?}"
+    );
+    assert_eq!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("read retried process")
+            .expect("retried process remains registered")
+            .status,
+        lash_core::ProcessStatus::Cancelled
+    );
 }
 
 #[tokio::test]

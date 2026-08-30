@@ -7,6 +7,7 @@ pub struct TestLocalProcessRegistry {
     pub(super) managed: Arc<Mutex<ManagedProcessMap>>,
     pub(super) process_read_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_read_error_after: Arc<Mutex<Option<(usize, PluginError)>>>,
+    pub(super) process_events_read_error: Arc<Mutex<Option<PluginError>>>,
     pub(super) process_read_absent: Arc<Mutex<bool>>,
     pub(super) process_read_override: Arc<Mutex<Option<ProcessRecord>>>,
     pub(super) process_lease_claim_error: Arc<Mutex<Option<PluginError>>>,

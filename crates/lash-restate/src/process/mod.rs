@@ -80,7 +80,13 @@ pub(crate) fn terminal_completion_workflow_key(
 /// runtime errors request redelivery, while every other plugin/runtime failure
 /// terminates the invocation so deterministic failures cannot loop forever.
 pub(crate) fn handler_error_from_plugin(error: PluginError) -> HandlerError {
-    if matches!(&error, PluginError::Runtime(error) if error.is_retryable()) {
+    if matches!(&error, PluginError::Runtime(error) if error.is_retryable())
+        || matches!(
+            &error,
+            PluginError::RuntimeEffectController(error)
+                if error.cause.is_none() && error.code.is_retryable()
+        )
+    {
         HandlerError::from(error)
     } else {
         HandlerError::from(TerminalError::from_error(error))
