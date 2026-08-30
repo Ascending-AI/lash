@@ -13,6 +13,7 @@ fn process_execution_env_identity_golden_corpus() {
         .plugins
         .insert("a:b".to_string(), serde_json::json!({"enabled": true}));
     let policy = crate::SessionPolicy {
+        charge_safety: Default::default(),
         model: crate::ModelSpec::builder("model:rich")
             .variant(crate::ReasoningSelection::Effort("high".to_string()))
             .context_window_tokens(8192)

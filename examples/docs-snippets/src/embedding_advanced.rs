@@ -356,6 +356,10 @@ async fn durable_stores_core(
             .build(),
         artifact_store.clone(),
     );
+    let bounded_charge_risk = lash::ChargeSafetyPolicy::AcceptDuplicateBilling {
+        max_unsafe_retries: 1,
+        max_duplicate_cost_tokens: Some(8_192),
+    };
     let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
         .with_native_queued_work()
         .provider(provider)
@@ -381,6 +385,9 @@ async fn durable_stores_core(
         // turn may fail to do any. This one defaults to bounded — name it to
         // change it, or to opt out with `NoProgressBudget::Unbounded`.
         .no_progress_budget(lash::NoProgressBudget::bounded(12))
+        // Default is `RequireGuarantee`. This host deliberately accepts one
+        // duplicate purchase only while reported abandoned usage is <= 8K.
+        .charge_safety(bounded_charge_risk)
         .build(crate::example_process_owner())?;
     // docs:end:durable-stores-core
     Ok(())

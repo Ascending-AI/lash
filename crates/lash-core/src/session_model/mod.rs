@@ -25,6 +25,34 @@ pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord
 
 pub const PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID: &str = "lash.plugin_runtime";
 
+/// Host appetite for retrying after a provider may already have billed a
+/// generation that Lash cannot resume or replay idempotently.
+///
+/// # Integrator class
+///
+/// Host applications choose this policy when constructing or reopening a
+/// session. Provider adapters continue to report retry guarantees as facts.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum ChargeSafetyPolicy {
+    /// Require an idempotency or resume guarantee before buying another
+    /// generation after output or ambiguous response evidence was observed.
+    #[default]
+    RequireGuarantee,
+    /// Permit bounded duplicate billing when no provider guarantee exists.
+    AcceptDuplicateBilling {
+        /// Maximum unsafe retries per logical LLM call. Lash hard-clamps this
+        /// value to five.
+        max_unsafe_retries: u8,
+        /// Skip the unsafe retry when provider-reported tokens already billed
+        /// for the abandoned generation exceed this bound. When the provider
+        /// reports no partial usage, Lash treats the tokens at stake as zero,
+        /// so this cost bound does not bind; the hard clamp of at most five
+        /// unsafe retries still applies.
+        max_duplicate_cost_tokens: Option<u64>,
+    },
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PersistedPluginRuntimeEvent {
     pub plugin_id: String,
@@ -116,6 +144,12 @@ pub struct SessionPolicy {
     /// carrier that predates the field resolves to the bound rather than to a
     /// loop.
     pub no_progress_budget: NoProgressBudget,
+    /// Live host risk appetite for duplicate provider billing.
+    ///
+    /// Like `no_progress_budget`, this is reconciled from host configuration
+    /// on every reopen and is deliberately absent from the persisted session
+    /// head. Old carriers therefore resolve to the charge-safe default.
+    pub charge_safety: ChargeSafetyPolicy,
     pub prompt: crate::PromptLayer,
     /// Caller-owned generation intent applied to every LLM call this session
     /// makes. It lives on the policy rather than on a single turn because it
@@ -140,6 +174,7 @@ impl SessionPolicy {
             autonomous: false,
             turn_budget,
             no_progress_budget: NoProgressBudget::default(),
+            charge_safety: ChargeSafetyPolicy::default(),
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         }
@@ -251,6 +286,9 @@ pub struct SessionSpec {
     /// Bound on consecutive unproductive provider attempts. `None` keeps the
     /// bound the base policy already carries.
     pub no_progress_budget: Option<NoProgressBudget>,
+    /// Host duplicate-billing appetite. `None` preserves the live base
+    /// policy.
+    pub charge_safety: Option<ChargeSafetyPolicy>,
     pub prompt: Option<crate::PromptLayer>,
     /// Generation intent for every LLM call the session makes. `None` inherits
     /// the base policy's options unchanged; `Some` applies a
@@ -269,6 +307,7 @@ impl SessionSpec {
             model: None,
             turn_budget: None,
             no_progress_budget: None,
+            charge_safety: None,
             prompt: None,
             generation: None,
         }
@@ -302,6 +341,17 @@ impl SessionSpec {
     /// execution, or opt the session out of that bound.
     pub fn no_progress_budget(mut self, no_progress_budget: NoProgressBudget) -> Self {
         self.no_progress_budget = Some(no_progress_budget);
+        self
+    }
+
+    /// Configure the host's bounded appetite for duplicate provider billing.
+    ///
+    /// # Integrator class
+    ///
+    /// Host applications use this setting; protocol and provider implementors
+    /// do not override it.
+    pub fn charge_safety(mut self, charge_safety: ChargeSafetyPolicy) -> Self {
+        self.charge_safety = Some(charge_safety);
         self
     }
 
@@ -350,6 +400,9 @@ impl SessionSpec {
         }
         if let Some(no_progress_budget) = self.no_progress_budget {
             policy.no_progress_budget = no_progress_budget;
+        }
+        if let Some(charge_safety) = self.charge_safety.as_ref() {
+            policy.charge_safety = charge_safety.clone();
         }
         if let Some(prompt) = self.prompt.as_ref() {
             policy.prompt = prompt.clone();
@@ -458,6 +511,48 @@ mod tests {
             decoded.no_progress_budget,
             NoProgressBudget::default(),
             "a carrier that predates the field resolves to the bound"
+        );
+    }
+
+    #[test]
+    fn charge_safety_is_live_host_policy_and_never_enters_the_durable_policy_shape() {
+        let mut policy = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        policy.charge_safety = ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries: 2,
+            max_duplicate_cost_tokens: Some(4_096),
+        };
+
+        let value = serde_json::to_value(policy).expect("serialize policy");
+        assert!(
+            value.get("charge_safety").is_none(),
+            "live charge appetite must not enter a durable carrier: {value}"
+        );
+        let decoded: SessionPolicy = serde_json::from_value(value).expect("decode old carrier");
+        assert_eq!(
+            decoded.charge_safety,
+            ChargeSafetyPolicy::RequireGuarantee,
+            "old and reopened carriers resolve to the safe host default"
+        );
+    }
+
+    #[test]
+    fn session_spec_reconciles_charge_safety_from_live_host_configuration() {
+        let base = SessionPolicy::new(crate::TurnBudget::Unbounded);
+        let appetite = ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries: 3,
+            max_duplicate_cost_tokens: Some(8_192),
+        };
+
+        assert_eq!(
+            SessionSpec::inherit().resolve_against(&base).charge_safety,
+            ChargeSafetyPolicy::RequireGuarantee
+        );
+        assert_eq!(
+            SessionSpec::inherit()
+                .charge_safety(appetite.clone())
+                .resolve_against(&base)
+                .charge_safety,
+            appetite
         );
     }
 

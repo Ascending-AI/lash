@@ -957,6 +957,7 @@ pub(crate) fn session_store_request(
             autonomous: false,
             turn_budget: crate::TurnBudget::Unbounded,
             no_progress_budget: Default::default(),
+            charge_safety: Default::default(),
             prompt: crate::PromptLayer::new(),
             generation: crate::GenerationOptions::default(),
         },

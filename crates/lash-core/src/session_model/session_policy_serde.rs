@@ -93,6 +93,7 @@ impl<'de> serde::Deserialize<'de> for SessionPolicy {
             autonomous: wire.autonomous,
             turn_budget: wire.turn_budget,
             no_progress_budget: wire.no_progress_budget,
+            charge_safety: Default::default(),
             prompt: wire.prompt,
             generation: wire.generation,
         })

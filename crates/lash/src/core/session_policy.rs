@@ -29,6 +29,18 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Configure bounded duplicate-billing risk for provider retries that
+    /// have no idempotency or resume guarantee.
+    ///
+    /// # Integrator class
+    ///
+    /// Host applications use this builder setting when establishing the live
+    /// policy for every session opened by this core.
+    pub fn charge_safety(mut self, charge_safety: lash_core::ChargeSafetyPolicy) -> Self {
+        self.session_spec = self.session_spec.charge_safety(charge_safety);
+        self
+    }
+
     /// Generation options — output token cap, temperature, seed — carried by
     /// every LLM call in every session this core opens.
     pub fn generation(mut self, generation: lash_core::GenerationOptions) -> Self {

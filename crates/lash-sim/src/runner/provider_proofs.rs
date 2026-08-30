@@ -562,7 +562,13 @@ pub(super) async fn prove_openai_compatible_cancel_before_response_start()
 pub(super) async fn prove_openai_compatible_retry_exhaustion()
 -> Result<ProofRun, FixedScriptRunnerError> {
     let attempt_budget = 2;
-    let rate_limit_script = ProviderWireScript::from_json_str(OPENAI_COMPAT_RATE_LIMIT)?;
+    let mut rate_limit_script = ProviderWireScript::from_json_str(OPENAI_COMPAT_RATE_LIMIT)?;
+    for event in rate_limit_script.timeline_mut() {
+        if let ProviderWireEvent::HttpError { headers, .. } = event {
+            headers.retain(|header| !header.name.eq_ignore_ascii_case("retry-after"));
+        }
+    }
+    let rate_limit_script_content = serde_json::to_string_pretty(&rate_limit_script)?;
     let transport = ScriptedLlmHttpTransport::from_scripts(
         (0..attempt_budget).map(|_| rate_limit_script.clone()),
     )?;
@@ -584,7 +590,14 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
     let mut handle = ProviderHandle::new(provider.into_components());
     handle.set_options(retry_options);
     let err = handle
-        .complete(openai_compatible_request(false))
+        .complete_with_charge_safety(
+            openai_compatible_request(false),
+            lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
+                max_unsafe_retries: u8::try_from(attempt_budget - 1)
+                    .expect("the two-attempt proof has one unsafe retry"),
+                max_duplicate_cost_tokens: None,
+            },
+        )
         .await
         .expect_err("retry exhaustion should fail");
     require(
@@ -619,7 +632,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
     proof(
         "openai-compatible.retry-exhaustion",
         "openai-compatible",
-        OPENAI_COMPAT_RATE_LIMIT,
+        &rate_limit_script_content,
         exchanges,
         error_terminal(&err),
         json!({

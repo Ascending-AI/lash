@@ -77,7 +77,8 @@ pub use lashlang_graph::{
 /// exec's tool-call roll-up, and removes the redundant `tool_call_count` and
 /// `terminal_finish_present` fields. Version 10 renames the exec completion's
 /// projection metadata list to match the merged observation representation.
-pub const TRACE_SCHEMA_VERSION: u32 = 10;
+/// Version 11 adds typed charge-safety decisions to retry attempts.
+pub const TRACE_SCHEMA_VERSION: u32 = 11;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -461,6 +462,56 @@ pub struct TraceRetryAttempt {
     pub delay_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_evidence: Option<TraceExecutionEvidence>,
+    /// Typed host risk-appetite outcome when this attempt considered an
+    /// otherwise unsafe duplicate generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charge_safety: Option<TraceChargeSafetyDecision>,
+}
+
+/// Why host charge-safety policy denied an otherwise transport-retryable
+/// generation.
+///
+/// # Integrator class
+///
+/// Reporting integrations exhaustively render these typed denial reasons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceChargeSafetyDenialReason {
+    /// Host policy requires a provider idempotency or resume guarantee.
+    GuaranteeRequired,
+    /// The per-call unsafe retry allowance is exhausted.
+    UnsafeRetryLimitExceeded,
+    /// Provider-reported tokens exceed the host's duplicate-cost bound.
+    DuplicateCostLimitExceeded,
+    /// The provider's requested retry delay exceeds the host cap.
+    RetryAfterExceedsCap,
+}
+
+/// Typed trace projection of one host charge-safety decision.
+///
+/// # Integrator class
+///
+/// Reporting integrations consume this optional component on an LLM retry
+/// attempt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum TraceChargeSafetyDecision {
+    /// Host policy permits this otherwise unsafe retry.
+    Authorized {
+        /// Provider-reported tokens billed for the abandoned generation.
+        tokens_at_stake: u64,
+        /// One-based unsafe retry number within the logical LLM call.
+        attempt_number: u8,
+    },
+    /// Host policy refuses this otherwise unsafe retry.
+    Denied {
+        /// Provider-reported tokens billed for the abandoned generation.
+        tokens_at_stake: u64,
+        /// One-based unsafe retry number within the logical LLM call.
+        attempt_number: u8,
+        /// Typed policy bound that refused the retry.
+        reason: TraceChargeSafetyDenialReason,
+    },
 }
 
 /// Provider-reported facts attached to one sealed LLM attempt.

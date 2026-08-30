@@ -41,6 +41,14 @@ struct CountedPartialStreamFailureProvider {
 }
 
 #[derive(Clone, Debug)]
+struct PaidPartialThenSuccessProvider {
+    options: ProviderOptions,
+    attempts: Arc<AtomicUsize>,
+    fail_until: usize,
+    retry_after: Option<Duration>,
+}
+
+#[derive(Clone, Debug)]
 struct ReplayCaptureProvider;
 
 #[derive(Clone, Debug)]
@@ -323,6 +331,69 @@ impl Provider for CountedPartialStreamFailureProvider {
 }
 
 #[async_trait::async_trait]
+impl Provider for PaidPartialThenSuccessProvider {
+    fn kind(&self) -> &'static str {
+        "paid-partial-then-success"
+    }
+
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+
+    fn options(&self) -> ProviderOptions {
+        self.options.clone()
+    }
+
+    fn set_options(&mut self, options: ProviderOptions) {
+        self.options = options;
+    }
+
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+
+    async fn complete(&mut self, _request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempt <= self.fail_until {
+            let verdict =
+                self.retry_after
+                    .map_or(TransportRetryVerdict::RetryableTransient, |retry_after| {
+                        TransportRetryVerdict::RetryableThrottle {
+                            retry_after: Some(retry_after),
+                        }
+                    });
+            return Err(LlmTransportError::new("paid stream interrupted")
+                .with_kind(ProviderFailureKind::Stream)
+                .with_retry_verdict(verdict)
+                .with_partial_response(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "paid partial".to_string(),
+                        response_meta: None,
+                    }],
+                    usage: LlmUsage {
+                        input_tokens: 7,
+                        output_tokens: 3,
+                        ..LlmUsage::default()
+                    },
+                    provider_usage: Some(serde_json::json!({
+                        "prompt_tokens": 7,
+                        "completion_tokens": 3
+                    })),
+                    ..LlmResponse::default()
+                }));
+        }
+        Ok(LlmResponse {
+            terminal_reason: LlmTerminalReason::Stop,
+            ..LlmResponse::default()
+        })
+    }
+
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+#[async_trait::async_trait]
 impl Provider for TerminalProvider {
     fn kind(&self) -> &'static str {
         "terminal"
@@ -562,12 +633,12 @@ impl Provider for StatusFailingProvider {
 /// the total requested wait, so retry-ladder tests assert real durations
 /// without real waits.
 #[derive(Debug, Default)]
-struct RecordingClock {
+pub(super) struct RecordingClock {
     slept_ms: std::sync::atomic::AtomicU64,
 }
 
 impl RecordingClock {
-    fn slept(&self) -> Duration {
+    pub(super) fn slept(&self) -> Duration {
         Duration::from_millis(self.slept_ms.load(Ordering::SeqCst))
     }
 }
@@ -649,7 +720,7 @@ impl Provider for MetricsTransport {
     }
 }
 
-fn empty_request() -> LlmRequest {
+pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
         model: "model".to_string(),
         messages: Vec::new(),
@@ -1055,7 +1126,11 @@ fn provider_retry_default_uses_bounded_nonzero_jitter() {
 fn provider_retry_jitter_varies_across_samples() {
     let retry = ProviderRetryPolicy::default();
     let samples = (0..64)
-        .map(|_| retry.delay_for_attempt(0, None))
+        .map(|_| {
+            retry
+                .delay_for_attempt(0, None)
+                .expect("ordinary retry delay should be available")
+        })
         .collect::<Vec<_>>();
 
     assert!(samples.iter().all(|delay| {
@@ -1076,7 +1151,11 @@ fn provider_retry_zero_jitter_preserves_deterministic_ladder() {
 
     assert_eq!(
         (0..4)
-            .map(|attempt| retry.delay_for_attempt(attempt, None))
+            .map(|attempt| {
+                retry
+                    .delay_for_attempt(attempt, None)
+                    .expect("ordinary retry delay should be available")
+            })
             .collect::<Vec<_>>(),
         [
             Duration::from_millis(2_000),
@@ -1349,6 +1428,46 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
             .and_then(|decision| decision.reason.as_deref()),
         Some("output_started_without_retry_guarantee")
     );
+    assert_eq!(
+        failure.call_record.attempts[0]
+            .retry_decision
+            .as_ref()
+            .and_then(|decision| decision.charge_safety.as_ref()),
+        Some(&crate::ChargeSafetyDecision::Denied {
+            tokens_at_stake: 0,
+            attempt_number: 1,
+            reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
+        })
+    );
+}
+
+pub(super) fn paid_partial_handle(
+    attempts: Arc<AtomicUsize>,
+    fail_until: usize,
+    max_attempts: u32,
+    retry_after: Option<Duration>,
+) -> ProviderHandle {
+    ProviderHandle::new(
+        PaidPartialThenSuccessProvider {
+            options: ProviderOptions {
+                reliability: ProviderReliability::default()
+                    .max_attempts(max_attempts)
+                    .base_delay_ms(0)
+                    .max_delay_ms(0),
+                ..ProviderOptions::default()
+            },
+            attempts,
+            fail_until,
+            retry_after,
+        }
+        .into_components(),
+    )
+}
+
+impl PaidPartialThenSuccessProvider {
+    fn into_components(self) -> ProviderComponents {
+        ProviderComponents::new(Box::new(self))
+    }
 }
 
 #[test]
@@ -1761,7 +1880,7 @@ async fn provider_handle_throttle_with_retry_after_does_not_consume_attempts() {
 }
 
 #[tokio::test]
-async fn provider_handle_throttle_with_future_http_date_retries_for_free() {
+async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let clock = Arc::new(RecordingClock::default());
     let provider = StatusFailingProvider {
@@ -1781,13 +1900,20 @@ async fn provider_handle_throttle_with_future_http_date_retries_for_free() {
     let mut handle =
         ProviderHandle::new(provider.into_components()).with_clock(Arc::clone(&clock) as _);
 
-    let result = handle.complete(empty_request()).await;
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    let completion =
-        result.expect("valid future HTTP-date defers without consuming the only attempt");
-    assert!(clock.slept() > Duration::ZERO);
-    assert_eq!(completion.call_record.attempts.len(), 2);
-    assert!(!completion.call_record.attempts[0].retry_budget_consumed);
+    let failure = handle
+        .complete(empty_request())
+        .await
+        .expect_err("a server delay beyond the host cap must fail fast");
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(clock.slept(), Duration::ZERO);
+    assert_eq!(failure.call_record.attempts.len(), 1);
+    assert_eq!(
+        failure.call_record.attempts[0]
+            .retry_decision
+            .as_ref()
+            .and_then(|decision| decision.reason.as_deref()),
+        Some("retry_after_exceeds_cap")
+    );
 }
 
 #[tokio::test]
