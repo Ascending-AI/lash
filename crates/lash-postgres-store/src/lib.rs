@@ -252,7 +252,8 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // stores are folded forward in place.
 // Version 64 switches content and semantic identities to domain-tagged BLAKE3.
 // Existing stores are rejected rather than reinterpreting SHA-256 rows.
-const SCHEMA_VERSION: i32 = 64;
+// Version 65 indexes process update timestamps for bounded retired-process polls.
+const SCHEMA_VERSION: i32 = 65;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

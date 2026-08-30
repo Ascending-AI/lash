@@ -35,7 +35,6 @@ const LIST_PROCESSES_SQL: &str = "SELECT record_json FROM processes
             json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
        AND (?9 IS NULL OR created_at_ms >= ?9)
        AND (?10 IS NULL OR created_at_ms < ?10)
-       AND ?11 IS NULL
      ORDER BY process_id ASC";
 
 const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
@@ -999,23 +998,29 @@ impl ProcessRegistry for SqliteProcessRegistry {
                         LIST_PROCESSES_SQL
                     };
                     let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
+                    let waiting = filter.waiting.map(i64::from);
+                    let created_at_start_ms = filter.created_at_start_ms.map(crate::clamp_epoch_ms);
+                    let created_at_end_ms = filter.created_at_end_ms.map(crate::clamp_epoch_ms);
+                    let retired_since_ms = filter.retired_since_ms.map(crate::clamp_epoch_ms);
+                    let mut values: Vec<&dyn rusqlite::ToSql> = vec![
+                        &status,
+                        &waiting,
+                        &filter.originator_id,
+                        &filter.identity_kind,
+                        &filter.identity_label,
+                        &definition,
+                        &filter.caused_by_occurrence_id,
+                        &filter.caused_by_subscription_id,
+                        &created_at_start_ms,
+                        &created_at_end_ms,
+                    ];
+                    if retired_since_ms.is_some() {
+                        values.push(&retired_since_ms);
+                    }
                     let rows = stmt
-                        .query_map(
-                            params![
-                                status,
-                                filter.waiting.map(i64::from),
-                                filter.originator_id,
-                                filter.identity_kind,
-                                filter.identity_label,
-                                definition,
-                                filter.caused_by_occurrence_id,
-                                filter.caused_by_subscription_id,
-                                filter.created_at_start_ms.map(crate::clamp_epoch_ms),
-                                filter.created_at_end_ms.map(crate::clamp_epoch_ms),
-                                filter.retired_since_ms.map(crate::clamp_epoch_ms),
-                            ],
-                            |row| row.get::<_, String>(0),
-                        )
+                        .query_map(rusqlite::params_from_iter(values), |row| {
+                            row.get::<_, String>(0)
+                        })
                         .map_err(process_sqlite_error)?;
                     let mut records = Vec::new();
                     for row in rows {

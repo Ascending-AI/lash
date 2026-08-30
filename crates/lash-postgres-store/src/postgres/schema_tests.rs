@@ -1,15 +1,33 @@
 use super::*;
 
 #[test]
-fn immediate_predecessor_is_a_recreate_boundary_at_the_blake3_cutover() {
+fn immediate_predecessor_adds_the_process_updated_index() {
     let declared = SCHEMA_MIGRATIONS
         .iter()
         .find(|migration| migration.from == SCHEMA_VERSION - 1)
+        .expect("component 64 must have an explicit migration");
+
+    assert_eq!(
+        declared.introduced_relations,
+        &["idx_lash_processes_updated"]
+    );
+    assert_eq!(
+        declared.statements,
+        &[PROCESS_UPDATED_INDEX_DDL],
+        "component 64 must create the bounded-poll index while migrating to 65"
+    );
+}
+
+#[test]
+fn component_63_remains_a_recreate_boundary_at_the_blake3_cutover() {
+    let declared = SCHEMA_MIGRATIONS
+        .iter()
+        .find(|migration| migration.from == 63)
         .expect("component 63 must remain visible to the refusal gate");
 
     assert!(
         declared.is_recreate_boundary(),
-        "component 63 must not migrate SHA-256 identities into component 64"
+        "component 63 must not migrate SHA-256 identities into component 65"
     );
 }
 
@@ -35,7 +53,7 @@ fn component_61_is_a_recreate_boundary_without_its_divergence_witness() {
     );
 }
 
-/// The declared 53 -> 64 migration, which every case below perturbs.
+/// The declared 53 -> 65 migration, which every case below perturbs.
 fn migration() -> &'static SchemaMigration {
     SCHEMA_MIGRATIONS
         .iter()
@@ -86,7 +104,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
     });
     SchemaReport {
         schema: Some("public".to_string()),
-        expected_version: 64,
+        expected_version: 65,
         found_version: Some(53),
         findings,
     }
@@ -97,7 +115,7 @@ fn report(mut findings: Vec<SchemaFinding>) -> SchemaReport {
 fn published_53_findings() -> Vec<SchemaFinding> {
     vec![
         SchemaFinding::VersionMismatch {
-            expected: 64,
+            expected: 65,
             found: Some(53),
         },
         SchemaFinding::UnexpectedColumn {

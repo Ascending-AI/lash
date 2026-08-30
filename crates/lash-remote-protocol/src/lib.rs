@@ -112,7 +112,8 @@ pub use usage_activity::*;
 // Bumped to 48: every physical turn begins with a `turn_started` activity.
 // Bumped to 49: process-environment refs move to the domain-tagged BLAKE3 v4
 // identity family. Exact-version negotiation rejects SHA-256-era peers.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 49;
+// Bumped to 50: process-list filters carry a retired-process recency bound.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 50;
 
 /// One versioned remote-protocol message.
 ///

@@ -77,6 +77,9 @@ const NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL: &str = r#"CREATE INDEX idx_lash_nod
 const SESSION_STATE_VERSION_DDL: &str =
     r#"ALTER TABLE lash_session_meta ADD COLUMN session_state_version INTEGER"#;
 
+const PROCESS_UPDATED_INDEX_DDL: &str = r#"CREATE INDEX IF NOT EXISTS idx_lash_processes_updated
+    ON lash_processes(updated_at_ms)"#;
+
 /// Supports bounded operational inventory by session-state generation and gives
 /// the schema migration gate a relation-shaped witness when a component-60
 /// catalog is paired with a rewound component-59 ledger.
@@ -307,32 +310,48 @@ const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "se
 /// table and fails the build when they drift, so the drift is a local check
 /// rather than a container-gate surprise.
 const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        from: 64,
+        to: 65,
+        source_missing_tables: &[],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        introduced_relations: &["idx_lash_processes_updated"],
+        statements: &[PROCESS_UPDATED_INDEX_DDL],
+    },
     // Component 64 changes durable identity bytes from SHA-256 to BLAKE3.
     // Every valid component-63 store has the pending-observer-intents table,
     // so this refusal-only row classifies the hard cutover as divergent before
     // any source-shape matching or migration DDL can advance its stamp.
     SchemaMigration {
         from: 63,
-        to: 64,
+        to: 65,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
-        introduced_relations: &["lash_session_meta_pending_observer_intents"],
+        introduced_relations: &[
+            "lash_session_meta_pending_observer_intents",
+            "idx_lash_processes_updated",
+        ],
         statements: &[],
     },
     SchemaMigration {
         from: 62,
-        to: 64,
+        to: 65,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
-        introduced_relations: &["lash_session_meta_pending_observer_intents"],
+        introduced_relations: &[
+            "lash_session_meta_pending_observer_intents",
+            "idx_lash_processes_updated",
+        ],
         statements: &[
             PENDING_OBSERVER_INTENTS_DDL,
             FOLD_PENDING_OBSERVER_INTENTS_DDL,
             DROP_OBSERVER_INTENT_LAYERS_DDL,
             DROP_FORK_PENDING_OBSERVER_INTENTS_DDL,
             DROP_OBSERVER_INTENT_DEPTH_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     // Component 61 is the append-identity recreate-only boundary. The receipt
@@ -340,11 +359,11 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // classifies the source as divergent before source-shape preflight or DDL.
     SchemaMigration {
         from: 61,
-        to: 64,
+        to: 65,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
-        introduced_relations: &["lash_runtime_turn_commits"],
+        introduced_relations: &["lash_runtime_turn_commits", "idx_lash_processes_updated"],
         statements: &[],
     },
     // Component 61 removes graph-node `seq` and its index. The global retired-
@@ -354,39 +373,48 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // It is refusal-only: it never runs DDL or advances the stamp.
     SchemaMigration {
         from: 60,
-        to: 64,
+        to: 65,
         source_missing_tables: &[],
         source_missing_columns: &[],
         source_missing_guards: &[],
-        introduced_relations: &["idx_lash_graph_nodes_seq"],
+        introduced_relations: &["idx_lash_graph_nodes_seq", "idx_lash_processes_updated"],
         statements: &[],
     },
     SchemaMigration {
         from: 59,
-        to: 64,
+        to: 65,
         source_missing_tables: &[],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
-        introduced_relations: &["idx_lash_session_meta_state_version"],
-        statements: &[SESSION_STATE_VERSION_DDL, SESSION_STATE_VERSION_INDEX_DDL],
+        introduced_relations: &[
+            "idx_lash_session_meta_state_version",
+            "idx_lash_processes_updated",
+        ],
+        statements: &[
+            SESSION_STATE_VERSION_DDL,
+            SESSION_STATE_VERSION_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
+        ],
     },
     // Component 59 persists the cancellation request and its applied input
     // outcome together so a resumed host can recover payloads without a
     // second queue read.
     SchemaMigration {
         from: 58,
-        to: 64,
+        to: 65,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[("lash_session_meta", "session_state_version")],
         source_missing_guards: &[],
         introduced_relations: &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
             TURN_CANCEL_REQUESTS_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     // Component 58 adds nullable session-enumeration metadata and its catalog
@@ -395,7 +423,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // the documented legacy sentinel values.
     SchemaMigration {
         from: 57,
-        to: 64,
+        to: 65,
         source_missing_tables: &["lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -412,11 +440,13 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_session_meta_state_version",
             "lash_turn_cancel_requests",
             "idx_lash_session_meta_catalog",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
             SESSION_STATE_VERSION_INDEX_DDL,
             TURN_CANCEL_REQUESTS_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     // Component 57 adds the indexed manifest -> component edge projection used
@@ -424,7 +454,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // arm an indexed NOT EXISTS predicate.
     SchemaMigration {
         from: 56,
-        to: 64,
+        to: 65,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -445,6 +475,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_checkpoint_blob_refs_blob_ref",
             "idx_lash_sessions_checkpoint_ref",
             "idx_lash_node_anchors_checkpoint_ref",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
@@ -454,13 +485,14 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             CHECKPOINT_BLOB_REFS_REVERSE_INDEX_DDL,
             SESSIONS_CHECKPOINT_REF_INDEX_DDL,
             NODE_ANCHORS_CHECKPOINT_REF_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     // A component-55 store takes both later generations at once: trigger
     // occurrence reclaim eligibility from 56 and checkpoint edges from 57.
     SchemaMigration {
         from: 55,
-        to: 64,
+        to: 65,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -483,6 +515,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_sessions_checkpoint_ref",
             "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
@@ -495,6 +528,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     // The 55 generation adds one index and nothing else: the drain's
@@ -503,7 +537,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // source shape a 54 store must present is the current one.
     SchemaMigration {
         from: 54,
-        to: 64,
+        to: 65,
         source_missing_tables: &["lash_checkpoint_blob_refs", "lash_turn_cancel_requests"],
         source_missing_columns: &[
             ("lash_session_meta", "session_state_version"),
@@ -527,6 +561,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_runtime_effect_replay_group_unsettled",
             "idx_lash_trigger_occurrences_reclaimable",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
@@ -540,6 +575,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     // A 53 store takes both later generations at once: the 54 effect-group
@@ -547,7 +583,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // `lash_runtime_effect_replay`) and the 55 drain index over them.
     SchemaMigration {
         from: 53,
-        to: 64,
+        to: 65,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -581,6 +617,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_sessions_checkpoint_ref",
             "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
@@ -600,11 +637,12 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     SchemaMigration {
         from: 52,
-        to: 64,
+        to: 65,
         source_missing_tables: &[
             "lash_runtime_effect_group",
             "lash_checkpoint_blob_refs",
@@ -640,6 +678,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_sessions_checkpoint_ref",
             "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
@@ -661,11 +700,12 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     SchemaMigration {
         from: 51,
-        to: 64,
+        to: 65,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_runtime_effect_group",
@@ -703,6 +743,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_sessions_checkpoint_ref",
             "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
@@ -725,13 +766,14 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
     // Component-50 stores skipped the 51 generation entirely; they take one
     // creation-only migration that lands every later generation at once.
     SchemaMigration {
         from: 50,
-        to: 64,
+        to: 65,
         source_missing_tables: &[
             "lash_attachment_condemnations",
             "lash_process_parent_end_plans",
@@ -774,6 +816,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "idx_lash_sessions_checkpoint_ref",
             "idx_lash_node_anchors_checkpoint_ref",
             "idx_lash_trigger_occurrences_reclaimable",
+            "idx_lash_processes_updated",
         ],
         statements: &[
             SESSION_STATE_VERSION_DDL,
@@ -799,6 +842,7 @@ const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             TRIGGER_OCCURRENCE_RECLAIMABLE_AT_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_ARM_DDL,
             TRIGGER_OCCURRENCE_RECLAIMABLE_INDEX_DDL,
+            PROCESS_UPDATED_INDEX_DDL,
         ],
     },
 ];
@@ -1033,9 +1077,7 @@ async fn apply_schema_migration(
         .introduced_relations
         .iter()
         .copied()
-        .chain(std::iter::once(
-            "lash_session_meta_pending_observer_intents",
-        ))
+        .chain((migration.from < 64).then_some("lash_session_meta_pending_observer_intents"))
         .collect::<Vec<_>>();
     let mut artifacts = sqlx::query_scalar::<_, String>(
         r#"SELECT pg_catalog.format('%I.%I', namespace.nspname, class.relname)
@@ -1306,8 +1348,8 @@ impl SchemaMigration {
             && missing_columns.is_empty()
             && missing_guards.is_empty()
             && (self.from >= 62 || self.from == 60 || saw_requested_ancestor)
-            && saw_missing_pending_observer_intents
-            && saw_observer_intent_depth
+            && (self.from > 62 || saw_missing_pending_observer_intents)
+            && (self.from > 62 || saw_observer_intent_depth)
     }
 }
 

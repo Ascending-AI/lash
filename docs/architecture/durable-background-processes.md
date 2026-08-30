@@ -233,10 +233,10 @@ PostgreSQL tables. The operations runbook reset consequently clears
 
 Figments coordination is one Lash revision. SQLite durable-core schema <span data-format-version="SQLITE_SCHEMA_VERSION">45</span> includes
 the read-only session-catalog projection and keyed checkpoint-component cutover on top of the required per-turn budget and
-immutable graph-generation cutover, plus durable turn-cancel disposition and outcome records, the session-state admission marker, structural append receipt identities, one attributed pending-observer-intent table, and the domain-tagged BLAKE3 identity cutover; graph generation is the sole persisted ordering authority. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">64</span> includes those cutovers,
+immutable graph-generation cutover, plus durable turn-cancel disposition and outcome records, the session-state admission marker, structural append receipt identities, one attributed pending-observer-intent table, and the domain-tagged BLAKE3 identity cutover; graph generation is the sole persisted ordering authority. PostgreSQL schema <span data-format-version="POSTGRES_SCHEMA_VERSION">65</span> includes those cutovers,
 the indexed recovery worklist, the session-metadata payload cutover, the
 durable effect-group journal, and the loser drain's unsettled-children index
-over it, plus the same turn-cancel records, admission marker, structural append receipt identities, and attributed observer intent. The BLAKE3 generation is reject-and-recreate: SHA-256-era stores are not migrated or dual-read. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">25</span> adds atomic pending
+over it, plus the same turn-cancel records, admission marker, structural append receipt identities, attributed observer intent, and the process-updated index added by the explicit migration from version 64. The BLAKE3 generation is reject-and-recreate: SHA-256-era stores are not migrated or dual-read. Process-registry schema <span data-format-version="SQLITE_PROCESS_SCHEMA_VERSION">25</span> adds atomic pending
 process-parent teardown to the v3 process-environment reference cutover; trigger
 schema <span data-format-version="SQLITE_TRIGGER_SCHEMA_VERSION">7</span> carries durable trigger-occurrence reclaim eligibility. Effect schema <span data-format-version="SQLITE_EFFECT_SCHEMA_VERSION">14</span> carries merged exec observations alongside the
 agent-frame-key and recorded tool-intent cutovers plus the effect-group journal,
