@@ -753,7 +753,7 @@ mod tests {
                     prompt
                         .read()
                         .expect("prompt read")
-                        .contains("- `scratch_note` = after execution")
+                        .contains(r#"- `scratch_note` = "after execution""#)
                 );
             });
     }

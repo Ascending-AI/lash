@@ -44,7 +44,7 @@ pub(crate) fn projection_is_lossy(original: &str, projected: &str) -> bool {
 }
 
 pub(crate) fn bound_variable_projector() -> BudgetedJsonProjector {
-    BudgetedJsonProjector::new(BOUND_VARIABLE_PROJECTION_CONFIG)
+    BudgetedJsonProjector::new(BOUND_VARIABLE_PROJECTION_CONFIG).with_quoted_top_level_strings()
 }
 
 pub(crate) fn decode_rlm_options(
@@ -447,8 +447,9 @@ fn render_row_line(
 
 fn build_bound_variable_row(value: &FlowValue) -> BuiltRow {
     let projected = bound_variable_projector().project_blocking(ValueProjectionContext::new(value));
-    let full =
-        BudgetedJsonProjector::unbounded().project_blocking(ValueProjectionContext::new(value));
+    let full = BudgetedJsonProjector::unbounded()
+        .with_quoted_top_level_strings()
+        .project_blocking(ValueProjectionContext::new(value));
     if projected == full {
         return BuiltRow {
             inline: Some(projected),
@@ -897,6 +898,30 @@ mod bound_variable_tests {
     }
 
     #[test]
+    fn record_shaped_string_is_quoted_while_record_rendering_stays_unchanged() {
+        let mut cache = BoundVariableRenderCache::default();
+        let s = render_with_cache(
+            &mut cache,
+            json!({
+                "record": { "location": { "name": "Utrecht" } },
+                "string": "{'location': {'name': 'Utrecht'}}",
+            }),
+        );
+        let rows = s
+            .lines()
+            .filter(|line| line.starts_with("- `record`") || line.starts_with("- `string`"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rows,
+            vec![
+                r#"- `record` = {"location":{"name":"Utrecht"}}"#,
+                r#"- `string` = "{'location': {'name': 'Utrecht'}}""#,
+            ]
+        );
+    }
+
+    #[test]
     fn large_values_fall_back_to_type_and_size_hint() {
         let big: Vec<String> = (0..500).map(|i| format!("item-{i}")).collect();
         let g = globals(json!({ "big": big }));
@@ -1044,9 +1069,9 @@ mod bound_variable_tests {
             json!({ "a": "new", "b": "steady", "c": "steady" }),
         );
 
-        let a_idx = s.find("- `a` = new").expect("a row");
-        let b_idx = s.find("- `b` = steady").expect("b row");
-        let c_idx = s.find("- `c` = steady").expect("c row");
+        let a_idx = s.find(r#"- `a` = "new""#).expect("a row");
+        let b_idx = s.find(r#"- `b` = "steady""#).expect("b row");
+        let c_idx = s.find(r#"- `c` = "steady""#).expect("c row");
         assert!(a_idx < b_idx, "{s}");
         assert!(b_idx < c_idx, "{s}");
     }
@@ -1094,7 +1119,7 @@ mod bound_variable_tests {
         );
 
         let big_idx = s.find("- `big`: `list[int]`, len=41").expect("big row");
-        let steady_idx = s.find("- `steady` = same").expect("steady row");
+        let steady_idx = s.find(r#"- `steady` = "same""#).expect("steady row");
         assert!(big_idx < steady_idx, "{s}");
     }
 

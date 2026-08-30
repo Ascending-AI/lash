@@ -4954,7 +4954,7 @@ mod tests {
             );
 
             assert!(
-                rendered.contains("- `scratch_note` = after execution"),
+                rendered.contains(r#"- `scratch_note` = "after execution""#),
                 "{}",
                 rendered
             );
