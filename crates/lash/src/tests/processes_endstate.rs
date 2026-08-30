@@ -577,6 +577,130 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
 }
 
 #[tokio::test]
+async fn session_trigger_process_visibility_conformance() -> Result<()> {
+    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
+        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
+    let trigger_store: Arc<dyn lash_core::TriggerStore> =
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let registry: Arc<dyn lash_core::ProcessRegistry> =
+        Arc::new(TestLocalProcessRegistry::default());
+    let process_env_store = in_memory_process_env_store();
+    let core = process_test_core(
+        Arc::clone(&artifact_store),
+        Arc::clone(&trigger_store),
+        Arc::clone(&registry),
+        Arc::clone(&process_env_store),
+    )?;
+    let env_ref =
+        persist_process_env_ref(core.env.core.durability.process_env_store.as_ref()).await;
+    let session_id = "session-trigger-visibility";
+    let process = LinkedTestProcess::new(
+        artifact_store.as_ref(),
+        r#"
+        process main() signals { ready: any } {
+          value = wait_signal("ready")
+          finish value
+        }
+        "#,
+        "main",
+    )
+    .await;
+    let source_type = "ui.button.pressed";
+    let source_key = lash_core::facade_support::default_trigger_source_key(
+        source_type,
+        &serde_json::json!({ "button": "Blue" }),
+    );
+    let mut draft = process.trigger_draft(source_type, source_key.clone(), env_ref);
+    draft.subscription_key = "session-trigger-visibility".to_string();
+    draft.name = Some("session trigger visibility".to_string());
+    trigger_store
+        .execute_command(
+            "session-trigger-visibility-register",
+            lash_core::TriggerCommand::Register {
+                owner_scope: lash_core::TriggerOwnerScope::session(session_id),
+                actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                    session_id,
+                )),
+                draft,
+            },
+        )
+        .await?
+        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+
+    let report = core
+        .triggers()
+        .emit(
+            lash_core::TriggerOccurrenceRequest::new(
+                source_type,
+                source_key,
+                serde_json::json!({ "button": "Blue" }),
+                "session-trigger-visibility-occurrence",
+            )
+            .with_source(serde_json::json!({ "button": "Blue" })),
+            runtime_operation_scope(&core, "session-trigger-visibility-emit"),
+        )
+        .await?;
+    let started_process_ids = report.started_process_ids();
+    assert_eq!(started_process_ids.len(), 1);
+    let process_id = &started_process_ids[0];
+    wait_for_waiting_signal(&core, process_id, "ready").await;
+    core.processes()
+        .signal(
+            process_id,
+            "ready",
+            "session-trigger-visibility-signal",
+            signal_request(
+                process_id,
+                "ready",
+                "session-trigger-visibility-signal",
+                serde_json::json!({ "delivered": true }),
+            ),
+            runtime_operation_scope(&core, "session-trigger-visibility-signal"),
+        )
+        .await?;
+    let output = core.processes().await_output(process_id).await?;
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
+        panic!("session trigger process did not succeed: {output:#?}");
+    };
+    assert_eq!(
+        value.to_json_value(),
+        serde_json::json!({ "delivered": true })
+    );
+    let events = registry.events_after(process_id, 0).await?;
+
+    let session = core.session(session_id).open().await?;
+    let observed = session.processes().list_all().await?;
+    let process = observed
+        .iter()
+        .find(|process| process.process_id == *process_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "the registering session must observe trigger delivery {process_id}; observed={observed:?}"
+            )
+        });
+    assert_eq!(process.lifecycle, lash_core::ProcessStatus::Completed);
+    let observers = registry.observers_for_process(process_id).await?;
+    assert!(
+        observers.iter().any(|observer| observer == session_id),
+        "completed trigger delivery must retain the registering session edge; observers={observers:?}"
+    );
+    let first_started = events
+        .iter()
+        .position(|event| event.event_type == "process.first_started")
+        .unwrap_or_else(|| panic!("missing process.first_started: {events:?}"));
+    let completed = events
+        .iter()
+        .position(|event| event.event_type == "process.completed")
+        .unwrap_or_else(|| panic!("missing process.completed: {events:?}"));
+    assert!(
+        first_started < completed,
+        "process.first_started must precede process.completed: {events:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> Result<()> {
     let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
         Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
