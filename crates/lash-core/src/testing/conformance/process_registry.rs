@@ -2,7 +2,10 @@
 
 use super::process_change_feed::process_change_feed_never_misses_concurrent_terminal_writers;
 use super::process_event_append_arms::process_event_append_arms_are_ordered;
-use super::process_filters::list_processes_filters_by_enriched_fields;
+use super::process_filters::{
+    list_processes_bounds_retired_rows_without_hiding_live_rows,
+    list_processes_filters_by_enriched_fields,
+};
 use super::process_references::{
     ProcessCountConservation, assert_process_count_conservation,
     live_reference_summary_tracks_non_terminal_reference_counts,
@@ -10,12 +13,12 @@ use super::process_references::{
 use super::*;
 use crate::{ProcessRecord, TestProcessRegistryWriteExt};
 
-// The shared registry fixture performs 54 successful registrations and six
-// prunes; the cold refold fixture below adds the 55th registration. Three of
+// The shared registry fixture leaves 57 modeled registrations after its
+// compaction probes; the cold refold fixture below adds the 58th. Three of
 // those registrations and two of those prunes come from the append-arm
 // contract, whose two completed rows are terminal and prune-eligible by the
 // time retention runs.
-const REOPEN_BASELINE_SPAWNS: usize = 55;
+const REOPEN_BASELINE_SPAWNS: usize = 58;
 const REOPEN_BASELINE_PRUNED: usize = 6;
 
 fn settled_success(value: serde_json::Value) -> ProcessAwaitOutput {
@@ -398,8 +401,10 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     waiting_processes_remain_in_the_recovery_worklist(Arc::clone(&registry)).await;
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     list_processes_filters_by_enriched_fields(Arc::clone(&registry)).await;
+    list_processes_bounds_retired_rows_without_hiding_live_rows(Arc::clone(&registry)).await;
     process_change_feed_never_misses_concurrent_terminal_writers(Arc::clone(&registry)).await;
     process_lease_fencing_contract(Arc::clone(&registry)).await;
+    process_lease_batch_read_matches_point_reads(Arc::clone(&registry)).await;
     session_delete_preserves_process_bytes(Arc::clone(&registry)).await;
     refolded_process_record_matches_stored_projection(
         Arc::clone(&registry),
@@ -414,6 +419,63 @@ async fn process_registry_conformance(registry: Arc<dyn ProcessRegistry>) {
     caller_departure_state_machine(Arc::clone(&registry)).await;
     caller_departed_rows_are_reclaimed_by_retention(Arc::clone(&registry)).await;
     terminal_completion_atomically_retains_parent_end_plan(registry).await;
+}
+
+async fn process_lease_batch_read_matches_point_reads(registry: Arc<dyn ProcessRegistry>) {
+    let process_ids = [
+        "lease-batch-leased".to_string(),
+        "lease-batch-unleased".to_string(),
+        "lease-batch-terminal".to_string(),
+    ];
+    for process_id in &process_ids {
+        registry
+            .register_process(registration(process_id))
+            .await
+            .expect("register batch lease-read fixture");
+    }
+    registry
+        .claim_process_lease(
+            &process_ids[0],
+            &process_lease_owner("lease-batch-owner"),
+            60_000,
+        )
+        .await
+        .expect("claim batch lease-read fixture")
+        .acquired()
+        .expect("batch lease-read fixture acquired");
+    registry
+        .complete_process(
+            &process_ids[2],
+            settled_success(serde_json::json!({"terminal": true})),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete terminal batch lease-read fixture");
+
+    let batched = registry
+        .get_process_leases(&process_ids)
+        .await
+        .expect("batch read process leases");
+    let mut point = Vec::with_capacity(process_ids.len());
+    for process_id in &process_ids {
+        point.push(
+            registry
+                .get_process_lease(process_id)
+                .await
+                .expect("point read process lease"),
+        );
+    }
+    assert_eq!(batched.len(), 3, "batch reads preserve input cardinality");
+    assert_eq!(
+        batched.iter().filter(|lease| lease.is_some()).count(),
+        1,
+        "only the leased process carries lease evidence"
+    );
+    assert_eq!(
+        serde_json::to_value(&batched).expect("serialize batch leases"),
+        serde_json::to_value(&point).expect("serialize point leases"),
+        "batched lease reads must equal aligned point reads"
+    );
 }
 
 /// Lifecycle refusals come from the shared process-event fold, so every
@@ -1885,6 +1947,7 @@ async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessR
             caused_by_subscription_id: Some("indexed-subscription-target".to_string()),
             created_at_start_ms: Some(record.created_at_ms),
             created_at_end_ms: Some(record.created_at_ms.saturating_add(1)),
+            retired_since_ms: None,
         })
         .await
         .expect("list with all filters");
@@ -1966,10 +2029,17 @@ async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn Proc
         )
         .await
         .expect("create terminal process");
-    let (_, projection_cursor) = registry
-        .processes_changed_since(crate::ProcessChangeCursor::initial(), 100)
-        .await
-        .expect("project terminal row before pruning");
+    let mut projection_cursor = crate::ProcessChangeCursor::initial();
+    loop {
+        let (changes, next_cursor) = registry
+            .processes_changed_since(projection_cursor, 100)
+            .await
+            .expect("project terminal row before pruning");
+        projection_cursor = next_cursor;
+        if changes.is_empty() {
+            break;
+        }
+    }
     tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     let prune_cutoff = terminal.updated_at_ms.saturating_add(1);
     registry

@@ -1374,6 +1374,10 @@ pub struct ProcessListFilter {
     /// Exclusive upper bound for `created_at_ms`; paired with
     /// `created_at_start_ms` this is a half-open `[start, end)` range.
     pub created_at_end_ms: Option<u64>,
+    /// Inclusive lower bound for `updated_at_ms` on retired rows. Live rows
+    /// remain eligible regardless of age, so `status: Any` answers a bounded
+    /// "live plus recently retired" poll in one store query.
+    pub retired_since_ms: Option<u64>,
 }
 
 impl ProcessListFilter {
@@ -1394,7 +1398,8 @@ impl ProcessListFilter {
                 | "caused_by_occurrence_id"
                 | "caused_by_subscription_id"
                 | "created_at_start_ms"
-                | "created_at_end_ms" => {}
+                | "created_at_end_ms"
+                | "retired_since_ms" => {}
                 _ => return Err(format!("processes.list unknown filter `{key}`")),
             }
         }
@@ -1416,6 +1421,7 @@ impl ProcessListFilter {
         let caused_by_subscription_id = optional_string_filter(args, "caused_by_subscription_id")?;
         let created_at_start_ms = optional_u64_filter(args, "created_at_start_ms")?;
         let created_at_end_ms = optional_u64_filter(args, "created_at_end_ms")?;
+        let retired_since_ms = optional_u64_filter(args, "retired_since_ms")?;
         Ok(Self {
             definition,
             status,
@@ -1427,6 +1433,7 @@ impl ProcessListFilter {
             caused_by_subscription_id,
             created_at_start_ms,
             created_at_end_ms,
+            retired_since_ms,
         })
     }
 
@@ -1437,7 +1444,9 @@ impl ProcessListFilter {
     }
 
     /// Applies every populated process filter conjunctively for store and conformance implementors;
-    /// the creation-time bounds form a half-open `[start, end)` range.
+    /// the creation-time bounds form a half-open `[start, end)` range, while
+    /// `retired_since_ms` preserves every live row and bounds retired rows by
+    /// their inclusive update timestamp.
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
         self.status.matches(record.status)
             && self
@@ -1475,6 +1484,9 @@ impl ProcessListFilter {
             && self
                 .created_at_end_ms
                 .is_none_or(|end_ms| record.created_at_ms < end_ms)
+            && self.retired_since_ms.is_none_or(|since_ms| {
+                !record.status.is_retired() || record.updated_at_ms >= since_ms
+            })
     }
 }
 

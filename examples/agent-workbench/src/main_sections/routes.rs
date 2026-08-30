@@ -903,10 +903,13 @@ async fn list_work(
             .map_err(AppError::internal)?
             .items
     } else {
+        let retired_since_ms = lash::runtime::Clock::timestamp_ms(&lash::runtime::SystemClock)
+            .saturating_sub(10_000);
         state
             .process_observer
             .snapshot_all(&lash::process::ProcessListFilter {
                 status: lash::process::ProcessStatusFilter::Any,
+                retired_since_ms: Some(retired_since_ms),
                 ..lash::process::ProcessListFilter::default()
             })
             .await

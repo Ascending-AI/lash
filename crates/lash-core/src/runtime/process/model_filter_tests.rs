@@ -132,3 +132,29 @@ fn process_list_filter_matches_enriched_facets() {
             .contains("must be an integer")
     );
 }
+
+#[test]
+fn process_list_filter_keeps_live_rows_and_bounds_retired_rows() {
+    let filter = ProcessListFilter::decode(&json!({
+        "status": "any",
+        "retired_since_ms": 100
+    }))
+    .expect("decode recently retired filter");
+
+    let mut old_live = record("old-live", "live", 1);
+    old_live.updated_at_ms = 1;
+    let mut fresh_terminal = record("fresh-terminal", "fresh", 1);
+    fresh_terminal.status = ProcessStatus::Completed;
+    fresh_terminal.updated_at_ms = 100;
+    let mut old_terminal = record("old-terminal", "old", 1);
+    old_terminal.status = ProcessStatus::Completed;
+    old_terminal.updated_at_ms = 99;
+    let mut old_caller_departed = record("old-caller-departed", "departed", 1);
+    old_caller_departed.status = ProcessStatus::CallerDeparted;
+    old_caller_departed.updated_at_ms = 99;
+
+    assert!(filter.matches_record(&old_live));
+    assert!(filter.matches_record(&fresh_terminal));
+    assert!(!filter.matches_record(&old_terminal));
+    assert!(!filter.matches_record(&old_caller_departed));
+}

@@ -773,6 +773,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         caused_by_subscription_id: Some("subscription-1".to_string()),
         created_at_start_ms: Some(10),
         created_at_end_ms: Some(20),
+        retired_since_ms: Some(15),
     };
     let remote = RemoteProcessListFilter::from(filter.clone());
     remote.validate().expect("valid list filter");
@@ -789,6 +790,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     );
     assert_eq!(core.created_at_start_ms, filter.created_at_start_ms);
     assert_eq!(core.created_at_end_ms, filter.created_at_end_ms);
+    assert_eq!(core.retired_since_ms, filter.retired_since_ms);
     assert!(core.definition.is_some());
 
     let cancel = RemoteProcessCancelRequest {

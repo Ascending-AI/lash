@@ -16,7 +16,9 @@ use lash_core::testing::conformance::{
 };
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
-    ProcessExecutionEnvStore, ProcessRegistry, Resolution, ResolveOutcome, RuntimeEffectCommand,
+    ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity, ProcessInput,
+    ProcessListFilter, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    ProcessStatusFilter, RecoveryContract, Resolution, ResolveOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimePersistence, SessionCommitStore, SessionStoreFactory, TriggerStore,
@@ -790,6 +792,82 @@ async fn sqlite_process_registry_pagination_satisfies_conformance() {
         .expect("open pagination registry"),
     ) as Arc<dyn ProcessRegistry>;
     lash_core::testing::conformance::process_registry_pagination(registry).await;
+}
+
+#[tokio::test]
+async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
+    let dir = tempfile::tempdir().expect("recently retired pushdown tempdir");
+    let path = dir.path().join("processes.db");
+    let registry = SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
+        .await
+        .expect("open recently retired pushdown registry");
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                "recent-pushdown",
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryContract::ExternallyOwned,
+                ProcessProvenance::host(),
+            )
+            .with_identity(ProcessIdentity::new("recent-pushdown-kind")),
+        )
+        .await
+        .expect("register recently retired pushdown fixture");
+    let terminal = registry
+        .complete_process(
+            "recent-pushdown",
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({}),
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete recently retired pushdown fixture");
+    let terminal = match terminal {
+        lash_core::ProcessCompletionOutcome::Committed(record)
+        | lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record }
+        | lash_core::ProcessCompletionOutcome::Superseded { stored: record } => record,
+    };
+
+    let conn = rusqlite::Connection::open(&path).expect("open pushdown corruption connection");
+    assert_eq!(
+        conn.execute(
+            "UPDATE processes SET updated_at_ms = 0 WHERE process_id = ?1",
+            rusqlite::params![terminal.id],
+        )
+        .expect("age only the extracted process timestamp"),
+        1
+    );
+    drop(conn);
+
+    let bounded = registry
+        .list_processes(&ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            identity_kind: Some("recent-pushdown-kind".to_string()),
+            retired_since_ms: Some(terminal.updated_at_ms),
+            ..ProcessListFilter::default()
+        })
+        .await
+        .expect("list bounded recently retired rows");
+    assert!(
+        bounded.is_empty(),
+        "the SQL WHERE must reject the extracted old timestamp before JSON decode"
+    );
+    assert_eq!(
+        registry
+            .list_processes(&ProcessListFilter {
+                status: ProcessStatusFilter::Any,
+                identity_kind: Some("recent-pushdown-kind".to_string()),
+                ..ProcessListFilter::default()
+            })
+            .await
+            .expect("list unbounded pushdown fixture")
+            .len(),
+        1,
+        "the unbounded list still returns the retained row"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

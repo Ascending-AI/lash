@@ -9,7 +9,7 @@ use super::events::{
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
+    ProcessExternalRef, ProcessId, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
     ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
     ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted, SessionId, WaitState,
 };
@@ -1125,6 +1125,23 @@ pub trait ProcessRegistry: Send + Sync {
         &self,
         process_id: &str,
     ) -> Result<Option<ProcessLease>, PluginError>;
+
+    /// Read current lease rows for `process_ids` in input order.
+    ///
+    /// The result has exactly one entry per input id; unknown, unleased, and
+    /// released processes produce `None`. Durable registries override this
+    /// method with one backend query so observation polls do not serialize one
+    /// read per process.
+    async fn get_process_leases(
+        &self,
+        process_ids: &[ProcessId],
+    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
+        let mut leases = Vec::with_capacity(process_ids.len());
+        for process_id in process_ids {
+            leases.push(self.get_process_lease(process_id).await?);
+        }
+        Ok(leases)
+    }
 
     /// Release a lease the caller owns, fenced by the completion's
     /// `(process_id, lease_token)`.

@@ -14,10 +14,10 @@ use super::events::{
 };
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
-    ProcessLeaseCompletion, ProcessListFilter, ProcessObserverBy, ProcessRecord,
-    ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
-    ProcessTombstone, SessionId, WaitState,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessId, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessObserverBy,
+    ProcessRecord, ProcessRegistration, ProcessSessionDeleteReport, ProcessStartOutcome,
+    ProcessStarted, ProcessTombstone, SessionId, WaitState,
 };
 use super::references::ProcessLiveReferenceView;
 use super::registry::{ProcessPruneReport, ProcessRegistry, ProjectionWatermark};
@@ -1399,7 +1399,25 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         &self,
         process_id: &str,
     ) -> Result<Option<ProcessLease>, PluginError> {
+        *self.process_lease_point_reads.lock().await += 1;
         leases::get_process_lease(self, process_id).await
+    }
+
+    async fn get_process_leases(
+        &self,
+        process_ids: &[ProcessId],
+    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
+        *self.process_lease_batch_reads.lock().await += 1;
+        let leases = self.leases.lock().await;
+        Ok(process_ids
+            .iter()
+            .map(|process_id| {
+                leases
+                    .get(process_id)
+                    .filter(|lease| !lease.lease_token.is_empty())
+                    .cloned()
+            })
+            .collect())
     }
 
     async fn complete_process_lease(

@@ -2498,8 +2498,8 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        total, 1,
-        "expected exactly one status-list literal site in the PostgreSQL backend; \
+        total, 2,
+        "expected exactly two status-list literal sites in the PostgreSQL backend; \
          update this count when adding one"
     );
 }

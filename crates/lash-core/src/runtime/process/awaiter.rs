@@ -605,6 +605,13 @@ impl ProcessRegistry for WatchedProcessRegistry {
         self.inner.get_process_lease(process_id).await
     }
 
+    async fn get_process_leases(
+        &self,
+        process_ids: &[super::ProcessId],
+    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
+        self.inner.get_process_leases(process_ids).await
+    }
+
     async fn complete_process_lease(
         &self,
         completion: &ProcessLeaseCompletion,

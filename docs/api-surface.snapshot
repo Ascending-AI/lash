@@ -4804,6 +4804,7 @@ lash::process::ProcessListFilter::identity_label
 lash::process::ProcessListFilter::list_mode
 lash::process::ProcessListFilter::matches_record
 lash::process::ProcessListFilter::originator_id
+lash::process::ProcessListFilter::retired_since_ms
 lash::process::ProcessListFilter::status
 lash::process::ProcessListFilter::waiting
 lash::process::ProcessListMode
@@ -4919,6 +4920,7 @@ lash::process::ProcessRegistry::filter_unregistered_process_ids
 lash::process::ProcessRegistry::get_pending_parent_end_plan
 lash::process::ProcessRegistry::get_process
 lash::process::ProcessRegistry::get_process_lease
+lash::process::ProcessRegistry::get_process_leases
 lash::process::ProcessRegistry::is_observer
 lash::process::ProcessRegistry::list_live_observed_by
 lash::process::ProcessRegistry::list_non_terminal_page
@@ -6233,6 +6235,7 @@ lash::remote::processes::RemoteProcessListFilter::definition
 lash::remote::processes::RemoteProcessListFilter::identity_kind
 lash::remote::processes::RemoteProcessListFilter::identity_label
 lash::remote::processes::RemoteProcessListFilter::originator_id
+lash::remote::processes::RemoteProcessListFilter::retired_since_ms
 lash::remote::processes::RemoteProcessListFilter::status
 lash::remote::processes::RemoteProcessListFilter::validate
 lash::remote::processes::RemoteProcessListFilter::waiting

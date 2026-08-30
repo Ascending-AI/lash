@@ -316,6 +316,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_waiting
     ON lash_processes(is_waiting);
 CREATE INDEX IF NOT EXISTS idx_lash_processes_created
     ON lash_processes(created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_lash_processes_updated
+    ON lash_processes(updated_at_ms);
 CREATE INDEX IF NOT EXISTS idx_lash_processes_wake_session
     ON lash_processes(wake_session_id);
 

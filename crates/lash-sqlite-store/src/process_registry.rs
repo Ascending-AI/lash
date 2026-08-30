@@ -3,6 +3,8 @@ use lash_core::facade_support;
 #[path = "process_registry/continuation_store.rs"]
 mod continuation_store;
 mod leases;
+#[cfg(test)]
+mod list_tests;
 #[path = "process_registry/parent_end.rs"]
 mod parent_end;
 mod segment_handover;
@@ -15,6 +17,68 @@ mod worklist;
 pub(crate) use support::{ProcessEventAppendArm, ProcessEventWriteAuthorization, tx_outcome};
 use support::{process_status_label, wake_allocation_floor_for_testing};
 use wake_delivery::{load_wake_delivery_conn, update_wake_delivery_state, wake_delivery_report};
+
+const LIST_PROCESSES_SQL: &str = "SELECT record_json FROM processes
+     WHERE (?1 IS NULL OR status = ?1)
+       AND (?2 IS NULL OR is_waiting = ?2)
+       AND (?3 IS NULL OR originator_id = ?3)
+       AND (?4 IS NULL OR identity_kind = ?4)
+       AND (?5 IS NULL OR identity_label = ?5)
+       AND (?6 IS NULL OR
+            (json_type(record_json, '$.identity.definition') IS NOT NULL
+             AND json_type(record_json, '$.identity.definition') = json_type(?6, '$')
+             AND (json_type(?6, '$') IN ('null', 'true', 'false')
+                  OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?6))))
+       AND (?7 IS NULL OR
+            json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
+       AND (?8 IS NULL OR
+            json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
+       AND (?9 IS NULL OR created_at_ms >= ?9)
+       AND (?10 IS NULL OR created_at_ms < ?10)
+       AND ?11 IS NULL
+     ORDER BY process_id ASC";
+
+const LIST_PROCESSES_RECENT_RETIRED_SQL: &str =
+    "SELECT record_json FROM (
+         SELECT process_id, record_json FROM processes
+         WHERE status IN ('running', 'waiting')
+           AND (?1 IS NULL OR status = ?1)
+           AND (?2 IS NULL OR is_waiting = ?2)
+           AND (?3 IS NULL OR originator_id = ?3)
+           AND (?4 IS NULL OR identity_kind = ?4)
+           AND (?5 IS NULL OR identity_label = ?5)
+           AND (?6 IS NULL OR
+                (json_type(record_json, '$.identity.definition') IS NOT NULL
+                 AND json_type(record_json, '$.identity.definition') = json_type(?6, '$')
+                 AND (json_type(?6, '$') IN ('null', 'true', 'false')
+                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?6))))
+           AND (?7 IS NULL OR
+                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
+           AND (?8 IS NULL OR
+                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
+           AND (?9 IS NULL OR created_at_ms >= ?9)
+           AND (?10 IS NULL OR created_at_ms < ?10)
+         UNION ALL
+         SELECT process_id, record_json FROM processes
+         WHERE status NOT IN ('running', 'waiting')
+           AND updated_at_ms >= ?11
+           AND (?1 IS NULL OR status = ?1)
+           AND (?2 IS NULL OR is_waiting = ?2)
+           AND (?3 IS NULL OR originator_id = ?3)
+           AND (?4 IS NULL OR identity_kind = ?4)
+           AND (?5 IS NULL OR identity_label = ?5)
+           AND (?6 IS NULL OR
+                (json_type(record_json, '$.identity.definition') IS NOT NULL
+                 AND json_type(record_json, '$.identity.definition') = json_type(?6, '$')
+                 AND (json_type(?6, '$') IN ('null', 'true', 'false')
+                      OR json_quote(json_extract(record_json, '$.identity.definition')) IS json(?6))))
+           AND (?7 IS NULL OR
+                json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
+           AND (?8 IS NULL OR
+                json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
+           AND (?9 IS NULL OR created_at_ms >= ?9)
+           AND (?10 IS NULL OR created_at_ms < ?10)
+     ) ORDER BY process_id ASC";
 
 #[async_trait::async_trait]
 impl ProcessRegistry for SqliteProcessRegistry {
@@ -929,34 +993,12 @@ impl ProcessRegistry for SqliteProcessRegistry {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT record_json FROM processes
-                             WHERE (?1 IS NULL OR status = ?1)
-                               AND (?2 IS NULL OR is_waiting = ?2)
-                               AND (?3 IS NULL OR originator_id = ?3)
-                               AND (?4 IS NULL OR identity_kind = ?4)
-                               AND (?5 IS NULL OR identity_label = ?5)
-                               AND (?6 IS NULL OR
-                                    (json_type(record_json, '$.identity.definition') IS NOT NULL
-                                     AND json_type(
-                                             record_json, '$.identity.definition'
-                                         ) = json_type(?6, '$')
-                                     AND (
-                                         json_type(?6, '$') IN ('null', 'true', 'false')
-                                         OR json_quote(json_extract(
-                                             record_json, '$.identity.definition'
-                                         )) IS json(?6)
-                                     )))
-                               AND (?7 IS NULL OR
-                                    json_extract(record_json, '$.provenance.caused_by.occurrence_id') = ?7)
-                               AND (?8 IS NULL OR
-                                    json_extract(record_json, '$.provenance.caused_by.subscription_id') = ?8)
-                               AND (?9 IS NULL OR created_at_ms >= ?9)
-                               AND (?10 IS NULL OR created_at_ms < ?10)
-                             ORDER BY process_id ASC",
-                        )
-                        .map_err(process_sqlite_error)?;
+                    let sql = if filter.retired_since_ms.is_some() {
+                        LIST_PROCESSES_RECENT_RETIRED_SQL
+                    } else {
+                        LIST_PROCESSES_SQL
+                    };
+                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(
                             params![
@@ -970,6 +1012,7 @@ impl ProcessRegistry for SqliteProcessRegistry {
                                 filter.caused_by_subscription_id,
                                 filter.created_at_start_ms.map(crate::clamp_epoch_ms),
                                 filter.created_at_end_ms.map(crate::clamp_epoch_ms),
+                                filter.retired_since_ms.map(crate::clamp_epoch_ms),
                             ],
                             |row| row.get::<_, String>(0),
                         )
@@ -1385,6 +1428,13 @@ impl ProcessRegistry for SqliteProcessRegistry {
         process_id: &str,
     ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
         leases::get_process_lease(self, process_id).await
+    }
+
+    async fn get_process_leases(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<Option<ProcessLease>>, lash_core::PluginError> {
+        leases::get_process_leases(self, process_ids).await
     }
 
     async fn complete_process_lease(
