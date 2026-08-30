@@ -9,6 +9,7 @@ use controller_doubles::{SerialOnlyEffectController, WrongOutcomeEffectControlle
 mod fig1127;
 mod fig1416;
 mod fig1535;
+mod response_settlement;
 #[derive(Clone, Debug)]
 struct EffectControllerRecord {
     kind: RuntimeEffectKind,
@@ -37,8 +38,11 @@ pub(super) struct RecordingEffectController {
     engine_paced_lane: bool,
     replay_by_key: bool,
     execute_llm_locally: bool,
+    execute_code_locally: bool,
+    fail_exec_after_local: Arc<std::sync::atomic::AtomicBool>,
     cancel_watch: CancelWatchBehavior,
     fail_next_tool_parent_end: Arc<std::sync::atomic::AtomicBool>,
+    fail_failure_disposition: Arc<std::sync::atomic::AtomicBool>,
     /// Model a host crash in the window between the journaled raw provider
     /// completion (phase 1) and hook post-processing (phase 2).
     crash_before_first_response_hooks: bool,
@@ -83,12 +87,26 @@ impl RecordingEffectController {
         self
     }
 
+    pub(super) fn with_local_code_execution(mut self) -> Self {
+        self.execute_code_locally = true;
+        self
+    }
+
+    pub(super) fn with_failing_exec_handoff_once(self) -> Self {
+        self.fail_exec_after_local.store(true, Ordering::SeqCst);
+        self
+    }
+
     pub(super) fn with_always_failing_cancel_watch(mut self) -> Self {
         self.cancel_watch = CancelWatchBehavior::AlwaysError {
             attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             exhausted: Arc::new(tokio::sync::Notify::new()),
         };
         self
+    }
+
+    pub(super) fn fail_failure_disposition(&self) {
+        self.fail_failure_disposition.store(true, Ordering::SeqCst);
     }
 
     pub(super) fn cancel_watch_attempts(&self) -> usize {
@@ -273,6 +291,12 @@ impl RuntimeEffectController for RecordingEffectController {
         &self,
         _code: crate::RuntimeErrorCode,
     ) -> Result<crate::RuntimeEffectFailureDisposition, RuntimeError> {
+        if self.fail_failure_disposition.load(Ordering::SeqCst) {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
+                "injected runtime-effect failure-disposition error",
+            ));
+        }
         Ok(if self.controller_owned_replay {
             crate::RuntimeEffectFailureDisposition::AbortInvocation
         } else {
@@ -459,6 +483,21 @@ impl RuntimeEffectController for RecordingEffectController {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await
+            }
+            RuntimeEffectCommand::ExecCode { language, code } if self.execute_code_locally => {
+                let outcome = local_executor
+                    .execute(RuntimeEffectEnvelope::new(
+                        envelope.invocation,
+                        RuntimeEffectCommand::ExecCode { language, code },
+                    ))
+                    .await;
+                if self.fail_exec_after_local.swap(false, Ordering::SeqCst) {
+                    return Err(RuntimeEffectControllerError::foreign(
+                        "injected_exec_handoff_failure",
+                        "injected code-effect response handoff failure",
+                    ));
+                }
+                outcome
             }
             RuntimeEffectCommand::ExecCode { .. } => Ok(RuntimeEffectOutcome::ExecCode {
                 result: Box::new(Ok(crate::ExecResponse {
@@ -1802,7 +1841,7 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
     };
     let plugin_session =
         crate::PluginHost::new(vec![Arc::new(EffectControllerTestProtocolFactory {
-            install_code_executor: true,
+            code_executor: Some(Arc::new(EffectControllerTestCodeExecutor)),
         })])
         .build_session("root")
         .expect("plugins");
@@ -1853,7 +1892,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
     };
     let plugin_session =
         crate::PluginHost::new(vec![Arc::new(EffectControllerTestProtocolFactory {
-            install_code_executor: false,
+            code_executor: None,
         })])
         .build_session("root")
         .expect("plugins");

@@ -142,6 +142,10 @@ impl<'run> HostBridge<'run> {
         }
     }
 
+    pub(super) fn cancellation_observed(&self) -> bool {
+        self.ctx.is_cancelled()
+    }
+
     fn resource_tool_call_id(
         &self,
         host_operation: &str,
@@ -1038,6 +1042,10 @@ impl ExecutionHost for HostBridge<'_> {
 
     async fn yield_now(&self) {
         tokio::task::yield_now().await;
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.ctx.is_cancelled()
     }
 
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {

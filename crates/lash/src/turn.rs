@@ -199,6 +199,7 @@ impl TurnBuilder {
     pub fn cancel(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
         self.cancel_origin_hint = TurnCancelOriginHint::default();
+        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, None);
         self
     }
 
@@ -208,7 +209,7 @@ impl TurnBuilder {
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
         self.cancel = cancel;
         self.cancel_origin_hint = TurnCancelOriginHint::default();
-        self.cancel_origin_hint.set(origin);
+        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, origin);
         self
     }
 
@@ -705,6 +706,7 @@ impl QueuedTurnBuilder {
     pub fn cancel(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
         self.cancel_origin_hint = TurnCancelOriginHint::default();
+        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, None);
         self
     }
 
@@ -714,7 +716,7 @@ impl QueuedTurnBuilder {
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
         self.cancel = cancel;
         self.cancel_origin_hint = TurnCancelOriginHint::default();
-        self.cancel_origin_hint.set(origin);
+        lash_core::facade_support::configure_local_turn_token(&self.cancel_origin_hint, origin);
         self
     }
 

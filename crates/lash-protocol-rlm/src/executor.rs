@@ -261,12 +261,20 @@ async fn execute_code_inner(
     source_dialect: SourceDialect,
 ) -> ExecResponse {
     state.mark_execution_started();
+    let execution_checkpoint = state.execution_checkpoint();
+    state.begin_code_execution(execution_checkpoint);
     select_deferred_resolution_link(state, &ctx);
     let mut host_environment = match lashlang_surface.host_environment(ctx.tool_catalog().as_ref())
     {
         Ok(host_environment) => host_environment,
         Err(err) => {
-            return exec_setup_failure(format!("invalid Lashlang host tool surface: {err}"), start);
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                format!("invalid Lashlang host tool surface: {err}"),
+                start,
+                Vec::new(),
+            );
         }
     };
 
@@ -378,7 +386,7 @@ async fn execute_code_inner(
         Ok(program) => program,
         Err((kind, error)) => {
             let error = kind.label(error);
-            return exec_setup_failure(error, start);
+            return exec_setup_failure_or_stop(state, &ctx, error, start, Vec::new());
         }
     };
     let linked_module = cached_program.linked_module();
@@ -394,9 +402,12 @@ async fn execute_code_inner(
                 .await
         };
         if let Err(err) = stored {
-            return exec_setup_failure(
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
                 format!("failed to store lashlang module artifact: {err}"),
                 start,
+                Vec::new(),
             );
         }
         state
@@ -406,9 +417,12 @@ async fn execute_code_inner(
     let owner_namespace = match ctx.trigger_owner_scope() {
         Ok(owner_scope) => owner_scope.namespace(),
         Err(err) => {
-            return exec_setup_failure(
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
                 format!("failed to resolve trigger owner namespace: {err}"),
                 start,
+                Vec::new(),
             );
         }
     };
@@ -418,9 +432,12 @@ async fn execute_code_inner(
     let manifest_replacement = match manifest_replacement {
         Ok(replacement) => replacement,
         Err(err) => {
-            return exec_setup_failure(
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
                 format!("failed to replace current trigger key manifest: {err}"),
                 start,
+                Vec::new(),
             );
         }
     };
@@ -445,7 +462,9 @@ async fn execute_code_inner(
     };
     let degraded_bindings = match rehydrated {
         Ok(rehydrated) => rehydrated.degraded_bindings,
-        Err(err) => return exec_setup_failure(err, start),
+        Err(err) => {
+            return exec_setup_failure_or_stop(state, &ctx, err, start, Vec::new());
+        }
     };
 
     let projected = {
@@ -453,7 +472,7 @@ async fn execute_code_inner(
         match projected_bindings(&ctx, session_projected_bindings, projection_resolver).await {
             Ok(projected) => projected,
             Err(err) => {
-                return exec_setup_failure_with_degraded(err, start, degraded_bindings);
+                return exec_setup_failure_or_stop(state, &ctx, err, start, degraded_bindings);
             }
         }
     };
@@ -516,6 +535,18 @@ async fn execute_code_inner(
     let terminal_finish = match result {
         Ok(ExecutionOutcome::Finished(value)) => Some(flow_to_json_value(&value).await),
         Ok(ExecutionOutcome::Continued) => None,
+        Ok(ExecutionOutcome::Failed(value)) if host.cancellation_observed() => {
+            state.cancel_code_execution();
+            return exec_response_from(
+                host.into_collected(),
+                Some(crate::feedback::RlmFeedbackKind::Stop.label(format!(
+                    "foreground execution stopped while returning failure: {value}"
+                ))),
+                None,
+                start,
+                degraded_bindings.clone(),
+            );
+        }
         Ok(ExecutionOutcome::Failed(value)) => {
             return exec_response_from(
                 host.into_collected(),
@@ -535,15 +566,11 @@ async fn execute_code_inner(
                     || !error.is_execution_bound_exhausted(),
                 "confidence execution exhausted a required Lashlang bound: {error}"
             );
-            // An exhausted execution bound is the runtime declining to keep
-            // going, and no amount of debugging the program changes that; every
-            // other runtime error is the program's own.
-            let kind = if error.is_execution_bound_exhausted() {
-                crate::feedback::RlmFeedbackKind::Policy
-            } else {
-                crate::feedback::RlmFeedbackKind::Error
-            };
+            let kind = lashlang_runtime_feedback_kind(&error, host.cancellation_observed());
             let failure = runtime_failure.unwrap_or(lashlang::RuntimeFailure { error, span: None });
+            if kind == crate::feedback::RlmFeedbackKind::Stop {
+                state.cancel_code_execution();
+            }
             return exec_response_from(
                 host.into_collected(),
                 Some(kind.label(lashlang::format_runtime_diagnostic(
@@ -566,8 +593,18 @@ async fn execute_code_inner(
     )
 }
 
-fn exec_setup_failure(error: impl Into<String>, start: std::time::Instant) -> ExecResponse {
-    exec_setup_failure_with_degraded(error, start, Vec::new())
+/// Classifies a typed Lashlang runtime outcome before it enters the persisted
+/// string carrier used by the RLM trajectory.
+fn lashlang_runtime_feedback_kind(
+    error: &lashlang::RuntimeError,
+    host_cancelled: bool,
+) -> crate::feedback::RlmFeedbackKind {
+    match error {
+        _ if host_cancelled => crate::feedback::RlmFeedbackKind::Stop,
+        lashlang::RuntimeError::HostCancelled => crate::feedback::RlmFeedbackKind::Stop,
+        error if error.is_execution_bound_exhausted() => crate::feedback::RlmFeedbackKind::Policy,
+        _ => crate::feedback::RlmFeedbackKind::Error,
+    }
 }
 
 fn exec_setup_failure_with_degraded(
@@ -585,6 +622,25 @@ fn exec_setup_failure_with_degraded(
         degraded_bindings,
         terminal_finish: None,
     }
+}
+
+fn exec_setup_failure_or_stop(
+    state: &mut RlmExecutionState,
+    ctx: &RuntimeExecutionContext<'_>,
+    error: impl Into<String>,
+    start: std::time::Instant,
+    degraded_bindings: Vec<lash_core::DegradedBinding>,
+) -> ExecResponse {
+    if ctx.is_cancelled() {
+        state.cancel_code_execution();
+        return exec_setup_failure_with_degraded(
+            crate::feedback::RlmFeedbackKind::Stop
+                .label("foreground execution stopped during setup"),
+            start,
+            degraded_bindings,
+        );
+    }
+    exec_setup_failure_with_degraded(error, start, degraded_bindings)
 }
 
 fn exec_response_from(
@@ -862,6 +918,310 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_cancellation_is_a_terminal_stop_not_a_program_error() {
+        assert_eq!(
+            lashlang_runtime_feedback_kind(&lashlang::RuntimeError::HostCancelled, false),
+            crate::feedback::RlmFeedbackKind::Stop
+        );
+        assert_eq!(
+            lashlang_runtime_feedback_kind(
+                &lashlang::RuntimeError::SleepFailed {
+                    source: lashlang::ExecutionHostError::new("cancelled wait"),
+                },
+                true,
+            ),
+            crate::feedback::RlmFeedbackKind::Stop,
+            "host cancellation wins when an active wait unwinds through a host error"
+        );
+    }
+
+    #[test]
+    fn cancelled_execution_reaches_the_stop_classifier_in_both_dialects() {
+        block_on(async {
+            for (language, successful_code, code, cancelled_binding, source_dialect) in [
+                (
+                    "lashlang",
+                    "survives = 7",
+                    "cancelled_tail = 1\nwhile true {}",
+                    "cancelled_tail",
+                    SourceDialect::Lashlang,
+                ),
+                (
+                    "typescript",
+                    "let survives: number = 7;",
+                    "let cancelledTail: number = 1; while (true) {}",
+                    "cancelledTail",
+                    SourceDialect::Typescript,
+                ),
+            ] {
+                let mut state = RlmExecutionState::for_engine(language);
+                let successful = execute_code_with_dialect_and_bounds(
+                    &mut state,
+                    lash_core::testing::code_execution_context(),
+                    ExecRequest {
+                        language: language.to_string(),
+                        code: successful_code.to_string(),
+                    },
+                    lashlang::global_in_memory_lashlang_artifact_store(),
+                    LashlangSurface::default(),
+                    None,
+                    RlmProjectedBindings::default(),
+                    Arc::new(ProjectionRegistry::new()),
+                    RlmLashlangExecutionTraceConfig::default(),
+                    lashlang::ExecutionBounds::unbounded(),
+                    source_dialect,
+                )
+                .await;
+                assert_eq!(successful.error, None, "{language}: first cell");
+
+                let response = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    execute_code_with_dialect_and_bounds(
+                        &mut state,
+                        lash_core::testing::code_execution_context_cancelling_after_yield(),
+                        ExecRequest {
+                            language: language.to_string(),
+                            code: code.to_string(),
+                        },
+                        lashlang::global_in_memory_lashlang_artifact_store(),
+                        LashlangSurface::default(),
+                        None,
+                        RlmProjectedBindings::default(),
+                        Arc::new(ProjectionRegistry::new()),
+                        RlmLashlangExecutionTraceConfig::default(),
+                        lashlang::ExecutionBounds::unbounded(),
+                        source_dialect,
+                    ),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("{language}: running code did not observe cancellation")
+                });
+
+                let error = response.error.expect("host cancellation is classified");
+                assert_eq!(
+                    crate::feedback::RlmFeedbackKind::split(&error).0,
+                    crate::feedback::RlmFeedbackKind::Stop,
+                    "{language}: the live executor must carry Stop to the driver"
+                );
+                assert!(
+                    state.rlm.globals().get(cancelled_binding).is_none(),
+                    "{language}: the cancelled tail must roll back to the execution checkpoint"
+                );
+                assert!(
+                    state.rlm.globals().get("survives").is_some(),
+                    "{language}: the earlier successful cell must remain live"
+                );
+
+                let snapshot = hydrate_snapshot(
+                    state
+                        .snapshot_execution_state()
+                        .expect("snapshot after cancelled cell"),
+                );
+                let mut restored = RlmExecutionState::for_engine(language);
+                restored
+                    .restore_execution_state(&snapshot)
+                    .expect("cold restore after cancelled cell");
+                assert!(
+                    restored.rlm.globals().get("survives").is_some(),
+                    "{language}: a cold restore must retain the earlier successful cell"
+                );
+                assert!(
+                    restored.rlm.globals().get(cancelled_binding).is_none(),
+                    "{language}: a cold restore must exclude the cancelled tail"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn cancellation_wins_over_pre_execution_compile_failures() {
+        block_on(async {
+            for (language, code, source_dialect) in [
+                ("lashlang", "missing =", SourceDialect::Lashlang),
+                (
+                    "typescript",
+                    "let missing: number = ;",
+                    SourceDialect::Typescript,
+                ),
+            ] {
+                let mut state = RlmExecutionState::for_engine(language);
+                let response = execute_code_with_dialect_and_bounds(
+                    &mut state,
+                    lash_core::testing::cancelled_code_execution_context(),
+                    ExecRequest {
+                        language: language.to_string(),
+                        code: code.to_string(),
+                    },
+                    lashlang::global_in_memory_lashlang_artifact_store(),
+                    LashlangSurface::default(),
+                    None,
+                    RlmProjectedBindings::default(),
+                    Arc::new(ProjectionRegistry::new()),
+                    RlmLashlangExecutionTraceConfig::default(),
+                    lashlang::ExecutionBounds::unbounded(),
+                    source_dialect,
+                )
+                .await;
+
+                let error = response.error.expect("cancelled setup is classified");
+                assert_eq!(
+                    crate::feedback::RlmFeedbackKind::split(&error).0,
+                    crate::feedback::RlmFeedbackKind::Stop,
+                    "{language}: observed cancellation must win over a compile failure"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell() {
+        block_on(async {
+            for (language, first_code, tail_code, tail_binding, source_dialect) in [
+                (
+                    "lashlang",
+                    "survives = 7",
+                    "cancelled_tail = 1",
+                    "cancelled_tail",
+                    SourceDialect::Lashlang,
+                ),
+                (
+                    "typescript",
+                    "let survives: number = 7;",
+                    "let cancelledTail: number = 1;",
+                    "cancelledTail",
+                    SourceDialect::Typescript,
+                ),
+            ] {
+                let mut state = RlmExecutionState::for_engine(language);
+                for code in [first_code, tail_code] {
+                    let response = execute_code_with_dialect_and_bounds(
+                        &mut state,
+                        lash_core::testing::code_execution_context(),
+                        ExecRequest {
+                            language: language.to_string(),
+                            code: code.to_string(),
+                        },
+                        lashlang::global_in_memory_lashlang_artifact_store(),
+                        LashlangSurface::default(),
+                        None,
+                        RlmProjectedBindings::default(),
+                        Arc::new(ProjectionRegistry::new()),
+                        RlmLashlangExecutionTraceConfig::default(),
+                        lashlang::ExecutionBounds::unbounded(),
+                        source_dialect,
+                    )
+                    .await;
+                    assert_eq!(response.error, None, "{language}: `{code}`");
+                }
+
+                assert!(state.rlm.globals().get(tail_binding).is_some());
+                state.cancel_code_execution();
+                assert!(state.rlm.globals().get(tail_binding).is_none());
+                assert!(state.rlm.globals().get("survives").is_some());
+
+                let snapshot = hydrate_snapshot(
+                    state
+                        .snapshot_execution_state()
+                        .expect("snapshot after late cancellation"),
+                );
+                let mut restored = RlmExecutionState::for_engine(language);
+                restored
+                    .restore_execution_state(&snapshot)
+                    .expect("cold restore after late cancellation");
+                assert!(restored.rlm.globals().get(tail_binding).is_none());
+                assert!(restored.rlm.globals().get("survives").is_some());
+            }
+        });
+    }
+
+    #[test]
+    fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_bookkeeping() {
+        block_on(async {
+            for (language, first_code, tail_code, tail_binding, source_dialect) in [
+                (
+                    "lashlang",
+                    format!("survives = \"{}\"", "x".repeat(1024)),
+                    "cancelled_tail = 1",
+                    "cancelled_tail",
+                    SourceDialect::Lashlang,
+                ),
+                (
+                    "typescript",
+                    format!("let survives: string = \"{}\";", "x".repeat(1024)),
+                    "let cancelledTail: number = 1;",
+                    "cancelledTail",
+                    SourceDialect::Typescript,
+                ),
+            ] {
+                for acknowledge_first_capture in [false, true] {
+                    let mut state = RlmExecutionState::for_engine(language);
+                    let first = execute_code_with_dialect_and_bounds(
+                        &mut state,
+                        lash_core::testing::code_execution_context(),
+                        ExecRequest {
+                            language: language.to_string(),
+                            code: first_code.clone(),
+                        },
+                        lashlang::global_in_memory_lashlang_artifact_store(),
+                        LashlangSurface::default(),
+                        None,
+                        RlmProjectedBindings::default(),
+                        Arc::new(ProjectionRegistry::new()),
+                        RlmLashlangExecutionTraceConfig::default(),
+                        lashlang::ExecutionBounds::unbounded(),
+                        source_dialect,
+                    )
+                    .await;
+                    assert_eq!(first.error, None, "{language}: large first cell");
+                    let first_snapshot = state
+                        .snapshot_execution_state()
+                        .expect("large first-cell snapshot");
+                    let first_hydration = hydrate_snapshot(first_snapshot);
+                    if acknowledge_first_capture {
+                        state.acknowledge_execution_state_capture();
+                    }
+
+                    let tail = execute_code_with_dialect_and_bounds(
+                        &mut state,
+                        lash_core::testing::code_execution_context(),
+                        ExecRequest {
+                            language: language.to_string(),
+                            code: tail_code.to_string(),
+                        },
+                        lashlang::global_in_memory_lashlang_artifact_store(),
+                        LashlangSurface::default(),
+                        None,
+                        RlmProjectedBindings::default(),
+                        Arc::new(ProjectionRegistry::new()),
+                        RlmLashlangExecutionTraceConfig::default(),
+                        lashlang::ExecutionBounds::unbounded(),
+                        source_dialect,
+                    )
+                    .await;
+                    assert_eq!(tail.error, None, "{language}: tail cell");
+                    state.cancel_code_execution();
+
+                    let final_snapshot = state
+                        .snapshot_execution_state()
+                        .expect("snapshot after late cancellation");
+                    let final_hydration = if acknowledge_first_capture {
+                        hydrate_snapshot_against(final_snapshot, &first_hydration)
+                    } else {
+                        hydrate_snapshot(final_snapshot)
+                    };
+                    let mut restored = RlmExecutionState::for_engine(language);
+                    restored
+                        .restore_execution_state(&final_hydration)
+                        .expect("cold restore after late cancellation");
+                    assert!(restored.rlm.globals().get("survives").is_some());
+                    assert!(restored.rlm.globals().get(tail_binding).is_none());
+                }
+            }
+        });
+    }
+
+    #[test]
     fn parse_diagnostic_warns_about_multiline_cell_delimiters() {
         let code = "payload = \"\"\"";
         let error = lashlang::parse(code).expect_err("unterminated multiline string");
@@ -1023,6 +1383,32 @@ mod tests {
                     }
                     lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
                         panic!("fresh test snapshot unexpectedly reused `{key}`")
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    fn hydrate_snapshot_against(
+        snapshot: lash_core::plugin::ExecutionStateSnapshot,
+        prior: &lash_core::plugin::HydratedExecutionState,
+    ) -> lash_core::plugin::HydratedExecutionState {
+        lash_core::plugin::HydratedExecutionState {
+            root: snapshot.root.expect("snapshot root"),
+            components: snapshot
+                .components
+                .into_iter()
+                .map(|(key, component)| match component {
+                    lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                        (key, body)
+                    }
+                    lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                        let body = prior
+                            .components
+                            .get(&key)
+                            .unwrap_or_else(|| panic!("durable prior is missing leaf `{key}`"))
+                            .clone();
+                        (key, body)
                     }
                 })
                 .collect(),

@@ -119,6 +119,11 @@ pub(crate) trait RlmDialectSession: Send {
 
     fn abort_execution_state_capture(&mut self) -> Result<(), SessionError>;
 
+    fn settle_code_execution(
+        &mut self,
+        disposition: lash_core::plugin::CodeExecutionDisposition,
+    ) -> Result<(), SessionError>;
+
     fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
@@ -202,7 +207,10 @@ impl RlmDialectSession for DialectSession {
         // The state is borrowed, never moved out: a cell that is cancelled
         // mid-flight leaves the session holding the same state it started
         // with, and every other caller waits behind the session's own lock.
-        Ok(execute_code_with_dialect_and_bounds(
+        self.state
+            .prepare_runtime_code_execution()
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        let response = execute_code_with_dialect_and_bounds(
             &mut self.state,
             ctx,
             request,
@@ -215,7 +223,9 @@ impl RlmDialectSession for DialectSession {
             self.services.execution_bounds.into_engine(),
             self.dialect,
         )
-        .await)
+        .await;
+        self.state.mark_code_execution_response_returned();
+        Ok(response)
     }
 
     fn execution_state_dirty(&self) -> bool {
@@ -245,6 +255,22 @@ impl RlmDialectSession for DialectSession {
 
     fn abort_execution_state_capture(&mut self) -> Result<(), SessionError> {
         self.state.abort_execution_state_capture();
+        Ok(())
+    }
+
+    fn settle_code_execution(
+        &mut self,
+        disposition: lash_core::plugin::CodeExecutionDisposition,
+    ) -> Result<(), SessionError> {
+        match disposition {
+            lash_core::plugin::CodeExecutionDisposition::Accepted => {
+                self.state.accept_code_execution();
+            }
+            lash_core::plugin::CodeExecutionDisposition::Discarded
+            | lash_core::plugin::CodeExecutionDisposition::Cancelled => {
+                self.state.cancel_code_execution();
+            }
+        }
         Ok(())
     }
 

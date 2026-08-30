@@ -1,5 +1,5 @@
 struct EffectControllerTestProtocolFactory {
-    install_code_executor: bool,
+    code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
 }
 
 impl crate::PluginFactory for EffectControllerTestProtocolFactory {
@@ -12,13 +12,13 @@ impl crate::PluginFactory for EffectControllerTestProtocolFactory {
         _ctx: &crate::PluginSessionContext,
     ) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError> {
         Ok(Arc::new(EffectControllerTestProtocolPlugin {
-            install_code_executor: self.install_code_executor,
+            code_executor: self.code_executor.clone(),
         }))
     }
 }
 
 struct EffectControllerTestProtocolPlugin {
-    install_code_executor: bool,
+    code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
 }
 
 impl crate::SessionPlugin for EffectControllerTestProtocolPlugin {
@@ -30,10 +30,8 @@ impl crate::SessionPlugin for EffectControllerTestProtocolPlugin {
         registrar
             .protocol()
             .session(Arc::new(EffectControllerTestProtocolSession))?;
-        if self.install_code_executor {
-            registrar
-                .execution()
-                .code_executor(Arc::new(EffectControllerTestCodeExecutor))?;
+        if let Some(code_executor) = self.code_executor.clone() {
+            registrar.execution().code_executor(code_executor)?;
         }
         registrar
             .protocol()
@@ -143,10 +141,15 @@ impl lash_sansio::ProtocolDriverHandle<crate::HostTurnProtocol> for EffectContro
 
     fn handle_exec_result(
         &self,
-        _ctx: crate::DriverContextView<'_>,
+        ctx: crate::DriverContextView<'_>,
         _waiting: lash_sansio::WaitingExecState<crate::HostTurnProtocol>,
         result: Result<crate::ExecResponse, String>,
     ) -> Vec<crate::DriverAction> {
+        if let Some(evidence) = ctx.observed_cancellation() {
+            return vec![crate::DriverAction::FinishCancelled {
+                evidence: evidence.clone(),
+            }];
+        }
         match result {
             Ok(response) => vec![crate::DriverAction::Finish(TurnOutcome::Finished(
                 TurnFinish::FinalValue {

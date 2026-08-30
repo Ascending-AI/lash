@@ -200,6 +200,10 @@ pub mod facade_support {
         SelectedQueuedWorkDrainError, SelectedQueuedWorkDrainOutcome,
         SelectedQueuedWorkDrainRefusalCause,
     };
+    /// Facade-internal configuration for a process-local turn token.
+    pub fn configure_local_turn_token(hint: &crate::TurnCancelOriginHint, origin: Option<String>) {
+        hint.configure_local_token(origin);
+    }
     pub use crate::tool_provider::orchestration::{
         OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
     };

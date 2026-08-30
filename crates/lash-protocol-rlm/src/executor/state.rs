@@ -396,10 +396,29 @@ struct PreparedCapture {
     encoded_globals: usize,
 }
 
+#[derive(Clone)]
 struct CaptureRollback {
     persisted_globals: BTreeMap<String, PersistedValue>,
     persisted_leaf_keys: BTreeSet<String>,
     dirty_globals: BTreeSet<String>,
+}
+
+/// The live state and capture bookkeeping that one foreground cell may mutate.
+///
+/// Restoring only the serialized state would make a prior successful cell look
+/// clean after a later cell is cancelled, allowing the prior cell to disappear
+/// from the next cold snapshot.
+pub(super) struct RlmExecutionCheckpoint {
+    rlm: FlowState,
+    deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
+    persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_leaf_keys: BTreeSet<String>,
+    dirty_globals: BTreeSet<String>,
+    root_dirty: bool,
+    capture_rollback: Option<CaptureRollback>,
+    pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
+    #[cfg(test)]
+    encoded_globals_in_last_snapshot: usize,
 }
 
 pub struct RlmExecutionState {
@@ -419,6 +438,8 @@ pub struct RlmExecutionState {
     root_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
     pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
+    active_execution_checkpoint: Option<RlmExecutionCheckpoint>,
+    execution_response_returned: bool,
     #[cfg(test)]
     encoded_globals_in_last_snapshot: usize,
 }
@@ -443,6 +464,8 @@ impl RlmExecutionState {
             root_dirty: true,
             capture_rollback: None,
             pending_snapshot: None,
+            active_execution_checkpoint: None,
+            execution_response_returned: false,
             #[cfg(test)]
             encoded_globals_in_last_snapshot: 0,
         }
@@ -453,6 +476,11 @@ impl RlmExecutionState {
     }
 
     pub(super) fn mark_execution_started(&mut self) {
+        debug_assert!(
+            !self.execution_response_returned,
+            "a returned code execution must be settled before another cell starts"
+        );
+        self.accept_code_execution();
         self.dirty_globals
             .append(&mut self.scratch.take_assigned_globals());
         if self.persisted_globals.is_empty() && self.root_dirty {
@@ -460,6 +488,73 @@ impl RlmExecutionState {
                 .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
         }
         self.root_dirty = true;
+    }
+
+    pub(super) fn execution_checkpoint(&self) -> RlmExecutionCheckpoint {
+        RlmExecutionCheckpoint {
+            rlm: self.rlm.clone(),
+            deferred_resolutions: self.deferred_resolutions.clone(),
+            persisted_globals: self.persisted_globals.clone(),
+            persisted_leaf_keys: self.persisted_leaf_keys.clone(),
+            dirty_globals: self.dirty_globals.clone(),
+            root_dirty: self.root_dirty,
+            capture_rollback: self.capture_rollback.clone(),
+            pending_snapshot: self.pending_snapshot.clone(),
+            #[cfg(test)]
+            encoded_globals_in_last_snapshot: self.encoded_globals_in_last_snapshot,
+        }
+    }
+
+    fn restore_execution_checkpoint(&mut self, checkpoint: RlmExecutionCheckpoint) {
+        self.rlm = checkpoint.rlm;
+        self.deferred_resolutions = checkpoint.deferred_resolutions;
+        self.persisted_globals = checkpoint.persisted_globals;
+        self.persisted_leaf_keys = checkpoint.persisted_leaf_keys;
+        self.dirty_globals = checkpoint.dirty_globals;
+        self.root_dirty = checkpoint.root_dirty;
+        self.capture_rollback = checkpoint.capture_rollback;
+        self.pending_snapshot = checkpoint.pending_snapshot;
+        #[cfg(test)]
+        {
+            self.encoded_globals_in_last_snapshot = checkpoint.encoded_globals_in_last_snapshot;
+        }
+        self.active_execution_checkpoint = None;
+        self.execution_response_returned = false;
+    }
+
+    pub(super) fn begin_code_execution(&mut self, checkpoint: RlmExecutionCheckpoint) {
+        debug_assert!(self.active_execution_checkpoint.is_none());
+        self.active_execution_checkpoint = Some(checkpoint);
+        self.execution_response_returned = false;
+    }
+
+    pub(crate) fn prepare_runtime_code_execution(&mut self) -> Result<(), &'static str> {
+        if self.active_execution_checkpoint.is_none() {
+            return Ok(());
+        }
+        if self.execution_response_returned {
+            return Err("the previous code execution response has not been settled");
+        }
+        self.cancel_code_execution();
+        Ok(())
+    }
+
+    pub(crate) fn mark_code_execution_response_returned(&mut self) {
+        self.execution_response_returned = true;
+    }
+
+    pub(crate) fn accept_code_execution(&mut self) {
+        self.active_execution_checkpoint = None;
+        self.execution_response_returned = false;
+    }
+
+    pub(crate) fn cancel_code_execution(&mut self) {
+        let Some(checkpoint) = self.active_execution_checkpoint.take() else {
+            self.execution_response_returned = false;
+            return;
+        };
+        self.restore_execution_checkpoint(checkpoint);
+        self.scratch = ExecutionScratch::new();
     }
 
     /// Encode the canonical RLM root and only the leaf bodies whose logical
@@ -779,6 +874,8 @@ impl RlmExecutionState {
         self.dirty_globals.clear();
         self.capture_rollback = None;
         self.pending_snapshot = None;
+        self.active_execution_checkpoint = None;
+        self.execution_response_returned = false;
         Ok(())
     }
 

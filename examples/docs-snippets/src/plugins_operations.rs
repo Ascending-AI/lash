@@ -15,12 +15,13 @@
 use std::sync::Arc;
 
 use lash::plugins::{
-    PluginCommand, PluginCommandContext, PluginError, PluginFactory, PluginOperation,
-    PluginOperationFailure, PluginOperationInvokeError, PluginOperationOutcome,
-    PluginOperationReceipt, PluginOwned, PluginQuery, PluginQueryContext, PluginRegistrar,
-    PluginRuntimeDirective, PluginRuntimeEvent, PluginSessionContext, PluginSnapshotMeta,
-    PluginTask, PluginTaskContext, ProcessReadService, SessionParam, SessionPlugin,
-    SessionReadService, SessionReadyContext, SnapshotReader, SnapshotWriter,
+    CodeExecutionDisposition, CodeExecutorPlugin, ExecRequest, ExecResponse, PluginCommand,
+    PluginCommandContext, PluginError, PluginFactory, PluginOperation, PluginOperationFailure,
+    PluginOperationInvokeError, PluginOperationOutcome, PluginOperationReceipt, PluginOwned,
+    PluginQuery, PluginQueryContext, PluginRegistrar, PluginRuntimeDirective, PluginRuntimeEvent,
+    PluginSessionContext, PluginSnapshotMeta, PluginTask, PluginTaskContext, ProcessReadService,
+    RuntimeExecutionContext, SessionParam, SessionPlugin, SessionReadService, SessionReadyContext,
+    SnapshotReader, SnapshotWriter,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,55 @@ use serde::{Deserialize, Serialize};
 const PLUGIN_ID: &str = "docs-plan";
 const SESSION: &str = "docs-plugin-operations";
 const PLAN_BLOB: &str = "plan.json";
+
+/// Minimal stateful executor shape showing the response-handoff contract that
+/// a protocol plugin uses to retain a cell checkpoint until Lash settles it.
+#[derive(Default)]
+struct DocsCodeExecutor {
+    last_disposition: std::sync::Mutex<Option<CodeExecutionDisposition>>,
+}
+
+#[async_trait::async_trait]
+impl CodeExecutorPlugin for DocsCodeExecutor {
+    async fn execute_code(
+        &self,
+        ctx: RuntimeExecutionContext<'_>,
+        _request: ExecRequest,
+    ) -> Result<ExecResponse, lash::SessionError> {
+        if ctx.is_cancelled() {
+            return Err(lash::SessionError::Protocol(
+                "documentation executor was cancelled".to_string(),
+            ));
+        }
+        Ok(ExecResponse {
+            observations: Vec::new(),
+            tool_calls: Vec::new(),
+            executed_calls: Vec::new(),
+            printed_images: Vec::new(),
+            error: None,
+            duration_ms: 0,
+            degraded_bindings: Vec::new(),
+            terminal_finish: None,
+        })
+    }
+
+    async fn settle_code_execution(
+        &self,
+        disposition: CodeExecutionDisposition,
+    ) -> Result<(), lash::SessionError> {
+        match disposition {
+            CodeExecutionDisposition::Accepted
+            | CodeExecutionDisposition::Discarded
+            | CodeExecutionDisposition::Cancelled => {
+                *self
+                    .last_disposition
+                    .lock()
+                    .expect("executor disposition mutex") = Some(disposition);
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 struct PlanArgs {
@@ -171,6 +221,8 @@ impl SessionPlugin for PlanPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        reg.execution()
+            .code_executor(Arc::new(DocsCodeExecutor::default()))?;
         reg.operations().typed_query::<ReadPlan, _, _>(read_plan)?;
         reg.operations()
             .typed_command::<RecordPlan, _, _>(record_plan)?;
