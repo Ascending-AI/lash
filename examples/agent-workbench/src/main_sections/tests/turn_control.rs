@@ -20,9 +20,12 @@ mod turn_control_timeout_tests {
         ));
         std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
@@ -32,11 +35,10 @@ mod turn_control_timeout_tests {
             .complete_error("turn input route test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::builder("test-model")
-                .context_window_tokens(4096)
-                .build()
-                .expect("model spec");
+        let model = lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
+            .expect("model spec");
         let event_tx = SessionEventRegistry::new(16);
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
@@ -155,12 +157,14 @@ mod turn_control_timeout_tests {
         assert_eq!(pending[1].input_id, queued.input_id);
         session.close().await.expect("close session");
 
-        let Json(snapshot) =
-            Box::pin(app_state(State(state.clone()), Query(SessionQuery::default())))
-                .await
-                .expect("load state snapshot");
+        let Json(snapshot) = Box::pin(app_state(
+            State(state.clone()),
+            Query(SessionQuery::default()),
+        ))
+        .await
+        .expect("load state snapshot");
         assert!(snapshot.messages.iter().any(|message| {
-                message.id == workbench_turn_user_message_id("running-turn")
+            message.id == workbench_turn_user_message_id("running-turn")
                 && message.role == "user"
                 && message.text == "restored active prompt"
         }));
@@ -219,7 +223,10 @@ mod turn_control_timeout_tests {
             .expect("list pending inputs after settle race");
         assert_eq!(after_race.len(), 1);
         assert_eq!(after_race[0].input_id, queued.input_id);
-        session.close().await.expect("close session after settle race");
+        session
+            .close()
+            .await
+            .expect("close session after settle race");
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
@@ -260,9 +267,12 @@ mod turn_control_timeout_tests {
 
     async fn turn_cancel_test_state(data_dir: &std::path::Path, admin_url: String) -> AppState {
         let process_registry = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(&data_dir.join("processes.db"), data_dir.join("lash-sessions"))
-                .await
-                .expect("open registry"),
+            lash_sqlite_store::SqliteProcessRegistry::open(
+                &data_dir.join("processes.db"),
+                data_dir.join("lash-sessions"),
+            )
+            .await
+            .expect("open registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
@@ -272,11 +282,10 @@ mod turn_control_timeout_tests {
             .complete_error("turn cancellation routing test should not call the provider")
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::builder("test-model")
-                .context_window_tokens(4096)
-                .build()
-                .expect("model spec");
+        let model = lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
+            .expect("model spec");
         let event_tx = SessionEventRegistry::new(16);
         let core = explicit_durable_test_facets(data_dir)
             .provider(provider)
@@ -336,6 +345,7 @@ mod turn_control_timeout_tests {
         let admin_url = spawn_restate_admin_with_workflow_status(None).await;
         let state = turn_cancel_test_state(&data_dir, admin_url).await;
         let session_id = state.current_session_id();
+        let mut events = state.event_tx.subscribe(&session_id);
         state.track_turn(&session_id, "dangling-turn");
 
         let receipts = tokio::time::timeout(
@@ -356,6 +366,15 @@ mod turn_control_timeout_tests {
             }] if error.code.as_str() == "turn_terminal_await_timeout"
         ));
         assert!(state.active_turns.for_session(&session_id).is_empty());
+        let done = events.try_recv().expect("receive break-glass Done event");
+        assert_eq!(
+            serde_json::to_value(done.item).expect("serialize break-glass Done item"),
+            json!({
+                "type": "done",
+                "turn_id": "dangling-turn",
+                "outcome": "failed",
+            })
+        );
         assert!(ui::INDEX_HTML.contains("turn_terminal_await_timeout"));
         assert!(ui::INDEX_HTML.contains("turn route cleared · terminal outcome unknown"));
         let recovered = ActiveTurns::persistent(data_dir.join("active-turns.json"))
@@ -380,6 +399,7 @@ mod turn_control_timeout_tests {
         let admin_url = spawn_restate_admin_with_workflow_status(Some("suspended")).await;
         let state = turn_cancel_test_state(&data_dir, admin_url).await;
         let session_id = state.current_session_id();
+        let mut events = state.event_tx.subscribe(&session_id);
         state.track_turn(&session_id, "live-turn");
 
         let receipts = tokio::time::timeout(
@@ -409,6 +429,10 @@ mod turn_control_timeout_tests {
         assert_eq!(
             recovered.for_session(&session_id),
             vec![lash::TurnAddress::new(session_id, "live-turn")]
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "a still-active turn must not receive a terminal Done item"
         );
         let _ = std::fs::remove_dir_all(data_dir);
     }
@@ -453,11 +477,10 @@ finish (await handle)?
             })
             .build()
             .into_handle();
-        let model =
-            lash::ModelSpec::builder("test-model")
-                .context_window_tokens(4096)
-                .build()
-                .expect("model spec");
+        let model = lash::ModelSpec::builder("test-model")
+            .context_window_tokens(4096)
+            .build()
+            .expect("model spec");
         let core = explicit_durable_test_facets(&data_dir)
             .provider(provider)
             .model(model)

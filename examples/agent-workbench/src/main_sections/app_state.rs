@@ -1,4 +1,3 @@
-
 impl AppState {
     /// The dialect this session is opened with: its roster row's, or the
     /// ambient default for a session the roster never recorded.
@@ -74,9 +73,7 @@ impl AppState {
     }
 
     fn selected_model(&self) -> ModelSelection {
-        self.selected_model
-            .lock_recover()
-            .clone()
+        self.selected_model.lock_recover().clone()
     }
 
     fn set_selected_model(&self, model: ModelSelection) {
@@ -158,9 +155,7 @@ impl AppState {
         event_id: impl Into<String>,
         item: StreamItem,
     ) {
-        let _ = self
-            .event_tx
-            .publish_identified(session_id, event_id, item);
+        let _ = self.event_tx.publish_identified(session_id, event_id, item);
     }
 
     fn publish_turn_done(&self, session_id: &str, turn_id: &str) {
@@ -338,7 +333,7 @@ impl AppState {
         let store = self
             .session_store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
+                pending_observer_intents: Vec::new(),
                 session_id: session_id.to_string(),
                 relation: lash::persistence::SessionRelation::Root,
                 policy,
@@ -351,28 +346,27 @@ impl AppState {
                     lash::EmbedError::Store(error),
                 )
             })?;
-        store
-            .read_session_state_version()
-            .await
-            .map_err(|error| {
-                self.session_admission_error(
-                    session_id,
-                    "api.turn.cancel",
-                    lash::EmbedError::Store(error),
-                )
-            })?;
+        store.read_session_state_version().await.map_err(|error| {
+            self.session_admission_error(
+                session_id,
+                "api.turn.cancel",
+                lash::EmbedError::Store(error),
+            )
+        })?;
         let mut receipts = Vec::with_capacity(active.len());
-        let mut operation_ids = Vec::with_capacity(active.len());
+        let mut done_events = Vec::with_capacity(active.len());
         for address in active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
-            operation_ids.push(format!("{}:{request_id}", address.turn_id));
             let driver = self.core.turn_work_driver();
             let receipt = driver
-                .request_cancel(lash::TurnCancelRequest::new(
-                    address.clone(),
-                    request_id.clone(),
-                    Some("user".to_string()),
-                ).with_reason("workbench Stop control"))
+                .request_cancel(
+                    lash::TurnCancelRequest::new(
+                        address.clone(),
+                        request_id.clone(),
+                        Some("user".to_string()),
+                    )
+                    .with_reason("workbench Stop control"),
+                )
                 .await
                 // Audited: revoked turn-cancel gates become an UnknownOrRevoked outcome; remaining failures are untyped control errors.
                 .map_err(|err| AppError::internal(err.to_string()))?;
@@ -399,12 +393,9 @@ impl AppState {
                 (None, None)
             };
             let routing_retained = if terminal.is_none()
-                && terminal_error
-                    .as_ref()
-                    .is_some_and(|err| {
-                        err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout
-                    })
-            {
+                && terminal_error.as_ref().is_some_and(|err| {
+                    err.code == lash::runtime::RuntimeErrorCode::TurnTerminalAwaitTimeout
+                }) {
                 match self.restate_turn_is_active(&address).await {
                     Ok(true) => true,
                     Ok(false) => {
@@ -443,6 +434,25 @@ impl AppState {
                     "routing_retained": routing_retained,
                 }),
             );
+            if !routing_retained {
+                let done_outcome = match &terminal {
+                    Some(lash::TurnTerminal::Committed { .. }) => TurnDoneOutcome::Completed,
+                    Some(lash::TurnTerminal::Failed { .. }) => TurnDoneOutcome::Failed,
+                    None if matches!(
+                        receipt.outcome,
+                        lash::TurnCancelOutcome::CompletionWonRace
+                    ) =>
+                    {
+                        TurnDoneOutcome::Completed
+                    }
+                    None => TurnDoneOutcome::Failed,
+                };
+                done_events.push((
+                    format!("turn-cancel:{}:{request_id}:done", address.turn_id),
+                    address.turn_id.clone(),
+                    done_outcome,
+                ));
+            }
             receipts.push(TurnCancelReceipt {
                 address,
                 outcome: receipt.outcome,
@@ -450,13 +460,13 @@ impl AppState {
                 terminal_error,
             });
         }
-        if !receipts.is_empty() {
+        for (event_id, turn_id, outcome) in done_events {
             self.publish_for_session_identified(
                 session_id,
-                format!("turn-cancel:{}:done", operation_ids.join(",")),
+                event_id,
                 StreamItem::Done {
-                    turn_id: None,
-                    outcome: TurnDoneOutcome::Completed,
+                    turn_id: Some(turn_id),
+                    outcome,
                 },
             );
         }
@@ -469,12 +479,11 @@ impl AppState {
         } else {
             "WorkbenchTurnWorkflow"
         };
-        let admin = lash_restate::RestateAdminClient::new(
-            lash_restate::RestateConnection::with_client(
+        let admin =
+            lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
                 self.restate_admin_url.clone(),
                 self.restate_http.clone(),
-            ),
-        );
+            ));
         Ok(admin
             .workflow_invocation_status(workflow, &address.turn_id, "run")
             .await?
@@ -538,9 +547,7 @@ impl AppState {
             },
         );
         if inserted {
-            self.messages
-                .lock_recover()
-                .push(message.clone());
+            self.messages.lock_recover().push(message.clone());
         }
         message
     }
@@ -860,9 +867,11 @@ fn model_spec_for_request(
         .to_string();
     let model_variant = model_variant_for_request(selected_model, model_variant);
     lash::ModelSpec::builder(model)
-        .variant(model_variant
-            .map(lash::provider::ReasoningSelection::Effort)
-            .unwrap_or_default())
+        .variant(
+            model_variant
+                .map(lash::provider::ReasoningSelection::Effort)
+                .unwrap_or_default(),
+        )
         .context_window_tokens(workbench_context_window_tokens())
         .build()
         .map(with_workbench_model_capability)
@@ -888,14 +897,16 @@ fn model_variant_for_request(
 
 fn model_spec_from_selection(selection: ModelSelection) -> lash::ModelSpec {
     lash::ModelSpec::builder(selection.model)
-        .variant(selection
-            .model_variant
-            .map(lash::provider::ReasoningSelection::Effort)
-            .unwrap_or_default())
+        .variant(
+            selection
+                .model_variant
+                .map(lash::provider::ReasoningSelection::Effort)
+                .unwrap_or_default(),
+        )
         .context_window_tokens(workbench_context_window_tokens())
         .build()
-    .expect("workbench model selection should use a valid token limit")
-    .with_capability(workbench_model_capability())
+        .expect("workbench model selection should use a valid token limit")
+        .with_capability(workbench_model_capability())
 }
 
 fn with_workbench_model_capability(model: lash::ModelSpec) -> lash::ModelSpec {
@@ -1192,7 +1203,10 @@ impl AppError {
         Self::internal(error)
     }
 
-    #[allow(dead_code, reason = "production authorizers use this denial constructor")]
+    #[allow(
+        dead_code,
+        reason = "production authorizers use this denial constructor"
+    )]
     fn forbidden(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
@@ -1249,7 +1263,9 @@ fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&st
             (source, Some(context.as_str()))
         }
         lash::EmbedError::Runtime(error) => {
-            return error.deleted_session_id().map(|session_id| (session_id, None));
+            return error
+                .deleted_session_id()
+                .map(|session_id| (session_id, None));
         }
         lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error)) => {
             return match error.cause.as_ref() {
@@ -1309,12 +1325,10 @@ mod app_error_tests {
 
     #[test]
     fn contended_session_open_is_retryable_service_unavailable() {
-        let error = AppError::session_open(lash::EmbedError::Session(
-            lash::SessionError::Store {
-                context: "failed to admit and load store".to_string(),
-                source: lash::persistence::StoreError::Contended,
-            },
-        ));
+        let error = AppError::session_open(lash::EmbedError::Session(lash::SessionError::Store {
+            context: "failed to admit and load store".to_string(),
+            source: lash::persistence::StoreError::Contended,
+        }));
 
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.verdict, AppErrorVerdict::Retryable);
@@ -1355,14 +1369,12 @@ mod app_error_tests {
     #[tokio::test]
     async fn wrapped_session_deletion_is_a_comprehensible_conflict_response() {
         let session_id = "retired-during-runtime-binding";
-        let error = AppError::session_open(lash::EmbedError::Session(
-            lash::SessionError::Store {
-                context: format!("failed to bind session `{session_id}` to its store"),
-                source: lash::persistence::StoreError::SessionDeleted {
-                    session_id: session_id.to_string(),
-                },
+        let error = AppError::session_open(lash::EmbedError::Session(lash::SessionError::Store {
+            context: format!("failed to bind session `{session_id}` to its store"),
+            source: lash::persistence::StoreError::SessionDeleted {
+                session_id: session_id.to_string(),
             },
-        ));
+        }));
         let response = error.into_response();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);

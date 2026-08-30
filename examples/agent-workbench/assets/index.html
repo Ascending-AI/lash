@@ -4332,7 +4332,10 @@
         if (text) node.querySelector("pre").textContent = text;
         else node.remove();
       }
-      if (pendingCodeBlock?.turnId === turnId) pendingCodeBlock = null;
+      if (pendingCodeBlock?.turnId === turnId) {
+        pendingCodeBlock.el.remove();
+        pendingCodeBlock = null;
+      }
       if (!reasoning?.isConnected) reasoning = null;
     }
     // END WORKBENCH_TRANSIENT_SETTLEMENT
