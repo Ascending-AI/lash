@@ -219,6 +219,30 @@ finish {
 
 #[cfg(feature = "rlm")]
 #[test]
+fn shell_start_is_visible_through_the_spawning_session_observer() -> Result<()> {
+    run_async_test_on_stack_budget("shell-process-admission-visibility", || async {
+        run_agent_turn_scenario(
+            AgentScenario::new(
+                "shell process admission visibility",
+                "Start and await one tracked shell process.",
+            )
+            .response(lashlang_block(
+                r#"
+handle = await shell.start({ cmd: "printf shell-visible", login: false })?
+result = (await handle)?
+finish { status: result.status }"#,
+            ))
+            .expected_final_value(serde_json::json!({ "status": "completed" }))
+            .observer_visible_process("shell", "printf shell-visible")
+            .install_shell_processes(),
+        )
+        .await?;
+        Ok(())
+    })
+}
+
+#[cfg(feature = "rlm")]
+#[test]
 fn agent_scenario_foreground_labeled_tool_call() -> Result<()> {
     run_async_test_on_stack_budget("agent-scenario-foreground-tool", || async {
         let case = AgentScenario::new(
@@ -486,6 +510,7 @@ finish result"#,
             .labeled_node("Start nested child process")
             .completed_process("parent")
             .completed_process("child")
+            .observer_visible_process("lashlang", "parent")
             .min_completed_process_graphs(2),
         )
         .await?;

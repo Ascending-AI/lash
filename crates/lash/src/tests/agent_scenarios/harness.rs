@@ -17,6 +17,7 @@ pub(super) struct AgentScenarioExpectations {
     pub(super) completed_process_entries: Vec<&'static str>,
     pub(super) min_completed_child_session_exec_graphs: usize,
     pub(super) min_completed_process_graphs: usize,
+    pub(super) observer_visible_processes: Vec<(&'static str, &'static str)>,
 }
 
 pub(super) struct AgentScenario {
@@ -119,6 +120,17 @@ impl AgentScenario {
     pub(super) fn min_completed_child_session_exec_graphs(mut self, count: usize) -> Self {
         self.expected_contracts
             .min_completed_child_session_exec_graphs = count;
+        self
+    }
+
+    pub(super) fn observer_visible_process(
+        mut self,
+        kind: &'static str,
+        label: &'static str,
+    ) -> Self {
+        self.expected_contracts
+            .observer_visible_processes
+            .push((kind, label));
         self
     }
 }
@@ -325,6 +337,12 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         .stream_to(events.as_ref())
         .await?;
     session.refresh_background_graph().await?;
+    assert_session_process_admission_contract(
+        runtime.process_registry.as_ref(),
+        &case.session_id,
+        &case.expected_contracts.observer_visible_processes,
+    )
+    .await;
     let final_process_list = runtime.final_process_list().await?;
     assert_remote_process_dto_surface(
         &runtime.core,
@@ -378,6 +396,76 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
             .min_completed_child_session_exec_graphs,
     );
     Ok(run)
+}
+
+async fn assert_session_process_admission_contract(
+    registry: &dyn lash_core::ProcessRegistry,
+    session_id: &str,
+    expected_processes: &[(&str, &str)],
+) {
+    if expected_processes.is_empty() {
+        return;
+    }
+    let observed = registry
+        .list_observed_by(session_id)
+        .await
+        .expect("list runtime processes through the session observer");
+    let observed_identities = observed
+        .iter()
+        .map(|process| (&process.id, &process.identity, &process.status))
+        .collect::<Vec<_>>();
+    for (kind, label) in expected_processes {
+        let matching = observed
+            .iter()
+            .filter(|process| {
+                process.identity.kind == *kind && process.identity.label.as_deref() == Some(*label)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matching.len(),
+            1,
+            "the parent session observer must expose one {kind}/{label} process record; observed={observed_identities:?}"
+        );
+        for process in matching {
+            assert_eq!(process.status, lash_core::ProcessStatus::Completed);
+            let observers = registry
+                .observers_for_process(&process.id)
+                .await
+                .expect("load process observer edges");
+            assert!(
+                observers.iter().any(|observer| observer == session_id),
+                "completed process {} must retain the spawning session observer edge; observers={observers:?}",
+                process.id
+            );
+            let events = registry
+                .events_after(&process.id, 0)
+                .await
+                .expect("load observer-visible process lifecycle events");
+            let first_started = events
+                .iter()
+                .position(|event| event.event_type == "process.first_started")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing process.first_started for observer-visible process {}: {events:?}",
+                        process.id
+                    )
+                });
+            let completed = events
+                .iter()
+                .position(|event| event.event_type == "process.completed")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing process.completed for observer-visible process {}: {events:?}",
+                        process.id
+                    )
+                });
+            assert!(
+                first_started < completed,
+                "process.first_started must precede process.completed for {}: {events:?}",
+                process.id
+            );
+        }
+    }
 }
 
 async fn all_host_process_summaries(core: &LashCore) -> Result<Vec<lash_core::ProcessHandleView>> {

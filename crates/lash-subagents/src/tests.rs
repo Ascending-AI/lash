@@ -633,6 +633,35 @@ finish direct
 }
 
 #[tokio::test]
+async fn rlm_spawn_is_visible_through_parent_session_process_observer() {
+    let probe = run_seed_probe_inner_dispatch(
+        lashlang_block(
+            r#"
+result = await agents.spawn({
+  capability: "default",
+  task: "Finish `{ len: len(chunk) }` using the seeded `chunk` variable.",
+  seed: { chunk: ["a", "b"] },
+  output: Type { len: int }
+})?
+finish result"#,
+        ),
+        TurnInput::text("spawn one observable subagent process"),
+        None,
+        None,
+    )
+    .await;
+    probe.assert_process_visibility("subagent", "spawn").await;
+    assert_eq!(
+        probe.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::FinalValue {
+                value: json!({ "len": 2 })
+            }
+        )
+    );
+}
+
+#[tokio::test]
 async fn rlm_spawn_process_handle_returns_child_final_value() {
     let (outcome, prompt) = run_seed_probe(
         r#"<lashlang>
@@ -1171,6 +1200,7 @@ async fn run_seed_probe_inner(
     SeedProbe {
         outcome: turn.outcome,
         child_prompt: prompt,
+        process_registry: registry,
     }
 }
 
@@ -1179,6 +1209,7 @@ async fn run_seed_probe_inner(
 struct SeedProbe {
     outcome: lash_core::facade_support::TurnOutcome,
     child_prompt: Option<String>,
+    process_registry: Arc<TestLocalProcessRegistry>,
 }
 
 impl SeedProbe {
@@ -1186,6 +1217,67 @@ impl SeedProbe {
         self.child_prompt
             .as_deref()
             .unwrap_or_else(|| panic!("child prompt was not captured; outcome={:?}", self.outcome))
+    }
+
+    async fn assert_process_visibility(&self, kind: &str, label: &str) {
+        let observed_processes =
+            lash_core::ProcessRegistry::list_observed_by(self.process_registry.as_ref(), "root")
+                .await
+                .expect("list processes through the parent session observer");
+        let observed_identities = observed_processes
+            .iter()
+            .map(|process| (&process.id, &process.identity, &process.status))
+            .collect::<Vec<_>>();
+        let matching = observed_processes
+            .iter()
+            .filter(|process| {
+                process.identity.kind == kind && process.identity.label.as_deref() == Some(label)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matching.len(),
+            1,
+            "the parent session observer must expose one {kind}/{label} process record; observed={observed_identities:?}"
+        );
+        let process = matching[0];
+        let observers = lash_core::ProcessRegistry::observers_for_process(
+            self.process_registry.as_ref(),
+            &process.id,
+        )
+        .await
+        .expect("load process observer edges");
+        assert!(
+            observers.iter().any(|observer| observer == "root"),
+            "the spawning session must retain the observer edge for {}; observers={observers:?}",
+            process.id
+        );
+
+        let events = lash_core::ProcessRegistry::events_after(
+            self.process_registry.as_ref(),
+            &process.id,
+            0,
+        )
+        .await
+        .expect("load observer-visible process lifecycle events");
+        let first_started = events
+            .iter()
+            .position(|event| event.event_type == "process.first_started")
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing process.first_started for {}: {events:?}",
+                    process.id
+                )
+            });
+        let completed = events
+            .iter()
+            .position(|event| event.event_type == "process.completed")
+            .unwrap_or_else(|| panic!("missing process.completed for {}: {events:?}", process.id));
+        assert!(
+            first_started < completed,
+            "process.first_started must precede process.completed for {}: {events:?}",
+            process.id
+        );
+        assert_eq!(process.status, lash_core::ProcessStatus::Completed);
     }
 }
 
