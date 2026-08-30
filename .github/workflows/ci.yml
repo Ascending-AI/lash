@@ -340,10 +340,9 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # Python-only repository gates plus the rustdoc lint. These were serial steps
-  # of test-doc, where they sat behind twelve minutes of compilation for no
-  # reason: nothing here depends on the workspace check. The rustdoc lint is the
-  # one cargo consumer, so this job restores the shared cache read-only.
+  # Python-only repository gates. These were serial steps of test-doc, where
+  # they sat behind twelve minutes of compilation for no reason: nothing here
+  # depends on the workspace check.
   repo-gates:
     name: Repository gates
     runs-on: ubuntu-24.04
@@ -366,32 +365,8 @@ jobs:
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
           git checkout --detach --force FETCH_HEAD
 
-      - name: Reclaim runner disk
-        run: bash scripts/ci-reclaim-disk.sh
-
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
-      - name: Install protoc
-        uses: ./.github/actions/install-tools
-        with:
-          tool: protoc
-
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
-
-      - name: Lint docs
-        run: python3 scripts/lint_docs.py
-
-      - name: Check documented format versions
-        run: python3 scripts/check_format_versions.py
 
       - name: Lint orchestrating tools
         run: python3 scripts/lint_orchestrating_tools.py
@@ -410,8 +385,6 @@ jobs:
           python3 scripts/test_check_facade_external_types.py
           python3 scripts/test_check_facade_only_examples.py
           python3 scripts/test_check_durable_read_fixture_version.py
-          python3 scripts/test_check_format_versions.py
-          python3 scripts/test_lint_docs.py
           python3 scripts/test_check_postgres_json_carrier_coverage.py
           python3 scripts/test_check_postgres_payload_shape_version.py
           python3 scripts/test_check_service_gate_pinning.py
@@ -433,13 +406,6 @@ jobs:
           python3 scripts/test_ci_plan.py
           bash scripts/test-worktree-gate-env.sh
           bash scripts/test-dev-script-process-identity.sh
-
-      - name: Lint rustdoc
-        run: bash scripts/check-rustdoc.sh
-
-      - name: Report sccache stats
-        if: always()
-        run: sccache --show-stats
 
   # The generated facade contract gates build rustdoc JSON for the facade crate,
   # independently of the workspace build. They run only on the full profile.

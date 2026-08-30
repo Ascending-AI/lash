@@ -83,9 +83,6 @@ if ! grep -Eq 'test result: ok\. 1 passed' "$artifact_dir/01-contract-tests.log"
   echo "focused contract filter did not execute exactly one passing test" >&2
   exit 1
 fi
-python3 scripts/lint_docs.py \
-  2>&1 | tee "$artifact_dir/02-docs-lint.log" | tee -a "$test_output"
-
 DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
   cargo run --locked --release --quiet -p lash-restate-postgres-workers-e2e \
     --bin lash-e2e-process-operator-flow -- "$scenario" \

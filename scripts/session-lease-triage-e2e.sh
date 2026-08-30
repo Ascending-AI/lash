@@ -57,10 +57,6 @@ harness takeover 2>&1 | tee "$artifact_dir/03-lease-takeover.jsonl" | tee -a "$t
 harness livelock 2>&1 | tee "$artifact_dir/04-commit-cas-livelock.jsonl" | tee -a "$test_output"
 harness direct-turn 2>&1 | tee "$artifact_dir/08-direct-turn-recovery.jsonl" | tee -a "$test_output"
 
-# The documented procedure and its compiled snippet must still agree with the
-# sources, so a docs-vs-observed judgment has something stable to score against.
-python3 scripts/lint_docs.py 2>&1 | tee "$artifact_dir/05-docs-lint.log" | tee -a "$test_output"
-
 python3 - "$artifact_dir" "$backends" <<'PY'
 import json
 import sys

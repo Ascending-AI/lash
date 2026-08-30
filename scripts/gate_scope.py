@@ -15,10 +15,8 @@ being wrong in the run direction costs wall-clock and nothing else.
 Families
 --------
 ``rust-compile``
-    fmt, check, clippy, nextest, doctests, rustdoc, and every source guard that
-    reads ``crates/``.
-``docs-text``
-    lint_docs, the production file-size budget, documented format versions.
+    fmt, check, clippy, nextest, doctests, and every source guard that reads
+    ``crates/``.
 ``scripts``
     the repository script self-test suite.
 ``workflows``
@@ -47,10 +45,6 @@ One local gate is deliberately in *no* family and must always run:
 paths, so every non-empty change affects it. A path-scoped classifier has
 nothing to say about a commit-scoped gate.
 
-Note that ``docs-text`` runs for source changes too: its gates read ``crates/``
-as well as ``docs/``. It stays a named family so the audit line printed into a
-gate log enumerates every family rather than an interesting subset.
-
 Only the Python standard library is used, so this runs before any toolchain.
 """
 
@@ -66,7 +60,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 
-FAMILIES = ("rust-compile", "docs-text", "scripts", "workflows")
+FAMILIES = ("rust-compile", "scripts", "workflows")
 ALL_FAMILIES = frozenset(FAMILIES)
 
 # Shared inputs: paths that can move the result of *any* gate, either because
@@ -118,18 +112,17 @@ RULES: tuple[Rule, ...] = (
         patterns=SHARED_INPUT_PATTERNS,
         families=ALL_FAMILIES,
     ),
-    # Rust sources also drive the text gates that scan `crates/`.
     Rule(
         name="rust-sources",
         patterns=("crates/**", "examples/**/*.rs"),
-        families=frozenset({"rust-compile", "docs-text"}),
+        families=frozenset({"rust-compile"}),
     ),
     # Prose the Rust suite reads. `rust-sources` already routes crate-local
     # markdown to `rust-compile` because `include_str!` can pull it in; the
     # same reasoning applies to repository-root prose that a test opens at
     # runtime, and the workspace has such tests. These paths are prose, so the
-    # text gates still own them, but a change here can turn the Rust suite red
-    # and must not be classified `docs-only`.
+    # change here can turn the Rust suite red and must not be classified
+    # `docs-only`.
     #
     # The list is exact rather than a glob so `docs-only` keeps its value: only
     # the files a Rust source actually names are pulled in. It is pinned by
@@ -140,7 +133,7 @@ RULES: tuple[Rule, ...] = (
     Rule(
         name="rust-runtime-doc-inputs",
         patterns=RUST_RUNTIME_DOC_INPUTS,
-        families=frozenset({"rust-compile", "docs-text"}),
+        families=frozenset({"rust-compile"}),
     ),
     # Prose: `docs/**` and repository-root markdown (README, CONTRIBUTING,
     # CONTEXT, PRODUCT, ...). Markdown nested under a crate is matched by
@@ -149,7 +142,7 @@ RULES: tuple[Rule, ...] = (
     Rule(
         name="docs-prose",
         patterns=("docs/**", "*.md"),
-        families=frozenset({"docs-text"}),
+        families=frozenset(),
     ),
 )
 

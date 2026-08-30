@@ -19,7 +19,6 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CONFIDENCE_WORKFLOW = ROOT / ".github" / "workflows" / "confidence.yml"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
-DOCS_PAGES_WORKFLOW = ROOT / ".github" / "workflows" / "docs-pages.yml"
 SCCACHE_ACTION_REF = "./.github/actions/setup-sccache"
 SCCACHE_ACTION = ROOT / ".github" / "actions" / "setup-sccache" / "action.yml"
 MOLD_RUSTFLAGS = "-C link-arg=-fuse-ld=mold"
@@ -899,7 +898,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
 
     def test_secret_bearing_workflows_pin_external_actions_by_sha(self) -> None:
-        for path in (RELEASE_WORKFLOW, DOCS_PAGES_WORKFLOW):
+        for path in (RELEASE_WORKFLOW,):
             workflow = path.read_text(encoding="utf-8")
             actions = re.findall(
                 r"^\s+uses: ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s#]+)"
@@ -1517,21 +1516,9 @@ derive_mutation_jobs() {{
         # The publisher stamps the ephemeral checkout before packaging crates.
         # Host Application binary stamping belongs to that host's own release.
         self.assertIn("publish_workspace.py --version", release)
-        self.assertIn('release_version.py stamp-docs "${version}"', release)
-        self.assertIn("git push origin HEAD:main", release)
-        self.assertIn("git rebase origin/main", release)
-        self.assertIn("continue-on-error: true", release)
-        self.assertIn(
-            "Skipping docs pin for superseded ${RELEASE_TAG}", release
-        )
-        self.assertIn(
-            "git tag --list 'v*' --sort=-v:refname", release
-        )
-        self.assertIn("python3 scripts/lint_docs.py", release)
-        self.assertIn("gh workflow run ci.yml --ref main", release)
         self.assertIn("permissions:\n  contents: read\n  actions: read", release)
         publish = workflow_job_block(release, "publish")
-        self.assertIn("permissions:\n      contents: write\n      actions: write", publish)
+        self.assertIn("permissions:\n      contents: write", publish)
 
     def test_workspace_tests_are_sharded_off_the_critical_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -1562,7 +1549,6 @@ derive_mutation_jobs() {{
             test_doc,
         )
         for foreign in (
-            "python3 scripts/lint_docs.py",
             "cargo check -p agent-service --features restate --all-targets --locked",
             "cargo check -p lash-runtime --no-default-features --locked",
         ):
@@ -1575,10 +1561,8 @@ derive_mutation_jobs() {{
         # somewhere, and named.
         moved_gates = {
             "repo-gates": (
-                "python3 scripts/lint_docs.py",
                 "python3 scripts/lint_orchestrating_tools.py",
                 "python3 scripts/check_test_quarantines.py",
-                "bash scripts/check-rustdoc.sh",
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
             ),
@@ -1616,14 +1600,10 @@ derive_mutation_jobs() {{
             with self.subTest(self_test=name):
                 self.assertIn(f"python3 scripts/{name}", repo_gates)
 
-        # Both 8-vCPU compile jobs reclaim runner disk, as the job they were
-        # split out of did.
-        for job_id in ("repo-gates", "runtime-feature-boundary"):
-            with self.subTest(job=job_id):
-                self.assertIn(
-                    "bash scripts/ci-reclaim-disk.sh",
-                    workflow_job_block(workflow, job_id),
-                )
+        self.assertIn(
+            "bash scripts/ci-reclaim-disk.sh",
+            workflow_job_block(workflow, "runtime-feature-boundary"),
+        )
 
     def test_one_ci_run_per_head_branch_whatever_the_trigger(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -1805,7 +1785,6 @@ derive_mutation_jobs() {{
         for job_id in (
             "test-doc",
             "test-shard",
-            "repo-gates",
             "facade-gates",
             "package-feature-checks",
             "runtime-feature-boundary",

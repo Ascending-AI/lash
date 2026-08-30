@@ -329,7 +329,6 @@ jobs:
     needs: [prepare-release, publish-crates]
     permissions:
       contents: write
-      actions: write
     env:
       RELEASE_SHA: ${{ needs.prepare-release.outputs.release_sha }}
       RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
@@ -391,74 +390,3 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
-
-      # The release is already public at this point. Keep the checked-in docs
-      # pin synchronized without allowing a transient main-branch race (or any
-      # other docs-bump failure) to turn a successful publish red.
-      - name: Stamp published version into docs
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          trap 'echo "::warning title=Docs pin bump failed::The release was published, but its automated docs pin bump failed. Update the docs pin manually."' ERR
-
-          version="${RELEASE_TAG#v}"
-          git fetch --force origin main --tags
-          latest_tag="$(git tag --list 'v*' --sort=-v:refname | sed -n '1p')"
-          if [ "${latest_tag}" != "${RELEASE_TAG}" ]; then
-            echo "Skipping docs pin for superseded ${RELEASE_TAG}; newer release tag ${latest_tag} already exists."
-            echo "Skipped docs pin for superseded ${RELEASE_TAG}; newer release ${latest_tag} exists." >> "${GITHUB_STEP_SUMMARY}"
-            exit 0
-          fi
-
-          git checkout -B release-docs-pin origin/main
-          python3 scripts/release_version.py stamp-docs "${version}"
-          python3 scripts/lint_docs.py
-
-          if [ -z "$(git status --short)" ]; then
-            echo "Docs already reference ${version}; no commit needed."
-            echo "Docs already reference ${version}; no commit was created." >> "${GITHUB_STEP_SUMMARY}"
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "docs: stamp release ${version}"
-
-          max_attempts=3
-          attempt=1
-          while true; do
-            echo "Pushing docs pin to main (attempt ${attempt}/${max_attempts})."
-            if git push origin HEAD:main; then
-              echo "Stamped docs for ${version} on main." >> "${GITHUB_STEP_SUMMARY}"
-              git fetch --force origin main
-              if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
-                if gh workflow run ci.yml --ref main; then
-                  echo "Dispatched CI for the docs pin commit." >> "${GITHUB_STEP_SUMMARY}"
-                else
-                  echo "::warning title=Docs pin CI dispatch failed::The docs pin reached main, but its CI run could not be dispatched."
-                  echo "WARNING: CI was not dispatched for the docs pin commit." >> "${GITHUB_STEP_SUMMARY}"
-                fi
-              else
-                echo "A newer main commit superseded the docs pin head and owns CI validation." >> "${GITHUB_STEP_SUMMARY}"
-              fi
-              exit 0
-            fi
-
-            if [ "${attempt}" -ge "${max_attempts}" ]; then
-              echo "::warning title=Docs pin push exhausted::The release was published, but the docs pin could not be pushed to main after ${max_attempts} attempts."
-              echo "WARNING: docs pin for ${version} was not pushed after ${max_attempts} attempts; update it manually." >> "${GITHUB_STEP_SUMMARY}"
-              exit 0
-            fi
-
-            git fetch origin main
-            if ! git rebase origin/main; then
-              git rebase --abort || true
-              echo "::warning title=Docs pin rebase failed::The release was published, but the docs pin commit conflicted with main."
-              echo "WARNING: docs pin for ${version} conflicted with main; update it manually." >> "${GITHUB_STEP_SUMMARY}"
-              exit 0
-            fi
-            attempt=$((attempt + 1))
-          done

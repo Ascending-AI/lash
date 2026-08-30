@@ -48,7 +48,6 @@ class DocOnlyTests(unittest.TestCase):
     def test_docs_and_root_markdown_skip_every_compile_family(self) -> None:
         scope = scope_of("docs/guide.md", "README.md", "CONTRIBUTING.md")
         self.assertEqual(scope.classification, "docs-only")
-        self.assertTrue(scope.runs("docs-text"))
         for family in ("rust-compile", "scripts", "workflows"):
             self.assertFalse(scope.runs(family), family)
 
@@ -66,7 +65,7 @@ class DocOnlyTests(unittest.TestCase):
 
 class ScriptOnlyTests(unittest.TestCase):
     def test_a_script_change_runs_everything(self) -> None:
-        scope = scope_of("scripts/lint_docs.py")
+        scope = scope_of("scripts/gate_scope.py")
         self.assertEqual(scope.classification, "shared-inputs")
         self.assertEqual(scope.families, gate_scope.ALL_FAMILIES)
 
@@ -80,7 +79,6 @@ class RustSourceTests(unittest.TestCase):
         scope = scope_of("crates/lash-core/src/runtime/turn_loop.rs")
         self.assertEqual(scope.classification, "rust-only")
         self.assertTrue(scope.runs("rust-compile"))
-        self.assertTrue(scope.runs("docs-text"))
         self.assertFalse(scope.runs("workflows"))
         self.assertFalse(scope.runs("scripts"))
 
@@ -100,7 +98,6 @@ class MixedTests(unittest.TestCase):
         scope = scope_of("docs/guide.md", "crates/lash/src/lib.rs")
         self.assertEqual(scope.classification, "mixed")
         self.assertTrue(scope.runs("rust-compile"))
-        self.assertTrue(scope.runs("docs-text"))
         self.assertFalse(scope.runs("workflows"))
 
     def test_docs_plus_a_shared_input_runs_everything(self) -> None:
@@ -151,7 +148,6 @@ class RenderTests(unittest.TestCase):
         lines = text.splitlines()
         self.assertEqual(len(lines), len(gate_scope.FAMILIES) + 1)
         self.assertIn("rust-compile: skip", lines)
-        self.assertIn("docs-text: run", lines)
         self.assertTrue(lines[-1].startswith("classification: docs-only -- "))
 
     def test_text_output_is_ascii_so_any_locale_can_print_it(self) -> None:
@@ -161,7 +157,6 @@ class RenderTests(unittest.TestCase):
     def test_env_output_is_evaluable_and_quotes_the_reason(self) -> None:
         env = gate_scope.render_env(scope_of("docs/guide.md"))
         self.assertIn("GATE_RUN_RUST_COMPILE=0", env)
-        self.assertIn("GATE_RUN_DOCS_TEXT=1", env)
         printed = subprocess.run(
             ["bash", "-c", f'eval "$1"; printf "%s|%s" "$GATE_RUN_SCRIPTS" '
              f'"$GATE_SCOPE_CLASSIFICATION"', "bash", env],
@@ -352,7 +347,6 @@ class RustRuntimeDocInputTests(unittest.TestCase):
     def test_a_pinned_doc_input_runs_the_rust_battery(self) -> None:
         scope = scope_of("docs/adr/0008-confidence-gate.md")
         self.assertTrue(scope.runs("rust-compile"))
-        self.assertTrue(scope.runs("docs-text"))
         self.assertEqual(scope.classification, "rust-input-docs")
 
     def test_unrelated_prose_still_skips_the_rust_battery(self) -> None:
