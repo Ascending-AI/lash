@@ -12126,9 +12126,35 @@ struct BlockingCancelSignalTransport {
     release: tokio::sync::Notify,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct CeilingCancelWatchTransport {
     requests: AtomicUsize,
+    attachment_started: tokio::sync::Semaphore,
+    expire_attachment: tokio::sync::Semaphore,
+}
+
+impl Default for CeilingCancelWatchTransport {
+    fn default() -> Self {
+        Self {
+            requests: AtomicUsize::new(0),
+            attachment_started: tokio::sync::Semaphore::new(0),
+            expire_attachment: tokio::sync::Semaphore::new(0),
+        }
+    }
+}
+
+impl CeilingCancelWatchTransport {
+    async fn await_attachment(&self) {
+        self.attachment_started
+            .acquire()
+            .await
+            .expect("cancel watch transport remains open")
+            .forget();
+    }
+
+    fn expire_attachment(&self) {
+        self.expire_attachment.add_permits(1);
+    }
 }
 
 #[async_trait::async_trait]
@@ -12136,10 +12162,15 @@ impl HttpTransport for CeilingCancelWatchTransport {
     async fn send(
         &self,
         _request: HttpRequest,
-        timeout: Option<Duration>,
+        _timeout: Option<Duration>,
     ) -> Result<HttpResponse, HttpTransportError> {
         self.requests.fetch_add(1, Ordering::SeqCst);
-        tokio::time::sleep(timeout.unwrap_or(Duration::ZERO)).await;
+        self.attachment_started.add_permits(1);
+        self.expire_attachment
+            .acquire()
+            .await
+            .expect("cancel watch transport remains open")
+            .forget();
         Err(
             HttpTransportError::new("cancel watch attach ceiling elapsed")
                 .with_kind(lash_core::ProviderFailureKind::Timeout)
@@ -12361,22 +12392,30 @@ async fn cancel_watch_reissues_after_attach_ceiling_until_segment_completes() {
         .await
         .expect("register process");
     let finish = Arc::clone(&runner);
+    let attachments = Arc::clone(&transport);
     let finisher = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(55)).await;
+        for _ in 0..2 {
+            attachments.await_attachment().await;
+            attachments.expire_attachment();
+        }
+        attachments.await_attachment().await;
         finish.finish_successfully.notify_one();
     });
 
-    let outcome = workflow
-        .run_registration(
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        workflow.run_registration(
             registration,
             ProcessExecutionContext::default(),
             native_process_scope("ceiling-reissues"),
             0,
             None,
             workflow.cancellation_signal("ceiling-reissues", 0),
-        )
-        .await
-        .expect("attach ceiling expiry must not fail the segment");
+        ),
+    )
+    .await
+    .expect("cancel watch must re-attach without hanging")
+    .expect("attach ceiling expiry must not fail the segment");
     finisher.await.expect("finish segment");
 
     assert!(matches!(
@@ -12384,8 +12423,9 @@ async fn cancel_watch_reissues_after_attach_ceiling_until_segment_completes() {
         lash_core::ProcessRunOutcome::Terminal { output, .. }
             if is_process_success(output.as_ref())
     ));
-    assert!(
-        transport.requests.load(Ordering::SeqCst) >= 3,
+    assert_eq!(
+        transport.requests.load(Ordering::SeqCst),
+        3,
         "the cancel watch must re-attach across several ceilings"
     );
 }
@@ -16220,7 +16260,6 @@ async fn spawn_restate_http_black_hole() -> (String, tokio::task::JoinHandle<()>
 
 async fn spawn_restate_http_timeout_then_capture(
     response: MockHttpResponse,
-    first_hold: Duration,
 ) -> (String, Arc<Mutex<Vec<String>>>, tokio::task::JoinHandle<()>) {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
@@ -16233,10 +16272,6 @@ async fn spawn_restate_http_timeout_then_capture(
         let (mut first_socket, _) = listener.accept().await.expect("accept first wait");
         let first_request = read_http_request(&mut first_socket).await;
         captured_server.lock_recover().push(first_request);
-        let first_wait = tokio::spawn(async move {
-            tokio::time::sleep(first_hold).await;
-            drop(first_socket);
-        });
 
         let (mut second_socket, _) = listener.accept().await.expect("accept reattached wait");
         let second_request = read_http_request(&mut second_socket).await;
@@ -16256,7 +16291,7 @@ async fn spawn_restate_http_timeout_then_capture(
             .await
             .expect("write response body");
         second_socket.flush().await.expect("flush");
-        first_wait.await.expect("first wait holder");
+        drop(first_socket);
     });
     (format!("http://{addr}"), captured, server)
 }
@@ -17016,13 +17051,10 @@ async fn restate_process_attach_preserves_re_attach_signal_on_ceiling() {
 #[tokio::test]
 async fn restate_process_attach_reattaches_after_timeout_until_terminal() {
     let expected = legacy_process_success(serde_json::json!({"reattached": true}));
-    let (base_url, captured, server) = spawn_restate_http_timeout_then_capture(
-        MockHttpResponse {
-            status: "200 OK",
-            body: r#"{"type":"success","value":{"reattached":true}}"#,
-        },
-        Duration::from_millis(100),
-    )
+    let (base_url, captured, server) = spawn_restate_http_timeout_then_capture(MockHttpResponse {
+        status: "200 OK",
+        body: r#"{"type":"success","value":{"reattached":true}}"#,
+    })
     .await;
     let runner = RestateProcessIngressRunner::new(
         RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
