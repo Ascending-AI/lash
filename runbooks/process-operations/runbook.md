@@ -88,28 +88,29 @@ before every action is durably represented, or any redrive appends a second
 
 ## FIG-1293 migrated-tool atomicity judgment
 
-Run these rows against the appropriate Restate-backed host tier before Phase 0:
-the four deterministic process/world-tool rows (`process-start-detach`, `process-signal`,
-`processes-cancel`, and `spawn-agent`) target the Agent Workbench's Restate tier
-(using its deterministic mock world tools and process lifecycle without host-affecting shell
-plugins), while the `protocol-batch` row targets `slack-clone` where the standard protocol is
-native.
+Run these rows against the Agent Workbench's Restate-backed RLM tier before Phase 0. The
+`process-start-detach` and `process-signal` rows exercise the RLM process language surface;
+`processes-cancel` and `spawn-agent` use the Workbench's deterministic process/world tools.
+The `protocol-batch` row exercises the RLM resource-operation batch over two deterministic
+Workbench leaf tools. No judged row uses a host-affecting `shell.*` authority or the
+standard-protocol `tools.batch` call.
 
 Use a fresh session for each row and save the rendered transcript, `/api/state`, Restate
 invocation/journal inspection, and `trace.jsonl` extract under a row-named artifact directory.
-Submit the named tool call, wait until its turn is active and its first durable child command
-is visible, then replace **only** the target worker (via `just agent-workbench-restart <port>`
+Submit the row's named tool call or RLM program, wait until its turn is active and its first
+durable child command is visible, then replace **only** the target worker (via
+`just agent-workbench-restart <port>`
 or the target host restart recipe) while preserving the same run/data directories and Restate
 container. Never use Restate Admin kill as a substitute. After recovery, reconcile DOM,
 API/durable messages, trace executions, and the literal outcome below.
 
-| Row | Public call and literal oracle | Required Restate journal shape after worker replacement |
+| Row | Call/program and literal oracle | Required Restate journal shape after worker replacement |
 |---|---|---|
-| `process-start-detach` | Invoke tracked deterministic process start once and detached deterministic process start once. Each result contains its exact pre-recorded `process_id`; the tracked row is `running`, while the detached audit row is externally owned and terminal with `status="detached"`. The acceptance must inspect the durable process lifecycle: the detached task remains alive and externally owned after the originating worker/runtime is dropped. | Each call has one recorded `StartProcess` intent with `on_parent_end=Abandon`; the detached flag and audit id remain in the recorded internal body, and redrive retains one launcher/audit identity with no duplicate launch, no `ToolAttempt`-nested process command, and no FIG-1127 refusal. |
-| `process-signal` | Start a signal-receiving tracked process, call `process.signal` with literal payload `{"signal":"ping"}`, and require `{"process_id":<started-id>,"sequence":<recorded-event-sequence>,"status":"signalled"}`. | One `SignalProcess` command with signal `ping` and payload `{"signal":"ping"}`; the process observes the input once after recovery and the projected sequence equals the recorded signal event. |
+| `process-start-detach` | In the active RLM dialect, define a deterministic process, invoke its language `start` construct once, retain the returned process handle, and await that handle after worker replacement. Require the exact returned value and the same process id before and after recovery. The historical `-detach` row name is retained for artifact continuity; the RLM surface has no detach mode, so do not assert detached ownership or an externally owned terminal status. | One direct `StartProcess` command for the prepared process id and one direct await of that same handle; recovery retains the single launcher identity and result, with no duplicate launch, no `ToolAttempt`-nested process command, and no FIG-1127 refusal. |
+| `process-signal` | In the active RLM dialect, define a process with a literal `ping` signal, start it with the language process-start construct, and send literal payload `"ping"` with the dialect's signal-send construct (`signal_run(handle, "ping", "ping")` in Lashlang or `wake(handle, "ping", "ping")` in TypeScript). Require the process's returned value to be the one observed payload; do not expect a public `process.signal` result wrapper. | One direct `StartProcess` command and one `SignalProcess` command for the same prepared process id, with signal `ping` and payload `"ping"`; recovery delivers the signal once and the process returns the observed payload once. |
 | `processes-cancel` | Start a long-lived tracked process, call `processes.cancel` for its exact id, and require `{"process_id":<started-id>,"status":"cancelled"}`. | One `CancelProcess` command and one `process.cancel_requested` event for the exact id; redrive emits neither a duplicate event nor an ordinal-tier refusal. |
 | `spawn-agent` | Call `spawn_agent` with a schema requiring `{"answer":"str"}` and require one matching child result. | The orchestration body has no enclosing `ToolAttempt`; its one start and one await are direct process-replay children for the same prepared child id, and recovery creates one child session/result. |
-| `protocol-batch` | Target `slack-clone` (native standard protocol host): Call protocol-standard `batch` with two literal side-effect-free child calls and require the ordered two-element literal result vector. | The batch body has no enclosing `ToolAttempt`; only the two children have attempt frames, and recovery retains their order and exactly one result per child. |
+| `protocol-batch` | On the Agent Workbench Restate/RLM profile, ensure the deterministic mock `work` and `personal` Inbox authorities are present, then issue two literal side-effect-free `list({})` calls in one dialect-native aggregate (`await Promise.all([inbox.work.list({}), inbox.personal.list({})])` in TypeScript or the equivalent Lashlang aggregate). Require the ordered two-element result vector. This is the RLM resource-operation batch, not a `tools.batch` call. | The RLM resource-operation batch has no enclosing `ToolAttempt`; only the two Inbox leaves have attempt frames, and recovery retains their source order and exactly one result per leaf. |
 
 **Pass only if:** all five rows recover to their literal outcomes, the three-layer counts and ids
 agree, each Restate journal has the required shape, no old ordinal-tier refusal appears, and the
