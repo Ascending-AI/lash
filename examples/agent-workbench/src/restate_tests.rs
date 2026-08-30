@@ -3,6 +3,7 @@ use super::{
     cron_occurrence_key, cron_session_disposition, emit_cron_occurrence_with_effect_controller,
 };
 use crate::AppError;
+use lash_core as lash_test_internals;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
