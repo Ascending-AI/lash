@@ -27,7 +27,8 @@ port override. Its path-qualified project and ownership label prevent it from to
 worktree's PostgreSQL service. It seeds the pre-bump deployment with a real turn
 per session, a live background process holding a pending wake, and a fired trigger
 delivery, then rewinds the recorded component schema version by one. It emits
-`version-bump recreation e2e passed: scenarios=4` only after every phase assertion holds.
+`version-bump recreation e2e passed: phases=4 refusal_cases=3` only after every phase
+assertion holds.
 Its `0*`-prefixed artifacts are the backend truth for this judged runbook.
 
 **No real tokens.** The companion's turns run against a deterministic in-process provider
@@ -206,7 +207,7 @@ coupling was tested end to end.
 
 Stop the static docs server and confirm its loopback port is closed. Require the
 companion's final `panic gate: clean` and
-`version-bump recreation e2e passed: scenarios=4` lines, and confirm its compose project
+`version-bump recreation e2e passed: phases=4 refusal_cases=3` lines, and confirm its compose project
 and volume no longer exist.
 
 | Item | Objective gate | Verdict | Evidence |

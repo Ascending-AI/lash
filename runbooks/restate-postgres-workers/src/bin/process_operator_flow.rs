@@ -669,6 +669,7 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
 
     emit(json!({
         "checkpoint": "seeded_drain_deployment",
+        "seeded_session_id": TURN_SESSION_ID,
         "in_flight_turn_id": "graceful-drain-in-flight",
         "provider_calls": provider.calls.load(Ordering::SeqCst),
         "journal_active": active_before_drain,
@@ -874,6 +875,7 @@ async fn request_abandon(storage: &PostgresStorage) -> Result<()> {
         "process_id": REQUEST_PROCESS_ID,
         "status": format!("{:?}", seeded.lifecycle),
         "terminal": seeded.terminal,
+        "first_started": seeded.first_started,
         "lease_holder_owner_id": seeded.lease_holder.as_ref().map(|owner| owner.owner_id.clone()),
         "lease_token": live_lease.lease_token,
         "fencing_token": live_lease.fencing_token,
