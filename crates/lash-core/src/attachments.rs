@@ -1424,8 +1424,8 @@ pub(crate) fn attachment_materialization_notice(
 ///
 /// The fast path neither clones nor mutates the request, keeping accepted
 /// attachment envelopes byte-for-byte identical. On the degradation path the
-/// rewritten request itself crosses the durable effect boundary, so replay
-/// observes the recorded decision rather than recomputing it after dispatch.
+/// effect outcome is journaled under the turn-effect invocation key, so its
+/// recorded response wins on replay instead of dispatch running again.
 pub(crate) fn degrade_unmaterializable_request_attachments(
     request: &mut Arc<crate::llm::types::LlmRequest>,
 ) -> Vec<crate::AttachmentMaterializationNotice> {

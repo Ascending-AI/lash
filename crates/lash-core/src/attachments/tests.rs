@@ -1597,14 +1597,19 @@ fn persistence_manifest_adapter_forwards_holds_ref() {
     );
 }
 
-fn attachment_request(source: crate::AttachmentSource) -> Arc<crate::llm::types::LlmRequest> {
+fn attachment_request(
+    attachments: Vec<crate::AttachmentSource>,
+) -> Arc<crate::llm::types::LlmRequest> {
+    let blocks = (0..attachments.len())
+        .map(|attachment_idx| crate::llm::types::LlmContentBlock::Attachment { attachment_idx })
+        .collect();
     Arc::new(crate::llm::types::LlmRequest {
         model: "attachment-model".to_string(),
         messages: vec![crate::llm::types::LlmMessage::new(
             crate::llm::types::LlmRole::User,
-            vec![crate::llm::types::LlmContentBlock::Attachment { attachment_idx: 0 }],
+            blocks,
         )],
-        attachments: vec![source],
+        attachments,
         resolved_stored: Default::default(),
         tools: Arc::new(Vec::new()),
         tool_choice: crate::llm::types::LlmToolChoice::None,
@@ -1624,10 +1629,10 @@ fn attachment_request(source: crate::AttachmentSource) -> Arc<crate::llm::types:
 
 #[test]
 fn accepted_attachment_degradation_fast_path_preserves_exact_request() {
-    let mut request = attachment_request(crate::AttachmentSource::inline(
+    let mut request = attachment_request(vec![crate::AttachmentSource::inline(
         MediaType::parse("image/png").expect("image MIME"),
         vec![1, 2, 3],
-    ));
+    )]);
     let pointer_before = Arc::as_ptr(&request);
     let bytes_before = serde_json::to_vec(request.as_ref()).expect("serialize request before");
 
@@ -1651,7 +1656,7 @@ fn unsupported_attachment_is_replaced_by_typed_placeholder() {
         type_metadata: None,
         label: Some("workspace_badge.bin".to_string()),
     };
-    let mut request = attachment_request(crate::AttachmentSource::stored(attachment_ref));
+    let mut request = attachment_request(vec![crate::AttachmentSource::stored(attachment_ref)]);
 
     let notices = degrade_unmaterializable_request_attachments(&mut request);
 
@@ -1664,4 +1669,136 @@ fn unsupported_attachment_is_replaced_by_typed_placeholder() {
                 && text.contains("workspace_badge.bin")
                 && text.contains("no_provider_accepts_mime_and_source")
     ));
+}
+
+const DEGRADED_BYTES: &[u8] = b"opaque degraded attachment bytes";
+const ACCEPTED_BYTES: &[u8] = b"exact accepted PNG bytes";
+
+fn stored_attachment(
+    id: &str,
+    media_type: &str,
+    bytes: &[u8],
+    type_metadata: Option<AttachmentTypeMetadata>,
+    label: &str,
+) -> lash_sansio::AttachmentRef {
+    lash_sansio::AttachmentRef {
+        id: AttachmentId::parse(id).expect("attachment id"),
+        media_type: MediaType::parse(media_type).expect("attachment MIME"),
+        byte_len: bytes.len() as u64,
+        type_metadata,
+        label: Some(label.to_string()),
+    }
+}
+
+fn assert_typed_degradation_placeholder(block: &crate::llm::types::LlmContentBlock) {
+    assert!(matches!(
+        block,
+        crate::llm::types::LlmContentBlock::Text { text, .. }
+            if text.contains("attachment_unavailable")
+                && text.contains("degraded.bin")
+                && text.contains("application/octet-stream")
+                && text.contains("no_provider_accepts_mime_and_source")
+    ));
+}
+
+#[test]
+fn degraded_then_accepted_attachment_remaps_surviving_index() {
+    let degraded_ref = stored_attachment(
+        "mixed-degraded-first",
+        "application/octet-stream",
+        DEGRADED_BYTES,
+        None,
+        "degraded.bin",
+    );
+    let accepted_ref = stored_attachment(
+        "mixed-accepted-second",
+        "image/png",
+        ACCEPTED_BYTES,
+        Some(AttachmentTypeMetadata::image(Some(640), Some(480))),
+        "accepted.png",
+    );
+    let accepted_source = crate::AttachmentSource::stored(accepted_ref.clone());
+    let mut request = attachment_request(vec![
+        crate::AttachmentSource::stored(degraded_ref.clone()),
+        accepted_source.clone(),
+    ]);
+    Arc::make_mut(&mut request).resolved_stored.extend([
+        (degraded_ref.id.clone(), DEGRADED_BYTES.to_vec()),
+        (accepted_ref.id.clone(), ACCEPTED_BYTES.to_vec()),
+    ]);
+
+    let notices = degrade_unmaterializable_request_attachments(&mut request);
+
+    assert_eq!(notices.len(), 1);
+    assert_eq!(
+        notices[0].reason,
+        crate::AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource
+    );
+    assert_eq!(request.attachments, vec![accepted_source]);
+    assert_eq!(
+        request.attachments[0].stored_ref(),
+        Some(&accepted_ref),
+        "the accepted attachment must retain its exact metadata"
+    );
+    assert_eq!(
+        request.attachment_bytes(&request.attachments[0]),
+        Some(ACCEPTED_BYTES),
+        "the accepted attachment must retain its exact original bytes"
+    );
+    assert_eq!(request.resolved_stored.len(), 1);
+    assert!(!request.resolved_stored.contains_key(&degraded_ref.id));
+    assert_typed_degradation_placeholder(&request.messages[0].blocks[0]);
+    let surviving_idx = match &request.messages[0].blocks[1] {
+        crate::llm::types::LlmContentBlock::Attachment { attachment_idx } => *attachment_idx,
+        block => panic!("expected surviving attachment block, got {block:?}"),
+    };
+    assert_eq!(
+        surviving_idx, 0,
+        "surviving attachment block must align with the pruned attachment vector"
+    );
+}
+
+#[test]
+fn accepted_then_degraded_attachment_keeps_surviving_index() {
+    let accepted_ref = stored_attachment(
+        "mixed-accepted-first",
+        "image/png",
+        ACCEPTED_BYTES,
+        Some(AttachmentTypeMetadata::image(Some(640), Some(480))),
+        "accepted.png",
+    );
+    let degraded_ref = stored_attachment(
+        "mixed-degraded-second",
+        "application/octet-stream",
+        DEGRADED_BYTES,
+        None,
+        "degraded.bin",
+    );
+    let accepted_source = crate::AttachmentSource::stored(accepted_ref.clone());
+    let mut request = attachment_request(vec![
+        accepted_source.clone(),
+        crate::AttachmentSource::stored(degraded_ref.clone()),
+    ]);
+    Arc::make_mut(&mut request).resolved_stored.extend([
+        (accepted_ref.id.clone(), ACCEPTED_BYTES.to_vec()),
+        (degraded_ref.id.clone(), DEGRADED_BYTES.to_vec()),
+    ]);
+
+    let notices = degrade_unmaterializable_request_attachments(&mut request);
+
+    assert_eq!(notices.len(), 1);
+    assert_eq!(request.attachments, vec![accepted_source]);
+    assert_eq!(request.attachments[0].stored_ref(), Some(&accepted_ref));
+    assert_eq!(
+        request.attachment_bytes(&request.attachments[0]),
+        Some(ACCEPTED_BYTES)
+    );
+    assert_eq!(request.resolved_stored.len(), 1);
+    assert!(!request.resolved_stored.contains_key(&degraded_ref.id));
+    let surviving_idx = match &request.messages[0].blocks[0] {
+        crate::llm::types::LlmContentBlock::Attachment { attachment_idx } => *attachment_idx,
+        block => panic!("expected surviving attachment block, got {block:?}"),
+    };
+    assert_eq!(surviving_idx, 0);
+    assert_typed_degradation_placeholder(&request.messages[0].blocks[1]);
 }
