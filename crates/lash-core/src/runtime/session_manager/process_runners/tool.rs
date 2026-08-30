@@ -183,6 +183,9 @@ impl RuntimeSessionServices {
                     .map_err(|err| crate::PluginError::Session(err.to_string()))?;
                 crate::tool_result::tool_output_from_completion_resolution(resolution)
             }
+            crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {
+                return Err(crate::PluginError::RuntimeEffectController(error));
+            }
         };
         let parent_end_actions = dispatch.recorded_intent_outcomes.snapshot();
         drop(dispatch);

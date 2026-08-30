@@ -7,13 +7,19 @@ pub(crate) async fn execute_final_tool_intents(
     tool_call_id: Option<&str>,
     intents: &crate::ToolIntents,
     child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Vec<crate::ToolIntentExecutionOutcome> {
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     let execution_scope_id = context.effect_controller.scoped().scope_id().to_string();
     if intents.intents.is_empty() && intents.protocol_version == crate::TOOL_INTENT_PROTOCOL_V1 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     if let Some(refusal) = admit_batch(&context.session_id, tool_call_id, intents) {
-        return refuse_all(context, &execution_scope_id, tool_call_id, intents, refusal);
+        return Ok(refuse_all(
+            context,
+            &execution_scope_id,
+            tool_call_id,
+            intents,
+            refusal,
+        ));
     }
 
     let mut outcomes = Vec::with_capacity(intents.intents.len());
@@ -52,6 +58,11 @@ pub(crate) async fn execute_final_tool_intents(
                     parent_end,
                 }
             }
+            Err(crate::PluginError::RuntimeEffectController(error))
+                if error.code.is_replay_mismatch() =>
+            {
+                return Err(error);
+            }
             Err(error) => refused(
                 index,
                 intent.kind(),
@@ -73,7 +84,7 @@ pub(crate) async fn execute_final_tool_intents(
         );
         outcomes.push(outcome);
     }
-    outcomes
+    Ok(outcomes)
 }
 
 pub(crate) async fn execute_parent_end_actions(

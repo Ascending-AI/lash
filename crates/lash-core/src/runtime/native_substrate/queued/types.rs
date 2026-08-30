@@ -119,11 +119,29 @@ impl QueuedWorkRunError {
 
 impl From<PluginError> for QueuedWorkRunError {
     fn from(error: PluginError) -> Self {
-        if matches!(&error, PluginError::Runtime(error) if error.is_retryable()) {
+        if error.is_retryable() {
             Self::transient(error)
         } else {
             Self::terminal(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod run_error_tests {
+    use super::*;
+
+    #[test]
+    fn controller_owned_lane_contention_is_a_transient_queued_work_failure() {
+        let error = PluginError::RuntimeEffectController(crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::SessionExecutionLaneBusy,
+            "durable controller lane is busy",
+        ));
+
+        assert_eq!(
+            QueuedWorkRunError::from(error).class,
+            QueuedWorkRunErrorClass::Transient
+        );
     }
 }
 

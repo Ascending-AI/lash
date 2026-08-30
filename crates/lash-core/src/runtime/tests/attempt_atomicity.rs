@@ -724,7 +724,8 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
     ]);
     let outcomes =
         crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
-            .await;
+            .await
+            .expect("execute intent batch");
     assert_eq!(outcomes.len(), 4, "one typed outcome per intent");
     let literal_ids = [
         "tool-intent:v1:blake3:fa76f136a996c94029681d3115e19813ddd90a1fb98fdf39782fb1fb2d28a11a",
@@ -789,7 +790,8 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
     );
     let outcomes =
         crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
-            .await;
+            .await
+            .expect("refuse over-budget intent batch");
     assert_eq!(outcomes.len(), 33, "every declaration gets a refusal");
     assert!(outcomes.iter().all(|outcome| matches!(
         outcome,
@@ -940,7 +942,8 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
 
     let first =
         crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
-            .await;
+            .await
+            .expect("execute first intent drain");
     let first_bytes = serde_json::to_vec(&first).expect("serialize first intent outcome");
     assert!(
         matches!(
@@ -969,7 +972,8 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
 
     let redriven =
         crate::tool_dispatch::execute_final_tool_intents(&dispatch, Some(CALL_ID), &intents, None)
-            .await;
+            .await
+            .expect("redrive intent drain");
     assert_eq!(
         serde_json::to_vec(&redriven).expect("serialize redriven intent outcome"),
         first_bytes,
@@ -1084,13 +1088,13 @@ impl crate::RuntimeEffectController for OrdinalJournaledTier {
             let journal = self.journal.lock_recover();
             let Some(entry) = journal.get(ordinal) else {
                 return Err(crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RestateEffectHashMismatch,
+                    crate::RuntimeErrorCode::WorkerReplacementAbort,
                     format!("RT0016: journal ended before ordinal {ordinal} (`{identity}`)"),
                 ));
             };
             if entry.identity != identity {
                 return Err(crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RestateEffectHashMismatch,
+                    crate::RuntimeErrorCode::WorkerReplacementAbort,
                     format!(
                         "RT0016: journal mismatch at ordinal {ordinal}: recorded `{}`, handler issued `{identity}`",
                         entry.identity
@@ -1099,7 +1103,7 @@ impl crate::RuntimeEffectController for OrdinalJournaledTier {
             }
             let Some(outcome) = entry.outcome.clone() else {
                 return Err(crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RestateEffectHashMismatch,
+                    crate::RuntimeErrorCode::WorkerReplacementAbort,
                     format!("RT0016: recorded entry `{identity}` never settled"),
                 ));
             };

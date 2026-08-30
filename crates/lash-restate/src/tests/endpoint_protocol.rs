@@ -289,6 +289,24 @@ pub(super) fn restate_output_failure_message(input: &[u8]) -> Option<String> {
     String::from_utf8(protobuf_len_field(failure, 2)?.to_vec()).ok()
 }
 
+pub(super) fn restate_completed_promise(
+    input: &[u8],
+    expected_key: &str,
+) -> Option<serde_json::Value> {
+    restate_message_frames(input, 0x040B)?
+        .into_iter()
+        .find_map(|frame| {
+            let payload = frame.get(8..)?;
+            let key = String::from_utf8(protobuf_len_field(payload, 1)?.to_vec()).ok()?;
+            if key != expected_key {
+                return None;
+            }
+            let completion_value = protobuf_len_field(payload, 2)?;
+            let json = protobuf_len_field(completion_value, 1)?;
+            serde_json::from_slice(json).ok()
+        })
+}
+
 /// FIG-779: redrive an invocation whose journal already contains the exact
 /// `SleepCommand` emitted by its suspended attempt, but no timer completion.
 pub(super) fn encode_pending_sleep_replay<T: serde::Serialize>(
