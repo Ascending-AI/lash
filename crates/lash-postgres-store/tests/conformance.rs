@@ -2034,16 +2034,17 @@ async fn postgres_effect_controller_satisfies_lease_fencing_conformance_when_con
     let expire_pool = storage.pool().clone();
     lash_core::testing::conformance::effect_controller_lease_fencing(
         lash_core::testing::conformance::EffectLeaseFencingBackend {
-            make_controller: Box::new(move |ttl| {
+            make_controller: Box::new(move |ttl, clock| {
                 let storage = make_storage.clone();
                 Box::pin(async move {
-                    let controller = PostgresRuntimeEffectController::with_options(
+                    let controller = PostgresRuntimeEffectController::with_options_and_clock(
                         &storage,
                         durable_turn_scope("session", "turn"),
                         PostgresEffectReplayOptions {
                             lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
                                 .expect("conformance lease timings"),
                         },
+                        clock,
                     );
                     let for_replay = controller.clone();
                     lash_core::testing::conformance::LeaseFencingController {

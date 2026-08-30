@@ -234,12 +234,26 @@ impl PostgresRuntimeEffectController {
         scope: ExecutionScope,
         options: PostgresEffectReplayOptions,
     ) -> Self {
+        Self::with_options_and_clock(
+            storage,
+            scope,
+            options,
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+    }
+
+    /// Construct a scoped controller with an explicit scheduling clock.
+    ///
+    /// PostgreSQL remains authoritative for lease timestamps and comparisons;
+    /// this clock drives only effect sleeps, busy backoff, and renewal cadence.
+    pub fn with_options_and_clock(
+        storage: &PostgresStorage,
+        scope: ExecutionScope,
+        options: PostgresEffectReplayOptions,
+        clock: Arc<dyn lash_core::Clock>,
+    ) -> Self {
         Self {
-            inner: Arc::new(build_effect_replay_driver(
-                storage,
-                options,
-                Arc::new(lash_core::facade_support::SystemClock),
-            )),
+            inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
             scope,
         }
     }
