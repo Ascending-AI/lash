@@ -34,7 +34,8 @@ Defaults:
   unless AGENT_WORKBENCH_DATABASE_URL points at an existing database.
   --port PORT binds 127.0.0.1:PORT.
   Managed-service ports use a 10-port stride for each workbench-port step from
-  3030, unless their environment variables override them.
+  3030 for workbench ports 2223 through 7676. Outside that range, set the
+  managed-service endpoint environment variables explicitly.
   Without --port/--addr, AGENT_WORKBENCH_ADDR is used, then 127.0.0.1:3030.
   AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS sets the model context window; it
   defaults to 200000 and must be at least twice the plugin's compaction buffer
@@ -709,12 +710,28 @@ read -r workbench_host workbench_port < <(addr_host_port "$workbench_addr")
 validate_port "workbench" "$workbench_port"
 workbench_port_number=$((10#$workbench_port))
 managed_service_port_stride=10
-port_offset=$(((workbench_port_number - 3030) * managed_service_port_stride))
-default_restate_endpoint_port=$((9081 + port_offset))
-default_restate_ingress_port=$((8080 + port_offset))
-default_restate_admin_port=$((19070 + port_offset))
-default_restate_node_port=$((19071 + port_offset))
-default_postgres_port=$((15432 + port_offset))
+# These bounds are the workbench ports for which every stride-derived managed
+# service port remains in 1..65535. Outside them, explicit endpoint settings
+# are required so the run metadata can never contain an impossible port.
+managed_service_port_min_workbench=2223
+managed_service_port_max_workbench=7676
+if ((
+  workbench_port_number < managed_service_port_min_workbench ||
+    workbench_port_number > managed_service_port_max_workbench
+)); then
+  default_restate_endpoint_port=""
+  default_restate_ingress_port=""
+  default_restate_admin_port=""
+  default_restate_node_port=""
+  default_postgres_port=""
+else
+  port_offset=$(((workbench_port_number - 3030) * managed_service_port_stride))
+  default_restate_endpoint_port=$((9081 + port_offset))
+  default_restate_ingress_port=$((8080 + port_offset))
+  default_restate_admin_port=$((19070 + port_offset))
+  default_restate_node_port=$((19071 + port_offset))
+  default_postgres_port=$((15432 + port_offset))
+fi
 
 restate_endpoint_addr="${AGENT_WORKBENCH_RESTATE_ADDR:-127.0.0.1:$default_restate_endpoint_port}"
 restate_ingress_url="${RESTATE_INGRESS_URL:-http://127.0.0.1:$default_restate_ingress_port}"
@@ -742,6 +759,31 @@ if (( postgres_enabled )) && [[ -z "$agent_workbench_database_url" ]]; then
   agent_workbench_database_url="postgres://lash:lash@$postgres_host:$postgres_port/lash"
 elif [[ -n "$agent_workbench_database_url" ]]; then
   read -r postgres_host postgres_port < <(url_host_port "$agent_workbench_database_url")
+fi
+
+if ((
+  workbench_port_number < managed_service_port_min_workbench ||
+    workbench_port_number > managed_service_port_max_workbench
+)); then
+  managed_service_override_hint="AGENT_WORKBENCH_RESTATE_ADDR, RESTATE_INGRESS_URL, RESTATE_ADMIN_URL (or AGENT_WORKBENCH_RESTATE_ADMIN_PORT), and AGENT_WORKBENCH_RESTATE_NODE_PORT"
+  if (( postgres_enabled )) && [[ -z "$agent_workbench_database_url" ]]; then
+    managed_service_override_hint+="; also AGENT_WORKBENCH_POSTGRES_PORT"
+  fi
+  managed_service_overrides_complete=1
+  [[ -n "${AGENT_WORKBENCH_RESTATE_ADDR:-}" ]] || managed_service_overrides_complete=0
+  [[ -n "${RESTATE_INGRESS_URL:-}" ]] || managed_service_overrides_complete=0
+  if [[ -z "${RESTATE_ADMIN_URL:-}" &&
+    -z "${AGENT_WORKBENCH_RESTATE_ADMIN_PORT:-}" ]]; then
+    managed_service_overrides_complete=0
+  fi
+  [[ -n "${AGENT_WORKBENCH_RESTATE_NODE_PORT:-}" ]] || managed_service_overrides_complete=0
+  if (( postgres_enabled )) && [[ -z "$agent_workbench_database_url" ]] &&
+    [[ -z "${AGENT_WORKBENCH_POSTGRES_PORT:-}" ]]; then
+    managed_service_overrides_complete=0
+  fi
+  if (( ! managed_service_overrides_complete )); then
+    die "cannot derive managed service ports for workbench port $workbench_port; set $managed_service_override_hint explicitly"
+  fi
 fi
 
 restate_container="${AGENT_WORKBENCH_RESTATE_CONTAINER:-lash-agent-workbench-dev-restate-$workbench_port}"
