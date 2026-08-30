@@ -62,7 +62,6 @@ workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deeps
 workbench-trigger-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-turn-ingress = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 workbench-usage-ledger = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "the shared `just agent-workbench-attachment-usage-gate` companion; only Phase 1 calls a provider" }
-workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }
 
 # These exercise TypeScript-only host-language surface with no honest Lashlang
 # twin. The runbook keeps them together because the final phase composes all
@@ -80,6 +79,7 @@ typescript-codemode-parity = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 docs-quickstart = { tier = "deterministic", model = "scripted-provider" }
 request-abandon = { tier = "deterministic", model = "scripted-provider" }
 slack-clone-bot = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }
 
 # Deterministic, hermetic harnesses that CI executes rather than judges. They
 # make no model call, so they have no dialect to pin and no judged row to pair;
