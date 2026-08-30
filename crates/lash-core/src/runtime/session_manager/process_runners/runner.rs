@@ -181,14 +181,20 @@ impl RuntimeSessionServices {
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }
+            let context_for_shutdown = context.clone();
             let guard = crate::ProcessEngineRunGuard::new(move |parent_ended| {
                 Box::pin(async move {
                     debug_assert!(
                         !parent_ended,
                         "process teardown belongs after durable terminal completion"
                     );
+                    let nested_effect_error = context_for_shutdown.take_nested_effect_error();
+                    drop(context_for_shutdown);
                     drop(dispatch);
                     run_context.shutdown().await;
+                    if let Some(error) = nested_effect_error {
+                        return Err(crate::PluginError::RuntimeEffectController(error));
+                    }
                     Ok(())
                 })
             });

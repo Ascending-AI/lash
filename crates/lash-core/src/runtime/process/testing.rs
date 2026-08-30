@@ -543,6 +543,9 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
         let _transaction = self.transaction.lock().await;
+        if let Some(error) = self.process_events_read_error.lock().await.take() {
+            return Err(error);
+        }
         let managed = self.managed.lock().await;
         let Some(record) = managed.get(process_id) else {
             return Err(self.process_miss(process_id).await);

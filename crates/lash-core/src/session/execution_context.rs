@@ -818,13 +818,53 @@ impl<'run> RuntimeExecutionContext<'run> {
                     crate::RuntimeEffectCommand::Sleep { duration_ms },
                 ),
                 crate::RuntimeEffectLocalExecutor::sleep_under(
-                    &self.turn_cancel_wait(cancellation),
+                    &self.turn_cancel_wait(cancellation.clone()),
                     std::sync::Arc::clone(&self.dispatch.clock),
                 ),
             )
             .await?;
         match outcome {
-            crate::RuntimeEffectOutcome::Sleep => Ok(()),
+            crate::RuntimeEffectOutcome::Sleep => {
+                // Process sleeps remain uninterruptible. The registry read is the
+                // wake boundary: durable cancellation may be committed before
+                // its live signal reaches this worker, but it must still win
+                // before guest code resumes after the timer.
+                if let Some(process) = self.process_execution.as_ref() {
+                    let event_context = process
+                        .event_context
+                        .as_ref()
+                        .ok_or_else(missing_process_execution_error)?;
+                    let events = match event_context
+                        .process_work
+                        .registry()
+                        .events_after(&process.process_id, 0)
+                        .await
+                    {
+                        Ok(events) => events,
+                        Err(error) => {
+                            let error = match error {
+                                crate::PluginError::Runtime(error) => {
+                                    crate::RuntimeEffectControllerError::from(error)
+                                }
+                                error => crate::RuntimeEffectControllerError::from(error),
+                            };
+                            self.record_nested_effect_error(error.clone());
+                            return Err(error);
+                        }
+                    };
+                    let cancel_requested = events
+                        .iter()
+                        .any(|event| event.event_type == "process.cancel_requested");
+                    if cancel_requested {
+                        cancellation.cancel();
+                        return Err(crate::RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::RuntimeEffectSleepCancelled,
+                            "runtime effect sleep observed process cancellation at wake",
+                        ));
+                    }
+                }
+                Ok(())
+            }
             other => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                 format!("expected sleep outcome, got {}", other.kind().as_str()),

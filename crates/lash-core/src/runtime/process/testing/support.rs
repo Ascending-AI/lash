@@ -19,6 +19,7 @@ impl Default for TestLocalProcessRegistry {
             managed: Arc::new(Mutex::new(HashMap::new())),
             process_read_error: Arc::new(Mutex::new(None)),
             process_read_error_after: Arc::new(Mutex::new(None)),
+            process_events_read_error: Arc::new(Mutex::new(None)),
             process_read_absent: Arc::new(Mutex::new(false)),
             process_read_override: Arc::new(Mutex::new(None)),
             process_lease_claim_error: Arc::new(Mutex::new(None)),
@@ -81,6 +82,12 @@ impl TestLocalProcessRegistry {
     /// Injects one process-read error after `successful_reads` successful reads.
     pub async fn set_process_read_error_after(&self, successful_reads: usize, error: PluginError) {
         *self.process_read_error_after.lock().await = Some((successful_reads, error));
+    }
+
+    /// Injects an error into the next process event-history read.
+    #[doc(hidden)]
+    pub async fn set_process_events_read_error_for_testing(&self, error: PluginError) {
+        *self.process_events_read_error.lock().await = Some(error);
     }
 
     /// Controls deterministic read-as-absent injection for recovery tests.
