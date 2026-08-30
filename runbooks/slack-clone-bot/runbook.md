@@ -11,9 +11,10 @@ projection is the thing under test. This one is inverted, which is the shape mos
 integrations have — somebody else's product already exists, it has its own users, its own
 database and its own wire contract, and the agent is one more app in it reached only over
 HTTP. `examples/slack-clone` is the repository's canonical downstream reference for that
-shape and its only standard-mode host, so what this runbook gates is whether a Lash bot
-behaves correctly *as a guest*: it hears everything, answers only when addressed, spends
-nothing while merely listening, answers exactly once, and survives both processes dying.
+shape. Its bot host opens no RLM session, so it is the repository's standard-mode example
+and what this runbook gates is whether a Lash bot behaves correctly *as a guest*: it hears
+everything, answers only when addressed, spends nothing while merely listening, answers
+exactly once, and survives both processes dying.
 
 The token-free, exact-answer subset is executable on every PR through
 [`../slack-clone-deterministic/runbook.md`](../slack-clone-deterministic/runbook.md).

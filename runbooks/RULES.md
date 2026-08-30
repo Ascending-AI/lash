@@ -40,13 +40,13 @@ fresh session id, data directory, ports, trace offset, and artifact directory fo
 never reuse one dialect's evidence for the other. The machine-readable inventory is
 [`parity-matrix.toml`](parity-matrix.toml).
 
-The exception is named there rather than argued per scenario: a **standard-mode** host
-(`LashCore::standard_builder`, a native tool loop) has no RLM session, so it has no dialect
-to pin and no honest twin. A second row would buy an identical judged run, an identical
-bill, and a `dialect` label describing a session that does not exist. Those scenarios sit
-in `standard_mode_only` and emit one row each, labelled `standard` — the mode, not a
-language. Adding a scenario to that list is a claim about the host's builder, and the claim
-is checkable in the host's source.
+The exception is named there rather than argued per scenario: a scenario that **opens no
+RLM session** has no dialect to pin and no honest twin. A second row would buy an identical
+judged run, an identical bill, and a `dialect` label describing a session that does not
+exist. Those scenarios sit in `no_rlm_session_only` and emit one row each, labelled
+`standard` — the mode, not a language. A standard-mode host using
+`LashCore::standard_builder` is one example; the predicate is whether the scenario opens
+an RLM session, and the claim is checkable in its runbook binary or driver.
 
 Set `LASH_RUNBOOK_DIALECT` to the row's language id and make the host pass that value in
 the RLM session-creation contract. Absence is allowed only for a Lashlang row and must be
@@ -84,8 +84,8 @@ Independent scenario/dialect rows may execute concurrently from the start, subje
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
-stable JSON work shard. The matrix currently expands to **64 rows**: 31 RLM scenarios in two
-dialects, one standard-mode row, and one TypeScript-only composite. The arithmetic is
+stable JSON work shard. The matrix currently expands to **62 rows**: 29 RLM scenarios in two
+dialects, three no-RLM-session rows, and one TypeScript-only composite. The arithmetic is
 asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave this
 number stale without turning CI red.
 
