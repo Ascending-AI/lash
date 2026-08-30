@@ -219,6 +219,7 @@ impl AppState {
         self.active_turns.insert(session_id, turn_id);
     }
 
+    #[cfg(test)]
     fn track_turn_prompt(
         &self,
         session_id: &str,
