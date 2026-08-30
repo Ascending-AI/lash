@@ -450,7 +450,18 @@ async fn selected_drain_scope_isolation(storage: &PostgresStorage) -> Result<()>
         .into_handle();
     let attachments = tempfile::tempdir().context("selected-drain attachment directory")?;
     let core = core(storage, provider, &attachments)?;
-    let session = core.session(SESSION_ID).open().await?;
+    let session = core
+        .session(SESSION_ID)
+        .plugin_option(
+            lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+            lash::rlm::RlmCreateExtras {
+                dialect: Some(runbook_dialect()),
+                ..lash::rlm::RlmCreateExtras::default()
+            },
+        )
+        .context("state the row's dialect")?
+        .open()
+        .await?;
     let store_factory = storage.session_store_factory_with_shared_process_registry();
     let store = store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
