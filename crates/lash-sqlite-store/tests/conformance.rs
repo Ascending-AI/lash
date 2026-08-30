@@ -2299,16 +2299,17 @@ async fn sqlite_effect_controller_satisfies_lease_fencing_conformance() {
     let expire_path = path.clone();
     lash_core::testing::conformance::effect_controller_lease_fencing(
         lash_core::testing::conformance::EffectLeaseFencingBackend {
-            make_controller: Box::new(move |ttl| {
+            make_controller: Box::new(move |ttl, clock| {
                 let path = make_path.clone();
                 Box::pin(async move {
-                    let controller = SqliteRuntimeEffectController::open_with_options(
+                    let controller = SqliteRuntimeEffectController::open_with_options_and_clock(
                         &path,
                         durable_turn_scope("session", "turn"),
                         SqliteEffectReplayOptions {
                             lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
                                 .expect("conformance lease timings"),
                         },
+                        clock,
                     )
                     .await
                     .expect("controller");
