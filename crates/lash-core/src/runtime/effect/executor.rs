@@ -603,6 +603,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             ),
             llm_stream_summaries: driver.llm_stream_summaries.clone(),
             llm_calls: Vec::new(),
+            failure_evidence: Vec::new(),
             next_llm_ordinal: driver.next_llm_ordinal,
             session_services: Arc::clone(&driver.session_services),
             protocol_turn_options: driver.protocol_turn_options.clone(),

@@ -1566,6 +1566,10 @@ pub struct TurnReport {
     /// composes any higher-level view from it (ADR 0033).
     #[serde(default)]
     pub llm_calls: Vec<LlmCallRecord>,
+    /// Bounded, non-transcript evidence from charge-safety-refused
+    /// generations in this turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failure_evidence: Vec<lash_core::TurnFailureEvidence>,
     /// Tool calls issued by the turn in protocol order.
     pub tool_calls: Vec<ToolCallRecord>,
     /// Execution metadata collected for the turn.
@@ -1604,6 +1608,7 @@ impl TurnReport {
             children_usage,
             llm_calls,
             tool_calls,
+            failure_evidence,
             errors,
         } = turn;
         Self {
@@ -1613,6 +1618,7 @@ impl TurnReport {
             usage: token_usage,
             children_usage,
             llm_calls,
+            failure_evidence,
             tool_calls,
             execution,
             errors,

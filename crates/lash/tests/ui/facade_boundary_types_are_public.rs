@@ -92,6 +92,7 @@ impl SessionCommitStore for FacadeStore {
                 .iter()
                 .map(|delta| delta.identity.clone())
                 .collect(),
+            failure_evidence: commit.failure_evidence.clone(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
             turn_cancel_input_outcome: Default::default(),
@@ -390,6 +391,7 @@ fn persistence_types_are_nameable(
                 RuntimeUsageDelta { identity, entry }
             })
             .collect(),
+        failure_evidence: Vec::new(),
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         completed_queue_claims: Vec::new(),
         completed_turn_input_claims: Vec::new(),

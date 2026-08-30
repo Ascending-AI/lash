@@ -6556,8 +6556,9 @@ async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset(
 }
 
 #[tokio::test]
-async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
+async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence() {
     let provider_calls = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let lost_text = std::iter::repeat_n("discarded", 256)
         .collect::<Vec<_>>()
         .join(" ");
@@ -6573,9 +6574,11 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
         })
         .complete({
             let provider_calls = Arc::clone(&provider_calls);
+            let requests = Arc::clone(&requests);
             let lost_text = lost_text.clone();
             move |request| {
                 let call = provider_calls.fetch_add(1, Ordering::SeqCst);
+                requests.lock_recover().push(request.messages.clone());
                 let lost_text = lost_text.clone();
                 async move {
                     let stream = request.stream_events.expect("stream events");
@@ -6624,7 +6627,13 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
             }
         })
         .build();
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let store = Arc::new(crate::InMemorySessionStore::new());
+    let runtime_store: Arc<dyn crate::RuntimePersistence> = store.clone();
+    let mut runtime = TestRuntime::new(transport)
+        .store(runtime_store)
+        .without_process_registry()
+        .build()
+        .await;
     let turn_events = RecordingTurnEvents::default();
 
     let assembled = runtime
@@ -6701,6 +6710,89 @@ async fn retryable_mid_stream_failure_preserves_paid_output_without_retry() {
     assert!(
         issue.message.contains("already paid for")
             && issue.message.contains("cannot be safely regenerated")
+    );
+    assert_eq!(assembled.failure_evidence.len(), 1);
+    assert!(
+        assembled.failure_evidence.len()
+            <= assembled
+                .llm_calls
+                .iter()
+                .map(|call| call.attempts.len())
+                .sum::<usize>(),
+        "durable failure evidence is cardinality-bounded by sealed provider attempts"
+    );
+    let failure = &assembled.failure_evidence[0];
+    assert_eq!(
+        failure.partial_output.as_ref().map(|output| output.text()),
+        Some(lost_text.as_str())
+    );
+    assert_eq!(failure.billed_usage.output_tokens, 256);
+    assert_eq!(
+        failure.refusal.denial_reason,
+        crate::ChargeSafetyDenialReason::GuaranteeRequired
+    );
+    assert_eq!(
+        failure.refusal.protocol_position,
+        crate::ProtocolPosition::OutputStarted
+    );
+    assert!(
+        serde_json::to_value(failure)
+            .expect("serialize durable failure evidence")
+            .get("refusal")
+            .and_then(|refusal| refusal.get("retry_guarantee"))
+            .is_none(),
+        "durable refusal evidence must not persist an inferred constant"
+    );
+    assert_eq!(
+        (
+            failure.refusal.attempt_number,
+            failure.refusal.attempt_count
+        ),
+        (1, 1)
+    );
+
+    runtime
+        .stream_turn(
+            TurnInput::text("follow up after the failed generation"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                named_turn_scope("root", "paid-output-follow-up"),
+            ),
+        )
+        .await
+        .expect("a later turn can continue without replaying failure evidence");
+    {
+        let requests = requests.lock_recover();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            !serde_json::to_string(&requests[1])
+                .expect("serialize the follow-up provider request")
+                .contains("discarded"),
+            "the next provider prompt has no constructional path from turn settlement evidence"
+        );
+    }
+
+    drop(runtime);
+    let reopened = crate::store::load_persisted_session_read_view(store.as_ref())
+        .await
+        .expect("reopen the failed turn's session")
+        .expect("failed turn left a durable session");
+    assert_eq!(
+        reopened.turn_failure_settlements().len(),
+        1,
+        "mid-stream failure evidence must survive runtime teardown and reopen"
+    );
+    assert_eq!(
+        reopened.turn_failure_settlements()[0].evidence,
+        assembled.failure_evidence
+    );
+    assert!(
+        reopened
+            .messages()
+            .iter()
+            .flat_map(|message| message.parts.iter())
+            .all(|part| !part.content.contains("discarded")),
+        "durable failure evidence remains outside model context"
     );
 }
 

@@ -568,6 +568,7 @@ fn reconcile_text_snapshot(existing: &mut String, snapshot: &str) {
 pub(super) struct TurnAssembler {
     pub(super) tool_calls: Vec<ToolCallRecord>,
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
+    pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) token_usage: TokenUsage,
     pub(super) last_llm_usage: Option<TokenUsage>,
     /// Latest `cumulative` reported by each child session, keyed by
@@ -592,6 +593,7 @@ impl TurnAssembler {
         Self {
             tool_calls: Vec::new(),
             llm_calls: Vec::new(),
+            failure_evidence: Vec::new(),
             token_usage: TokenUsage::default(),
             last_llm_usage: None,
             child_cumulatives: BTreeMap::new(),
@@ -672,6 +674,14 @@ impl TurnAssembler {
 
     pub(super) fn with_llm_calls(mut self, llm_calls: Vec<crate::LlmCallRecord>) -> Self {
         self.llm_calls = llm_calls;
+        self
+    }
+
+    pub(super) fn with_failure_evidence(
+        mut self,
+        failure_evidence: Vec<crate::TurnFailureEvidence>,
+    ) -> Self {
+        self.failure_evidence = failure_evidence;
         self
     }
 
@@ -779,6 +789,7 @@ impl TurnAssembler {
             children_usage,
             llm_calls: self.llm_calls,
             tool_calls: self.tool_calls,
+            failure_evidence: self.failure_evidence,
             errors: issues,
             // Stamped by the ingress that accepted this turn's input, which
             // owns the acceptance identity assembly never sees.

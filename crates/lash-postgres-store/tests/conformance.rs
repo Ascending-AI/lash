@@ -2509,7 +2509,6 @@ include!("conformance/append_identity.rs");
 mod direct_turn_acceptance;
 #[path = "conformance/injectors.rs"]
 mod injectors;
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_session_read_view_satisfies_conformance_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
@@ -2517,8 +2516,16 @@ async fn postgres_session_read_view_satisfies_conformance_when_configured() {
         return;
     };
     reset(&storage).await;
-    lash_core::testing::conformance::session_store_factory_read_session(Arc::new(
-        storage.session_store_factory(),
-    ))
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
+    let factory = Arc::new(
+        storage
+            .session_store_factory()
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+    );
+    lash_core::testing::conformance::session_store_factory_mid_stream_failure_evidence(
+        factory.clone(),
+        || clock.advance(1),
+    )
     .await;
+    lash_core::testing::conformance::session_store_factory_read_session(factory).await;
 }

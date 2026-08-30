@@ -123,8 +123,28 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         .into(),
         origin: None,
     }]);
+    let partial_text = "provider-visible prefix before the stream failed";
+    let failure_evidence = crate::TurnFailureEvidence {
+        partial_output: Some(crate::TurnFailurePartialOutput::Complete {
+            text: partial_text.to_string(),
+        }),
+        billed_usage: crate::llm::types::LlmUsage {
+            input_tokens: 17,
+            output_tokens: 5,
+            ..Default::default()
+        },
+        refusal: crate::ChargeSafetyRefusalEvidence {
+            code: "unsafe_retry_after_output_started".to_string(),
+            denial_reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
+            protocol_position: crate::ProtocolPosition::OutputStarted,
+            attempt_number: 1,
+            attempt_count: 1,
+        },
+    };
+    let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.failure_evidence = vec![failure_evidence.clone()];
     writer
-        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .commit_runtime_state(commit)
         .await
         .expect("commit readable session state");
 
@@ -148,6 +168,23 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
     assert_eq!(view.durable_relation(), Some(&expected_relation));
     assert_eq!(view.messages().len(), 1, "history is projected");
     assert_eq!(view.message_tree().len(), 1, "tree is projected");
+    assert_eq!(
+        view.turn_failure_settlements().len(),
+        1,
+        "the failed generation's evidence remains readable after factory reopen"
+    );
+    assert_eq!(
+        view.turn_failure_settlements()[0].evidence,
+        vec![failure_evidence],
+        "the turn settlement preserves typed partial output, billed usage, and refusal facts"
+    );
+    assert!(
+        view.messages().iter().all(|message| message
+            .parts
+            .iter()
+            .all(|part| !part.content.contains(partial_text))),
+        "settlement evidence has no graph/message path into prompt assembly"
+    );
     assert_eq!(
         view.token_usage(),
         &crate::TokenUsage {

@@ -9,7 +9,8 @@ use crate::LlmTerminalReason;
 /// repeated requests; `Resumable` means it continues the interrupted
 /// generation without regenerating output already produced. Lash's bundled
 /// providers currently declare neither guarantee.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GenerationRetryGuarantee {
     #[default]
     None,

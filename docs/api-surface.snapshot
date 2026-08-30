@@ -37,6 +37,12 @@ lash::ChargeSafetyPolicy::AcceptDuplicateBilling
 lash::ChargeSafetyPolicy::AcceptDuplicateBilling::max_duplicate_cost_tokens
 lash::ChargeSafetyPolicy::AcceptDuplicateBilling::max_unsafe_retries
 lash::ChargeSafetyPolicy::RequireGuarantee
+lash::ChargeSafetyRefusalEvidence
+lash::ChargeSafetyRefusalEvidence::attempt_count
+lash::ChargeSafetyRefusalEvidence::attempt_number
+lash::ChargeSafetyRefusalEvidence::code
+lash::ChargeSafetyRefusalEvidence::denial_reason
+lash::ChargeSafetyRefusalEvidence::protocol_position
 lash::CommitBudget
 lash::CommitBudget::bounded
 lash::CommitBudget::bytes
@@ -824,6 +830,21 @@ lash::TurnExecutionMetrics::duration_ms
 lash::TurnExecutionMetrics::had_code_execution
 lash::TurnExecutionMetrics::had_tool_calls
 lash::TurnExecutionMetrics::started_at_ms
+lash::TurnFailureEvidence
+lash::TurnFailureEvidence::billed_usage
+lash::TurnFailureEvidence::partial_output
+lash::TurnFailureEvidence::refusal
+lash::TurnFailurePartialOutput
+lash::TurnFailurePartialOutput::Complete
+lash::TurnFailurePartialOutput::Complete::text
+lash::TurnFailurePartialOutput::Truncated
+lash::TurnFailurePartialOutput::Truncated::original_byte_count
+lash::TurnFailurePartialOutput::Truncated::text
+lash::TurnFailurePartialOutput::is_truncated
+lash::TurnFailurePartialOutput::text
+lash::TurnFailureSettlement
+lash::TurnFailureSettlement::evidence
+lash::TurnFailureSettlement::turn_id
 lash::TurnFinish
 lash::TurnFinish::AssistantMessage
 lash::TurnFinish::AssistantMessage::text
@@ -880,6 +901,7 @@ lash::TurnReport::children_usage
 lash::TurnReport::duration
 lash::TurnReport::errors
 lash::TurnReport::execution
+lash::TurnReport::failure_evidence
 lash::TurnReport::final_value
 lash::TurnReport::is_success
 lash::TurnReport::llm_calls
@@ -2044,6 +2066,7 @@ lash::persistence::PersistedSessionRead::graph
 lash::persistence::PersistedSessionRead::head_revision
 lash::persistence::PersistedSessionRead::session_id
 lash::persistence::PersistedSessionRead::token_ledger
+lash::persistence::PersistedSessionRead::turn_failure_settlements
 lash::persistence::PersistedTurnState
 lash::persistence::PersistedTurnState::last_prompt_usage
 lash::persistence::PersistedTurnState::protocol_turn_options
@@ -2199,6 +2222,7 @@ lash::persistence::RuntimeCommit::current_frame_node_id
 lash::persistence::RuntimeCommit::deferring_interrupted_turn_inputs
 lash::persistence::RuntimeCommit::enqueued_queue_batches
 lash::persistence::RuntimeCommit::expected_head_revision
+lash::persistence::RuntimeCommit::failure_evidence
 lash::persistence::RuntimeCommit::graph
 lash::persistence::RuntimeCommit::interrupted_turn_input_turn_id
 lash::persistence::RuntimeCommit::persisted_state_for_test
@@ -2223,6 +2247,7 @@ lash::persistence::RuntimeCommitReceipt::checkpoint_ref
 lash::persistence::RuntimeCommitReceipt::committed_leaf_node_id
 lash::persistence::RuntimeCommitReceipt::committed_usage_delta_identities
 lash::persistence::RuntimeCommitReceipt::enqueued_queue_batches
+lash::persistence::RuntimeCommitReceipt::failure_evidence
 lash::persistence::RuntimeCommitReceipt::head_revision
 lash::persistence::RuntimeCommitReceipt::manifest
 lash::persistence::RuntimeCommitReceipt::realized_node_timestamps
@@ -2500,6 +2525,7 @@ lash::persistence::SessionReadView::session_graph
 lash::persistence::SessionReadView::session_id
 lash::persistence::SessionReadView::to_snapshot
 lash::persistence::SessionReadView::token_usage
+lash::persistence::SessionReadView::turn_failure_settlements
 lash::persistence::SessionReadView::turn_index
 lash::persistence::SessionRelation
 lash::persistence::SessionRelation::Child
@@ -4477,6 +4503,7 @@ lash::prelude::TurnReport::children_usage
 lash::prelude::TurnReport::duration
 lash::prelude::TurnReport::errors
 lash::prelude::TurnReport::execution
+lash::prelude::TurnReport::failure_evidence
 lash::prelude::TurnReport::final_value
 lash::prelude::TurnReport::is_success
 lash::prelude::TurnReport::llm_calls
@@ -7209,6 +7236,7 @@ lash::runtime::AssembledTurn::assistant_output
 lash::runtime::AssembledTurn::children_usage
 lash::runtime::AssembledTurn::errors
 lash::runtime::AssembledTurn::execution
+lash::runtime::AssembledTurn::failure_evidence
 lash::runtime::AssembledTurn::llm_calls
 lash::runtime::AssembledTurn::outcome
 lash::runtime::AssembledTurn::state
@@ -8738,6 +8766,7 @@ lash::testing::conformance::session_graph_append_branch_liveness
 lash::testing::conformance::session_graph_state_machine
 lash::testing::conformance::session_store_factory
 lash::testing::conformance::session_store_factory_delete_fences_stale_handles
+lash::testing::conformance::session_store_factory_mid_stream_failure_evidence
 lash::testing::conformance::session_store_factory_read_session
 lash::testing::conformance::signed_counter_write_domain_conformance
 lash::testing::conformance::store_contract_state_machine
@@ -10385,6 +10414,7 @@ lash::turn::TurnReport::children_usage
 lash::turn::TurnReport::duration
 lash::turn::TurnReport::errors
 lash::turn::TurnReport::execution
+lash::turn::TurnReport::failure_evidence
 lash::turn::TurnReport::final_value
 lash::turn::TurnReport::is_success
 lash::turn::TurnReport::llm_calls

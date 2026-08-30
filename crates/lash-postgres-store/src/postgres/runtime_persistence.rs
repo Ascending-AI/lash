@@ -1,5 +1,11 @@
 use crate::*;
 
+pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
+     FROM lash_runtime_turn_commits
+     WHERE session_id = $1
+       AND result_json LIKE '%\"failure_evidence\"%'
+     ORDER BY committed_at_ms, turn_id";
+
 pub(crate) async fn lock_session_history_mutation_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
@@ -492,6 +498,34 @@ impl SessionCommitStore for PostgresSessionStore {
         let token_ledger = lash_core::store::merge_token_ledger_entries_checked(
             load_usage_deltas_tx(&mut tx, session_id).await?,
         )?;
+        let turn_failure_rows = sqlx::query(LOAD_TURN_FAILURE_SETTLEMENTS_SQL)
+            .bind(session_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let mut turn_failure_settlements = Vec::new();
+        for row in turn_failure_rows {
+            let turn_id = row.get::<String, _>("turn_id");
+            let result_json = row.get::<String, _>("result_json");
+            let receipt: RuntimeCommitReceipt = match serde_json::from_str(&result_json) {
+                Ok(receipt) => receipt,
+                Err(error) => {
+                    tracing::warn!(
+                        session_id,
+                        turn_id,
+                        error = %error,
+                        "skipping corrupt runtime turn receipt while loading failure evidence"
+                    );
+                    continue;
+                }
+            };
+            if !receipt.failure_evidence.is_empty() {
+                turn_failure_settlements.push(lash_core::TurnFailureSettlement {
+                    turn_id,
+                    evidence: receipt.failure_evidence,
+                });
+            }
+        }
         let read = PersistedSessionRead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
@@ -501,6 +535,7 @@ impl SessionCommitStore for PostgresSessionStore {
             checkpoint_ref: meta.checkpoint_ref,
             checkpoint,
             token_ledger,
+            turn_failure_settlements,
         };
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Some(read))

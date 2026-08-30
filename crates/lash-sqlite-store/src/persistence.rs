@@ -26,6 +26,67 @@
 use super::*;
 use lash_core::SelectedQueuedWorkClaimOutcome;
 
+pub(crate) const LOAD_TURN_FAILURE_SETTLEMENTS_SQL: &str = "SELECT turn_id, result_json
+     FROM runtime_turn_commits
+     WHERE session_id = ?1
+       AND result_json LIKE '%\"failure_evidence\"%'
+     ORDER BY committed_at_ms, turn_id";
+
+struct CorruptTurnFailureReceipt {
+    turn_id: String,
+    error: String,
+}
+
+struct TurnFailureSettlementLoad {
+    settlements: Vec<lash_core::TurnFailureSettlement>,
+    corrupt_receipts: Vec<CorruptTurnFailureReceipt>,
+}
+
+struct SessionLoadWithWarnings {
+    read: PersistedSessionRead,
+    corrupt_failure_receipts: Vec<CorruptTurnFailureReceipt>,
+}
+
+fn load_turn_failure_settlements_conn(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<TurnFailureSettlementLoad, StoreError> {
+    let mut statement = conn
+        .prepare(LOAD_TURN_FAILURE_SETTLEMENTS_SQL)
+        .map_err(sqlite_error)?;
+    let rows = statement
+        .query_map(params![session_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(sqlite_error)?;
+    let mut settlements = Vec::new();
+    let mut corrupt_rows = Vec::new();
+    for row in rows {
+        let (turn_id, result_json) = row.map_err(sqlite_error)?;
+        let receipt: lash_core::store::RuntimeCommitReceipt =
+            match serde_json::from_str(&result_json) {
+                Ok(receipt) => receipt,
+                Err(error) => {
+                    corrupt_rows.push(CorruptTurnFailureReceipt {
+                        turn_id,
+                        error: error.to_string(),
+                    });
+                    continue;
+                }
+            };
+        if !receipt.failure_evidence.is_empty() {
+            settlements.push(lash_core::TurnFailureSettlement {
+                turn_id,
+                evidence: receipt.failure_evidence,
+            });
+        }
+    }
+    Ok(TurnFailureSettlementLoad {
+        settlements,
+        corrupt_receipts: corrupt_rows,
+    })
+}
+
 fn read_session_state_version_conn(
     conn: &rusqlite::Connection,
     session_id: &str,
@@ -326,10 +387,12 @@ impl SessionCommitStore for Store {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(None);
         };
-        self.conn
+        let warning_session_id = session_id.clone();
+        let (outcome, corrupt_failure_receipts) = self
+            .conn
             .call(move |conn| {
                 let tx = conn.transaction()?;
-                let outcome: Result<Option<PersistedSessionRead>, StoreError> = (|| {
+                let outcome: Result<Option<SessionLoadWithWarnings>, StoreError> = (|| {
                     read_session_state_version_conn(&tx, &session_id)?;
                     let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
                         return Ok(None);
@@ -354,25 +417,44 @@ impl SessionCommitStore for Store {
                         }
                         None => None,
                     };
-                    Ok(Some(PersistedSessionRead {
-                        session_id: meta.session_id,
-                        head_revision: meta.head_revision,
-                        config: meta.config,
-                        current_frame_node_id: meta.current_frame_node_id,
-                        graph,
-                        checkpoint_ref: meta.checkpoint_ref,
-                        checkpoint,
-                        token_ledger: lash_core::store::merge_token_ledger_entries_checked(
-                            Self::load_usage_deltas_conn(&tx, &session_id)?,
-                        )?,
+                    let failure_settlements = load_turn_failure_settlements_conn(&tx, &session_id)?;
+                    Ok(Some(SessionLoadWithWarnings {
+                        read: PersistedSessionRead {
+                            session_id: meta.session_id,
+                            head_revision: meta.head_revision,
+                            config: meta.config,
+                            current_frame_node_id: meta.current_frame_node_id,
+                            graph,
+                            checkpoint_ref: meta.checkpoint_ref,
+                            checkpoint,
+                            token_ledger: lash_core::store::merge_token_ledger_entries_checked(
+                                Self::load_usage_deltas_conn(&tx, &session_id)?,
+                            )?,
+                            turn_failure_settlements: failure_settlements.settlements,
+                        },
+                        corrupt_failure_receipts: failure_settlements.corrupt_receipts,
                     }))
                 })(
                 );
                 tx.commit()?;
-                Ok(outcome)
+                let (read, corrupt_failure_receipts) = match outcome {
+                    Ok(Some(loaded)) => (Ok(Some(loaded.read)), loaded.corrupt_failure_receipts),
+                    Ok(None) => (Ok(None), Vec::new()),
+                    Err(error) => (Err(error), Vec::new()),
+                };
+                Ok((read, corrupt_failure_receipts))
             })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)?;
+        for corrupt in corrupt_failure_receipts {
+            tracing::warn!(
+                session_id = warning_session_id,
+                turn_id = corrupt.turn_id,
+                error = corrupt.error,
+                "skipping corrupt runtime turn receipt while loading failure evidence"
+            );
+        }
+        outcome
     }
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {

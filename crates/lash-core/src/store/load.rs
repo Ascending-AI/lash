@@ -1,19 +1,19 @@
 use super::*;
 
 fn persisted_session_state_from_read(
-    read: PersistedSessionRead,
+    read: &PersistedSessionRead,
 ) -> Result<crate::RuntimeSessionState, StoreError> {
     persisted_session_state_from_head(
         SessionHead {
-            session_id: read.session_id,
+            session_id: read.session_id.clone(),
             head_revision: read.head_revision,
-            current_frame_node_id: read.current_frame_node_id,
-            graph: read.graph,
-            config: read.config,
-            checkpoint_ref: read.checkpoint_ref,
-            token_ledger: read.token_ledger,
+            current_frame_node_id: read.current_frame_node_id.clone(),
+            graph: read.graph.clone(),
+            config: read.config.clone(),
+            checkpoint_ref: read.checkpoint_ref.clone(),
+            token_ledger: read.token_ledger.clone(),
         },
-        read.checkpoint,
+        read.checkpoint.clone(),
     )
 }
 
@@ -23,6 +23,7 @@ fn persisted_session_state_from_read(
 pub struct LoadedPersistedSession {
     pub state: crate::RuntimeSessionState,
     pub config: crate::PersistedSessionConfig,
+    pub turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
 }
 
 #[doc(hidden)]
@@ -44,8 +45,9 @@ async fn load_persisted_session_with_relation(
     let config = read.config.clone();
     Ok(Some((
         LoadedPersistedSession {
-            state: persisted_session_state_from_read(read)?,
+            state: persisted_session_state_from_read(&read)?,
             config,
+            turn_failure_settlements: read.turn_failure_settlements,
         },
         meta.relation,
     )))
@@ -68,7 +70,11 @@ pub async fn load_persisted_session_read_view(
     Ok(load_persisted_session_with_relation(store)
         .await?
         .map(|(loaded, relation)| {
-            crate::SessionReadView::from_persisted_state_with_relation(&loaded.state, relation)
+            crate::SessionReadView::from_persisted_state_with_relation_and_failures(
+                &loaded.state,
+                relation,
+                loaded.turn_failure_settlements,
+            )
         }))
 }
 

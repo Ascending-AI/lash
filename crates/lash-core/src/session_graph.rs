@@ -220,6 +220,9 @@ pub struct SessionNodeRecord {
 /// generation it carries. Bodies written before the stamp existed carry no
 /// field and are generation 1 by definition.
 ///
+/// Version 4 persists `RetryDecision.charge_safety` when present; older bodies
+/// omit it and continue to decode through the field's `default`.
+///
 /// Version 3 removes the duplicated `LlmResponse.full_text` member. The
 /// pre-v3 decode path below projects that legacy value into response parts
 /// before typed decoding when the parts carry no visible assistant prose.
@@ -227,7 +230,7 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as a forward-only fence rather than a
 /// counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 3;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 4;
 
 /// Generation of a body written before the stamp existed.
 ///

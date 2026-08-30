@@ -21,6 +21,7 @@ struct SessionReadState {
     graph: SessionReadGraph,
     read_model: crate::session_graph::SessionReadModel,
     chronological_projection: OnceLock<Arc<crate::ChronologicalProjection>>,
+    turn_failure_settlements: Arc<Vec<crate::TurnFailureSettlement>>,
 }
 
 #[derive(Clone, Debug)]
@@ -132,6 +133,7 @@ impl SessionReadView {
                 prompt_render_cache: Arc::new(crate::BaseRenderCache::new()),
             },
             chronological_projection: OnceLock::new(),
+            turn_failure_settlements: Arc::new(Vec::new()),
         }))
     }
 
@@ -144,6 +146,7 @@ impl SessionReadView {
             graph: SessionReadGraph::Owned(snapshot.session_graph.clone()),
             read_model,
             chronological_projection: OnceLock::new(),
+            turn_failure_settlements: Arc::new(Vec::new()),
         }))
     }
 
@@ -157,12 +160,14 @@ impl SessionReadView {
             graph: SessionReadGraph::Owned(graph),
             read_model,
             chronological_projection: OnceLock::new(),
+            turn_failure_settlements: Arc::new(Vec::new()),
         }))
     }
 
-    pub(crate) fn from_persisted_state_with_relation(
+    pub(crate) fn from_persisted_state_with_relation_and_failures(
         state: &RuntimeSessionState,
         relation: crate::SessionRelation,
+        turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
     ) -> Self {
         let graph = state.session_graph.clone();
         let read_model = state.read_model();
@@ -171,6 +176,7 @@ impl SessionReadView {
             graph: SessionReadGraph::Owned(graph),
             read_model,
             chronological_projection: OnceLock::new(),
+            turn_failure_settlements: Arc::new(turn_failure_settlements),
         }))
     }
 
@@ -188,6 +194,7 @@ impl SessionReadView {
             graph: SessionReadGraph::Owned(graph),
             read_model,
             chronological_projection: OnceLock::new(),
+            turn_failure_settlements: Arc::new(Vec::new()),
         }))
     }
 
@@ -254,6 +261,14 @@ impl SessionReadView {
     /// therefore return `None`.
     pub fn durable_relation(&self) -> Option<&crate::SessionRelation> {
         self.0.meta.durable_relation.as_ref()
+    }
+
+    /// Durable failure evidence owned by settled turn records.
+    ///
+    /// This collection is structurally separate from messages, protocol
+    /// events, and prompt contributions. Reading it cannot alter model context.
+    pub fn turn_failure_settlements(&self) -> &[crate::TurnFailureSettlement] {
+        self.0.turn_failure_settlements.as_slice()
     }
 
     /// Exposes policy to store, effect-host, and protocol implementors while materializing,

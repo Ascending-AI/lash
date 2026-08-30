@@ -143,6 +143,7 @@ impl SnapshotStore {
                     ..Default::default()
                 }),
                 token_ledger: Vec::new(),
+                turn_failure_settlements: Vec::new(),
             })),
             session_meta: std::sync::Mutex::new(Some(session_meta)),
             runtime_turn_commits: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -341,6 +342,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             checkpoint_ref: Some(lash_core::BlobRef("checkpoint".to_string())),
             checkpoint: Some(commit.checkpoint),
             token_ledger,
+            turn_failure_settlements: Vec::new(),
         });
         let result = lash_core::store::RuntimeCommitReceipt {
             head_revision: 8,
@@ -353,6 +355,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 .iter()
                 .map(|delta| delta.identity.clone())
                 .collect(),
+            failure_evidence: commit.failure_evidence.clone(),
             enqueued_queue_batches: Vec::new(),
             turn_input_applications: Vec::new(),
             turn_cancel_input_outcome: Default::default(),

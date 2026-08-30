@@ -984,6 +984,32 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         graph
             .validate_resident_integrity()
             .map_err(map_graph_corruption)?;
+        let mut turn_failure_settlements = self
+            .runtime_turn_commits
+            .lock_recover()
+            .iter()
+            .filter_map(|((owner_session_id, turn_id), record)| {
+                (owner_session_id == &meta.session_id && !record.result.failure_evidence.is_empty())
+                    .then(|| {
+                        (
+                            record.committed_at_ms,
+                            crate::TurnFailureSettlement {
+                                turn_id: turn_id.clone(),
+                                evidence: record.result.failure_evidence.clone(),
+                            },
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        turn_failure_settlements.sort_by(|(left_at, left), (right_at, right)| {
+            left_at
+                .cmp(right_at)
+                .then_with(|| left.turn_id.cmp(&right.turn_id))
+        });
+        let turn_failure_settlements = turn_failure_settlements
+            .into_iter()
+            .map(|(_, settlement)| settlement)
+            .collect();
         Ok(Some(crate::store::PersistedSessionRead {
             session_id: meta.session_id,
             head_revision: meta.head_revision,
@@ -999,6 +1025,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     .map(|delta| delta.entry.clone())
                     .collect(),
             )?,
+            turn_failure_settlements,
         }))
     }
 

@@ -53,6 +53,7 @@ mod session_graph_append;
 mod session_graph_state_machine;
 mod session_store_factory;
 mod session_store_factory_enumeration;
+mod session_store_factory_failure_evidence;
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -89,6 +90,7 @@ pub use session_execution_lease_renewal::*;
 pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
 pub use session_store_factory::*;
+pub use session_store_factory_failure_evidence::*;
 pub use store_contract_state_machine::*;
 pub use store_maintenance_outcome::*;
 pub use store_recovery::*;
@@ -212,8 +214,13 @@ mod tests {
 
     #[tokio::test]
     async fn in_memory_session_read_view_conformance() {
-        session_store_factory_read_session(Arc::new(crate::InMemorySessionStoreFactory::new()))
+        let clock = Arc::new(crate::testing::TestClock::new(1_800_000_000_000));
+        let factory = Arc::new(crate::InMemorySessionStoreFactory::with_clock(
+            Arc::clone(&clock) as Arc<dyn crate::Clock>,
+        ));
+        session_store_factory_mid_stream_failure_evidence(factory.clone(), || clock.advance(1))
             .await;
+        session_store_factory_read_session(factory).await;
     }
 
     #[tokio::test]

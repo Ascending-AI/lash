@@ -674,6 +674,7 @@ struct TurnDriverRemainder {
     policy: RuntimeSessionPolicy,
     turn_pipeline: TurnBoundary,
     llm_calls: Vec<crate::LlmCallRecord>,
+    failure_evidence: Vec<crate::TurnFailureEvidence>,
     pending_queue_claims: Vec<crate::QueuedWorkClaim>,
     pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
 }
@@ -692,6 +693,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             policy,
             turn_pipeline,
             llm_calls,
+            failure_evidence,
             pending_queue_claims,
             pending_turn_input_claims,
             ..
@@ -701,6 +703,7 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             policy,
             turn_pipeline,
             llm_calls,
+            failure_evidence,
             pending_queue_claims,
             pending_turn_input_claims,
         }
@@ -3819,6 +3822,7 @@ impl LashRuntime {
             turn_pipeline,
             llm_stream_summaries: HashMap::new(),
             llm_calls: Vec::new(),
+            failure_evidence: Vec::new(),
             next_llm_ordinal: 0,
             session_services: manager,
             protocol_turn_options: effective_protocol_turn_options,
@@ -3933,28 +3937,33 @@ impl LashRuntime {
             policy,
             turn_pipeline,
             llm_calls,
+            failure_evidence,
             pending_queue_claims,
             pending_turn_input_claims,
         } = driver;
         let pending_claims =
             LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
-        let finish_result = Box::pin(self.finish_turn(
-            TurnFinishInput {
-                turn_pipeline,
-                assembler: assembler.with_llm_calls(llm_calls),
-                new_messages,
-                policy: policy.policy,
-                turn_index,
-                trace_turn_id,
-            },
-            &pending_claims,
-            events,
-            &finish_scoped_effect_controller,
-            &cancel_state,
-            session_execution_lease,
-            session_execution_lease_release_policy,
-            turn_control.as_ref(),
-        ))
+        let finish_result = Box::pin(
+            self.finish_turn(
+                TurnFinishInput {
+                    turn_pipeline,
+                    assembler: assembler
+                        .with_llm_calls(llm_calls)
+                        .with_failure_evidence(failure_evidence),
+                    new_messages,
+                    policy: policy.policy,
+                    turn_index,
+                    trace_turn_id,
+                },
+                &pending_claims,
+                events,
+                &finish_scoped_effect_controller,
+                &cancel_state,
+                session_execution_lease,
+                session_execution_lease_release_policy,
+                turn_control.as_ref(),
+            ),
+        )
         .await;
         if let Err(err) = &finish_result {
             self.abandon_queued_work_claims_after_local_abort(err, &pending_claims.queued)

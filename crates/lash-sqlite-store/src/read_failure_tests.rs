@@ -1,6 +1,23 @@
 use super::*;
 use crate::attachments::RAW_ARTIFACT_NAMESPACE;
 use lashlang::LashlangArtifactStore;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tracing::instrument::WithSubscriber as _;
+use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::{Layer, Registry};
+
+struct WarningCounter(std::sync::Arc<AtomicUsize>);
+
+impl<S> Layer<S> for WarningCounter
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
+        if *event.metadata().level() == tracing::Level::WARN {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {
@@ -36,6 +53,133 @@ fn assert_artifact_storage_failure<T>(
         Err(error) => panic!("expected SQLite storage failure from {label}, got {error}"),
         Ok(_) => panic!("expected SQLite storage failure from {label}"),
     }
+}
+
+#[test]
+fn turn_failure_settlement_query_filters_receipts_without_evidence() {
+    assert!(
+        crate::persistence::LOAD_TURN_FAILURE_SETTLEMENTS_SQL
+            .contains(r#"result_json LIKE '%"failure_evidence"%'"#),
+        "the SQL path must exclude receipts that cannot carry failure evidence"
+    );
+}
+
+#[tokio::test]
+async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_receipts() {
+    const SESSION_ID: &str = "failure-evidence-corrupt-receipt";
+    const NON_EVIDENCE_RECEIPTS: usize = 256;
+
+    let store = Store::memory().await.expect("open receipt-filter store");
+    store
+        .bind_session(SESSION_ID)
+        .expect("bind receipt-filter store");
+    let state = lash_core::RuntimeSessionState {
+        session_id: SESSION_ID.to_string(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.failure_evidence = vec![lash_core::TurnFailureEvidence {
+        partial_output: Some(lash_core::TurnFailurePartialOutput::Complete {
+            text: "settled partial output".to_string(),
+        }),
+        billed_usage: lash_core::llm::types::LlmUsage {
+            output_tokens: 3,
+            ..Default::default()
+        },
+        refusal: lash_core::ChargeSafetyRefusalEvidence {
+            code: "unsafe_retry_after_output_started".to_string(),
+            denial_reason: lash_core::ChargeSafetyDenialReason::GuaranteeRequired,
+            protocol_position: lash_core::ProtocolPosition::OutputStarted,
+            attempt_number: 1,
+            attempt_count: 1,
+        },
+    }];
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("seed one failure-evidence receipt");
+
+    let evidence_turn_id = store
+        .conn
+        .call(|conn| {
+            let (turn_id, result_json, committed_at_ms) = conn.query_row(
+                "SELECT turn_id, result_json, committed_at_ms
+                 FROM runtime_turn_commits
+                 WHERE session_id = ?1",
+                params![SESSION_ID],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )?;
+            let mut no_evidence: serde_json::Value =
+                serde_json::from_str(&result_json).expect("seed receipt is valid JSON");
+            no_evidence
+                .as_object_mut()
+                .expect("receipt JSON is an object")
+                .remove("failure_evidence");
+            let no_evidence = serde_json::to_string(&no_evidence)
+                .expect("serialize receipt without failure evidence");
+            for index in 0..NON_EVIDENCE_RECEIPTS {
+                conn.execute(
+                    "INSERT INTO runtime_turn_commits
+                     (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        SESSION_ID,
+                        format!("non-evidence-{index:03}"),
+                        format!("non-evidence-hash-{index:03}"),
+                        no_evidence,
+                        committed_at_ms + i64::try_from(index).expect("receipt index") + 1,
+                    ],
+                )?;
+            }
+            conn.execute(
+                "INSERT INTO runtime_turn_commits
+                 (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
+                 VALUES (?1, 'corrupt-evidence', 'corrupt-evidence-hash', ?2, ?3)",
+                params![
+                    SESSION_ID,
+                    r#"{"failure_evidence":"#,
+                    committed_at_ms
+                        + i64::try_from(NON_EVIDENCE_RECEIPTS).expect("receipt count")
+                        + 1,
+                ],
+            )?;
+            Ok(turn_id)
+        })
+        .await
+        .expect("seed many ordinary receipts and one corrupt evidence receipt");
+
+    let warning_count = std::sync::Arc::new(AtomicUsize::new(0));
+    let subscriber =
+        Registry::default().with(WarningCounter(std::sync::Arc::clone(&warning_count)));
+    let reopened = store
+        .load_session()
+        .with_subscriber(subscriber)
+        .await
+        .expect("one corrupt evidence receipt must not make the session unreadable")
+        .expect("seeded session remains readable");
+
+    assert_eq!(
+        reopened.turn_failure_settlements.len(),
+        1,
+        "only the valid evidence receipt becomes a settlement"
+    );
+    assert_eq!(
+        reopened.turn_failure_settlements[0].turn_id,
+        evidence_turn_id
+    );
+    assert_eq!(
+        warning_count.load(Ordering::Relaxed),
+        1,
+        "the skipped corrupt evidence receipt emits one warning"
+    );
 }
 
 #[tokio::test]

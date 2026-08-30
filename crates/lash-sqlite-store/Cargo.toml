@@ -49,6 +49,7 @@ lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", featur
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tracing-subscriber = { workspace = true }
 
 [[bin]]
 name = "sqlite-await-event-helper"

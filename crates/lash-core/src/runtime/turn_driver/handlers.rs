@@ -111,6 +111,19 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
+        if let (Err(error), Some(record)) = (&result, call_record.as_ref()) {
+            let sealed_attempt_count = self
+                .llm_calls
+                .iter()
+                .fold(record.attempts.len(), |count, call| {
+                    count.saturating_add(call.attempts.len())
+                });
+            if self.failure_evidence.len() < sealed_attempt_count
+                && let Some(evidence) = crate::TurnFailureEvidence::from_llm_failure(error, record)
+            {
+                self.failure_evidence.push(evidence);
+            }
+        }
         if let Some(call_record) = call_record {
             send_turn_activity(
                 event_tx,

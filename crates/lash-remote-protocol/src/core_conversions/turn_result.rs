@@ -50,6 +50,9 @@ impl RemoteTurnReport {
             children_usage,
             llm_calls,
             tool_calls,
+            // Failure evidence is a durable turn-receipt read surface, not a
+            // duplicate remote execution-result payload.
+            failure_evidence: _,
             errors,
         } = turn;
         let activities = activities.into_iter().collect::<Vec<_>>();
