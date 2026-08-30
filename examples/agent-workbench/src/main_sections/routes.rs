@@ -187,7 +187,7 @@ async fn upload_attachment(
 }
 
 // Retrieval is deliberately not session-gated: reloads and retired-session transcripts must
-// still render. The unguessable SHA-256 content address is the bearer capability, and the URL
+// still render. The unguessable BLAKE3 content address is the bearer capability, and the URL
 // carries no session data. That capability does not expire and blobs outlive sessions; reclaiming
 // them belongs to ADR 0024 retention work. If ids are not content addresses, or an id can reach a
 // viewer who may not read the blob, this route MUST be protected by an authorization gate.

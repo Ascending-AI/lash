@@ -55,8 +55,9 @@ repair rather than looping restarts.
   provider reports fixed non-zero usage, the gate reconciles one `llm_call_completed`
   record, reconstructs the core, and executes against both SQLite and Postgres
   session-store backends on a managed database inside the worktree block. Its
-  Postgres offset is `+0..+9`, selected by the last decimal digit of `<port>`
-  (`3042` selects `+2`).
+  Postgres offset is `+0..+9` from `LASH_E2E_PORT_BASE`, which is derived by
+  `scripts/worktree-gate-env.sh`, selected by the last decimal digit of `<port>`
+  (`3042` selects `LASH_E2E_PORT_BASE + 2`).
 - Boot with a fresh directory:
   `AGENT_WORKBENCH_DATA_DIR=<fresh-tmp> AGENT_WORKBENCH_OPEN=0 just agent-workbench <port>`.
   Require `OPENROUTER_API_KEY`; missing credentials are a harness gap → Abort. Teardown is
@@ -81,8 +82,11 @@ Send a short deterministic-shaped instruction with a unique marker, for example:
 `/api/state.active_turns` is empty, and the committed user/assistant pair is present. Do
 not gate on the assistant obeying the exact prose constraint; it only identifies the turn.
 
-Save the settled state as `01-settled-state.json` and screenshot the fully scrolled
-transcript plus usage rail as `01-usage-rendered.png`.
+Save the settled state as `01-settled-state.json`. Screenshot the fully scrolled
+transcript as `01-transcript-rendered.png`, then separately scroll the usage rail
+into view and screenshot it as `01-usage-rail-rendered.png`. The render gate may
+instead use a DOM-text assertion on `#usageTotal` and `#usageBreakdown` for the
+expected rendered values.
 
 ## Phase 2 — Reconcile API, render, and trace
 
@@ -125,7 +129,7 @@ are gone.
 | Settled turn | one committed pair and at least one completed LLM call | | `01-*`, `02-llm-calls.json` |
 | Report arithmetic | totals equal row sum and dominate selected call sum | | `02-reconciliation.json` |
 | Non-zero usage | call/report input and output are positive where calls occurred | | state + trace JSON |
-| Render agreement | usage and token rail text exactly formats API counters | | `01-usage-rendered.png` |
+| Render agreement | usage and token rail text exactly formats API counters | | `01-transcript-rendered.png`, `01-usage-rail-rendered.png`, or DOM text for `#usageTotal`/`#usageBreakdown` |
 | Restart persistence | PID changed; complete usage object and rail text are unchanged | | `03-*`, command log |
 | Restart side effects | restart/state load emits no LLM call | | trace boundary evidence |
 

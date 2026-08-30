@@ -81,7 +81,7 @@ cross-surface identity, not the quality of the model's image description.
 - API truth: `POST /api/attachments`, `POST /api/turn`,
   `GET /api/attachments/{attachment_id}`, and `GET /api/state`.
 - Disk truth: the active session backend's committed attachment-manifest row,
-  `<data-dir>/attachments/sha256/<first-two-id-characters>/<attachment-id>`, and
+  `<data-dir>/attachments/blake3/<first-two-id-characters>/<attachment-id>`, and
   `<data-dir>/trace.jsonl`. SQLite calls the per-session table `attachment_manifest`;
   Postgres calls the shared table `lash_attachment_manifest`.
 
@@ -126,7 +126,7 @@ Complete the three-layer attachment cross-check before continuing:
 2. **API state:** one matching user message and one attachment reference with the upload id
    and retrieval URL.
 3. **Durable state:** one committed manifest row for the session/id plus the content blob at
-   the expected `attachments/sha256/` path; hash and length must match the source.
+   the expected `attachments/blake3/` path; hash and length must match the source.
 
 From the matching trace turn, save the `llm_call_started` record as
 `02-provider-request.json`. Require one request attachment with `source: stored` and MIME

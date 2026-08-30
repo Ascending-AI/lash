@@ -62,14 +62,15 @@ in `01-contract-tests.log`, docs lint green in `02-docs-lint.log`, and no contai
 the companion exits.
 
 **Fail if:** the container is outside the `lash-fig897-*` ownership prefix, publishes
-outside `5540-5549`, a prerequisite gate fails, or teardown leaks it.
+outside `5540-5599`, a prerequisite gate fails, or teardown leaks it.
 
 ## Phase 1 — Seed a live owner and observer
 
 Read `seeded_request_abandon_deployment`. Require process
 `request-abandon-owner-bound` to be non-terminal `Running`, its live lease holder to be
 `request-abandon-live-owner`, a positive token and fencing token, a future expiry, and an
-observer edge for `request-abandon-observer`.
+observer edge for `request-abandon-observer`. The checkpoint must also carry the
+non-empty `first_started` object that establishes the durable execution-started fact.
 
 **Fail if:** no live lease exists, the row lacks `first_started`, the lease is already
 lapsed, or the process is not visible through the seeded observer lens.

@@ -97,7 +97,9 @@ behind.
 
 ## Phase 1 — Seed an honestly in-flight deployment
 
-Read `seeded_drain_deployment` in `03-observed.jsonl`.
+Read `seeded_drain_deployment` in `03-observed.jsonl`. Use its emitted
+`seeded_session_id` when checking the parked session against the seed; the
+`in_flight_turn_id` is the separate turn identity for the admitted effect.
 
 Require exactly one provider call parked in flight, a non-empty `journal_active`, ingress
 still accepting, and five non-terminal process rows:

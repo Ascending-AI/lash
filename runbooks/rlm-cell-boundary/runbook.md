@@ -57,8 +57,9 @@ session id disagree.
 
 Submit a prompt that asks the RLM to compute a small value in one Lashlang cell
 and explicitly asks it to explain another possible computation after the code.
-Poll until the turn settles. Capture the fully scrolled transcript and activity
-rail as `01-first-cell.png`.
+Before capturing evidence, explicitly toggle the workbench rail's `filterForeground`
+control on so foreground activity is rendered. Poll until the turn settles, then
+capture the fully scrolled transcript and activity rail as `01-first-cell.png`.
 
 Require one successful first-cell execution. If the model naturally emits a
 second cell or trailing prose, require that it produces no second execution. If
