@@ -74,7 +74,10 @@ async fn run_workbench_turn_attempt_with_error_evidence(
         ),
         Err(lash::EmbedError::Runtime(error)) => {
             let evidence = Some((error.code.clone(), error.message.clone()));
-            (Err(AppError::runtime(lash::EmbedError::Runtime(error))), evidence)
+            (
+                Err(AppError::runtime(lash::EmbedError::Runtime(error))),
+                evidence,
+            )
         }
         Err(error) => (Err(AppError::runtime(error)), None),
     }
@@ -93,9 +96,7 @@ fn product_user_rows(state: &AppState, session_id: &str) -> Vec<(String, String)
             StreamItem::Message { .. }
             | StreamItem::TurnInput { .. }
             | StreamItem::ModelCallRecorded { .. }
-            | StreamItem::Done { .. } => {
-                None
-            }
+            | StreamItem::Done { .. } => None,
         })
         .collect()
 }
@@ -113,9 +114,7 @@ fn product_event_rows(state: &AppState, session_id: &str) -> Vec<(String, String
             StreamItem::Message { .. }
             | StreamItem::TurnInput { .. }
             | StreamItem::ModelCallRecorded { .. }
-            | StreamItem::Done { .. } => {
-                None
-            }
+            | StreamItem::Done { .. } => None,
         })
         .collect()
 }
@@ -160,14 +159,19 @@ fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
         .collect()
 }
 
+const ABANDONED_LEASE_TTL_MS: u64 = 100;
+const LEASE_TEST_START_MS: u64 = 1_700_000_000_000;
+
 /// ADR 0077: a replacement worker is refused while a dead holder's lease is
 /// still live, then admits and completes after the TTL expires.
 #[tokio::test]
 async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
     let data_dir = tempfile::tempdir().expect("successor persistence tempdir");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.path().join("lash-sessions"),
-    ));
+    let clock = Arc::new(lash::testing::TestClock::new(LEASE_TEST_START_MS));
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions"))
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>),
+    );
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-successor-persistence")
         .complete(|_| async {
@@ -207,27 +211,31 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         .expect("park the materialized session");
     assert_eq!(parked.session_id(), session_id);
     drop(parked);
-    let store = lash_sqlite_store::Store::open(&store_factory.catalog_path())
-        .await
-        .expect("open the durable session catalog");
-    let dead_lease = lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        &store,
-        &session_id,
-        &dead_incarnation,
-        "new-turn-within-dead-lease-ttl-commits-under-head-cas-executor",
-        100,
+    let store = lash_sqlite_store::Store::open_with_clock(
+        &store_factory.catalog_path(),
+        Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
     )
     .await
-    .expect("incarnation A claims the session lane")
-    .acquired()
-    .expect("the parked session lane is free for incarnation A");
+    .expect("open the durable session catalog");
+    let dead_lease =
+        lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+            &store,
+            &session_id,
+            &dead_incarnation,
+            "new-turn-within-dead-lease-ttl-commits-under-head-cas-executor",
+            ABANDONED_LEASE_TTL_MS,
+        )
+        .await
+        .expect("incarnation A claims the session lane")
+        .acquired()
+        .expect("the parked session lane is free for incarnation A");
 
     let before_expiry = state.core.session(session_id.clone()).open().await;
     assert!(
         matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
         "replacement recovery must wait for the dead holder TTL"
     );
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    clock.advance(ABANDONED_LEASE_TTL_MS + 1);
 
     let successor = state
         .core
@@ -265,7 +273,9 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         .map(lash::message_text)
         .collect::<Vec<_>>();
     assert!(
-        committed.iter().any(|text| text == "complete after process loss"),
+        committed
+            .iter()
+            .any(|text| text == "complete after process loss"),
         "the successor's user turn must be durable: {committed:?}"
     );
     assert!(
@@ -322,9 +332,11 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
 #[tokio::test]
 async fn same_worker_successor_waits_for_dead_boot_ttl() {
     let data_dir = tempfile::tempdir().expect("same-turn successor tempdir");
-    let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.path().join("lash-sessions"),
-    ));
+    let clock = Arc::new(lash::testing::TestClock::new(LEASE_TEST_START_MS));
+    let store_factory = Arc::new(
+        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions"))
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>),
+    );
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-same-turn-successor")
         .complete_error("the append-only restart gate must not call the provider")
@@ -351,31 +363,35 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         .await
         .expect("park restart-gate session before simulating process loss");
 
-    let store = lash_sqlite_store::Store::open(&store_factory.catalog_path())
-        .await
-        .expect("open restart-gate store");
+    let store = lash_sqlite_store::Store::open_with_clock(
+        &store_factory.catalog_path(),
+        Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
+    )
+    .await
+    .expect("open restart-gate store");
     let dead_boot = lash::persistence::LeaseOwnerIdentity::opaque(
         "agent-workbench-test-worker",
         "agent-workbench-dead-boot",
     );
-    let dead_lease = lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        &store,
-        &session_id,
-        &dead_boot,
-        "same-turn-successor-within-dead-lease-ttl-commits-under-head-cas-executor",
-        100,
-    )
-    .await
-    .expect("dead boot claims the lane")
-    .acquired()
-    .expect("restart-gate lane starts free");
+    let dead_lease =
+        lash::persistence::SessionExecutionLeaseStore::try_claim_session_execution_lease(
+            &store,
+            &session_id,
+            &dead_boot,
+            "same-turn-successor-within-dead-lease-ttl-commits-under-head-cas-executor",
+            ABANDONED_LEASE_TTL_MS,
+        )
+        .await
+        .expect("dead boot claims the lane")
+        .acquired()
+        .expect("restart-gate lane starts free");
 
     let before_expiry = state.core.session(session_id.clone()).open().await;
     assert!(
         matches!(before_expiry, Err(ref error) if error.to_string().contains("store commit is contended")),
         "the same stable owner still needs expiry of the dead incarnation"
     );
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    clock.advance(ABANDONED_LEASE_TTL_MS + 1);
 
     let successor = state
         .core
@@ -396,9 +412,13 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         .await
         .expect("read same-turn successor state")
         .expect("same-turn successor state exists");
-    assert!(durable.read_view().messages().iter().any(|message| {
-        lash::message_text(message) == "same-turn successor committed"
-    }));
+    assert!(
+        durable
+            .read_view()
+            .messages()
+            .iter()
+            .any(|message| { lash::message_text(message) == "same-turn successor committed" })
+    );
     assert_eq!(dead_lease.owner, dead_boot);
 }
 
@@ -614,10 +634,7 @@ fn gated_first_call_provider(
 /// workbench's Restate queued-turn workflow. A state built without a driver gets
 /// lash's `NativeQueuedWorkRunHandle` instead, which drains the input itself
 /// without the workbench in the loop — a shape the workbench never runs in.
-async fn queued_send_test_state(
-    data_dir: &std::path::Path,
-    provider: ProviderHandle,
-) -> AppState {
+async fn queued_send_test_state(data_dir: &std::path::Path, provider: ProviderHandle) -> AppState {
     let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
@@ -731,7 +748,10 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         lash::persistence::TurnInputState::DeferredNextTurn
     );
     assert!(
-        matches!(restate_requests.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+        matches!(
+            restate_requests.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ),
         "a queued send must not submit a second concurrent turn workflow"
     );
     assert_eq!(
@@ -895,15 +915,14 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         let session_id = session_id.clone();
         let turn_id = turn_id.clone();
         async move {
-            let (result, error_evidence) = Box::pin(
-                run_workbench_turn_attempt_with_error_evidence(
+            let (result, error_evidence) =
+                Box::pin(run_workbench_turn_attempt_with_error_evidence(
                     &state,
                     &session_id,
                     &turn_id,
                     "admitted send",
-                ),
-            )
-            .await;
+                ))
+                .await;
             let terminalized = crate::restate::terminalize_turn_execution(
                 &state,
                 &session_id,
@@ -929,7 +948,10 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         .expect("stalled turn materialized its lease")
         .holder
         .expect("stalled turn holds the lane");
-    assert_eq!(holder_before_race.owner.owner_id, "agent-workbench-test-worker");
+    assert_eq!(
+        holder_before_race.owner.owner_id,
+        "agent-workbench-test-worker"
+    );
     assert_eq!(
         holder_before_race.owner.incarnation_id,
         "agent-workbench-test-boot"
@@ -943,17 +965,14 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
         "the admitted send renders optimistically while it runs"
     );
 
-    let competitor_error = match state
-        .core
-        .session(session_id.clone())
-        .open()
-        .await
-    {
+    let competitor_error = match state.core.session(session_id.clone()).open().await {
         Ok(_) => panic!("a busy lane must refuse competing recovery"),
         Err(error) => error,
     };
     assert!(
-        competitor_error.to_string().contains("store commit is contended"),
+        competitor_error
+            .to_string()
+            .contains("store commit is contended"),
         "the refusal must identify the busy admission lane: {competitor_error}"
     );
     let holder_after_race = state
