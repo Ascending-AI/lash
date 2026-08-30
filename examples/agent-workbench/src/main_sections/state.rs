@@ -77,6 +77,7 @@ struct StateSnapshot {
     pending_turn_inputs: Vec<lash::PendingTurnInput>,
     queued_work: Vec<lash::persistence::QueuedWorkBatch>,
     turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
+    turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
     usage: lash::usage::SessionUsageReport,
     pending_approvals: Vec<approvals::PendingApproval>,
 }

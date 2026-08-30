@@ -90,6 +90,7 @@ async fn app_state(
         product_messages,
     );
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
+    let turn_failure_settlements = read_view.turn_failure_settlements().to_vec();
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
         read_view,
         cursor: cursor.clone(),
@@ -106,6 +107,7 @@ async fn app_state(
             pending_turn_inputs,
             queued_work,
             turn_input_applications,
+            turn_failure_settlements,
             usage,
             pending_approvals,
         },
@@ -884,6 +886,7 @@ async fn reset_chat(
         pending_turn_inputs: Vec::new(),
         queued_work: Vec::new(),
         turn_input_applications: Vec::new(),
+        turn_failure_settlements: Vec::new(),
         usage: session.usage_report(),
         pending_approvals: state.approvals.pending().map_err(AppError::internal)?,
     }))

@@ -35,6 +35,9 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) llm_stream_summaries: HashMap<usize, LlmStreamSummary>,
     /// Parent-session calls only. Child runtimes assemble their own ledgers.
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
+    /// Non-transcript evidence from charge-safety-refused generations, with
+    /// cardinality capped at one component per sealed provider attempt.
+    pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) next_llm_ordinal: usize,
     pub(super) session_services: Arc<RuntimeSessionServices>,
     pub(super) protocol_turn_options: crate::ProtocolTurnOptions,

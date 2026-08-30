@@ -270,6 +270,36 @@ fn intent_hash_golden_vector() {
 }
 
 #[test]
+fn failure_evidence_changes_intent_hash_without_changing_empty_legacy_hash() {
+    let baseline = intent_fixture();
+    let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
+    assert_eq!(
+        baseline_hash,
+        "7e5b11079818497ba41093c8df1e14a1351db03a19580218e3bf4622f425c5cf"
+    );
+
+    let mut with_evidence = baseline;
+    with_evidence.failure_evidence = vec![crate::TurnFailureEvidence {
+        partial_output: None,
+        billed_usage: crate::llm::types::LlmUsage::default(),
+        refusal: crate::ChargeSafetyRefusalEvidence {
+            code: "unsafe_retry_after_output_started".to_string(),
+            denial_reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
+            protocol_position: crate::ProtocolPosition::OutputStarted,
+            attempt_number: 1,
+            attempt_count: 1,
+        },
+    }];
+    assert_ne!(
+        with_evidence
+            .turn_commit_hash()
+            .expect("intent with failure evidence"),
+        baseline_hash,
+        "nonempty settlement evidence participates in commit identity"
+    );
+}
+
+#[test]
 fn session_head_payload_bytes_match_the_legacy_meta_format() {
     #[allow(dead_code)]
     #[derive(serde::Serialize)]

@@ -1489,7 +1489,7 @@ pub struct RetryDecision {
     pub reason: Option<String>,
     /// Typed host risk-appetite decision when a retry would purchase a second
     /// generation without an idempotency or resume guarantee.
-    #[serde(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub charge_safety: Option<ChargeSafetyDecision>,
 }
 

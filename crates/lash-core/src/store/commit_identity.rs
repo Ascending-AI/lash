@@ -1241,6 +1241,10 @@ impl OperationId {
     }
 }
 
+fn failure_evidence_is_empty(evidence: &&[crate::TurnFailureEvidence]) -> bool {
+    evidence.is_empty()
+}
+
 #[derive(serde::Serialize)]
 struct RuntimeCommitIntent<'a> {
     session_id: &'a str,
@@ -1249,6 +1253,8 @@ struct RuntimeCommitIntent<'a> {
     graph: GraphCommitIntent<'a>,
     checkpoint: CheckpointIntent<'a>,
     usage_deltas: &'a [crate::store::RuntimeUsageDelta],
+    #[serde(skip_serializing_if = "failure_evidence_is_empty")]
+    failure_evidence: &'a [crate::TurnFailureEvidence],
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,
@@ -1272,6 +1278,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
             graph: GraphCommitIntent::from(&commit.graph),
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             usage_deltas: &commit.usage_deltas,
+            failure_evidence: &commit.failure_evidence,
             completed_queue_batches: commit
                 .completed_queue_claims
                 .iter()

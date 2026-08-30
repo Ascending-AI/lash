@@ -7,10 +7,17 @@ use lash_sqlite_store::SqliteSessionStoreFactory;
 #[tokio::test]
 async fn sqlite_session_read_view_satisfies_conformance() {
     let dir = tempfile::tempdir().expect("read-view tempdir");
-    lash_core::testing::conformance::session_store_factory_read_session(Arc::new(
-        SqliteSessionStoreFactory::new(dir.path()),
-    ))
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
+    let factory = Arc::new(
+        SqliteSessionStoreFactory::new(dir.path())
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+    );
+    lash_core::testing::conformance::session_store_factory_mid_stream_failure_evidence(
+        factory.clone(),
+        || clock.advance(1),
+    )
     .await;
+    lash_core::testing::conformance::session_store_factory_read_session(factory).await;
 }
 
 fn catalog_state(root: &Path) -> std::collections::BTreeMap<String, (u64, std::time::SystemTime)> {

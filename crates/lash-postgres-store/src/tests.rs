@@ -7,6 +7,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
+use tracing::instrument::WithSubscriber as _;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::{Layer, Registry};
 
@@ -21,6 +22,148 @@ where
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
+}
+
+#[test]
+fn turn_failure_settlement_query_filters_receipts_without_evidence() {
+    assert!(
+        crate::runtime_persistence::LOAD_TURN_FAILURE_SETTLEMENTS_SQL
+            .contains(r#"result_json LIKE '%"failure_evidence"%'"#),
+        "the SQL path must exclude receipts that cannot carry failure evidence"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_receipts() {
+    const SESSION_ID: &str = "failure-evidence-corrupt-receipt";
+    const NON_EVIDENCE_RECEIPTS: i64 = 256;
+
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres receipt-filter contract: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect receipt-filter contract storage");
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT tablename FROM pg_tables
+         WHERE schemaname = 'public'
+           AND tablename LIKE 'lash\\_%'
+           AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta')
+         ORDER BY tablename",
+    )
+    .fetch_all(storage.pool())
+    .await
+    .expect("list Lash tables for receipt-filter reset");
+    let truncate = format!("TRUNCATE {} RESTART IDENTITY CASCADE", tables.join(", "));
+    sqlx::query(&truncate)
+        .execute(storage.pool())
+        .await
+        .expect("reset receipt-filter tables");
+
+    let store = storage.session_store(SESSION_ID);
+    store
+        .admit_and_bind_session(&lash_core::SessionBinding::root(SESSION_ID))
+        .await
+        .expect("bind receipt-filter session");
+    let state = lash_core::RuntimeSessionState {
+        session_id: SESSION_ID.to_string(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
+    commit.failure_evidence = vec![lash_core::TurnFailureEvidence {
+        partial_output: Some(lash_core::TurnFailurePartialOutput::Complete {
+            text: "settled partial output".to_string(),
+        }),
+        billed_usage: lash_core::llm::types::LlmUsage {
+            output_tokens: 3,
+            ..Default::default()
+        },
+        refusal: lash_core::ChargeSafetyRefusalEvidence {
+            code: "unsafe_retry_after_output_started".to_string(),
+            denial_reason: lash_core::ChargeSafetyDenialReason::GuaranteeRequired,
+            protocol_position: lash_core::ProtocolPosition::OutputStarted,
+            attempt_number: 1,
+            attempt_count: 1,
+        },
+    }];
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("seed one failure-evidence receipt");
+
+    let (evidence_turn_id, result_json, committed_at_ms): (String, String, i64) = sqlx::query_as(
+        "SELECT turn_id, result_json, committed_at_ms
+             FROM lash_runtime_turn_commits
+             WHERE session_id = $1",
+    )
+    .bind(SESSION_ID)
+    .fetch_one(storage.pool())
+    .await
+    .expect("read seeded failure-evidence receipt");
+    let mut no_evidence: serde_json::Value =
+        serde_json::from_str(&result_json).expect("seed receipt is valid JSON");
+    no_evidence
+        .as_object_mut()
+        .expect("receipt JSON is an object")
+        .remove("failure_evidence");
+    let no_evidence =
+        serde_json::to_string(&no_evidence).expect("serialize receipt without failure evidence");
+    sqlx::query(
+        "INSERT INTO lash_runtime_turn_commits
+         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
+         SELECT $1,
+                'non-evidence-' || to_char(index, 'FM000'),
+                'non-evidence-hash-' || to_char(index, 'FM000'),
+                $2,
+                $3 + index
+         FROM generate_series(1, $4) AS index",
+    )
+    .bind(SESSION_ID)
+    .bind(no_evidence)
+    .bind(committed_at_ms)
+    .bind(NON_EVIDENCE_RECEIPTS)
+    .execute(storage.pool())
+    .await
+    .expect("seed ordinary receipts");
+    sqlx::query(
+        "INSERT INTO lash_runtime_turn_commits
+         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
+         VALUES ($1, 'corrupt-evidence', 'corrupt-evidence-hash', $2, $3)",
+    )
+    .bind(SESSION_ID)
+    .bind(r#"{"failure_evidence":"#)
+    .bind(committed_at_ms + NON_EVIDENCE_RECEIPTS + 1)
+    .execute(storage.pool())
+    .await
+    .expect("seed corrupt evidence receipt");
+
+    let warning_count = Arc::new(AtomicUsize::new(0));
+    let subscriber = Registry::default().with(WarningCounter(Arc::clone(&warning_count)));
+    let reopened = store
+        .load_session()
+        .with_subscriber(subscriber)
+        .await
+        .expect("one corrupt evidence receipt must not make the session unreadable")
+        .expect("seeded session remains readable");
+
+    assert_eq!(
+        reopened.turn_failure_settlements.len(),
+        1,
+        "only the valid evidence receipt becomes a settlement"
+    );
+    assert_eq!(
+        reopened.turn_failure_settlements[0].turn_id,
+        evidence_turn_id
+    );
+    assert_eq!(
+        warning_count.load(Ordering::Relaxed),
+        1,
+        "the skipped corrupt evidence receipt emits one warning"
+    );
 }
 
 #[test]

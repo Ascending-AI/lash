@@ -740,6 +740,7 @@ mod tests {
                 usage: Default::default(),
                 children_usage: Vec::new(),
                 llm_calls: Vec::new(),
+                failure_evidence: Vec::new(),
                 tool_calls: Vec::new(),
                 execution: Default::default(),
                 errors: Vec::new(),

@@ -299,6 +299,8 @@ pub struct PersistedSessionRead {
     pub checkpoint_ref: Option<BlobRef>,
     pub checkpoint: Option<HydratedSessionCheckpoint>,
     pub token_ledger: Vec<crate::TokenLedgerEntry>,
+    /// Failure components loaded from this session's durable turn receipts.
+    pub turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -482,6 +484,7 @@ impl RuntimeCommit {
             graph: _,
             checkpoint: _,
             usage_deltas: _,
+            failure_evidence,
             turn_commit: _,
             completed_queue_claims,
             completed_turn_input_claims,
@@ -496,6 +499,7 @@ impl RuntimeCommit {
                 && enqueued_queue_batches.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
                 && *adopted_intent_rows == 0
+                && failure_evidence.is_empty()
                 && committed_attachment_ids.is_empty(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
@@ -658,6 +662,7 @@ impl RuntimeCommit {
             graph,
             checkpoint: build_checkpoint_from_persisted_state(state)?,
             usage_deltas: usage_deltas.to_vec(),
+            failure_evidence: Vec::new(),
             turn_commit: RuntimeTurnCommitStamp::new(operation),
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),

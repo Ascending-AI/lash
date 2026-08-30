@@ -11,6 +11,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) agent_frame_switch_materializes: bool,
     pub(super) store: Option<&'a (dyn RuntimePersistence + 'a)>,
     pub(super) usage_deltas: &'a [crate::store::RuntimeUsageDelta],
+    pub(super) failure_evidence: &'a [crate::TurnFailureEvidence],
     pub(super) outcome: &'a TurnOutcome,
     pub(super) originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
     pub(super) originating_turn_input_claims: Vec<crate::TurnInputCompletion>,

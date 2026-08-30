@@ -59,7 +59,12 @@ mod turn_boundary;
 mod turn_commit_draft;
 pub(crate) mod turn_control;
 mod turn_driver;
+mod turn_failure_evidence;
 mod turn_graph_editor;
+pub use turn_failure_evidence::{
+    ChargeSafetyRefusalEvidence, TurnFailureEvidence, TurnFailurePartialOutput,
+    TurnFailureSettlement,
+};
 pub(crate) mod turn_input_ingress;
 pub(crate) mod turn_loop;
 mod turn_queue;
@@ -868,6 +873,10 @@ pub struct AssembledTurn {
     pub llm_calls: Vec<crate::LlmCallRecord>,
     #[serde(default)]
     pub tool_calls: Vec<ToolCallRecord>,
+    /// Bounded, non-transcript evidence retained when host charge-safety
+    /// policy refuses regeneration of a failed provider generation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failure_evidence: Vec<TurnFailureEvidence>,
     #[serde(default)]
     pub errors: Vec<TurnIssue>,
     /// Durable admission identity of the input this turn was driven from.

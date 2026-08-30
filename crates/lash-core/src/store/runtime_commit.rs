@@ -84,6 +84,9 @@ pub struct RuntimeCommit {
     /// Usage rows published atomically by this commit, each carrying a stable
     /// identity so retrying an unknown commit outcome cannot double-account.
     pub usage_deltas: Vec<RuntimeUsageDelta>,
+    /// Bounded, non-transcript evidence settled with this turn record.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub turn_commit: RuntimeTurnCommitStamp,
     pub completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
     pub completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
@@ -546,6 +549,9 @@ pub struct RuntimeCommitReceipt {
     /// to retain re-ridden staged rows that the first attempt did not carry.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub committed_usage_delta_identities: Vec<RuntimeUsageDeltaIdentity>,
+    /// Bounded failure evidence owned by this durable turn settlement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failure_evidence: Vec<crate::TurnFailureEvidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     /// Canonical input applications settled by this idempotent turn commit.

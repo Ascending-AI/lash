@@ -325,6 +325,7 @@ impl TurnBoundary {
                 agent_frame_switch_materializes,
                 store: store.as_ref().map(|store| store.as_ref()),
                 usage_deltas,
+                failure_evidence: &returned_turn.failure_evidence,
                 outcome: &returned_turn.outcome,
                 originating_queue_claims,
                 originating_turn_input_claims,
@@ -406,6 +407,7 @@ impl TurnBoundary {
             agent_frame_switch_materializes,
             store,
             usage_deltas,
+            failure_evidence,
             outcome,
             originating_queue_claims,
             originating_turn_input_claims,
@@ -457,6 +459,7 @@ impl TurnBoundary {
                 store,
                 graph,
                 usage_deltas,
+                failure_evidence,
                 self.final_operation(),
                 originating_queue_claims,
                 originating_turn_input_claims,
@@ -491,6 +494,7 @@ impl TurnBoundary {
         store: &(dyn RuntimePersistence + '_),
         mut graph: GraphAppend,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
+        failure_evidence: &[crate::TurnFailureEvidence],
         operation: crate::OperationId,
         mut originating_queue_claims: Vec<crate::QueuedWorkCompletion>,
         mut originating_turn_input_claims: Vec<crate::TurnInputCompletion>,
@@ -543,6 +547,7 @@ impl TurnBoundary {
                 commit_budget,
             )?
             .with_committed_attachments(committed_attachment_ids);
+        commit.failure_evidence = failure_evidence.to_vec();
         commit.adopted_intent_rows = adopted_intent_rows;
         if let Some(completion) = session_execution_lease_completion {
             commit = commit.releasing_session_execution_lease(completion);
@@ -611,14 +616,13 @@ impl TurnBoundary {
 
 #[cfg(test)]
 mod tests {
-    use lash_sansio::core_support::MessageSequenceCoreSupport;
-    use lash_sansio::sync::MutexExt;
-
     use super::*;
     use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
     use crate::session_model::{ConversationRecord, MessageRole, Part};
     use crate::store::SessionExecutionLeaseStore;
     use crate::{Message, SessionGraph, TokenUsage, shared_parts};
+    use lash_sansio::core_support::MessageSequenceCoreSupport;
+    use lash_sansio::sync::MutexExt;
     const UNBOUNDED: crate::TurnBudget = crate::TurnBudget::Unbounded;
     fn cancelled_outcome() -> TurnOutcome {
         TurnOutcome::Stopped(crate::TurnStop::Cancelled {
@@ -628,7 +632,6 @@ mod tests {
     fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
         crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
     }
-
     fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
         Message {
             id: id.to_string(),
@@ -641,7 +644,6 @@ mod tests {
             origin: None,
         }
     }
-
     fn usage_entry(source: &str, model: &str, input_tokens: i64) -> crate::TokenLedgerEntry {
         crate::TokenLedgerEntry {
             source: source.to_string(),
@@ -655,7 +657,6 @@ mod tests {
             },
         }
     }
-
     #[test]
     fn turn_draft_appends_resident_nodes_not_yet_durable() {
         let durable = text_message("durable", MessageRole::User, "already durable");
@@ -681,7 +682,6 @@ mod tests {
             vec![frame_node_id.as_str(), pending_node_id.as_str()]
         );
     }
-
     fn attachment_ref(id: &str) -> crate::AttachmentRef {
         crate::AttachmentMeta::new(
             crate::AttachmentId::parse(id).expect("valid attachment id"),
@@ -692,7 +692,6 @@ mod tests {
         )
         .as_ref()
     }
-
     fn test_protocol_event(kind: &str) -> crate::ProtocolEvent {
         crate::ProtocolEvent::typed(
             "test_protocol",
@@ -703,7 +702,6 @@ mod tests {
         )
         .expect("test protocol event serializes")
     }
-
     fn summarize_protocol_event(event: &crate::ProtocolEvent) -> String {
         let Some(value) = event
             .decode::<serde_json::Value>("test_protocol")
@@ -717,7 +715,6 @@ mod tests {
             .unwrap_or("unknown");
         format!("protocol:{kind}")
     }
-
     fn persisted_event_order(graph: &SessionGraph) -> Vec<String> {
         graph
             .nodes
@@ -732,7 +729,6 @@ mod tests {
             })
             .collect()
     }
-
     fn chronological_event_order(graph: &SessionGraph) -> Vec<String> {
         let read_model = graph.read_model();
         crate::chronological::ChronologicalProjection::from_read_model(&read_model)
@@ -748,7 +744,6 @@ mod tests {
             })
             .collect()
     }
-
     fn stored_graph_with_head_leaf(store: &RecordingStore) -> SessionGraph {
         let mut graph = store.session_graph.lock_recover().clone();
         graph.set_leaf_node_id(
@@ -760,7 +755,6 @@ mod tests {
         );
         graph
     }
-
     fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
         let mut state = RuntimeSessionState {
             session_id: "session-1".to_string(),
@@ -806,7 +800,6 @@ mod tests {
             .expect("test session execution lease");
         (TurnBoundary::from_state(state), lease)
     }
-
     #[test]
     fn agent_frame_switch_materializes_outcome_seed_without_tool_call_event() {
         let graph = SessionGraph::from_active_read_state(&[text_message(
@@ -863,7 +856,6 @@ mod tests {
         assert_eq!(previous_read.messages.len(), 1);
         assert_eq!(previous_read.messages[0].parts[0].content, "old frame");
     }
-
     #[test]
     fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         let graph = SessionGraph::from_active_read_state(&[text_message(
@@ -1108,6 +1100,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
+                failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
@@ -1167,6 +1160,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
+                failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 originating_queue_claims: Vec::new(),
                 originating_turn_input_claims: Vec::new(),
@@ -1305,6 +1299,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &usage,
+                failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: Vec::new(),
@@ -1421,6 +1416,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
+                failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 originating_queue_claims: vec![predecessor_claim.completion()],
                 originating_turn_input_claims: Vec::new(),
@@ -1489,6 +1485,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
+                failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: vec![queue_origin],
@@ -1525,6 +1522,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: Some(&store),
                 usage_deltas: &[],
+                failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: Vec::new(),
@@ -1574,6 +1572,7 @@ mod tests {
                 agent_frame_switch_materializes: false,
                 store: None,
                 usage_deltas: &[],
+                failure_evidence: &[],
                 outcome: &cancelled_outcome(),
                 tool_calls: &[],
                 originating_queue_claims: Vec::new(),

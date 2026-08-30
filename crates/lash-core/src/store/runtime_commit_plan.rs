@@ -523,6 +523,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             committed_leaf_node_id: self.commit.graph.leaf_node_id.clone(),
             realized_node_timestamps: self.realized_node_timestamps.clone(),
             committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
+            failure_evidence: self.commit.failure_evidence.clone(),
             enqueued_queue_batches,
             turn_input_applications: self.turn_input_applications.clone(),
             turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
