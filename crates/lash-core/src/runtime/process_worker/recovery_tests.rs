@@ -19,6 +19,7 @@ mod pagination_tests;
 #[path = "recovery_disposition_tests.rs"]
 mod recovery_disposition_tests;
 mod session_store_factories;
+mod session_turn_cancellation_tests;
 mod worker_fixtures;
 use session_store_factories::*;
 use worker_fixtures::*;
@@ -36,6 +37,26 @@ fn test_session_policy() -> crate::SessionPolicy {
     }
 }
 
+fn session_turn_registration(process_id: &str, child_session_id: &str) -> ProcessRegistration {
+    let create_request = crate::SessionCreateRequest::child_session(
+        "recovery-test-parent",
+        crate::SessionStartPoint::Empty,
+        crate::PluginOptions::default(),
+    )
+    .with_session_id(child_session_id);
+    ProcessRegistration::new(
+        process_id,
+        ProcessInput::SessionTurn {
+            definition_key: "recovery-test-session-turn:v1".to_string(),
+            create_request: Box::new(create_request),
+            turn_input: Box::new(crate::TurnInput::text("run recovered child turn")),
+            output_contract: crate::ToolOutputContract::Static,
+        },
+        RecoveryContract::Rerunnable,
+        crate::ProcessProvenance::host(),
+    )
+}
+
 #[test]
 fn process_execution_concurrency_validates_semaphore_bounds() {
     DurableProcessWorkerConfig::validate_process_execution_concurrency(1)
@@ -46,6 +67,185 @@ fn process_execution_concurrency_validates_semaphore_bounds() {
             tokio::sync::Semaphore::MAX_PERMITS + 1,
         )
         .is_err()
+    );
+}
+
+#[tokio::test]
+async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
+    let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let watched = crate::watch_process_registry(raw_registry);
+    let registry = Arc::clone(watched.registry());
+    let process_id = "cancelled-before-crash-replay";
+    registry
+        .register_process(session_turn_registration(
+            process_id,
+            "cancelled-before-crash-child",
+        ))
+        .await
+        .expect("register replay fixture");
+    registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::cancel_requested(
+                process_id,
+                Some("cancel before crash".to_string()),
+            ),
+        )
+        .await
+        .expect("persist cancellation before simulated crash");
+    let policy = test_session_policy();
+    let worker = DurableProcessWorker::new(
+        DurableProcessWorkerConfig::new(
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
+            RuntimeHostConfig::in_memory(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1),
+            ),
+            Arc::new(crate::InMemorySessionStoreFactory::new()),
+            crate::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoQueuedWork::new()),
+            local_owner("cancel-replay-worker", "host-a", "fresh-incarnation"),
+        )
+        .with_session_policy(policy),
+    )
+    .expect("valid cancel-replay worker");
+
+    let report = worker
+        .drive_pending_processes()
+        .await
+        .expect("fresh worker admits cancelled replay");
+    assert_eq!(report.admitted, vec![process_id.to_string()]);
+    await_terminal(&registry, process_id).await;
+    let record = registry
+        .get_process(process_id)
+        .await
+        .expect("read replayed process")
+        .expect("replayed process remains retained");
+    assert_eq!(
+        record.status,
+        ProcessStatus::Cancelled,
+        "a fresh recovery attempt must settle the persisted cancellation before recreating the child"
+    );
+}
+
+#[tokio::test]
+async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal() {
+    let provider_started = Arc::new(tokio::sync::Notify::new());
+    let provider_release = Arc::new(tokio::sync::Semaphore::new(0));
+    let started = Arc::clone(&provider_started);
+    let release = Arc::clone(&provider_release);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("test")
+        .complete(move |_request| {
+            let started = Arc::clone(&started);
+            let release = Arc::clone(&release);
+            async move {
+                started.notify_one();
+                let _permit = release.acquire().await.expect("provider release permit");
+                Ok(crate::llm::types::LlmResponse {
+                    parts: vec![crate::llm::types::LlmOutputPart::Text {
+                        text: "runner completed".to_string(),
+                        response_meta: None,
+                    }],
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let raw_registry = Arc::new(TestLocalProcessRegistry::default());
+    let raw_registry_port: Arc<dyn ProcessRegistry> = raw_registry.clone();
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let (registry, _hub, process_work) =
+        late_bound_process_work_wiring(raw_registry_port, Arc::clone(&run_handle));
+    let mut runtime_host = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    runtime_host.providers.provider_resolver =
+        Arc::new(crate::SingleProviderResolver::new(provider));
+    let policy = test_session_policy();
+    let worker = DurableProcessWorker::new(
+        DurableProcessWorkerConfig::new(
+            Arc::new(PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
+            runtime_host,
+            Arc::new(TestSessionStoreFactory),
+            crate::WorkerProcessWork::External(process_work),
+            Arc::new(crate::NoQueuedWork::new()),
+            local_owner("terminal-fence-worker", "host-a", "terminal-fence-start"),
+        )
+        .with_session_policy(policy),
+    )
+    .expect("valid terminal-fence worker");
+    run_handle
+        .worker
+        .set(worker)
+        .unwrap_or_else(|_| panic!("terminal-fence worker binds once"));
+    let process_id = "session-turn-terminal-fence";
+    registry
+        .register_process(session_turn_registration(
+            process_id,
+            "session-turn-terminal-fence-child",
+        ))
+        .await
+        .expect("register SessionTurn fence fixture");
+
+    let report = run_handle
+        .enable_and_drive()
+        .await
+        .expect("admit SessionTurn fence fixture");
+    assert_eq!(report.admitted, vec![process_id.to_string()]);
+    provider_started.notified().await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while raw_registry.process_events_read_count_for_testing() < 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancel watcher reaches its durable wait before runner completion");
+    raw_registry
+        .append_event(
+            process_id,
+            crate::ProcessEventAppendRequest::cancel_requested(
+                process_id,
+                Some("commit cancellation behind the parked watcher".to_string()),
+            ),
+        )
+        .await
+        .expect("append cancellation without notifying the parked watcher");
+    provider_release.add_permits(1);
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let record = registry
+                .get_process(process_id)
+                .await
+                .expect("read SessionTurn fence fixture")
+                .expect("SessionTurn fence fixture remains retained");
+            let lease = registry
+                .get_process_lease(process_id)
+                .await
+                .expect("read SessionTurn fence lease");
+            if record.first_started.is_some() && lease.is_none() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("fenced recovery attempt releases its lease");
+    let record = registry
+        .get_process(process_id)
+        .await
+        .expect("read fenced SessionTurn")
+        .expect("fenced SessionTurn remains retained");
+    assert!(
+        !record.is_terminal(),
+        "a committed SessionTurn cancellation must not write the runner's successful terminal"
     );
 }
 

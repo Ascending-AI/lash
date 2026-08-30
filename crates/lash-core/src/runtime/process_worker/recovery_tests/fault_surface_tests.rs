@@ -113,6 +113,45 @@ async fn a_failed_read_on_an_admitted_row_reaches_the_fault_surface() {
 }
 
 #[tokio::test]
+async fn non_session_cancel_watcher_read_failure_preserves_prior_terminalization() {
+    let run_handle = Arc::new(LateBoundProcessWork::default());
+    let (_worker, registry, run_handle, env_ref, test_registry) =
+        worker_with_engine_and_registry(1, Arc::new(ImmediateSuccessEngine), run_handle).await;
+    let process_id = "engine-cancel-watch-read-failure";
+    registry
+        .register_process(engine_registration(
+            process_id,
+            "immediate-success",
+            env_ref,
+            serde_json::Value::Null,
+        ))
+        .await
+        .expect("register non-session fixture");
+    test_registry
+        .set_process_events_read_error_for_testing(PluginError::Session(
+            "injected non-session cancel watcher read failure".to_string(),
+        ))
+        .await;
+
+    let report = run_handle
+        .enable_and_drive()
+        .await
+        .expect("admit non-session fixture");
+    assert_eq!(report.admitted, vec![process_id.to_string()]);
+    await_terminal(&registry, process_id).await;
+    let record = registry
+        .get_process(process_id)
+        .await
+        .expect("read non-session fixture")
+        .expect("non-session fixture remains retained");
+    assert_eq!(
+        record.status,
+        ProcessStatus::Completed,
+        "a cancel-watcher read failure must not widen SessionTurn retry semantics to engine processes"
+    );
+}
+
+#[tokio::test]
 async fn a_failed_terminal_write_on_an_admitted_row_reaches_the_fault_surface() {
     let (report, fault, terminal) = drive_one_faulted_row("fault-write", async |registry| {
         registry

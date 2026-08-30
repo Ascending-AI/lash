@@ -163,10 +163,11 @@ Expect:
   parent's managed-turn registry admitted new child work after the cancellation;
 - **durable-catalog gate (objective):** `03b-sessions-before.json` proves the query saw
   the recorded child session, and `03b-sessions-after.json` has zero rows for that id in
-  all five listed tables. Runtime-internal child session ids are reclaimed without a
-  `deleted_sessions` tombstone, so the absence of that tombstone is expected and is not
-  the cleanup gate. Quote the child id and the before/after counts when scoring — an
-  unquoted "looked clean" does not pass;
+  all five listed tables. Reclamation uses the canonical session-delete transaction, so
+  the runtime-internal child id also joins `deleted_sessions` and cannot be recreated on
+  replay. The tombstone is identity evidence, not leaked live catalog state. Quote the
+  child id and the before/after counts when scoring — an unquoted "looked clean" does not
+  pass;
 - capture the workbench logs with debug-level records enabled: `managed_turn.admission`
   and `managed_turn.release` are emitted by `tracing::debug!`, so an info-only log does
   not prove their absence. The records are log evidence, not a guaranteed event in the

@@ -542,6 +542,8 @@ impl ProcessRegistry for TestLocalProcessRegistry {
         process_id: &str,
         after_sequence: u64,
     ) -> Result<Vec<ProcessEvent>, PluginError> {
+        self.process_events_read_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let _transaction = self.transaction.lock().await;
         if let Some(error) = self.process_events_read_error.lock().await.take() {
             return Err(error);
