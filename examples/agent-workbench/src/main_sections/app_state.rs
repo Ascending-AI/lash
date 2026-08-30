@@ -243,10 +243,12 @@ impl AppState {
     /// Delete `session_id`, reclaim the finished work it left behind, and report
     /// what the reclamation removed.
     ///
-    /// Both halves are the workbench's session-deletion contract, so they live
-    /// in one place: the runtime delete retires the session, and the retention
-    /// lever below reclaims the globally-owned process rows the delete
-    /// deliberately only detaches.
+    /// Both halves live in one place, but only the runtime delete decides the
+    /// session fence: it durably retires the id, then the retention lever
+    /// reclaims globally-owned process rows the delete deliberately only
+    /// detaches. Cleanup failures are retryable. The workflow deliberately
+    /// replays this idempotent delete before retrying retention so its Restate
+    /// journal command sequence remains stable.
     async fn delete_session_and_reclaim_processes(
         &self,
         session_id: &str,
@@ -258,7 +260,23 @@ impl AppState {
             .await
             // Audited: delete_session lowers component and factory failures to non-tombstone EmbedError variants.
             .map_err(AppError::internal)?;
-        let retention = self.prune_processes_originated_by(session_id).await?;
+        #[cfg(test)]
+        if let Some(turn_id) = SESSION_DELETE_RETENTION_FAULTS
+            .lock_recover()
+            .remove(session_id)
+        {
+            // Model a turn appearing after the first attempt's journaled
+            // snapshot, then fail retention once. A correct redrive reuses the
+            // snapshot instead of turning this post-tombstone retry terminal.
+            self.active_turns.insert(session_id, &turn_id);
+            return Err(AppError::retryable_internal(
+                "injected post-tombstone process-retention failure",
+            ));
+        }
+        let retention = self
+            .prune_processes_originated_by(session_id)
+            .await
+            .map_err(AppError::retryable_internal)?;
         self.trace_for_session(
             session_id,
             "reset.restate.session_deleted",
@@ -313,7 +331,7 @@ impl AppState {
     async fn prune_processes_originated_by(
         &self,
         session_id: &str,
-    ) -> Result<lash::process::ProcessPruneReport, AppError> {
+    ) -> Result<lash::process::ProcessPruneReport, lash::EmbedError> {
         self.core
             .processes()
             .prune(
@@ -326,8 +344,7 @@ impl AppState {
                 lash::process::ProjectionWatermark::NoProjector,
             )
             .await
-            // Audited: process retention reads and writes the global registry and never consults a session tombstone.
-            .map_err(AppError::internal)
+        // Audited: process retention reads and writes the global registry and never consults a session tombstone.
     }
 
     /// Fan out exact-address cooperative cancellation to the active turns the
@@ -696,21 +713,56 @@ impl WorkbenchSessions {
         self.current.lock_recover().clone()
     }
 
-    fn rotate(&self) -> (String, String) {
+    /// Replace one retired roster slot without disturbing a session selected
+    /// while the durable delete was settling.
+    fn replace(
+        &self,
+        retired_session_id: &str,
+        fallback_dialect: lash::rlm::RlmDialect,
+    ) -> (String, bool) {
+        let replacement_session_id = new_session_id();
+        // Roster then current is the shared lock order with `select`: removing
+        // the retired row and conditionally moving the pointer are one local
+        // decision, so no selector can reinstall the tombstoned id between
+        // those halves.
+        let mut roster = self.roster.lock_recover();
+        let carried = roster.remove(retired_session_id);
+        let (name, dialect) = carried
+            .map(|entry| (entry.name, entry.dialect))
+            .unwrap_or_else(|| (retired_session_id.to_string(), fallback_dialect));
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        roster.insert(
+            replacement_session_id.clone(),
+            WorkbenchSessionEntry {
+                session_id: replacement_session_id.clone(),
+                name,
+                dialect,
+                created_at_ms: now_ms,
+                last_active_ms: now_ms,
+            },
+        );
         let mut current = self.current.lock_recover();
-        let old = current.clone();
-        let new = new_session_id();
-        *current = new.clone();
-        drop(current);
-        self.persist();
-        // A reset replaces the session behind the same roster slot, so the new
-        // id inherits the retired one's name and dialect: an operator who
-        // created a TypeScript session and pressed reset is still in one.
-        let carried = self.roster.lock_recover().get(&old).cloned();
-        if let Some(carried) = carried {
-            self.record(new.clone(), carried.name, carried.dialect);
-            self.forget(&old);
+        let replaced_current = *current == retired_session_id;
+        if replaced_current {
+            *current = replacement_session_id.clone();
         }
+        drop(current);
+        self.persist_roster(&roster);
+        drop(roster);
+        if replaced_current {
+            self.persist();
+        }
+        (replacement_session_id, replaced_current)
+    }
+
+    #[cfg(test)]
+    fn rotate(&self) -> (String, String) {
+        let old = self.current();
+        let dialect = self
+            .dialect_for(&old)
+            .unwrap_or(lash::rlm::RlmDialect::Lashlang);
+        let (new, replaced_current) = self.replace(&old, dialect);
+        debug_assert!(replaced_current);
         (old, new)
     }
 
@@ -751,13 +803,6 @@ impl WorkbenchSessions {
             return;
         }
         self.record(session_id.to_string(), session_id.to_string(), dialect);
-    }
-
-    fn forget(&self, session_id: &str) {
-        let mut roster = self.roster.lock_recover();
-        if roster.remove(session_id).is_some() {
-            self.persist_roster(&roster);
-        }
     }
 
     fn touch(&self, session_id: &str) {
@@ -817,8 +862,10 @@ impl WorkbenchSessions {
     /// restart, and the drivers that read `<data-dir>/session-id` must all
     /// agree on which session the workbench is serving.
     fn select(&self, session_id: &str) -> Option<WorkbenchSessionEntry> {
-        let entry = self.entry(session_id)?;
+        let roster = self.roster.lock_recover();
+        let entry = roster.get(session_id)?.clone();
         *self.current.lock_recover() = session_id.to_string();
+        drop(roster);
         self.persist();
         self.touch(session_id);
         Some(entry)
@@ -1154,6 +1201,18 @@ fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkE
     }
 }
 
+#[cfg(test)]
+static SESSION_DELETE_RETENTION_FAULTS: std::sync::LazyLock<
+    Mutex<BTreeMap<String, String>>,
+> = std::sync::LazyLock::new(|| Mutex::new(BTreeMap::new()));
+
+#[cfg(test)]
+fn fail_session_delete_retention_once(session_id: &str, turn_id: &str) {
+    SESSION_DELETE_RETENTION_FAULTS
+        .lock_recover()
+        .insert(session_id.to_string(), turn_id.to_string());
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AppErrorVerdict {
     Retryable,
@@ -1183,6 +1242,39 @@ impl AppError {
             status: StatusCode::CONFLICT,
             message: message.into(),
             verdict: AppErrorVerdict::Terminal,
+        }
+    }
+
+    fn session_delete_failed(session_id: &str, error: impl std::fmt::Display) -> Self {
+        let message = format!(
+            "session deletion failed for `{session_id}`; the session remains live: {error}"
+        );
+        eprintln!("agent-workbench session deletion failure: {message}");
+        Self::conflict(message)
+    }
+
+    fn retryable_internal(error: impl std::fmt::Display) -> Self {
+        eprintln!("agent-workbench retryable internal request failure: {error}");
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "internal server error".to_string(),
+            verdict: AppErrorVerdict::Retryable,
+        }
+    }
+
+    fn session_delete_unconfirmed(
+        session_id: &str,
+        call_error: impl std::fmt::Display,
+        probe_error: impl std::fmt::Display,
+    ) -> Self {
+        let message = format!(
+            "session deletion outcome for `{session_id}` could not be confirmed; refresh session state before submitting more work: Restate call failed ({call_error}); durable fence probe failed ({probe_error})"
+        );
+        eprintln!("agent-workbench session deletion outcome unconfirmed: {message}");
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message,
+            verdict: AppErrorVerdict::Ambiguous,
         }
     }
 

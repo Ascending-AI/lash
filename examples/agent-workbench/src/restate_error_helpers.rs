@@ -22,6 +22,14 @@ fn terminal_handler_error(err: AppError) -> HandlerError {
     TerminalError::new(err.message).into()
 }
 
+fn session_delete_handler_error(err: AppError) -> HandlerError {
+    if err.verdict == AppErrorVerdict::Retryable {
+        HandlerError::from(err)
+    } else {
+        TerminalError::new_with_code(err.status.as_u16(), err.message).into()
+    }
+}
+
 fn settlement_handler_error(err: AppError) -> HandlerError {
     match err.verdict {
         AppErrorVerdict::Retryable => HandlerError::from(err),

@@ -188,8 +188,11 @@ cancellation through `POST /api/work/{process_id}/cancel`; the resulting
 `process.cancel_requested` and terminal status come back through the durable process
 registry. Hosts can delete and rotate the current session with `DELETE /api/session`
 (`POST /api/reset` remains the UI-compatible alias) without deleting Runtime Processes.
-Rotation is required: a deleted session id is permanently retired and cannot
-be reopened in the same store.
+The response waits for Restate to finish the durable delete: success rotates to
+the returned id, while a terminal delete failure returns `409` and identifies
+the old session as still live. Rotation is required after success because a
+deleted session id is permanently retired and cannot be reopened in the same
+store.
 
 Six low-frequency data utilities under `text`, `json`, and `list` are kept out
 of the resident RLM tool catalog. The prompt carries only a capped catalogue

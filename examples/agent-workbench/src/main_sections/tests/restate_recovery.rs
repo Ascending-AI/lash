@@ -436,6 +436,14 @@ fn live_restate_session_delete_revokes_process_await_without_cancelling_process(
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
+fn live_restate_terminal_session_delete_failure_keeps_the_session_live() {
+    run_async_test_on_stack_budget_multi_thread("workbench-delete-failure-e2e", 4, || {
+        live_restate_terminal_session_delete_failure_keeps_the_session_live_inner()
+    });
+}
+
+#[test]
+#[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_provider_auth_failure_terminalizes_and_session_recovers() {
     run_async_test_on_stack_budget_multi_thread("workbench-auth-failure-e2e", 4, || {
         live_restate_provider_auth_failure_terminalizes_and_session_recovers_inner()
@@ -843,6 +851,90 @@ async fn live_failure_path_harness(
 
 struct LiveFailurePathHarness {
     state: AppState,
+}
+
+async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inner() {
+    let (harness, data_dir) = live_failure_path_harness(
+        "delete-failure",
+        failure_provider::DevProviderScenario::RenderedSurface,
+    )
+    .await;
+    let session_id = harness.state.current_session_id();
+    harness
+        .state
+        .open_session(&session_id)
+        .await
+        .expect("materialize the session before its failed delete");
+    harness
+        .state
+        .active_turns
+        .insert(&session_id, "held-delete-turn");
+
+    let error = Box::pin(tokio::time::timeout(
+        Duration::from_secs(30),
+        reset_chat(
+            State(harness.state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        ),
+    ))
+    .await
+    .expect("the real delete workflow reaches its bounded terminal failure")
+    .expect_err("the held active turn must fail the real delete workflow");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains(&session_id));
+    assert!(error.message.contains("remains live"));
+    assert_eq!(harness.state.current_session_id(), session_id);
+    assert!(
+        !harness
+            .state
+            .core
+            .session_was_deleted(&session_id)
+            .await
+            .expect("read failed-delete tombstone fence")
+    );
+    let _ = app_state(
+        State(harness.state.clone()),
+        Query(SessionQuery {
+            session_id: Some(session_id.clone()),
+        }),
+    )
+    .await
+    .expect("the actual terminal failure leaves GET /api/state live");
+
+    harness
+        .state
+        .active_turns
+        .remove(&session_id, "held-delete-turn");
+    let post_tombstone_turn = "turn-admitted-after-delete-snapshot";
+    fail_session_delete_retention_once(&session_id, post_tombstone_turn);
+    let Json(replacement) = Box::pin(tokio::time::timeout(
+        Duration::from_secs(30),
+        reset_chat(
+            State(harness.state.clone()),
+            Query(SessionQuery {
+                session_id: Some(session_id.clone()),
+            }),
+        ),
+    ))
+    .await
+    .expect("post-tombstone retention redrive settles")
+    .expect("retry succeeds after the held turn settles");
+    assert_ne!(replacement.settings.session_id, session_id);
+    harness
+        .state
+        .active_turns
+        .remove(&session_id, post_tombstone_turn);
+    assert!(
+        harness
+            .state
+            .core
+            .session_was_deleted(&session_id)
+            .await
+            .expect("read successful retry tombstone fence")
+    );
+    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 async fn live_restate_session_delete_revokes_process_await_without_cancelling_process_inner() {

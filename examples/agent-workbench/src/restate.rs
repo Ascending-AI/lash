@@ -39,6 +39,10 @@ use crate::{
     workbench_owns_committed_agent_reply, workbench_turn_assistant_message_id,
 };
 
+#[path = "restate_session_delete.rs"]
+mod session_delete_client;
+pub(crate) use session_delete_client::call_session_delete;
+
 const CRON_STATE_KEY: &str = "state";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -359,7 +363,7 @@ impl WorkbenchSessionDeleteWorkflow for WorkbenchSessionDeleteWorkflowImpl {
         let controller = lash_restate::RestateRuntimeEffectController::new(ctx);
         run_session_delete(self.state.clone(), request, &controller)
             .await
-            .map_err(terminal_handler_error)?;
+            .map_err(session_delete_handler_error)?;
         Ok(Json(()))
     }
 }
@@ -648,6 +652,7 @@ pub(crate) async fn submit_mail_received_with_client(
     .await
 }
 
+#[cfg(test)]
 pub(crate) async fn submit_session_delete(
     state: &AppState,
     request: WorkbenchSessionDeleteWorkflowRequest,
@@ -943,7 +948,24 @@ async fn run_session_delete(
     request: WorkbenchSessionDeleteWorkflowRequest,
     controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
 ) -> Result<(), AppError> {
-    let active_turns = state.active_turns.for_session(&request.session_id);
+    // Pin the first attempt's wait obligation in the journal. A prior attempt
+    // may already have committed the durable session tombstone before failing
+    // in retention; a redrive must neither change this snapshot nor change the
+    // command sequence before retrying the non-journaled cleanup.
+    let snapshot_state = state.clone();
+    let snapshot_session_id = request.session_id.clone();
+    let Json(active_turns) = controller
+        .context()
+        .run(move || async move {
+            Ok::<_, HandlerError>(Json(
+                snapshot_state
+                    .active_turns
+                    .for_session(&snapshot_session_id),
+            ))
+        })
+        .name("workbench.session-delete.active-turns")
+        .await
+        .map_err(AppError::internal)?;
     controller
         .revoke_await_events_for_session(&request.session_id)
         .await
@@ -961,10 +983,10 @@ async fn run_session_delete(
             }
             if tokio::time::Instant::now() >= deadline {
                 // Audited: this locally generated timeout observes only the in-process active-turn registry.
-                return Err(AppError::internal(format!(
-                    "timed out waiting for revoked turns to settle before deleting session `{}`",
-                    request.session_id
-                )));
+                return Err(AppError::session_delete_failed(
+                    &request.session_id,
+                    "timed out waiting for revoked turns to settle before deleting session",
+                ));
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }

@@ -2680,7 +2680,7 @@
   </div>
 
   <script>
-    const scopedSessionId = new URLSearchParams(window.location.search).get("session_id");
+    let scopedSessionId = new URLSearchParams(window.location.search).get("session_id");
     const nativeFetch = window.fetch.bind(window);
     function scopedApiUrl(input) {
       if (!scopedSessionId || typeof input !== "string") return input;
@@ -4782,8 +4782,17 @@
       workRefreshGeneration += 1;
       try {
         const response = await fetch("/api/reset", { method: "POST" });
-        if (!response.ok) throw new Error("reset failed (" + response.status + ")");
-        const state = await response.json();
+        const state = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(
+            typeof state?.error === "string"
+              ? state.error
+              : "the conversation could not be reset"
+          );
+        }
+        if (!state?.settings?.session_id) {
+          throw new Error("the reset response did not identify the replacement session");
+        }
         const applied = applyStateSnapshot(
           state,
           true,
@@ -4792,6 +4801,14 @@
           snapshotSequence
         );
         if (!applied) return;
+        scopedSessionId = state.settings.session_id;
+        const replacementUrl = new URL(window.location.href);
+        replacementUrl.searchParams.set("session_id", scopedSessionId);
+        window.history.replaceState(
+          null,
+          "",
+          replacementUrl.pathname + replacementUrl.search + replacementUrl.hash
+        );
         clearExecutionState();
         clearAttachment();
         lastRequest = null;
@@ -4801,8 +4818,10 @@
         cancelStateRetry();
         markShellChannel(shellAvailability, "state", true);
         restartEventStreams(true);
-      } catch (_) {
-        renderError("the conversation could not be reset");
+      } catch (error) {
+        renderError(
+          error instanceof Error ? error.message : "the conversation could not be reset"
+        );
       } finally {
         resetInFlight = false;
         resetButton.disabled = false;
