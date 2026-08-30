@@ -47,9 +47,7 @@ async fn app_state(
         .messages()
         .iter()
         .filter_map(|message| match message.origin.as_ref() {
-            Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => {
-                Some(turn_id.clone())
-            }
+            Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => Some(turn_id.clone()),
             _ => None,
         })
         .collect::<BTreeSet<_>>();
@@ -63,14 +61,12 @@ async fn app_state(
         }
         pending_message_nodes.extend(node.children);
     }
-    state
-        .event_tx
-        .reconcile_settled(
-            &session_id,
-            &committed_message_ids,
-            &committed_input_turn_ids,
-            &active_turn_ids,
-        );
+    state.event_tx.reconcile_settled(
+        &session_id,
+        &committed_message_ids,
+        &committed_input_turn_ids,
+        &active_turn_ids,
+    );
     let product_events = state.event_tx.snapshot(&session_id);
     let product_messages = product_events
         .events
@@ -94,11 +90,10 @@ async fn app_state(
         product_messages,
     );
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
-    let observation =
-        RemoteSessionObservation::from_core(lash::observe::SessionObservation {
-            read_view,
-            cursor: cursor.clone(),
-        });
+    let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
+        read_view,
+        cursor: cursor.clone(),
+    });
     debug_assert_eq!(observation.cursor, cursor.to_string());
     Ok(Json(StateReadSnapshot {
         transcript,
@@ -283,10 +278,12 @@ async fn session_observations(
     let session = state
         .open_session(&session_id)
         .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "api.observations", error)
-        })?;
-    let cursor = match query.cursor.as_deref().filter(|cursor| !cursor.trim().is_empty()) {
+        .map_err(|error| state.session_admission_error(&session_id, "api.observations", error))?;
+    let cursor = match query
+        .cursor
+        .as_deref()
+        .filter(|cursor| !cursor.trim().is_empty())
+    {
         Some(cursor) => serde_json::from_value::<SessionCursor>(json!(cursor))
             .map_err(|err| AppError::bad_request(format!("invalid session cursor: {err}")))?,
         None => session.observe().recoverable_chat_snapshot().cursor,
@@ -296,6 +293,41 @@ async fn session_observations(
         forward_session_observations(session, cursor, tx).await;
     });
     Ok(ndjson_response(rx))
+}
+
+async fn commit_and_submit_user_turn(
+    state: AppState,
+    cleanup: ActiveTurnSubmissionGuard,
+    request: restate::WorkbenchTurnWorkflowRequest,
+    chat_attachments: Vec<ChatAttachment>,
+) -> Result<lash_restate::RestateInvocationId, AppError> {
+    state.push_message_with_id_and_attachments_for_session(
+        &request.session_id,
+        workbench_turn_user_message_id(&request.turn_id),
+        "user",
+        request.text.clone(),
+        chat_attachments,
+    );
+    state.trace_for_session(
+        &request.session_id,
+        "api.turn.admission_committed",
+        json!({ "turn_id": request.turn_id }),
+    );
+    let invocation_id = restate::submit_user_turn(&state, request).await?;
+    cleanup.complete();
+    Ok(invocation_id)
+}
+
+async fn submit_tracked_queued_turn(
+    cleanup: ActiveTurnSubmissionGuard,
+    restate_http: reqwest::Client,
+    restate_ingress_url: String,
+    request: restate::WorkbenchQueuedTurnWorkflowRequest,
+) -> Result<lash_restate::RestateInvocationId, AppError> {
+    let invocation_id =
+        restate::submit_queued_turn_request(&restate_http, &restate_ingress_url, &request).await?;
+    cleanup.complete();
+    Ok(invocation_id)
 }
 
 async fn send_turn(
@@ -368,44 +400,23 @@ async fn send_turn(
     // durably, every viewer sees a queued receipt, and the queued-work drain
     // that runs at terminalization answers it as its own turn.
     //
-    // This check is advisory, exactly like `/api/turn/input`'s: two sends can
-    // both read an idle session and race. The lease and the CAS remain the
-    // authority, and the loser's failure is surfaced by `record_turn_failure`.
-    // It reads the same `active_turns` signal `WorkbenchQueuedWorkSubmitter`
-    // already trusts to decide whether a drain may start, so admission and drain
-    // cannot disagree about whether the session is busy.
+    // The initial read selects the ordinary busy path without opening a runtime
+    // session. The atomic reservation below rechecks after that open, closing
+    // the race with another send or a queued-work runner.
     if !state.active_turns.for_session(&session_id).is_empty() {
-        state
-            .authorization
-            .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
-                session_id: session_id.clone(),
-            })?;
-        let mut input = lash::TurnInput::text(text.clone());
-        if let Some(attachment) = attachment {
-            input = input.with_attachment(lash::direct::AttachmentSource::inline(
-                lash::attachments::MediaType::parse("image/png")
-                    .expect("workbench uploads only PNG"),
-                attachment.bytes,
-            ));
-        }
-        let receipt = admit_turn_input(
+        return admit_queued_send(
             &state,
             &session_id,
             text,
-            input,
-            lash::persistence::TurnInputIngress::next_turn(),
-            "api.turn",
+            attachment.map(|attachment| attachment.bytes),
         )
-        .await?;
-        return Ok(Json(TurnAccepted::queued(receipt)));
+        .await;
     }
     drop(
         state
             .open_session(&session_id)
             .await
-            .map_err(|error| {
-                state.session_admission_error(&session_id, "api.turn", error)
-            })?,
+            .map_err(|error| state.session_admission_error(&session_id, "api.turn", error))?,
     );
     let turn_id = format!("workbench-turn-{}", uuid::Uuid::new_v4());
     let chat_attachments = attachment_id
@@ -413,35 +424,37 @@ async fn send_turn(
         .cloned()
         .map(ChatAttachment::from_id)
         .collect();
-    state.push_message_with_id_and_attachments_for_session(
-        &session_id,
-        workbench_turn_user_message_id(&turn_id),
-        "user",
-        text.clone(),
-        chat_attachments,
-    );
-    state.track_turn_prompt(
+    let cleanup = ActiveTurnSubmissionGuard::user_turn(&state, &session_id, &turn_id);
+    state.trace_for_session(&session_id, "api.turn.claim_ready", json!({}));
+    if !state.active_turns.try_insert_with_prompt_for_idle_session(
         &session_id,
         &turn_id,
-        text.clone(),
+        Some(text.clone()),
         attachment_id.clone(),
-    );
-    if let Err(err) = restate::submit_user_turn(
-        &state,
+    ) {
+        cleanup.complete();
+        return admit_queued_send(
+            &state,
+            &session_id,
+            text,
+            attachment.map(|attachment| attachment.bytes),
+        )
+        .await;
+    }
+    tokio::spawn(commit_and_submit_user_turn(
+        state,
+        cleanup,
         restate::WorkbenchTurnWorkflowRequest {
-            turn_id: turn_id.clone(),
-            session_id: session_id.clone(),
+            turn_id,
+            session_id,
             text,
             model: ModelSelection::from_spec(&turn_model),
             attachment_id,
         },
-    )
+        chat_attachments,
+    ))
     .await
-    {
-        state.active_turns.remove(&session_id, &turn_id);
-        state.publish_turn_failed(&session_id, &turn_id);
-        return Err(err);
-    }
+    .map_err(|error| AppError::internal(format!("turn admission task failed: {error}")))??;
     Ok(Json(TurnAccepted::started()))
 }
 
@@ -523,14 +536,18 @@ async fn set_trigger_enabled(
     let command = if request.enabled {
         lash::triggers::TriggerCommand::Enable {
             owner_scope: record.owner_scope.clone(),
-            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
+            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
+                &session_id,
+            )),
             subscription_key: record.subscription_key.clone(),
             expected_revision: record.revision,
         }
     } else {
         lash::triggers::TriggerCommand::Disable {
             owner_scope: record.owner_scope.clone(),
-            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
+            actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
+                &session_id,
+            )),
             subscription_key: record.subscription_key.clone(),
             expected_revision: record.revision,
         }
@@ -548,7 +565,9 @@ async fn set_trigger_enabled(
         .map_err(AppError::internal)?;
     let lash::triggers::TriggerCommandOutcome::Mutation { receipt } = outcome else {
         // Audited: this locally generated error guards an impossible command/outcome shape.
-        return Err(AppError::internal("trigger mutation returned a list outcome"));
+        return Err(AppError::internal(
+            "trigger mutation returned a list outcome",
+        ));
     };
     state.trace_for_session(
         &session_id,
@@ -593,7 +612,9 @@ async fn delete_trigger(
             &format!("workbench-trigger-delete-{}", uuid::Uuid::new_v4()),
             lash::triggers::TriggerCommand::Delete {
                 owner_scope: record.owner_scope.clone(),
-                actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(&session_id)),
+                actor: lash::process::ProcessOriginator::session(lash::process::SessionScope::new(
+                    &session_id,
+                )),
                 subscription_key: record.subscription_key.clone(),
                 expected_revision: record.revision,
             },
@@ -702,12 +723,9 @@ async fn enqueue_tool_catalog_refresh(
     reason: &str,
 ) -> Result<lash::SessionCommandReceipt, AppError> {
     let session_id = state.current_session_id();
-    let session = state
-        .open_session(&session_id)
-        .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
-        })?;
+    let session = state.open_session(&session_id).await.map_err(|error| {
+        state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
+    })?;
     let receipt = session
         .commands()
         .refresh_tool_catalog(
@@ -751,11 +769,7 @@ async fn inject_message(
     state.set_selected_model(model.clone());
     let delivered = state
         .mail_world
-        .deliver(
-            &slug,
-            &request.title,
-            &request.text,
-        )
+        .deliver(&slug, &request.title, &request.text)
         .map_err(AppError::not_found)?;
     let message = delivered.message;
     let delivery = delivered.delivery;
@@ -930,13 +944,12 @@ async fn list_queued_work(
         .authorize(WorkbenchAuthorizationAction::Observe {
             session_id: session_id.clone(),
         })?;
-    let session = state
-        .open_session(&session_id)
-        .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "api.queued_work.list", error)
-        })?;
-    Ok(Json(session.queued_work().await.map_err(AppError::internal)?))
+    let session = state.open_session(&session_id).await.map_err(|error| {
+        state.session_admission_error(&session_id, "api.queued_work.list", error)
+    })?;
+    Ok(Json(
+        session.queued_work().await.map_err(AppError::internal)?,
+    ))
 }
 
 async fn run_queued_work_batch(
@@ -955,12 +968,9 @@ async fn run_queued_work_batch(
             "queued work cannot be run while this session has an active turn",
         ));
     }
-    let session = state
-        .open_session(&session_id)
-        .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "api.queued_work.run", error)
-        })?;
+    let session = state.open_session(&session_id).await.map_err(|error| {
+        state.session_admission_error(&session_id, "api.queued_work.run", error)
+    })?;
     if !session
         .queued_work()
         .await
@@ -981,17 +991,27 @@ async fn run_queued_work_batch(
         batch_ids: vec![batch_id.clone()],
         drain_id: Some(format!("workbench-queued-batch:{batch_id}")),
     };
-    state.active_turns.insert(&session_id, &turn_id);
-    if let Err(error) = restate::submit_queued_turn_request(
-        &state.restate_http,
-        &state.restate_ingress_url,
-        &request,
-    )
-    .await
+    let cleanup =
+        ActiveTurnSubmissionGuard::queued_turn(state.active_turns.clone(), &session_id, &turn_id);
+    if !state
+        .active_turns
+        .try_insert_for_idle_session(&session_id, &turn_id)
     {
-        state.active_turns.remove(&session_id, &turn_id);
-        return Err(error);
+        cleanup.complete();
+        return Err(AppError::conflict(
+            "queued work cannot be run while this session has an active turn",
+        ));
     }
+    tokio::spawn(submit_tracked_queued_turn(
+        cleanup,
+        state.restate_http.clone(),
+        state.restate_ingress_url.clone(),
+        request,
+    ))
+    .await
+    .map_err(|error| {
+        AppError::internal(format!("queued-turn submission task failed: {error}"))
+    })??;
     state.trace_for_session(
         &session_id,
         "api.queued_work.run_submitted",
@@ -1014,12 +1034,9 @@ async fn cancel_queued_work_batch(
         .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
             session_id: session_id.clone(),
         })?;
-    let session = state
-        .open_session(&session_id)
-        .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "api.queued_work.cancel", error)
-        })?;
+    let session = state.open_session(&session_id).await.map_err(|error| {
+        state.session_admission_error(&session_id, "api.queued_work.cancel", error)
+    })?;
     if session
         .cancel_queued_work_batch(&batch_id)
         .await
@@ -1236,7 +1253,9 @@ async fn forward_session_observations(
                     break;
                 }
             }
-            Ok(RecoverableChatUpdate::TerminalReplacement { event, snapshot, .. }) => {
+            Ok(RecoverableChatUpdate::TerminalReplacement {
+                event, snapshot, ..
+            }) => {
                 let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
                     Ok(event) => event,
                     Err(err) => {
@@ -1256,7 +1275,9 @@ async fn forward_session_observations(
                     break;
                 }
             }
-            Ok(RecoverableChatUpdate::ResidentReplacement { event, snapshot, .. }) => {
+            Ok(RecoverableChatUpdate::ResidentReplacement {
+                event, snapshot, ..
+            }) => {
                 let event = match RemoteSessionObservationEvent::from_core(sequence, event) {
                     Ok(event) => event,
                     Err(err) => {
@@ -1399,12 +1420,10 @@ mod turn_stream_state_tests {
             },
         ))
         .await;
-        sink.emit(TurnActivity::independent(
-            TurnEvent::ModelAttemptReset {
-                assistant_prose_correlation_ids: vec![lash::TurnActivityId::new("failed")],
-                reasoning_correlation_ids: Vec::new(),
-            },
-        ))
+        sink.emit(TurnActivity::independent(TurnEvent::ModelAttemptReset {
+            assistant_prose_correlation_ids: vec![lash::TurnActivityId::new("failed")],
+            reasoning_correlation_ids: Vec::new(),
+        }))
         .await;
         sink.emit(TurnActivity::new(
             lash::TurnActivityId::new("successful"),
@@ -1414,12 +1433,7 @@ mod turn_stream_state_tests {
         ))
         .await;
 
-        assert_eq!(
-            turn_state
-                .lock_recover()
-                .assistant_prose(),
-            "kept answer"
-        );
+        assert_eq!(turn_state.lock_recover().assistant_prose(), "kept answer");
     }
 
     #[tokio::test]

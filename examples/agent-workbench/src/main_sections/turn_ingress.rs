@@ -47,6 +47,36 @@ async fn enqueue_turn_input(
     Ok(Json(receipt))
 }
 
+async fn admit_queued_send(
+    state: &AppState,
+    session_id: &str,
+    text: String,
+    attachment_bytes: Option<Vec<u8>>,
+) -> Result<Json<TurnAccepted>, AppError> {
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
+            session_id: session_id.to_string(),
+        })?;
+    let mut input = lash::TurnInput::text(text.clone());
+    if let Some(attachment_bytes) = attachment_bytes {
+        input = input.with_attachment(lash::direct::AttachmentSource::inline(
+            lash::attachments::MediaType::parse("image/png").expect("workbench uploads only PNG"),
+            attachment_bytes,
+        ));
+    }
+    let receipt = admit_turn_input(
+        state,
+        session_id,
+        text,
+        input,
+        lash::persistence::TurnInputIngress::next_turn(),
+        "api.turn",
+    )
+    .await?;
+    Ok(Json(TurnAccepted::queued(receipt)))
+}
+
 /// Admit `input` into the session's durable ingress lane and publish its receipt
 /// to every viewer.
 ///
@@ -110,10 +140,7 @@ async fn reject_if_active_turn_settled(
     let Some(turn_id) = acceptance.ingress.active_turn_id() else {
         return Ok(());
     };
-    if state
-        .active_turns
-        .contains(&acceptance.session_id, turn_id)
-    {
+    if state.active_turns.contains(&acceptance.session_id, turn_id) {
         return Ok(());
     }
 

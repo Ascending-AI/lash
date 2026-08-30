@@ -76,8 +76,7 @@ struct StateSnapshot {
     active_turns: Vec<lash::TurnAddress>,
     pending_turn_inputs: Vec<lash::PendingTurnInput>,
     queued_work: Vec<lash::persistence::QueuedWorkBatch>,
-    turn_input_applications:
-        Vec<lash::remote::observations::RemoteTurnInputApplication>,
+    turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
     usage: lash::usage::SessionUsageReport,
     pending_approvals: Vec<approvals::PendingApproval>,
 }
@@ -99,11 +98,21 @@ impl std::ops::Deref for StateReadSnapshot {
 
 #[derive(Clone, Debug)]
 enum WorkbenchAuthorizationAction {
-    Observe { session_id: String },
-    EnqueueTurn { session_id: String },
-    EnqueueTurnInput { session_id: String },
-    CancelTurn { session_id: String },
-    ManageQueuedWork { session_id: String },
+    Observe {
+        session_id: String,
+    },
+    EnqueueTurn {
+        session_id: String,
+    },
+    EnqueueTurnInput {
+        session_id: String,
+    },
+    CancelTurn {
+        session_id: String,
+    },
+    ManageQueuedWork {
+        session_id: String,
+    },
     /// Deployment-wide operator policy. Approval decisions are deliberately
     /// separate from chat/session participation.
     ManageApprovals,
@@ -189,10 +198,8 @@ impl ChatAttachment {
 }
 
 fn attachment_retrieve_url(attachment_id: &str) -> String {
-    let encoded = percent_encoding::utf8_percent_encode(
-        attachment_id,
-        percent_encoding::NON_ALPHANUMERIC,
-    );
+    let encoded =
+        percent_encoding::utf8_percent_encode(attachment_id, percent_encoding::NON_ALPHANUMERIC);
     format!("/api/attachments/{encoded}")
 }
 
@@ -632,12 +639,8 @@ fn decode_product_event_histories(
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ProductStreamItem {
-    Event {
-        event: ProductEvent,
-    },
-    Resync {
-        snapshot: ProductEventSnapshot,
-    },
+    Event { event: ProductEvent },
+    Resync { snapshot: ProductEventSnapshot },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -752,9 +755,7 @@ impl SessionEventRegistry {
     ) -> bool {
         let event_id = event_id.into();
         let event = {
-            let mut histories = self
-                .histories
-                .lock_recover();
+            let mut histories = self.histories.lock_recover();
             let history = histories.entry(session_id.to_string()).or_default();
             if !history.event_ids.insert(event_id.clone()) {
                 return false;
@@ -793,9 +794,7 @@ impl SessionEventRegistry {
         committed_input_turn_ids: &BTreeSet<String>,
         active_turn_ids: &BTreeSet<String>,
     ) {
-        let mut histories = self
-            .histories
-            .lock_recover();
+        let mut histories = self.histories.lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
             return;
         };
@@ -807,8 +806,7 @@ impl SessionEventRegistry {
                     // once the turn commits anywhere in the session graph.
                     // Until then they remain optimistic and retire with a turn
                     // that is no longer active (FIG-1000, FIG-1062).
-                    active_turn_ids.contains(turn_id)
-                        || committed_input_turn_ids.contains(turn_id)
+                    active_turn_ids.contains(turn_id) || committed_input_turn_ids.contains(turn_id)
                 } else if let Some(turn_id) =
                     workbench_turn_id_from_assistant_message_id(&message.id)
                 {
@@ -829,10 +827,7 @@ impl SessionEventRegistry {
             } => active_turn_ids.contains(turn_id),
             StreamItem::TurnInput { .. }
             | StreamItem::ModelCallRecorded { .. }
-            | StreamItem::Done {
-                turn_id: None,
-                ..
-            } => true,
+            | StreamItem::Done { turn_id: None, .. } => true,
         });
         if history.events.len() != before {
             self.persist_snapshot(&histories);
@@ -854,9 +849,7 @@ impl SessionEventRegistry {
     /// row must be a no-op, not a resurrection of the row this just retired.
     fn retire_turn_rows(&self, session_id: &str, turn_id: &str) -> BTreeSet<String> {
         let mut retired = BTreeSet::new();
-        let mut histories = self
-            .histories
-            .lock_recover();
+        let mut histories = self.histories.lock_recover();
         let Some(history) = histories.get_mut(session_id) else {
             return retired;
         };
@@ -879,15 +872,11 @@ impl SessionEventRegistry {
     }
 
     fn remove(&self, session_id: &str) {
-        let mut histories = self
-            .histories
-            .lock_recover();
+        let mut histories = self.histories.lock_recover();
         histories.remove(session_id);
         self.persist_snapshot(&histories);
         drop(histories);
-        self.senders
-            .lock_recover()
-            .remove(session_id);
+        self.senders.lock_recover().remove(session_id);
     }
 
     fn persist_snapshot(&self, histories: &HashMap<String, ProductEventHistory>) {
@@ -901,10 +890,7 @@ impl SessionEventRegistry {
         .expect("serialize product event log");
         let temporary = path.with_extension("json.tmp");
         std::fs::write(&temporary, bytes).unwrap_or_else(|err| {
-            panic!(
-                "write product event log `{}`: {err}",
-                temporary.display()
-            )
+            panic!("write product event log `{}`: {err}", temporary.display())
         });
         std::fs::rename(&temporary, path).unwrap_or_else(|err| {
             panic!(
@@ -917,9 +903,7 @@ impl SessionEventRegistry {
 
     #[cfg(test)]
     fn contains(&self, session_id: &str) -> bool {
-        self.senders
-            .lock_recover()
-            .contains_key(session_id)
+        self.senders.lock_recover().contains_key(session_id)
     }
 }
 
@@ -965,6 +949,72 @@ struct ActiveTurns {
 struct ActiveTurnPrompt {
     text: String,
     attachment_id: Option<String>,
+}
+
+/// Cleans up an active-turn claim unless its work-driver submission completes.
+///
+/// This guard lives inside the detached admission task. It therefore runs when
+/// submission returns an error, the task is cancelled during runtime shutdown,
+/// or the task unwinds after a panic. User-turn admission also retires its
+/// optimistic row and publishes the terminal failure expected by the browser;
+/// queued turns have no optimistic row, so they only release their claim.
+struct ActiveTurnSubmissionGuard {
+    active_turns: ActiveTurns,
+    failure_publisher: Option<AppState>,
+    session_id: String,
+    turn_id: String,
+    armed: bool,
+}
+
+impl ActiveTurnSubmissionGuard {
+    fn user_turn(state: &AppState, session_id: &str, turn_id: &str) -> Self {
+        Self {
+            active_turns: state.active_turns.clone(),
+            failure_publisher: Some(state.clone()),
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            armed: true,
+        }
+    }
+
+    fn queued_turn(active_turns: ActiveTurns, session_id: &str, turn_id: &str) -> Self {
+        Self {
+            active_turns,
+            failure_publisher: None,
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            armed: true,
+        }
+    }
+
+    fn complete(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ActiveTurnSubmissionGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let already_panicking = std::thread::panicking();
+        let removal = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.active_turns.remove(&self.session_id, &self.turn_id);
+        }));
+        let publication = self.failure_publisher.as_ref().map(|state| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                state.publish_turn_failed(&self.session_id, &self.turn_id);
+            }))
+        });
+        let cleanup_panic = removal.err().or_else(|| publication.and_then(Result::err));
+        if let Some(payload) = cleanup_panic {
+            if already_panicking {
+                eprintln!("turn admission cleanup panicked while preserving the original panic");
+            } else {
+                std::panic::resume_unwind(payload);
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1036,8 +1086,7 @@ impl ActiveTurns {
                 (BTreeSet::new(), BTreeMap::new())
             }
             Err(err) => {
-                return Err(err)
-                    .with_context(|| format!("read active turns `{}`", path.display()));
+                return Err(err).with_context(|| format!("read active turns `{}`", path.display()));
             }
         };
         let active = Self {
@@ -1049,10 +1098,12 @@ impl ActiveTurns {
         Ok(active)
     }
 
+    #[cfg(test)]
     fn insert(&self, session_id: impl Into<String>, turn_id: impl Into<String>) {
         self.insert_with_prompt(session_id, turn_id, None, None);
     }
 
+    #[cfg(test)]
     fn insert_with_prompt(
         &self,
         session_id: impl Into<String>,
@@ -1074,6 +1125,40 @@ impl ActiveTurns {
             );
         }
         self.persist_snapshot(&active, &prompts);
+    }
+
+    fn try_insert_for_idle_session(&self, session_id: &str, turn_id: &str) -> bool {
+        self.try_insert_with_prompt_for_idle_session(session_id, turn_id, None, None)
+    }
+
+    fn try_insert_with_prompt_for_idle_session(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        prompt: Option<String>,
+        attachment_id: Option<String>,
+    ) -> bool {
+        let mut active = self.inner.lock_recover();
+        if active
+            .iter()
+            .any(|(active_session_id, _)| active_session_id == session_id)
+        {
+            return false;
+        }
+        let key = (session_id.to_string(), turn_id.to_string());
+        let mut prompts = self.prompts.lock_recover();
+        active.insert(key.clone());
+        if let Some(prompt) = prompt {
+            prompts.insert(
+                key,
+                ActiveTurnPrompt {
+                    text: prompt,
+                    attachment_id,
+                },
+            );
+        }
+        self.persist_snapshot(&active, &prompts);
+        true
     }
 
     fn remove(&self, session_id: &str, turn_id: &str) {
@@ -1324,22 +1409,33 @@ impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
             batch_ids: Vec::new(),
             drain_id: None,
         };
-        self.active_turns
-            .insert(&session_id, &workflow_request.turn_id);
-        if let Err(err) = restate::submit_queued_turn_request(
-            &self.restate_http,
-            &self.restate_ingress_url,
-            &workflow_request,
-        )
-        .await
+        let cleanup = ActiveTurnSubmissionGuard::queued_turn(
+            self.active_turns.clone(),
+            &session_id,
+            &workflow_request.turn_id,
+        );
+        if !self
+            .active_turns
+            .try_insert_for_idle_session(&session_id, &workflow_request.turn_id)
         {
-            self.active_turns
-                .remove(&session_id, &workflow_request.turn_id);
-            return Err(lash::runtime::QueuedWorkRunError::transient(
-                PluginError::Session(err.to_string()),
-            ));
+            cleanup.complete();
+            return Ok(());
         }
-        Ok(())
+        let submission = tokio::spawn(submit_tracked_queued_turn(
+            cleanup,
+            self.restate_http.clone(),
+            self.restate_ingress_url.clone(),
+            workflow_request,
+        ));
+        match submission.await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(error)) => Err(lash::runtime::QueuedWorkRunError::transient(
+                PluginError::Session(error.to_string()),
+            )),
+            Err(error) => Err(lash::runtime::QueuedWorkRunError::transient(
+                PluginError::Session(format!("queued-turn submission task failed: {error}")),
+            )),
+        }
     }
 }
 
@@ -1364,12 +1460,7 @@ impl WorkbenchQueuedWorkSubmitter {
             .await
             .map_err(lash::runtime::RuntimeEffectControllerError::from)?
             .into_iter()
-            .any(|input| {
-                matches!(
-                    input.ingress,
-                    lash::persistence::TurnInputIngress::NextTurn
-                )
-            });
+            .any(|input| matches!(input.ingress, lash::persistence::TurnInputIngress::NextTurn));
         Ok(!queued.is_empty() || next_turn_inputs)
     }
 }
