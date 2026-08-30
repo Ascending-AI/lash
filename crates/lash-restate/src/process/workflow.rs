@@ -30,9 +30,10 @@ use super::{
     RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessCancelSignal,
     RestateProcessCompleteRequest, RestateProcessRunner, RestateProcessWorkflowInput,
     RestateProcessWorkflowOutput, boundary_must_be_declined, handler_error_from_plugin,
-    missing_segment_is_superseded, process_segment_workflow_key, resolve_process_cancel_signal,
-    resolve_process_terminal_promise, restate_now_ms, restate_process_terminal_await_key,
-    restate_process_terminal_output, segment_execution_authority, terminal_completion_workflow_key,
+    is_replay_mismatch, missing_segment_is_superseded, process_segment_workflow_key,
+    resolve_process_cancel_signal, resolve_process_terminal_promise, restate_now_ms,
+    restate_process_terminal_await_key, restate_process_terminal_output,
+    segment_execution_authority, terminal_completion_workflow_key, terminal_process_output,
     workflow_key_authority,
 };
 use crate::controller::{RestateEffectControllerOptions, RestateRuntimeEffectController};
@@ -412,6 +413,15 @@ where
                             control: None,
                         },
                     )
+                    .await
+                    .map_err(handler_error_from_plugin)?;
+                Ok(output.into())
+            }
+            Err(err) if is_replay_mismatch(&err) => Err(handler_error_from_plugin(err)),
+            Err(err) if err.is_retryable() => Err(HandlerError::from(err)),
+            Err(err) if err.is_terminal() => {
+                let output = self
+                    .complete_with_stored_outcome(&process_id, terminal_process_output(err))
                     .await
                     .map_err(handler_error_from_plugin)?;
                 Ok(output.into())

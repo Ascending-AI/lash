@@ -345,7 +345,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(recorded),
             &canonical(reconstructed),
-            crate::RuntimeErrorCode::RestateEffectHashMismatch,
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
             None,
         )
         .expect_err("mismatch");
@@ -402,7 +402,7 @@ mod tests {
                 "f0": 1, "f1": 1, "f2": 1, "f3": 1, "f4": 1,
                 "f5": 1, "f6": 1, "f7": 1, "f8": 1, "f9": 1
             })),
-            crate::RuntimeErrorCode::RestateEffectHashMismatch,
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
             None,
         )
         .expect_err("mismatch");
@@ -445,7 +445,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(json!({"tool_results": [{"value": "a".repeat(3_000)}]})),
             &canonical(json!({"tool_results": [{"value": "b".repeat(3_000)}]})),
-            crate::RuntimeErrorCode::RestateEffectHashMismatch,
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
             Some(&trace),
         )
         .expect_err("mismatch");
@@ -480,7 +480,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &recorded,
             &reconstructed,
-            crate::RuntimeErrorCode::RestateEffectHashMismatch,
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
             None,
         )
         .expect_err("canonical invariant failure");
@@ -505,7 +505,7 @@ mod tests {
         let error = validate_replayed_effect_envelope(
             &canonical(json!({"value": 1})),
             &canonical(json!({"value": 2})),
-            crate::RuntimeErrorCode::RestateEffectHashMismatch,
+            crate::RuntimeErrorCode::SqliteEffectReplayHashConflict,
             Some(&trace),
         )
         .expect_err("mismatch");

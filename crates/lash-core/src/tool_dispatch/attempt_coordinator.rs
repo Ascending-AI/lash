@@ -415,18 +415,20 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                 record.duration_ms = identity.duration_ms(context, started_at, record.duration_ms);
                 let Some(retry_after) = retry_after else {
                     return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::Done(Box::new(
-                            settle_terminal_attempt(
-                                context,
-                                intent_drain_slot.take(),
-                                child_trace_hook.as_ref(),
-                                recorded_call_id.as_deref(),
-                                record,
-                                intents,
-                                attempts,
-                            )
-                            .await,
-                        )),
+                        launch: match settle_terminal_attempt(
+                            context,
+                            intent_drain_slot.take(),
+                            child_trace_hook.as_ref(),
+                            recorded_call_id.as_deref(),
+                            record,
+                            intents,
+                            attempts,
+                        )
+                        .await
+                        {
+                            Ok(outcome) => ToolCallLaunch::Done(Box::new(outcome)),
+                            Err(error) => ToolCallLaunch::ControllerAborted(error),
+                        },
                         triggers,
                     };
                 };
@@ -441,18 +443,20 @@ pub(crate) async fn coordinate_tool_invocation<'run>(
                         ))
                     });
                     return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::Done(Box::new(
-                            settle_terminal_attempt(
-                                context,
-                                intent_drain_slot.take(),
-                                child_trace_hook.as_ref(),
-                                recorded_call_id.as_deref(),
-                                record,
-                                intents,
-                                attempts,
-                            )
-                            .await,
-                        )),
+                        launch: match settle_terminal_attempt(
+                            context,
+                            intent_drain_slot.take(),
+                            child_trace_hook.as_ref(),
+                            recorded_call_id.as_deref(),
+                            record,
+                            intents,
+                            attempts,
+                        )
+                        .await
+                        {
+                            Ok(outcome) => ToolCallLaunch::Done(Box::new(outcome)),
+                            Err(error) => ToolCallLaunch::ControllerAborted(error),
+                        },
                         triggers,
                     };
                 }
@@ -512,25 +516,25 @@ async fn settle_terminal_attempt(
     mut record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
-) -> ToolDispatchOutcome {
+) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
     if let Some(slot) = &intent_drain_slot {
         slot.begin_final_drain().await;
     }
     let intent_outcomes =
         super::execute_final_tool_intents(context, recorded_call_id, &intents, child_trace_hook)
-            .await;
+            .await?;
     project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
     context.recorded_intent_outcomes.record(&intent_outcomes);
     // Discharges the drain slot, where both former bodies called
     // `complete_final_drain`. Written out so the release point stays explicit
     // even though the guard would do it at the end of this scope anyway.
     drop(intent_drain_slot);
-    ToolDispatchOutcome {
+    Ok(ToolDispatchOutcome {
         record: *record,
         attempts,
         intents,
         intent_outcomes,
-    }
+    })
 }
 
 fn project_recorded_intent_outcomes(

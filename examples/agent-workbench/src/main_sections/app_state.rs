@@ -179,6 +179,15 @@ impl AppState {
     /// knows to re-derive from the authoritative snapshot instead of keeping a
     /// phantom whose commit was refused.
     fn publish_turn_failed(&self, session_id: &str, turn_id: &str) {
+        self.publish_turn_failed_with_message(session_id, turn_id, PUBLIC_TURN_FAILURE_MESSAGE);
+    }
+
+    fn publish_turn_failed_with_message(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        public_message: &str,
+    ) {
         let retired = self.event_tx.retire_turn_rows(session_id, turn_id);
         if !retired.is_empty() {
             self.messages
@@ -189,7 +198,7 @@ impl AppState {
             session_id,
             format!("turn:{turn_id}:failed"),
             "event",
-            PUBLIC_TURN_FAILURE_MESSAGE,
+            public_message,
         );
         self.publish_for_session_identified(
             session_id,
@@ -1148,6 +1157,7 @@ fn work_event_from_observed(event: lash::process::ObservedProcessEvent) -> WorkE
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AppErrorVerdict {
     Retryable,
+    ReplacementAbort,
     Terminal,
     Ambiguous,
 }
@@ -1225,6 +1235,14 @@ impl AppError {
     }
 
     fn runtime(error: lash::EmbedError) -> Self {
+        if let Some(message) = replay_divergence_abort_message(&error) {
+            eprintln!("agent-workbench replay divergence aborted turn: {error}");
+            return Self {
+                status: StatusCode::CONFLICT,
+                message,
+                verdict: AppErrorVerdict::ReplacementAbort,
+            };
+        }
         let verdict = match (error.is_retryable(), error.is_terminal()) {
             (true, false) => AppErrorVerdict::Retryable,
             (false, true) => AppErrorVerdict::Terminal,
@@ -1255,6 +1273,25 @@ impl AppError {
             message: "internal server error".to_string(),
         }
     }
+}
+
+fn replay_divergence_abort_message(error: &lash::EmbedError) -> Option<String> {
+    let code = match error {
+        lash::EmbedError::Runtime(error) if error.code.is_worker_replacement_abort() => {
+            &error.code
+        }
+        lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error))
+            if error.code.is_worker_replacement_abort() =>
+        {
+            &error.code
+        }
+        _ => return None,
+    };
+    Some(format!(
+        "{}: {}",
+        code.as_str(),
+        crate::REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE
+    ))
 }
 
 fn deleted_session_details(error: &lash::EmbedError) -> Option<(&str, Option<&str>)> {
@@ -1388,5 +1425,37 @@ mod app_error_tests {
                 "error": deleted_session_message(session_id),
             })
         );
+    }
+
+    #[tokio::test]
+    async fn replay_divergence_is_a_redacted_conflict_response() {
+        let error = AppError::runtime(lash::EmbedError::Plugin(
+            lash::plugins::PluginError::RuntimeEffectController(
+                lash::runtime::RuntimeEffectControllerError::new(
+                    lash::runtime::RuntimeErrorCode::WorkerReplacementAbort,
+                    "recorded hash raw-old-hash did not match reconstructed hash raw-new-hash",
+                ),
+            ),
+        ));
+        assert_eq!(error.verdict, AppErrorVerdict::ReplacementAbort);
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("read replay-divergence response");
+        let body = serde_json::from_slice::<Value>(&body).expect("decode conflict response");
+        assert_eq!(
+            body,
+            json!({
+                "error": format!(
+                    "worker_replacement_abort: {}",
+                    crate::REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE
+                ),
+            })
+        );
+        let rendered = body.to_string();
+        assert!(!rendered.contains("raw-old-hash"));
+        assert!(!rendered.contains("raw-new-hash"));
     }
 }

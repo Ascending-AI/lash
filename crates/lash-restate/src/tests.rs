@@ -82,8 +82,8 @@ use endpoint_protocol::{
     invoke_endpoint_body_open, invoke_endpoint_body_with_json_call_responses, invoke_endpoint_open,
     invoke_endpoint_with_named_call_responses, invoke_endpoint_with_scripted_responses,
     invoke_process_workflow_endpoint, restate_call_frames, restate_command_frame_types,
-    restate_error_message, restate_message_types, restate_output_failure_message,
-    restate_output_json,
+    restate_completed_promise, restate_error_message, restate_message_types,
+    restate_output_failure_message, restate_output_json,
 };
 
 fn registry_local_executor(
@@ -1399,11 +1399,11 @@ async fn fig1126_revoked_await_refuses_before_command_on_first_execution_and_red
     );
 }
 
-/// Runbook-level replay proof: splice the captured first-incarnation run into
-/// a handler whose reconstructed envelope has changed, then inspect the error
-/// exactly as the Restate host renders it.
+/// Worker-replacement replay proof: splice the captured first-incarnation run
+/// into a replacement whose reconstructed envelope has changed, then inspect
+/// the error exactly as the Restate host renders it.
 #[tokio::test]
-async fn fig1142_replay_divergence_runbook_renders_path_summary() {
+async fn worker_replacement_mid_turn_surfaces_typed_abort_from_replayed_effect() {
     let model_version = Arc::new(AtomicUsize::new(1));
     let endpoint = Endpoint::builder()
         .bind(
@@ -1454,8 +1454,8 @@ async fn fig1142_replay_divergence_runbook_renders_path_summary() {
     let rendered = restate_output_failure_message(&redriven)
         .expect("the Restate host must render the replay-divergence failure");
     assert!(
-        rendered.contains("restate_effect_hash_mismatch"),
-        "rendered failure omitted the typed mismatch code: {rendered}"
+        rendered.contains("worker_replacement_abort"),
+        "rendered failure omitted the typed replacement-abort code: {rendered}"
     );
     assert!(
         rendered.contains("divergent_paths=[command.request.model]"),
@@ -4755,7 +4755,7 @@ async fn restate_effect_controller_replay_mismatch_diagnostics_conformance() {
     let context = Arc::new(ReplayableRecordingContext::default());
     lash_core::testing::conformance::effect_controller_replay_mismatch_diagnostics(
         move || replayable_conformance_invocation(context),
-        "restate_effect_hash_mismatch",
+        "worker_replacement_abort",
     )
     .await;
 }
@@ -5754,7 +5754,7 @@ fn recorded_runtime_effect_hash_mismatch_fails_explicitly() {
 
     assert_eq!(
         err.code,
-        lash_core::RuntimeErrorCode::RestateEffectHashMismatch
+        lash_core::RuntimeErrorCode::WorkerReplacementAbort
     );
     assert!(
         err.code.is_replay_mismatch(),
@@ -6876,9 +6876,13 @@ impl RecordingContext {
     }
 
     fn resolve_process_terminal(&self, process_id: &str, output: &ProcessAwaitOutput) {
-        let key = restate_process_terminal_await_key(process_id).expect("terminal await key");
         let resolution =
             restate_process_terminal_resolution(output).expect("terminal await resolution");
+        self.resolve_process_terminal_resolution(process_id, resolution);
+    }
+
+    fn resolve_process_terminal_resolution(&self, process_id: &str, resolution: Resolution) {
+        let key = restate_process_terminal_await_key(process_id).expect("terminal await key");
         self.awaited_events
             .lock_recover()
             .insert(key.promise_key(), resolution);
@@ -7395,7 +7399,8 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
             "tool-intent-corpus-call",
             &intents,
         )
-        .await;
+        .await
+        .map_err(TerminalError::from_error)?;
         Ok(Json(
             serde_json::to_value(outcomes).map_err(TerminalError::from_error)?,
         ))
@@ -12100,6 +12105,99 @@ struct AlreadyStartedRunner {
     winner: lash_core::LeaseOwnerIdentity,
 }
 
+struct TerminalFailureRunner;
+
+struct ReplacementThenSuccessRunner {
+    runs: AtomicUsize,
+}
+
+struct OpaqueFailureThenSuccessRunner {
+    runs: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for ReplacementThenSuccessRunner {
+    async fn run_process_segment(
+        &self,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(PluginError::RuntimeEffectController(
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    "recorded runtime effect did not match the reconstructed envelope",
+                )
+                .with_summary(lash_core::RuntimeEffectReplayMismatchReport {
+                    divergent_path_count: 1,
+                    first_divergent_paths: vec!["command.request.model".to_string()],
+                }),
+            ));
+        }
+        Ok(process_success(serde_json::json!({"rerun": "succeeded"})).into())
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
+    async fn run_process_segment(
+        &self,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(PluginError::Session(
+                "process infrastructure became unavailable".to_string(),
+            ));
+        }
+        Ok(process_success(serde_json::json!({"rerun": "succeeded"})).into())
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for TerminalFailureRunner {
+    async fn run_process_segment(
+        &self,
+        _registration: ProcessRegistration,
+        _execution_context: ProcessExecutionContext,
+        _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        _handover: Option<lash_core::SegmentHandover>,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        Err(PluginError::Runtime(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::RestateServiceUnregistered,
+            "no deployment binds the child worker",
+        )))
+    }
+
+    async fn request_process_cancel(
+        &self,
+        _request: RestateProcessCancelRequest,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl RestateProcessRunner for AlreadyStartedRunner {
     async fn run_process_segment(
@@ -13357,6 +13455,250 @@ fn runtime_handler_error_classification_keeps_lane_busy_retryable() {
         debug.contains("Retryable"),
         "lane contention must ask Restate to retry: {debug}"
     );
+}
+
+#[test]
+fn controller_handler_error_classification_keeps_lane_busy_retryable() {
+    let error = handler_error_from_plugin(lash_core::PluginError::RuntimeEffectController(
+        lash_core::RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::SessionExecutionLaneBusy,
+            "child session execution lane is busy",
+        ),
+    ));
+    let debug = format!("{error:?}");
+    assert!(
+        debug.contains("Retryable"),
+        "controller-owned lane contention must ask Restate to retry: {debug}"
+    );
+}
+
+#[tokio::test]
+async fn terminal_child_failure_becomes_typed_process_output_for_the_awaiting_parent() {
+    let registry = process_registry();
+    let registration = rerunnable_registration("terminal-child-failure");
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register terminal-failure child");
+    let parent_context = Arc::new(RecordingContext::default());
+    let parent = RestateRuntimeEffectController::new(Arc::clone(&parent_context));
+    let parent_wait = parent.execute_effect(
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::Process, "await-terminal-child-failure"),
+            RuntimeEffectCommand::process(ProcessCommand::Await {
+                process_id: "terminal-child-failure".to_string(),
+            }),
+        ),
+        registry_local_executor(Arc::clone(&registry)),
+    );
+    tokio::pin!(parent_wait);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), &mut parent_wait)
+            .await
+            .is_err(),
+        "the parent must be parked before the child publishes its terminal promise"
+    );
+
+    let endpoint = Endpoint::builder()
+        .bind(
+            LashProcessWorkflowImpl::new_for_test(
+                Arc::new(TerminalFailureRunner),
+                Arc::clone(&registry),
+                continuation_store(),
+            )
+            .serve(),
+        )
+        .build();
+    let endpoint_output = invoke_process_workflow_endpoint(
+        &endpoint,
+        "run",
+        "terminal-child-failure",
+        &RestateProcessWorkflowInput {
+            registration,
+            execution_context: ProcessExecutionContext::default(),
+            segment_ordinal: 0,
+            execution_id: None,
+        },
+        true,
+    )
+    .await
+    .expect("terminal child workflow must complete through the Restate endpoint");
+    let promise_key = restate_process_terminal_await_key("terminal-child-failure")
+        .expect("terminal promise key")
+        .promise_key();
+    let resolution = restate_completed_promise(&endpoint_output, &promise_key)
+        .expect("terminal child workflow must publish its process-terminal promise");
+    let serde_json::Value::String(resolution) = resolution else {
+        panic!("terminal promise completion must carry its serialized typed resolution")
+    };
+    parent_context.resolve_process_terminal_resolution(
+        "terminal-child-failure",
+        serde_json::from_str(&resolution).expect("decode published terminal resolution"),
+    );
+    let awaited = tokio::time::timeout(Duration::from_secs(1), &mut parent_wait)
+        .await
+        .expect("the published terminal promise must wake the awaiting parent")
+        .expect("the awaiting parent must settle instead of hanging");
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Await { output },
+    } = awaited
+    else {
+        panic!("awaiting parent received the wrong process outcome")
+    };
+    let ProcessAwaitOutput::Settled { output } = output.as_ref() else {
+        panic!("awaiting parent must receive the child's settled output")
+    };
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("awaiting parent must receive the child's typed failure")
+    };
+    assert_eq!(failure.code, "restate_service_unregistered");
+    assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
+    assert_eq!(
+        registry
+            .get_process("terminal-child-failure")
+            .await
+            .expect("read terminal child")
+            .and_then(|record| record.outcome),
+        Some(ProcessAwaitOutput::Settled {
+            output: output.clone(),
+        })
+    );
+}
+
+#[tokio::test]
+async fn worker_replacement_mid_child_aborts_parent_without_terminalizing_rerunnable_child() {
+    let process_id = "replacement-aborted-child";
+    let registry = process_registry();
+    let registration = rerunnable_registration(process_id);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register replacement-aborted child");
+    let runner = Arc::new(ReplacementThenSuccessRunner {
+        runs: AtomicUsize::new(0),
+    });
+    let workflow = LashProcessWorkflowImpl::new_for_test(
+        Arc::clone(&runner),
+        Arc::clone(&registry),
+        continuation_store(),
+    );
+
+    let error = workflow
+        .run_registration(
+            registration.clone(),
+            ProcessExecutionContext::default(),
+            lash_core::ScopedEffectController::shared(
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                lash_core::ExecutionScope::process(process_id),
+            )
+            .expect("replacement-aborted child scope"),
+            0,
+            None,
+            pending_process_cancel_signal(),
+        )
+        .await
+        .expect_err("worker replacement must abort the parent invocation");
+    let rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
+            .to_string();
+    assert!(
+        rendered.contains("worker_replacement_abort"),
+        "parent abort lost the typed replacement code: {rendered}"
+    );
+    let interrupted = registry
+        .get_process(process_id)
+        .await
+        .expect("read interrupted child")
+        .expect("interrupted child remains registered");
+    assert!(
+        !interrupted.is_terminal() && interrupted.outcome.is_none(),
+        "replacement abort must leave the rerunnable child non-terminal: {interrupted:?}"
+    );
+
+    let rerun = workflow
+        .run_registration(
+            registration,
+            ProcessExecutionContext::default(),
+            lash_core::ScopedEffectController::shared(
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                lash_core::ExecutionScope::process(process_id),
+            )
+            .expect("rerun child scope"),
+            0,
+            None,
+            pending_process_cancel_signal(),
+        )
+        .await
+        .expect("the rerunnable child must succeed on a fresh invocation");
+    assert!(matches!(
+        rerun,
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
+            if is_process_success(output.as_ref())
+    ));
+    assert_eq!(runner.runs.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn opaque_process_infrastructure_failure_does_not_become_terminal_process_truth() {
+    let process_id = "opaque-infrastructure-failure";
+    let registry = process_registry();
+    let registration = rerunnable_registration(process_id);
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register rerunnable child");
+    let runner = Arc::new(OpaqueFailureThenSuccessRunner {
+        runs: AtomicUsize::new(0),
+    });
+    let workflow = LashProcessWorkflowImpl::new_for_test(
+        Arc::clone(&runner),
+        Arc::clone(&registry),
+        continuation_store(),
+    );
+
+    workflow
+        .run_registration(
+            registration.clone(),
+            ProcessExecutionContext::default(),
+            lash_core::ScopedEffectController::shared(
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                lash_core::ExecutionScope::process(process_id),
+            )
+            .expect("first child scope"),
+            0,
+            None,
+            pending_process_cancel_signal(),
+        )
+        .await
+        .expect_err("opaque infrastructure failure must abort the invocation");
+    let interrupted = registry
+        .get_process(process_id)
+        .await
+        .expect("read interrupted child")
+        .expect("child remains registered");
+    assert!(!interrupted.is_terminal());
+    assert!(interrupted.outcome.is_none());
+
+    let rerun = workflow
+        .run_registration(
+            registration,
+            ProcessExecutionContext::default(),
+            lash_core::ScopedEffectController::shared(
+                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                lash_core::ExecutionScope::process(process_id),
+            )
+            .expect("rerun child scope"),
+            0,
+            None,
+            pending_process_cancel_signal(),
+        )
+        .await
+        .expect("fresh invocation must be able to rerun the child");
+    assert!(matches!(
+        rerun,
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
+            if is_process_success(output.as_ref())
+    ));
 }
 
 #[test]

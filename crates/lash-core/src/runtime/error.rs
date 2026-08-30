@@ -130,7 +130,12 @@ pub enum RuntimeErrorCode {
     RestateAwaitEventRevoke,
     RestateAwaitEventSessionUpdate,
     RestateEffectController,
-    RestateEffectHashMismatch,
+    /// A Restate redrive reconstructed an effect envelope that differs from its
+    /// durable journal. This commonly follows worker replacement across a
+    /// deployment, but the discriminator proves divergence rather than the
+    /// deployment event itself. The current invocation cannot replay that
+    /// journal safely; a fresh turn on the same session is safe.
+    WorkerReplacementAbort,
     RestateEffectHostRequiresHandlerScope,
     /// A journaled Restate effect produced an outcome the durable journal can
     /// never accept, so the effect gave up with a terminal failure instead of
@@ -532,7 +537,7 @@ impl RuntimeErrorCode {
             Self::RestateAwaitEventRevoke => "restate_await_event_revoke",
             Self::RestateAwaitEventSessionUpdate => "restate_await_event_session_update",
             Self::RestateEffectController => "restate_effect_controller",
-            Self::RestateEffectHashMismatch => "restate_effect_hash_mismatch",
+            Self::WorkerReplacementAbort => "worker_replacement_abort",
             Self::RestateJournaledEffectPoisoned => "restate_journaled_effect_poisoned",
             Self::RestateEffectHostRequiresHandlerScope => {
                 "restate_effect_host_requires_handler_scope"
@@ -646,11 +651,17 @@ impl RuntimeErrorCode {
     /// backend-specific strings when choosing alerting or drain policy.
     pub fn is_replay_mismatch(&self) -> bool {
         matches!(
-            self.as_str(),
-            "sqlite_effect_replay_hash_conflict"
-                | "postgres_effect_replay_hash_conflict"
-                | "restate_effect_hash_mismatch"
+            self,
+            Self::SqliteEffectReplayHashConflict
+                | Self::PostgresEffectReplayHashConflict
+                | Self::WorkerReplacementAbort
         )
+    }
+
+    /// Whether this error aborts only the in-flight turn because its durable
+    /// journal belongs to a replaced worker.
+    pub fn is_worker_replacement_abort(&self) -> bool {
+        matches!(self, Self::WorkerReplacementAbort)
     }
 
     /// Whether retrying the identical operation is explicitly safe.
@@ -738,7 +749,7 @@ impl RuntimeErrorCode {
                 | Self::ProcessRegistryUnavailable
                 | Self::ProcessSignalWaitCancelled
                 | Self::ProcessSignalWaitTimeout
-                | Self::RestateEffectHashMismatch
+                | Self::WorkerReplacementAbort
                 | Self::RestateEffectHostRequiresHandlerScope
                 | Self::RestateJournaledEffectPoisoned
                 | Self::RestateProcessAwait
@@ -889,7 +900,9 @@ impl RuntimeErrorCode {
             "restate_await_event_revoke" => Self::RestateAwaitEventRevoke,
             "restate_await_event_session_update" => Self::RestateAwaitEventSessionUpdate,
             "restate_effect_controller" => Self::RestateEffectController,
-            "restate_effect_hash_mismatch" => Self::RestateEffectHashMismatch,
+            "worker_replacement_abort" | "restate_effect_hash_mismatch" => {
+                Self::WorkerReplacementAbort
+            }
             "restate_effect_host_requires_handler_scope" => {
                 Self::RestateEffectHostRequiresHandlerScope
             }
@@ -1123,7 +1136,7 @@ mod tests {
         for code in [
             "sqlite_effect_replay_hash_conflict",
             "postgres_effect_replay_hash_conflict",
-            "restate_effect_hash_mismatch",
+            "worker_replacement_abort",
         ] {
             let typed = RuntimeErrorCode::from_wire_code(code);
             assert!(typed.is_replay_mismatch(), "{code}");
@@ -1133,6 +1146,18 @@ mod tests {
                 "classification must preserve display code"
             );
         }
+    }
+
+    #[test]
+    fn retired_restate_hash_mismatch_wire_code_decodes_to_the_current_classification() {
+        let code = RuntimeErrorCode::from_wire_code("restate_effect_hash_mismatch");
+
+        assert_eq!(code, RuntimeErrorCode::WorkerReplacementAbort);
+        assert_eq!(code.as_str(), "worker_replacement_abort");
+        assert!(code.is_replay_mismatch());
+        assert!(code.is_terminal());
+        let encoded = serde_json::to_value(&code).expect("serialize retired wire code");
+        assert_eq!(encoded, serde_json::json!("worker_replacement_abort"));
     }
 
     #[test]
@@ -1253,7 +1278,7 @@ mod tests {
             | RuntimeErrorCode::ProcessRegistryUnavailable
             | RuntimeErrorCode::ProcessSignalWaitCancelled
             | RuntimeErrorCode::ProcessSignalWaitTimeout
-            | RuntimeErrorCode::RestateEffectHashMismatch
+            | RuntimeErrorCode::WorkerReplacementAbort
             | RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
             | RuntimeErrorCode::RestateJournaledEffectPoisoned
             | RuntimeErrorCode::RestateProcessAwait
@@ -1419,7 +1444,7 @@ mod tests {
             RuntimeErrorCode::RestateAwaitEventRevoke,
             RuntimeErrorCode::RestateAwaitEventSessionUpdate,
             RuntimeErrorCode::RestateEffectController,
-            RuntimeErrorCode::RestateEffectHashMismatch,
+            RuntimeErrorCode::WorkerReplacementAbort,
             RuntimeErrorCode::RestateEffectHostRequiresHandlerScope,
             RuntimeErrorCode::RestateJournaledEffectPoisoned,
             RuntimeErrorCode::RestateProcessAwait,

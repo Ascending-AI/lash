@@ -1128,6 +1128,21 @@ pub(crate) async fn terminalize_turn_execution(
                 );
                 Err(HandlerError::from(err))
             }
+            AppErrorVerdict::ReplacementAbort => {
+                let message = err.message.clone();
+                settle_workbench_turn(state, session_id, turn_id)
+                    .await
+                    .map_err(settlement_handler_error)?;
+                record_turn_failure(
+                    state,
+                    session_id,
+                    turn_id,
+                    trace_name,
+                    &message,
+                    crate::REPLAY_DIVERGENCE_TURN_FAILURE_MESSAGE,
+                );
+                Err(terminal_handler_error(err))
+            }
             AppErrorVerdict::Terminal => {
                 let message = err.message.clone();
                 // Settlement is the durable boundary for this attempt. If it
@@ -1136,7 +1151,14 @@ pub(crate) async fn terminalize_turn_execution(
                 settle_workbench_turn(state, session_id, turn_id)
                     .await
                     .map_err(settlement_handler_error)?;
-                record_turn_failure(state, session_id, turn_id, trace_name, &message);
+                record_turn_failure(
+                    state,
+                    session_id,
+                    turn_id,
+                    trace_name,
+                    &message,
+                    crate::PUBLIC_TURN_FAILURE_MESSAGE,
+                );
                 Err(terminal_handler_error(err))
             }
             AppErrorVerdict::Ambiguous => {
@@ -1145,7 +1167,14 @@ pub(crate) async fn terminalize_turn_execution(
                 settle_workbench_turn(state, session_id, turn_id)
                     .await
                     .map_err(settlement_handler_error)?;
-                record_turn_failure(state, session_id, turn_id, trace_name, &message);
+                record_turn_failure(
+                    state,
+                    session_id,
+                    turn_id,
+                    trace_name,
+                    &message,
+                    crate::PUBLIC_TURN_FAILURE_MESSAGE,
+                );
                 Err(terminal_handler_error(err))
             }
         },
@@ -1155,7 +1184,14 @@ pub(crate) async fn terminalize_turn_execution(
             settle_workbench_turn(state, session_id, turn_id)
                 .await
                 .map_err(settlement_handler_error)?;
-            record_turn_failure(state, session_id, turn_id, trace_name, &message);
+            record_turn_failure(
+                state,
+                session_id,
+                turn_id,
+                trace_name,
+                &message,
+                crate::PUBLIC_TURN_FAILURE_MESSAGE,
+            );
             Err(TerminalError::new(message).into())
         }
     }
@@ -1328,25 +1364,6 @@ async fn record_turn_output_for_model(
     }
     state.publish_turn_done(&session.session_id(), turn_id);
     Ok(())
-}
-
-fn record_turn_failure(
-    state: &AppState,
-    session_id: &str,
-    turn_id: &str,
-    trace_name: &str,
-    message: &str,
-) {
-    state.trace_for_session(
-        session_id,
-        trace_name,
-        json!({
-            "session_id": session_id,
-            "turn_id": turn_id,
-            "error": message,
-        }),
-    );
-    state.publish_turn_failed(session_id, turn_id);
 }
 
 include!("restate_cron_sync.rs");
@@ -1537,28 +1554,7 @@ fn cron_job_key(session_id: &str, source_key: &str) -> String {
     format!("{session_id}:{source_key}")
 }
 
-fn terminal_handler_error(err: AppError) -> HandlerError {
-    TerminalError::new(err.message).into()
-}
-
-fn settlement_handler_error(err: AppError) -> HandlerError {
-    match err.verdict {
-        AppErrorVerdict::Retryable => HandlerError::from(err),
-        AppErrorVerdict::Terminal => terminal_handler_error(err),
-        AppErrorVerdict::Ambiguous => {
-            // Ambiguous settlement failures remain retryable.
-            HandlerError::from(err)
-        }
-    }
-}
-
-fn classified_embed_handler_error(error: lash::EmbedError) -> HandlerError {
-    settlement_handler_error(AppError::runtime(error))
-}
-
-fn classified_plugin_handler_error(error: lash::plugins::PluginError) -> HandlerError {
-    classified_embed_handler_error(lash::EmbedError::Plugin(error))
-}
+include!("restate_error_helpers.rs");
 
 #[cfg(test)]
 #[path = "restate_tests.rs"]

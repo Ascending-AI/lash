@@ -3152,6 +3152,8 @@ lash::plugins::PluginError::StoredDataCorrupt::record_kind
 lash::plugins::PluginError::UnstagedUsageConfirmation
 lash::plugins::PluginError::UnstagedUsageConfirmation::confirmed_count
 lash::plugins::PluginError::UnstagedUsageConfirmation::staged_count
+lash::plugins::PluginError::is_retryable
+lash::plugins::PluginError::is_terminal
 lash::plugins::PluginExtensionContribution
 lash::plugins::PluginExtensionContribution::extension_id
 lash::plugins::PluginExtensionContribution::from_value
@@ -7830,7 +7832,6 @@ lash::runtime::RuntimeErrorCode::RestateAwaitEventRevocationRead
 lash::runtime::RuntimeErrorCode::RestateAwaitEventRevoke
 lash::runtime::RuntimeErrorCode::RestateAwaitEventSessionUpdate
 lash::runtime::RuntimeErrorCode::RestateEffectController
-lash::runtime::RuntimeErrorCode::RestateEffectHashMismatch
 lash::runtime::RuntimeErrorCode::RestateEffectHostRequiresHandlerScope
 lash::runtime::RuntimeErrorCode::RestateJournaledEffectPoisoned
 lash::runtime::RuntimeErrorCode::RestateProcessAwait
@@ -7926,11 +7927,13 @@ lash::runtime::RuntimeErrorCode::TurnTerminalDecode
 lash::runtime::RuntimeErrorCode::TurnTerminalEncode
 lash::runtime::RuntimeErrorCode::TurnTerminalInvalidResolution
 lash::runtime::RuntimeErrorCode::TurnTerminalUnknownOrRevoked
+lash::runtime::RuntimeErrorCode::WorkerReplacementAbort
 lash::runtime::RuntimeErrorCode::as_str
 lash::runtime::RuntimeErrorCode::from_wire_code
 lash::runtime::RuntimeErrorCode::is_replay_mismatch
 lash::runtime::RuntimeErrorCode::is_retryable
 lash::runtime::RuntimeErrorCode::is_terminal
+lash::runtime::RuntimeErrorCode::is_worker_replacement_abort
 lash::runtime::RuntimeHandle
 lash::runtime::RuntimeHandle::abandon_queued_work_claim
 lash::runtime::RuntimeHandle::abandon_turn_input_claim

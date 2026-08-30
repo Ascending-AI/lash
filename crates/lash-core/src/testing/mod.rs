@@ -842,7 +842,7 @@ pub async fn execute_tool_intents_with_services(
     session_id: &str,
     tool_call_id: &str,
     intents: &crate::ToolIntents,
-) -> Vec<crate::ToolIntentExecutionOutcome> {
+) -> Result<Vec<crate::ToolIntentExecutionOutcome>, crate::RuntimeEffectControllerError> {
     let parent_invocation = crate::RuntimeInvocation::effect(
         crate::RuntimeScope::new(session_id),
         format!("tool-intent-drain:{tool_call_id}"),

@@ -109,6 +109,9 @@ async fn run_fixed_intent_attempt(
     {
         ToolCallLaunch::Done(outcome) => outcome,
         ToolCallLaunch::Pending(_) => panic!("fixed intent law cannot defer"),
+        ToolCallLaunch::ControllerAborted(error) => {
+            panic!("fixed intent law unexpectedly aborted: {error}")
+        }
     }
 }
 
@@ -398,6 +401,113 @@ async fn concurrent_batch_drains_intents_in_call_order_then_intent_index() {
 }
 
 #[tokio::test]
+async fn controller_abort_during_intent_drain_aborts_the_turn_batch() {
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None).with_process_abort(
+        crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::WorkerReplacementAbort,
+            "replacement invalidated the process-command journal",
+        ),
+    ));
+    let context = fixed_intent_dispatch_context(
+        controller,
+        registry,
+        recorded_event_intents(&["replacement.abort"]),
+        Arc::clone(&calls),
+    );
+    let execution =
+        runtime_execution_for_intent_law(context, tokio_util::sync::CancellationToken::new());
+    let batch = crate::PreparedToolBatch::new(
+        "replacement-abort-batch",
+        vec![crate::PreparedToolCall::from_parts(
+            "fixed-intent-call",
+            "tool:fixed_intent_law",
+            "fixed_intent_law",
+            json!({"value": "drive"}),
+            None,
+            serde_json::Value::Null,
+        )],
+    );
+
+    let error = Box::pin(execution.execute_prepared_tool_batch_launches(
+            batch,
+            intent_law_batch_parent("replacement-abort-parent"),
+            std::collections::HashMap::new(),
+        ))
+        .await
+        .expect_err("controller abort must escape the intent drain and abort the turn batch");
+
+    assert_eq!(error.code, crate::RuntimeErrorCode::WorkerReplacementAbort);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect_abort() {
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None).with_process_abort(
+        crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::WorkerReplacementAbort,
+            "reconstructed process-command envelope diverged",
+        ),
+    ));
+    let context = fixed_intent_dispatch_context(
+        controller,
+        registry,
+        recorded_event_intents(&["replacement.abort"]),
+        Arc::clone(&calls),
+    );
+    let execution =
+        runtime_execution_for_intent_law(context, tokio_util::sync::CancellationToken::new());
+
+    let reply = execution
+        .call_tool_by_id(
+            "fixed-intent-call".to_string(),
+            crate::ToolId::from("tool:fixed_intent_law"),
+            json!({"value": "drive"}),
+            0,
+        )
+        .await;
+
+    assert!(!reply.output.is_success());
+    let error = execution
+        .take_nested_effect_error()
+        .expect("the fixed scalar host reply must latch the enclosing controller abort");
+    assert_eq!(error.code, crate::RuntimeErrorCode::WorkerReplacementAbort);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
+    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let controller = Arc::new(IntentReplayController::new(None).with_process_abort(
+        crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
+            "process command returned the wrong outcome kind",
+        ),
+    ));
+    let context = fixed_intent_dispatch_context(
+        controller,
+        registry,
+        recorded_event_intents(&["controller.refusal"]),
+        calls,
+    );
+
+    let outcome = run_fixed_intent_attempt(&context).await;
+    let crate::ToolIntentExecutionOutcome::Refused {
+        refusal: crate::ToolIntentRefusalReason::CommandFailed { code, message },
+        ..
+    } = &outcome.intent_outcomes[0]
+    else {
+        panic!("ordinary controller-wrapped failures must remain per-intent refusals")
+    };
+    assert_eq!(code, "runtime_effect_wrong_outcome");
+    assert_eq!(message, "process command returned the wrong outcome kind");
+}
+
+#[tokio::test]
 async fn cancellation_before_result_commit_executes_no_intents() {
     let definition = named_beta_tool("blocking_intent_attempt");
     let entered = Arc::new(tokio::sync::Notify::new());
@@ -537,8 +647,14 @@ async fn parent_end_policies_are_literal_and_redrive_stable() {
             })
             .collect(),
     );
-    let outcomes =
-        execute_final_tool_intents(&context, Some("parent-policy-call"), &intents, None).await;
+    let outcomes = execute_final_tool_intents(
+        &context,
+        Some("parent-policy-call"),
+        &intents,
+        None,
+    )
+    .await
+    .expect("parent-end intents execute");
     assert!(
         outcomes
             .iter()
@@ -705,7 +821,8 @@ async fn empty_v1_batch_without_a_recorded_call_id_is_a_noop() {
         &crate::ToolIntents::default(),
         None,
     )
-    .await;
+    .await
+    .expect("empty v1 batch is a no-op");
     assert!(outcomes.is_empty());
 }
 

@@ -444,6 +444,7 @@ pub(crate) async fn execute_prepared_tool_attempt_effect<'run>(
             pending: pending.pending,
             duration_ms: pending.duration_ms,
         },
+        ToolCallLaunch::ControllerAborted(error) => return Err(error),
     };
     let triggers = context.trigger_outcomes.drain();
     Ok(crate::ToolAttemptEffectOutcome { launch, triggers })
@@ -497,6 +498,16 @@ impl ToolCallLaunchExt for ToolCallLaunch {
                     "pending tool completion is not supported on this dispatch path",
                 ),
                 pending.duration_ms,
+            ),
+            ToolCallLaunch::ControllerAborted(error) => outcome(
+                "runtime_effect_controller".to_string(),
+                serde_json::Value::Null,
+                runtime_failure(
+                    ToolFailureClass::Internal,
+                    error.code.as_str(),
+                    error.message,
+                ),
+                0,
             ),
         }
     }

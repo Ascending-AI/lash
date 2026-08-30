@@ -80,17 +80,30 @@ pub(crate) fn terminal_completion_workflow_key(
 /// runtime errors request redelivery, while every other plugin/runtime failure
 /// terminates the invocation so deterministic failures cannot loop forever.
 pub(crate) fn handler_error_from_plugin(error: PluginError) -> HandlerError {
-    if matches!(&error, PluginError::Runtime(error) if error.is_retryable())
-        || matches!(
-            &error,
-            PluginError::RuntimeEffectController(error)
-                if error.cause.is_none() && error.code.is_retryable()
-        )
-    {
+    if error.is_retryable() {
         HandlerError::from(error)
     } else {
         HandlerError::from(TerminalError::from_error(error))
     }
+}
+
+fn is_replay_mismatch(error: &PluginError) -> bool {
+    match error {
+        PluginError::Runtime(error) => error.code.is_replay_mismatch(),
+        PluginError::RuntimeEffectController(error) => error.code.is_replay_mismatch(),
+        _ => false,
+    }
+}
+
+fn terminal_process_output(error: PluginError) -> ProcessAwaitOutput {
+    let error = lash_core::RuntimeEffectControllerError::from(error);
+    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
+        lash_core::ToolFailure::runtime(
+            lash_core::ToolFailureClass::Execution,
+            error.code.as_str(),
+            error.message,
+        ),
+    ))
 }
 
 /// Maps an ingress submit failure for `LashProcessWorkflow/run`. A 404 here is

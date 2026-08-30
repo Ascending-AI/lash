@@ -245,7 +245,7 @@ impl EmbedError {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Runtime(err) => err.is_retryable(),
-            Self::Plugin(lash_core::PluginError::Runtime(err)) => err.is_retryable(),
+            Self::Plugin(err) => err.is_retryable(),
             _ => false,
         }
     }
@@ -266,9 +266,10 @@ impl EmbedError {
     /// - session provider-configuration errors (`ProviderMismatch`,
     ///   `ProviderUnconfigured`, `ProviderUnavailable`,
     ///   `CodeExecutionUnavailable`);
-    /// - direct, session-wrapped, or nested controller-owned
+    /// - direct or session-wrapped
     ///   [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted)
-    ///   tombstones — session ids are permanently single-use;
+    ///   tombstones, plus nested controller-owned terminal codes or structured
+    ///   causes;
     /// - direct or session-wrapped commit byte or node budget rejections, which
     ///   require the host to raise the configured limit or submit a smaller
     ///   commit;
@@ -300,11 +301,7 @@ impl EmbedError {
                 | lash_core::StoreError::CommitByteBudgetExceeded { .. },
             ) => true,
             Self::Runtime(err) => err.is_terminal(),
-            Self::Plugin(lash_core::PluginError::Runtime(err)) => err.is_terminal(),
-            Self::Plugin(lash_core::PluginError::RuntimeEffectController(err)) => matches!(
-                err.cause.as_ref(),
-                Some(lash_core::RuntimeErrorCause::SessionDeleted { .. })
-            ),
+            Self::Plugin(err) => err.is_terminal(),
             Self::Session(err) => matches!(
                 err,
                 SessionError::ProviderMismatch { .. }
@@ -353,6 +350,32 @@ mod tests {
 
         let queued_error = QueuedWorkRunError::from(plugin_error);
         assert_eq!(queued_error.class, QueuedWorkRunErrorClass::Transient);
+    }
+
+    #[test]
+    fn controller_owned_lane_contention_stays_retryable_across_embed_boundary() {
+        let error = EmbedError::Plugin(PluginError::RuntimeEffectController(
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::SessionExecutionLaneBusy,
+                "durable controller lane is busy",
+            ),
+        ));
+
+        assert!(error.is_retryable());
+        assert!(!error.is_terminal());
+    }
+
+    #[test]
+    fn terminal_controller_failure_stays_terminal_across_embed_boundary() {
+        let error = EmbedError::Plugin(PluginError::RuntimeEffectController(
+            RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectWrongOutcome,
+                "durable controller returned the wrong outcome kind",
+            ),
+        ));
+
+        assert!(!error.is_retryable());
+        assert!(error.is_terminal());
     }
 
     #[test]

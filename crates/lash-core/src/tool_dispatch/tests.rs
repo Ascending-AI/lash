@@ -245,6 +245,7 @@ struct IntentReplayController {
         BTreeMap<String, Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError>>,
     >,
     frame_sightings: std::sync::Mutex<BTreeMap<String, Vec<String>>>,
+    process_abort: Option<crate::RuntimeEffectControllerError>,
     process_commands: AtomicUsize,
     pause: std::sync::Mutex<Option<IntentPausePoint>>,
     pause_entered: tokio::sync::Notify,
@@ -298,11 +299,17 @@ impl IntentReplayController {
             native: crate::NativeRuntimeEffectController::default(),
             recorded: std::sync::Mutex::new(BTreeMap::new()),
             frame_sightings: std::sync::Mutex::new(BTreeMap::new()),
+            process_abort: None,
             process_commands: AtomicUsize::new(0),
             pause: std::sync::Mutex::new(pause),
             pause_entered: tokio::sync::Notify::new(),
             pause_release: tokio::sync::Notify::new(),
         }
+    }
+
+    fn with_process_abort(mut self, error: crate::RuntimeEffectControllerError) -> Self {
+        self.process_abort = Some(error);
+        self
     }
 
     fn take_pause(&self, expected: IntentPausePoint) -> bool {
@@ -411,6 +418,11 @@ impl crate::RuntimeEffectController for IntentReplayController {
         }
 
         let kind = envelope.command.kind();
+        if kind == crate::RuntimeEffectKind::Process
+            && let Some(error) = self.process_abort.as_ref()
+        {
+            return Err(error.clone());
+        }
         let process_ordinal = (kind == crate::RuntimeEffectKind::Process)
             .then(|| self.process_commands.fetch_add(1, Ordering::SeqCst) + 1);
         if let Some(ordinal) = process_ordinal {
@@ -2469,7 +2481,8 @@ async fn empty_batch_dispatches_v0_and_v2_to_a_typed_protocol_refusal() {
             },
             None,
         )
-        .await;
+        .await
+        .expect("empty unsupported batch is refused");
         assert_eq!(
             outcomes,
             vec![crate::ToolIntentExecutionOutcome::ProtocolRefused {

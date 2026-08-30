@@ -312,6 +312,7 @@ pub(crate) struct PendingToolDispatchOutcome {
 pub(crate) enum ToolCallLaunch {
     Done(Box<ToolDispatchOutcome>),
     Pending(Box<PendingToolDispatchOutcome>),
+    ControllerAborted(crate::RuntimeEffectControllerError),
 }
 
 pub(crate) enum ToolPreparationOutcome {

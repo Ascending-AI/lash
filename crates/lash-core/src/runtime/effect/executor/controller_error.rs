@@ -81,7 +81,7 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
         Self {
             code: err.code,
             message: err.message,
-            summary: None,
+            summary: err.summary,
             cause: err.cause,
         }
     }
@@ -90,6 +90,7 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
 impl From<PluginError> for RuntimeEffectControllerError {
     fn from(err: PluginError) -> Self {
         match err {
+            PluginError::Runtime(err) => err.into(),
             PluginError::RuntimeEffectController(err) => err,
             err @ PluginError::ProcessNotVisible { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNotVisible, err.to_string())
@@ -238,5 +239,26 @@ mod tests {
         assert!(runtime_error.code.is_replay_mismatch());
         assert_eq!(runtime_error.summary, Some(summary));
         assert!(runtime_error.to_string().contains("command.duration_ms"));
+    }
+
+    #[test]
+    fn replay_mismatch_summary_survives_controller_error_conversion() {
+        let summary = crate::RuntimeEffectReplayMismatchReport {
+            divergent_path_count: 1,
+            first_divergent_paths: vec!["invocation.scope.turn_index".to_string()],
+        };
+        let mut runtime_error = RuntimeError::new(
+            crate::RuntimeErrorCode::WorkerReplacementAbort,
+            "replacement reconstructed a different turn index",
+        );
+        runtime_error.summary = Some(summary.clone());
+
+        let controller_error = RuntimeEffectControllerError::from(runtime_error);
+
+        assert_eq!(
+            controller_error.code,
+            crate::RuntimeErrorCode::WorkerReplacementAbort
+        );
+        assert_eq!(controller_error.summary, Some(summary));
     }
 }

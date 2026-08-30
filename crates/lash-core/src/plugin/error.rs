@@ -151,3 +151,64 @@ pub enum PluginError {
     #[error("process worklist cursor belongs to backend `{actual}`, not `{expected}`")]
     ProcessWorklistCursorBackendMismatch { expected: String, actual: String },
 }
+
+impl PluginError {
+    /// Whether retrying the identical plugin operation is explicitly safe.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Runtime(error) => error.is_retryable(),
+            Self::RuntimeEffectController(error) => {
+                error.cause.is_none() && error.code.is_retryable()
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether retrying the identical plugin operation cannot succeed without
+    /// changing durable state, configuration, or wiring.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            Self::Runtime(error) => error.is_terminal(),
+            Self::RuntimeEffectController(error) => {
+                error.cause.is_some() || error.code.is_terminal()
+            }
+            Self::BeforeToolCallReplacementConflict { .. }
+            | Self::AfterToolCallReplacementConflict { .. }
+            | Self::MissingRecordedSessionConfig { .. }
+            | Self::AppendOperationIdentityConflict { .. }
+            | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
+            | Self::StoredDataCorrupt { .. }
+            | Self::UnstagedUsageConfirmation { .. }
+            | Self::ClockBeforeUnixEpoch { .. }
+            | Self::MonotonicCounterOverflow { .. }
+            | Self::ProcessNoLongerRetained { .. }
+            | Self::ProcessCallerDeparted { .. }
+            | Self::ProcessAlreadyTerminal { .. }
+            | Self::ProcessTerminalOutcomeMismatch { .. }
+            | Self::ReservedProcessEvent { .. }
+            | Self::InvalidProcessWakeIdentity { .. }
+            | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
+            | Self::ProcessWorklistCursorBackendMismatch { .. } => true,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod classification_tests {
+    use super::*;
+
+    #[test]
+    fn deterministic_corrupt_state_is_terminal_but_opaque_infrastructure_is_unknown() {
+        let corrupt = PluginError::StoredDataCorrupt {
+            record_kind: "process_event".to_string(),
+            message: "negative sequence".to_string(),
+        };
+        assert!(corrupt.is_terminal());
+        assert!(!corrupt.is_retryable());
+
+        let opaque = PluginError::Session("database connection closed".to_string());
+        assert!(!opaque.is_terminal());
+        assert!(!opaque.is_retryable());
+    }
+}

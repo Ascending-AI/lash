@@ -68,7 +68,7 @@ impl RuntimeExecutionContext<'_> {
                         child_execution_trace_hook,
                         None,
                     )
-                    .await;
+                    .await?;
                 launches.push(outcome.launch);
                 triggers.extend(outcome.triggers);
                 context = context.with_cancellation_token(tool_cancel.clone());
@@ -132,7 +132,7 @@ impl RuntimeExecutionContext<'_> {
                                 // the drain slot; no hand-written release is
                                 // needed to keep later siblings moving.
                                 _ = &mut grace => {
-                                    CoordinatedToolLaunch {
+                                    Ok(CoordinatedToolLaunch {
                                         launch: cancelled_runtime_tool_call_launch(
                                             cancelled_tool.call_id,
                                             cancelled_tool.tool_name,
@@ -140,7 +140,7 @@ impl RuntimeExecutionContext<'_> {
                                             cancelled_tool.replay,
                                         ),
                                         triggers: Vec::new(),
-                                    }
+                                    })
                                 },
                             }
                         }
@@ -161,6 +161,7 @@ impl RuntimeExecutionContext<'_> {
         let mut launches = Vec::with_capacity(child_outcomes.outcomes.len());
         let mut triggers = Vec::new();
         for outcome in child_outcomes.outcomes {
+            let outcome = outcome?;
             launches.push(outcome.launch);
             triggers.extend(outcome.triggers);
         }
@@ -177,7 +178,7 @@ impl RuntimeExecutionContext<'_> {
         parent_invocation: crate::RuntimeInvocation,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
         intent_drain_slot: Option<crate::tool_dispatch::IntentDrainGuard>,
-    ) -> CoordinatedToolLaunch {
+    ) -> Result<CoordinatedToolLaunch, crate::RuntimeEffectControllerError> {
         let authorization = match child.execution_grant {
             Some(grant) => ToolCallAuthorization::Granted(grant),
             None => ToolCallAuthorization::Catalog(child.call.tool_id.clone()),
@@ -215,14 +216,14 @@ impl RuntimeExecutionContext<'_> {
             // where the former hand-written discharge stood.
             drop(intent_drain_slot);
             let completed = self.complete_tool_call(call_id, replay, outcome).await;
-            return CoordinatedToolLaunch {
+            return Ok(CoordinatedToolLaunch {
                 launch: crate::runtime::ToolCallLaunch::Done {
                     result: Box::new(completed.completed),
                 },
                 // Orchestrating bodies emit trigger occurrences directly, so the
                 // batch still owns their effect outcomes.
                 triggers: self.dispatch.trigger_outcomes.drain(),
-            };
+            });
         }
 
         let retry_policy = crate::tool_dispatch::resolve_retry_policy(
@@ -269,14 +270,15 @@ impl RuntimeExecutionContext<'_> {
                 )
                 .await
             }
+            ToolCallLaunch::ControllerAborted(error) => return Err(error),
         };
         let completed = self.complete_tool_call(call_id, replay, outcome).await;
-        CoordinatedToolLaunch {
+        Ok(CoordinatedToolLaunch {
             launch: crate::runtime::ToolCallLaunch::Done {
                 result: Box::new(completed.completed),
             },
             triggers: coordinated.triggers,
-        }
+        })
     }
 
     /// Executes a source-ordered tool batch for code-executor implementors and returns replies in

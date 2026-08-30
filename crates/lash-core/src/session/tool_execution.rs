@@ -994,6 +994,25 @@ impl RuntimeExecutionContext<'_> {
                 )
                 .await
             }
+            ToolCallLaunch::ControllerAborted(error) => {
+                self.record_nested_effect_error(error.clone());
+                crate::tool_dispatch::ToolDispatchOutcome {
+                    record: crate::ToolCallRecord {
+                        call_id: Some(call_id.clone()),
+                        tool: "runtime_effect_controller".to_string(),
+                        args: serde_json::Value::Null,
+                        output: crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                            crate::ToolFailureClass::Internal,
+                            error.code.as_str(),
+                            error.message,
+                        )),
+                        duration_ms: 0,
+                    },
+                    attempts: Vec::new(),
+                    intents: crate::ToolIntents::default(),
+                    intent_outcomes: Vec::new(),
+                }
+            }
         };
         outcome.record.call_id = Some(call_id.clone());
 

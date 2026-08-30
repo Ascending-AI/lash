@@ -1465,7 +1465,7 @@ pub(crate) fn validate_recorded_effect_envelope(
     validate_replayed_effect_envelope(
         recorded.envelope.as_ref(),
         reconstructed,
-        RuntimeErrorCode::RestateEffectHashMismatch,
+        RuntimeErrorCode::WorkerReplacementAbort,
         trace,
     )?;
     Ok(recorded.outcome)

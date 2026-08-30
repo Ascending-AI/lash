@@ -213,6 +213,23 @@ fn cron_sync_classifies_permanent_errors_terminal_and_unknown_errors_retryable()
         !unknown_rendered.starts_with("Terminal error"),
         "ambiguous store failures must remain retryable, got {unknown_rendered}"
     );
+
+    let controller_busy = classified_embed_handler_error(lash::EmbedError::Plugin(
+        lash::plugins::PluginError::RuntimeEffectController(
+            lash::runtime::RuntimeEffectControllerError::new(
+                lash::runtime::RuntimeErrorCode::SessionExecutionLaneBusy,
+                "durable controller lane is busy",
+            ),
+        ),
+    ));
+    let controller_busy_rendered = <restate_sdk::errors::HandlerError as AsRef<
+        dyn std::error::Error,
+    >>::as_ref(&controller_busy)
+    .to_string();
+    assert!(
+        !controller_busy_rendered.starts_with("Terminal error"),
+        "controller-owned lane contention must remain retryable, got {controller_busy_rendered}"
+    );
 }
 
 #[test]
@@ -232,6 +249,64 @@ fn runtime_shape_uses_the_shared_terminal_classifier() {
         error.message,
         crate::deleted_session_message("retired-session")
     );
+}
+
+#[tokio::test]
+async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
+        data_dir.path(),
+        Arc::new(lash::triggers::InMemoryTriggerStore::default()),
+    )
+    .await;
+    let session_id = state.current_session_id();
+    state.track_turn(&session_id, "replacement-aborted-turn");
+    let error = super::terminalize_turn_execution(
+        &state,
+        &session_id,
+        "replacement-aborted-turn",
+        "replacement.aborted",
+        Ok(Err(AppError::runtime(lash::EmbedError::Plugin(
+            lash::plugins::PluginError::RuntimeEffectController(
+                lash::runtime::RuntimeEffectControllerError::new(
+                    lash::runtime::RuntimeErrorCode::WorkerReplacementAbort,
+                    "recorded hash raw-old-hash did not match reconstructed hash raw-new-hash",
+                ),
+            ),
+        )))),
+    )
+    .await
+    .expect_err("replacement must abort the in-flight invocation");
+    let rendered =
+        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&error)
+            .to_string();
+
+    assert!(
+        rendered.contains("worker_replacement_abort"),
+        "replacement abort must retain its typed code: {rendered}"
+    );
+    assert!(
+        !rendered.contains("internal server error"),
+        "replacement abort must not cross the generic internal-error projection: {rendered}"
+    );
+    assert!(
+        !rendered.contains("raw-old-hash") && !rendered.contains("raw-new-hash"),
+        "replacement abort must redact envelope hashes at the conflict boundary: {rendered}"
+    );
+    assert!(
+        state.active_turns.for_session(&session_id).is_empty(),
+        "replacement abort must retire the active turn before returning"
+    );
+    let session = state
+        .open_session(&session_id)
+        .await
+        .expect("the settled replacement abort must leave the session reopenable");
+    session
+        .turn(lash::TurnInput::text("run after worker replacement"))
+        .turn_id("post-replacement-turn")
+        .run()
+        .await
+        .expect("the same session must accept and complete its next turn");
 }
 
 #[test]
