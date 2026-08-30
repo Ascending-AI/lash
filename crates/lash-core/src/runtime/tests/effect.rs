@@ -24,6 +24,8 @@ enum CancelWatchBehavior {
     AlwaysError {
         attempts: Arc<std::sync::atomic::AtomicUsize>,
         exhausted: Arc<tokio::sync::Notify>,
+        failures_released: Arc<std::sync::atomic::AtomicBool>,
+        release_failures: Arc<tokio::sync::Notify>,
     },
 }
 
@@ -101,8 +103,26 @@ impl RecordingEffectController {
         self.cancel_watch = CancelWatchBehavior::AlwaysError {
             attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             exhausted: Arc::new(tokio::sync::Notify::new()),
+            failures_released: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            release_failures: Arc::new(tokio::sync::Notify::new()),
         };
         self
+    }
+
+    pub(super) fn release_cancel_watch_failures(&self) {
+        match &self.cancel_watch {
+            CancelWatchBehavior::Delegate => {
+                panic!("cancel-watch failure gate is unavailable in delegate mode")
+            }
+            CancelWatchBehavior::AlwaysError {
+                failures_released,
+                release_failures,
+                ..
+            } => {
+                failures_released.store(true, Ordering::SeqCst);
+                release_failures.notify_one();
+            }
+        }
     }
 
     pub(super) fn fail_failure_disposition(&self) {
@@ -124,6 +144,7 @@ impl RecordingEffectController {
             CancelWatchBehavior::AlwaysError {
                 attempts,
                 exhausted,
+                ..
             } => loop {
                 let notified = exhausted.notified();
                 if attempts.load(Ordering::SeqCst)
@@ -252,24 +273,31 @@ impl crate::AwaitEventResolver for RecordingEffectController {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<Resolution, RuntimeError> {
-        match &self.cancel_watch {
-            CancelWatchBehavior::Delegate => {
-                self.native.await_await_event(key, cancel, deadline).await
-            }
-            CancelWatchBehavior::AlwaysError {
+        if matches!(key.wait, AwaitEventWaitIdentity::TurnCancelGate)
+            && let CancelWatchBehavior::AlwaysError {
                 attempts,
                 exhausted,
-            } => {
-                let attempts = attempts.fetch_add(1, Ordering::SeqCst) + 1;
-                if attempts == crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS {
-                    exhausted.notify_one();
+                failures_released,
+                release_failures,
+            } = &self.cancel_watch
+        {
+            while !failures_released.load(Ordering::SeqCst) {
+                let released = release_failures.notified();
+                if failures_released.load(Ordering::SeqCst) {
+                    break;
                 }
-                Err(RuntimeError::new(
-                    crate::RuntimeErrorCode::TransientCancelWatch,
-                    "cancel resolver remains unavailable",
-                ))
+                released.await;
             }
+            let attempts = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+            if attempts == crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS {
+                exhausted.notify_one();
+            }
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::TransientCancelWatch,
+                "cancel resolver remains unavailable",
+            ));
         }
+        self.native.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(&self, session_id: &str) -> Result<(), RuntimeError> {
@@ -527,6 +555,13 @@ impl RuntimeEffectController for RecordingEffectController {
                             "reason": "cancel landed during the journaled LLM run"
                         }
                     }))),
+                })
+            }
+            RuntimeEffectCommand::PeekAwaitEvent { key }
+                if matches!(self.cancel_watch, CancelWatchBehavior::AlwaysError { .. }) =>
+            {
+                Ok(RuntimeEffectOutcome::PeekAwaitEvent {
+                    resolution: self.native.peek_await_event(&key).await?,
                 })
             }
             RuntimeEffectCommand::PeekAwaitEvent { .. } => {

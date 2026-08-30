@@ -515,45 +515,32 @@ fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
 }
 
 #[derive(Debug)]
-struct CancelWatchTestClock {
-    inner: crate::testing::TestClock,
-    sleeps: AtomicUsize,
-}
-
-impl CancelWatchTestClock {
-    fn new(epoch_ms: u64) -> Self {
-        Self {
-            inner: crate::testing::TestClock::new(epoch_ms),
-            sleeps: AtomicUsize::new(0),
-        }
-    }
-}
+struct CancelWatchTestClock(crate::testing::TestClock);
 
 #[async_trait::async_trait]
 impl crate::Clock for CancelWatchTestClock {
     fn now(&self) -> std::time::Instant {
-        self.inner.now()
+        self.0.now()
     }
 
     fn timestamp_ms(&self) -> u64 {
-        self.inner.timestamp_ms()
+        self.0.timestamp_ms()
     }
 
     fn timestamp_rfc3339(&self) -> String {
-        self.inner.timestamp_rfc3339()
+        self.0.timestamp_rfc3339()
     }
 
     fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
-        self.inner.timestamp_datetime()
+        self.0.timestamp_datetime()
     }
 
     async fn sleep(&self, _duration: std::time::Duration) {
-        self.sleeps.fetch_add(1, Ordering::SeqCst);
         tokio::task::yield_now().await;
     }
 
     async fn sleep_until(&self, deadline: std::time::Instant) {
-        self.inner.sleep_until(deadline).await;
+        self.0.sleep_until(deadline).await;
     }
 }
 
@@ -6042,65 +6029,233 @@ async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_event() {
     );
 }
 
+#[derive(Clone)]
+struct CountingEchoTool {
+    executions: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct CancellationGatedTurnEvents {
+    events: RecordingTurnEvents,
+    cancellation: CancellationToken,
+    entered: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+}
+
+impl CancellationGatedTurnEvents {
+    fn new(cancellation: CancellationToken) -> (Self, tokio::sync::oneshot::Receiver<()>) {
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        (
+            Self {
+                events: RecordingTurnEvents::default(),
+                cancellation,
+                entered: Arc::new(Mutex::new(Some(entered_tx))),
+            },
+            entered_rx,
+        )
+    }
+
+    fn snapshot(&self) -> Vec<TurnActivity> {
+        self.events.snapshot()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::TurnActivitySink for CancellationGatedTurnEvents {
+    async fn emit(&self, activity: TurnActivity) {
+        if matches!(
+            &activity.event,
+            TurnEvent::AssistantProseDelta { text }
+                if text.as_ref() == "drained before effect abort"
+        ) {
+            if let Some(entered) = self.entered.lock_recover().take() {
+                let _ = entered.send(());
+            }
+            self.cancellation.cancelled().await;
+        }
+        self.events.events.lock_recover().push(activity);
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for CountingEchoTool {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        EchoTool.tool_manifests()
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        EchoTool.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolOutcome {
+        self.executions.fetch_add(1, Ordering::SeqCst);
+        EchoTool.execute(call).await
+    }
+}
+
 #[tokio::test]
-async fn cancellation_watch_exhaustion_does_not_block_turn_completion() {
+async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_turn() {
     let controller = Arc::new(
         super::effect::RecordingEffectController::default().with_always_failing_cancel_watch(),
     );
     let controller_for_provider = Arc::clone(&controller);
-    let transport = TestProvider::builder()
-        .kind("mock")
-        .complete(move |_| {
-            let controller = Arc::clone(&controller_for_provider);
-            async move {
-                controller.wait_for_cancel_watch_exhaustion().await;
-                // Give an unbounded watcher a deterministic chance to enter a
-                // ninth resolver attempt before the turn ends and aborts it.
-                tokio::task::yield_now().await;
-                tokio::task::yield_now().await;
-                Ok(LlmResponse {
-                    parts: vec![LlmOutputPart::Text {
-                        text: "turn completed after cancel-watch exhaustion".to_string(),
-                        response_meta: None,
-                    }],
-                    response_metadata: Default::default(),
-                    ..LlmResponse::default()
-                })
-            }
-        })
-        .build();
-    let clock = Arc::new(CancelWatchTestClock::new(0));
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let observed_provider_calls = Arc::clone(&provider_calls);
+    let tool_executions = Arc::new(AtomicUsize::new(0));
+    let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
+    let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
+    let transport =
+        TestProvider::builder()
+            .kind("mock")
+            .requires_streaming(true)
+            .complete(move |request| {
+                let controller = Arc::clone(&controller_for_provider);
+                let observed_provider_calls = Arc::clone(&observed_provider_calls);
+                let provider_started_tx = Arc::clone(&provider_started_tx);
+                async move {
+                    let call = observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                    match call {
+                        0 => {
+                            request.stream_events.expect("stream events").send(
+                                LlmStreamEvent::Delta("drained before effect abort".to_string()),
+                            );
+                            if let Some(started) = provider_started_tx.lock_recover().take() {
+                                let _ = started.send(());
+                            }
+                            controller.wait_for_cancel_watch_exhaustion().await;
+                            for _ in 0..32 {
+                                tokio::task::yield_now().await;
+                            }
+                            Ok(LlmResponse {
+                                parts: vec![LlmOutputPart::ToolCall {
+                                    call_id: "post-exhaustion-tool".to_string(),
+                                    tool_name: "echo_tool".to_string(),
+                                    input_json: serde_json::json!({"value": "zombie"}).to_string(),
+                                    replay: None,
+                                }],
+                                response_metadata: Default::default(),
+                                ..LlmResponse::default()
+                            })
+                        }
+                        1 => Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::Text {
+                                text: "zombie turn completed".to_string(),
+                                response_meta: None,
+                            }],
+                            response_metadata: Default::default(),
+                            ..LlmResponse::default()
+                        }),
+                        _ => panic!("unexpected provider call {call}"),
+                    }
+                }
+            })
+            .build();
+    let clock = Arc::new(CancelWatchTestClock(crate::testing::TestClock::new(0)));
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
-    let host = EmbeddedRuntimeHost::new(
-        super::effect::runtime_host_config_with_native_controller(controller.clone())
-            .with_clock(host_clock),
-    );
-    let mut runtime = standard_runtime_with_transport_and_host(transport, host).await;
+    let config = super::effect::runtime_host_config_with_native_controller(controller.clone())
+        .with_clock(host_clock);
+    let turn_driver = crate::TurnWorkDriver::new(Arc::clone(&config.control.effect_host));
+    let host = EmbeddedRuntimeHost::new(config);
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(CountingEchoTool {
+            executions: Arc::clone(&tool_executions),
+        }),
+        transport,
+        host,
+    )
+    .await;
+    let turn_id = "bounded-cancel-watch";
+    let turn_address = crate::TurnAddress::new("root", turn_id);
+    let turn_cancel = CancellationToken::new();
+    let observed_turn_cancel = turn_cancel.clone();
+    let (turn_events, stream_event_entered_rx) =
+        CancellationGatedTurnEvents::new(turn_cancel.clone());
+    let turn_events_for_task = turn_events.clone();
+    let turn = crate::task::spawn(async move {
+        runtime
+            .stream_turn(
+                TurnInput::text("tear down after the cancellation watcher gives up"),
+                TurnOptions::new(turn_cancel, named_turn_scope("root", turn_id))
+                    .with_turn_events(&turn_events_for_task),
+            )
+            .await
+    });
 
-    let turn = runtime
-        .stream_turn(
-            TurnInput::text("complete despite a failed cancellation resolver"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                named_turn_scope("root", "bounded-cancel-watch"),
-            ),
-        )
+    provider_started_rx
         .await
-        .expect("cancel-watch exhaustion must not block turn completion");
+        .expect("provider must start before cancellation is committed");
+    stream_event_entered_rx
+        .await
+        .expect("the buffered stream event must reach the gated sink");
+    let receipt = turn_driver
+        .request_cancel(crate::TurnCancelRequest::new(
+            turn_address.clone(),
+            "watch-exhaustion-cancel",
+            Some("test-user".to_string()),
+        ))
+        .await
+        .expect("commit cancellation receipt");
+    assert!(matches!(
+        receipt.outcome,
+        crate::TurnCancelOutcome::Requested(ref evidence)
+            if evidence.request_id == "watch-exhaustion-cancel"
+    ));
+    controller.release_cancel_watch_failures();
 
-    assert_eq!(
-        turn.assistant_output.safe_text,
-        "turn completed after cancel-watch exhaustion"
-    );
+    let turn = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+        .await
+        .expect("watch exhaustion must tear down and settle the turn")
+        .expect("turn task")
+        .expect("committed cancellation remains a successful turn terminal");
     assert_eq!(
         controller.cancel_watch_attempts(),
         crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS
     );
     assert_eq!(
-        clock.sleeps.load(Ordering::SeqCst),
-        crate::runtime::turn_loop::TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1,
-        "every retry backoff before exhaustion must use the injected TestClock"
+        provider_calls.load(Ordering::SeqCst),
+        1,
+        "watch exhaustion must abort the in-flight provider call before another can start"
     );
+    assert_eq!(
+        tool_executions.load(Ordering::SeqCst),
+        0,
+        "provider output produced after watcher exhaustion must never reach an executor"
+    );
+    assert!(
+        observed_turn_cancel.is_cancelled(),
+        "watch exhaustion must cancel the active turn token after {} attempts",
+        controller.cancel_watch_attempts()
+    );
+    assert!(matches!(
+        turn.outcome,
+        TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
+            if evidence.request_id == "watch-exhaustion-cancel"
+    ));
+    assert!(
+        turn_events.snapshot().iter().any(|activity| matches!(
+            &activity.event,
+            TurnEvent::AssistantProseDelta { text }
+                if text.as_ref() == "drained before effect abort"
+        )),
+        "cooperative teardown must drain the buffered stream event; provider_calls={}, tool_executions={}",
+        provider_calls.load(Ordering::SeqCst),
+        tool_executions.load(Ordering::SeqCst)
+    );
+
+    let terminal = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        turn_driver.await_terminal(&turn_address),
+    )
+    .await
+    .expect("the cancelled turn must settle its terminal")
+    .expect("read settled turn terminal");
+    assert!(matches!(
+        terminal,
+        crate::TurnTerminal::Committed {
+            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence }),
+            ..
+        } if evidence.request_id == "watch-exhaustion-cancel"
+    ));
 }
 
 #[tokio::test]
