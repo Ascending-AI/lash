@@ -4697,6 +4697,7 @@
     }
     // END WORKBENCH_REMOTE_STREAM_RECOVERY
 
+    // BEGIN WORKBENCH_STOP_TURN
     function stopTurn() {
       if (controller) controller.abort();
       fetch("/api/turn/cancel", { method: "POST" })
@@ -4704,7 +4705,7 @@
           if (!response.ok) throw new Error("stop request failed (" + response.status + ")");
           const receipt = await response.json();
           const committed = (receipt.cancellations || []).find(item => item.terminal?.status === "committed");
-          const evidence = committed?.terminal?.cancellation;
+          const evidence = committed?.terminal?.outcome?.stopped?.cancelled?.evidence;
           const unresolved = (receipt.cancellations || []).find(item =>
             item.terminal_error?.code === "turn_terminal_await_timeout");
           if (evidence) renderNote("turn stopped · request " + evidence.request_id);
@@ -4716,6 +4717,7 @@
           if (!resetInFlight) refreshBusyState();
         });
     }
+    // END WORKBENCH_STOP_TURN
     stopButton.addEventListener("click", stopTurn);
 
     /* reset — replaces the server-side session and clears the transcript, with a two-step confirm */

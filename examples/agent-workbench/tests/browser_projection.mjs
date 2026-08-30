@@ -19,6 +19,25 @@ assert.ok(
   triggerIdentities,
   "LASH_WORKBENCH_TRIGGER_IDENTITIES must come from the Rust projection gate",
 );
+const stopReceipt = {
+  accepted: true,
+  cancellations: [{
+    terminal: {
+      status: "committed",
+      outcome: {
+        stopped: {
+          cancelled: {
+            evidence: {
+              request_id: "workbench-stop-browser-projection",
+              origin: "user",
+              reason: "workbench Stop control",
+            },
+          },
+        },
+      },
+    },
+  }],
+};
 const multiAttachmentMessage = JSON.parse(
   process.env.LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE ?? "null",
 );
@@ -86,6 +105,46 @@ function markedSource(begin, end) {
   assert.ok(block, `production ${begin} block is missing`);
   return block;
 }
+
+test("committed-cancelled Stop renders its request evidence", async () => {
+  const notes = [];
+  const errors = [];
+  let busyRefreshes = 0;
+  let resolveCompleted;
+  const completed = new Promise(resolve => { resolveCompleted = resolve; });
+  const stopContext = {
+    controller: null,
+    resetInFlight: false,
+    async fetch(url, options) {
+      assert.equal(url, "/api/turn/cancel");
+      assert.equal(options.method, "POST");
+      return {
+        ok: true,
+        async json() { return stopReceipt; },
+      };
+    },
+    renderNote(message) { notes.push(message); },
+    renderError(message) { errors.push(message); },
+    refreshBusyState() {
+      busyRefreshes += 1;
+      resolveCompleted();
+    },
+  };
+
+  vm.runInNewContext(
+    `${markedSource("WORKBENCH_STOP_TURN", "WORKBENCH_STOP_TURN")}
+     this.stopTurn = stopTurn;`,
+    stopContext,
+  );
+  stopContext.stopTurn();
+  await completed;
+
+  assert.deepEqual(notes, [
+    "turn stopped · request workbench-stop-browser-projection",
+  ]);
+  assert.deepEqual(errors, []);
+  assert.equal(busyRefreshes, 1);
+});
 
 test("resident replacement refetches without settling provisional rows", () => {
   const recovery = markedSource(
