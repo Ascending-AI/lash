@@ -313,6 +313,10 @@ where
         );
         tokio::pin!(runner);
         tokio::pin!(cancellation_signal);
+        // Redelivery must poll a committed cancellation before guest replay. If
+        // both are ready, replaying the guest first could consume a completed
+        // sleep and diverge against a journaled post-wake suffix before
+        // cancellation takes ownership of settlement.
         let outcome = tokio::select! {
             biased;
             signal = &mut cancellation_signal => {
