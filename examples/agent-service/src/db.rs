@@ -2,6 +2,7 @@ use std::path::Path;
 
 use axum::http::StatusCode;
 use lash::TurnEvent;
+use lash_remote_protocol::RemoteTurnEvent;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::json;
@@ -831,8 +832,10 @@ impl AppDb {
 }
 
 fn tool_payload(event: TurnEvent) -> AppResult<serde_json::Value> {
+    let event =
+        RemoteTurnEvent::try_from(event).map_err(|error| AppError::internal(error.to_string()))?;
     match event {
-        TurnEvent::ToolCallStarted {
+        RemoteTurnEvent::ToolCallStarted {
             call_id,
             name,
             args,
@@ -843,7 +846,7 @@ fn tool_payload(event: TurnEvent) -> AppResult<serde_json::Value> {
             "name": name,
             "args": args,
         })),
-        TurnEvent::ToolCallCompleted {
+        RemoteTurnEvent::ToolCallCompleted {
             call_id,
             name,
             args,
@@ -878,26 +881,52 @@ fn chat_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSummar
 }
 
 fn chat_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
+    let kind: String = row.get(2)?;
     let payload: Option<String> = row.get(5)?;
+    let mut payload = payload
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    5,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })
+        .transpose()?;
+    if kind == "tool_call"
+        && let Some(payload) = payload.as_mut()
+    {
+        normalize_legacy_tool_result(payload);
+    }
     Ok(ChatMessage {
         id: row.get(0)?,
         chat_id: row.get(1)?,
-        kind: row.get(2)?,
+        kind,
         role: row.get(3)?,
         text: row.get(4)?,
-        payload: payload
-            .map(|value| {
-                serde_json::from_str(&value).map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        5,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })
-            })
-            .transpose()?,
+        payload,
         created_at: row.get(6)?,
     })
+}
+
+fn normalize_legacy_tool_result(payload: &mut serde_json::Value) {
+    let Some(result) = payload.pointer_mut("/output/outcome/payload") else {
+        return;
+    };
+    let serde_json::Value::Object(wrapper) = result else {
+        return;
+    };
+    if wrapper.len() != 2
+        || wrapper.get("$lash_tool_value").and_then(|tag| tag.as_str()) != Some("untrusted_json")
+    {
+        return;
+    }
+    // This legacy heuristic unwraps a genuine user value if it is exactly this two-key wrapper.
+    let Some(value) = wrapper.get("value").cloned() else {
+        return;
+    };
+    *result = value;
 }
 
 fn branch_point_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatBranchPoint> {
@@ -961,6 +990,101 @@ mod tests {
     use axum::http::StatusCode;
 
     use super::*;
+
+    #[test]
+    fn replayed_tool_result_matches_live_payload_shape() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
+        let chat = db
+            .create_chat("tool replay", "mock-model", None)
+            .expect("create chat");
+        db.insert_tool_call(
+            &chat.id,
+            TurnEvent::ToolCallCompleted {
+                call_id: Some("move-1".to_string()),
+                name: "play_move".to_string(),
+                args: json!({ "cell": 4 }),
+                output: lash::tools::ToolCallOutput::success(json!({
+                    "accepted": true,
+                    "move": { "cell": 4 },
+                    "board": {
+                        "cells": [null, null, null, null, "O", null, null, null, null],
+                        "turn": "X"
+                    }
+                })),
+                duration_ms: 7,
+                graph_key: None,
+                parent_call_id: None,
+            },
+        )
+        .expect("persist completed tool call");
+
+        let stored_payload: String = db
+            .conn
+            .query_row(
+                "SELECT payload FROM messages
+                 WHERE chat_id = ?1 AND kind = 'tool_call'
+                 ORDER BY id DESC LIMIT 1",
+                params![&chat.id],
+                |row| row.get(0),
+            )
+            .expect("read persisted tool payload");
+        let stored_payload: serde_json::Value =
+            serde_json::from_str(&stored_payload).expect("parse persisted tool payload");
+        let replayed_result = &stored_payload["output"]["outcome"]["payload"];
+
+        assert_eq!(
+            replayed_result,
+            &json!({
+                "accepted": true,
+                "move": { "cell": 4 },
+                "board": {
+                    "cells": [null, null, null, null, "O", null, null, null, null],
+                    "turn": "X"
+                }
+            }),
+            "persisted replay must expose the same bare tool result as the live stream"
+        );
+    }
+
+    #[test]
+    fn legacy_wrapped_tool_result_replays_as_live_payload_shape() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
+        let chat = db
+            .create_chat("legacy tool replay", "mock-model", None)
+            .expect("create chat");
+        let legacy_payload = json!({
+            "phase": "completed",
+            "call_id": "move-legacy",
+            "name": "play_move",
+            "args": { "cell": 4 },
+            "output": {
+                "outcome": {
+                    "status": "success",
+                    "payload": {
+                        "$lash_tool_value": "untrusted_json",
+                        "value": { "accepted": true, "move": { "cell": 4 } }
+                    }
+                }
+            },
+            "duration_ms": 7
+        });
+        db.conn
+            .execute(
+                "INSERT INTO messages (chat_id, kind, role, text, payload, created_at)
+                 VALUES (?1, 'tool_call', 'tool', 'play_move', ?2, ?3)",
+                params![&chat.id, legacy_payload.to_string(), now()],
+            )
+            .expect("insert legacy tool row");
+
+        let messages = db.list_messages(&chat.id).expect("replay transcript");
+
+        assert_eq!(
+            messages[0].payload.as_ref().expect("tool payload")["output"]["outcome"]["payload"],
+            json!({ "accepted": true, "move": { "cell": 4 } })
+        );
+    }
 
     #[test]
     fn apply_agent_move_errors_when_not_agent_turn() {
