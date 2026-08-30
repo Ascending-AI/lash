@@ -189,7 +189,13 @@ def evaluate_conclusion(
     needs: Mapping[str, Mapping[str, object]],
     event_name: str = "",
     ref: str = "",
+    workers_e2e_enabled: bool | None = None,
 ) -> list[str]:
+    if workers_e2e_enabled is None:
+        workers_e2e_enabled = not (
+            event_name == "push" and ref != "refs/heads/main"
+        )
+
     expected_jobs = UNGATED_JOBS | set(GATED_JOBS)
     problems: list[str] = []
 
@@ -225,10 +231,10 @@ def evaluate_conclusion(
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
-        if job in WORKERS_E2E_JOBS and event_name == "push" and ref != "refs/heads/main":
+        if job in WORKERS_E2E_JOBS and not workers_e2e_enabled:
             if result != "skipped":
                 problems.append(
-                    f"workers E2E job {job} ended with {result!r} on a non-main push, expected skipped"
+                    f"workers E2E job {job} ended with {result!r} while disabled, expected skipped"
                 )
             continue
         if job in FULL_PROFILE_JOBS and event_name != "workflow_dispatch":
@@ -317,10 +323,18 @@ def main() -> int:
     except (KeyError, json.JSONDecodeError) as error:
         print(f"Invalid needs JSON: {error}", file=sys.stderr)
         return 1
+    workers_e2e_enabled = os.environ.get("WORKERS_E2E_ENABLED")
+    if workers_e2e_enabled not in {"true", "false"}:
+        print(
+            f"Invalid WORKERS_E2E_ENABLED: {workers_e2e_enabled!r}, expected 'true' or 'false'",
+            file=sys.stderr,
+        )
+        return 1
     problems = evaluate_conclusion(
         needs,
         os.environ.get("GITHUB_EVENT_NAME", ""),
         os.environ.get("GITHUB_REF", ""),
+        workers_e2e_enabled == "true",
     )
     print(json.dumps(needs, indent=2, sort_keys=True))
     if problems:
