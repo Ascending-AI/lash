@@ -586,6 +586,7 @@ async fn delete_trigger(
 ) -> Result<Json<TriggerMutationResponse>, AppError> {
     let session_id = query.resolve(&state)?;
     let record = trigger_record_for_session(&state, &session_id, &subscription_key).await?;
+    restate::cancel_cron_job_before_trigger_delete(&state, &session_id, &record).await?;
     state
         .trigger_store
         .execute_command(
@@ -608,14 +609,6 @@ async fn delete_trigger(
         "api.triggers.delete",
         json!({ "subscription_key": subscription_key, "changed": changed }),
     );
-    // A sync failure leaves the mutation durable and Restate stale; the next sync reconciles.
-    restate::sync_cron_jobs_after_trigger_mutation(
-        &state,
-        &session_id,
-        "trigger_deleted",
-        &record,
-    )
-    .await?;
     Ok(Json(TriggerMutationResponse {
         changed,
         registration: None,

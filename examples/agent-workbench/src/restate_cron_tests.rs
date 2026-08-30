@@ -513,6 +513,57 @@ async fn deleting_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
 }
 
 #[tokio::test]
+async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session() {
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let store_factory = Arc::new(ContendedSessionStoreFactory::new());
+    let mut state = crate::tests::recoverable_chat_test_state_with_store_factory_and_trigger_store(
+        data_dir.path(),
+        Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>,
+        Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
+    )
+    .await;
+    let session_id = state.current_session_id();
+    materialize_cron_test_session(&state, &session_id).await;
+    let record = register_fig1067_cron_subscription(trigger_store.as_ref(), &session_id).await;
+    let job_key = super::cron_job_key(&session_id, &record.source_key);
+    let surface = ScriptedCronObjectSurface::default();
+    surface.arm(&job_key);
+    state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
+    store_factory.contend_session_opens();
+
+    let axum::Json(response) = crate::delete_trigger(
+        axum::extract::Path(record.subscription_key),
+        axum::extract::State(state),
+        axum::extract::Query(crate::SessionQuery {
+            session_id: Some(session_id.clone()),
+        }),
+    )
+    .await
+    .expect("delete must cancel without opening the contended session");
+
+    assert!(response.changed);
+    assert!(response.registration.is_none());
+    assert_eq!(surface.info(&job_key), None, "cron info must be null");
+    assert_eq!(
+        surface.calls(),
+        vec![format!("WorkbenchCronJob/{job_key}/cancel")]
+    );
+    assert_eq!(
+        store_factory.contended_attempts(),
+        0,
+        "delete must not reach the failing session-open seam"
+    );
+    let durable = lash::triggers::TriggerStore::list_subscriptions(
+        trigger_store.as_ref(),
+        lash::triggers::TriggerSubscriptionFilter::for_session(&session_id),
+    )
+    .await
+    .expect("read durable triggers");
+    assert!(durable.is_empty(), "delete must commit after cancellation");
+}
+
+#[tokio::test]
 async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     let data_dir = tempfile::tempdir().expect("tempdir");
     let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
@@ -736,7 +787,7 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
 }
 
 #[tokio::test]
-async fn a_failed_delete_sync_still_traces_the_committed_mutation() {
+async fn a_failed_delete_cancel_preserves_the_registration() {
     let data_dir = tempfile::tempdir().expect("tempdir");
     let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
     let mut state = crate::tests::recoverable_chat_test_state_with_trigger_store(
@@ -776,17 +827,133 @@ async fn a_failed_delete_sync_still_traces_the_committed_mutation() {
     )
     .await
     .expect("read durable triggers");
-    assert!(durable.is_empty(), "delete must remain committed");
-    assert!(
-        std::fs::read_to_string(trace_path)
-            .expect("read failed-delete trace")
-            .contains("agent_workbench.api.triggers.delete")
+    assert_eq!(
+        durable.len(),
+        1,
+        "delete must not commit before cancellation succeeds"
     );
+    let trace = std::fs::read_to_string(trace_path).unwrap_or_default();
+    assert!(!trace.contains("agent_workbench.api.triggers.delete"));
 }
 
 struct MetaLossSessionStoreFactory {
     inner: lash::persistence::InMemorySessionStoreFactory,
     absent_session_ids: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+struct ContendedRuntimePersistence {
+    inner: Arc<dyn lash::persistence::RuntimePersistence>,
+    contend: Arc<std::sync::atomic::AtomicBool>,
+    contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl lash_test_internals::store::RuntimePersistenceDecorator for ContendedRuntimePersistence {
+    fn inner(&self) -> &(dyn lash::persistence::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn try_claim_session_execution_lease(
+        &self,
+        session_id: &str,
+        owner: &lash::persistence::LeaseOwnerIdentity,
+        executor_id: &str,
+        lease_ttl_ms: u64,
+    ) -> Result<
+        lash::persistence::SessionExecutionLeaseClaimOutcome,
+        lash::persistence::StoreError,
+    > {
+        if self.contend.load(std::sync::atomic::Ordering::SeqCst) {
+            self.contended_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Err(lash::persistence::StoreError::Contended);
+        }
+        self.inner
+            .try_claim_session_execution_lease(session_id, owner, executor_id, lease_ttl_ms)
+            .await
+    }
+}
+
+struct ContendedSessionStoreFactory {
+    inner: lash::persistence::InMemorySessionStoreFactory,
+    contend: Arc<std::sync::atomic::AtomicBool>,
+    contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ContendedSessionStoreFactory {
+    fn new() -> Self {
+        Self {
+            inner: lash::persistence::InMemorySessionStoreFactory::new(),
+            contend: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            contended_attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    fn contend_session_opens(&self) {
+        self.contend
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn contended_attempts(&self) -> usize {
+        self.contended_attempts
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::persistence::AttachmentRootSet for ContendedSessionStoreFactory {
+    async fn live_attachment_refs(
+        &self,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<
+        std::collections::BTreeSet<lash::attachments::AttachmentId>,
+        lash::persistence::StoreError,
+    > {
+        lash::persistence::AttachmentRootSet::live_attachment_refs(
+            &self.inner,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+
+    async fn has_live_attachment_ref(
+        &self,
+        id: &lash::attachments::AttachmentId,
+        intent_grace_cutoff_epoch_ms: u64,
+    ) -> Result<bool, lash::persistence::StoreError> {
+        lash::persistence::AttachmentRootSet::has_live_attachment_ref(
+            &self.inner,
+            id,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
+    async fn create_store(
+        &self,
+        request: &lash::persistence::SessionStoreCreateRequest,
+    ) -> Result<Arc<dyn lash::persistence::RuntimePersistence>, lash::persistence::StoreError> {
+        let inner = lash::persistence::SessionStoreFactory::create_store(&self.inner, request).await?;
+        Ok(Arc::new(ContendedRuntimePersistence {
+            inner,
+            contend: Arc::clone(&self.contend),
+            contended_attempts: Arc::clone(&self.contended_attempts),
+        }))
+    }
+
+    async fn session_was_deleted(&self, session_id: &str) -> Result<bool, String> {
+        lash::persistence::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+    }
+
+    async fn delete_session(
+        &self,
+        session_id: &str,
+    ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
+        lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
+    }
 }
 
 impl MetaLossSessionStoreFactory {

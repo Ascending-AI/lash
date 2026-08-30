@@ -86,9 +86,9 @@ impl CronJobSyncSurface for IngressCronJobSyncSurface {
     }
 }
 
-/// Completes the cron half of one committed trigger lifecycle mutation before
-/// its HTTP route may return success. The pre-mutation record keeps delete and
-/// disable cancellable even when this process did not originally arm the job.
+/// Completes the cron half of one committed trigger enable/disable mutation
+/// before its HTTP route may return success. The pre-mutation record keeps a
+/// disabled job cancellable even when this process did not originally arm it.
 pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
     state: &AppState,
     session_id: &str,
@@ -113,6 +113,47 @@ pub(crate) async fn sync_cron_jobs_after_trigger_mutation(
         ),
     };
     sync_cron_jobs(state, &surface, session_id, reason, AppError::runtime).await
+}
+
+/// Cancels the cron job named by the registration before its durable trigger
+/// delete. A failed cancellation therefore leaves the registration available
+/// for a later retry instead of orphaning a live external job.
+pub(crate) async fn cancel_cron_job_before_trigger_delete(
+    state: &AppState,
+    session_id: &str,
+    affected_registration: &lash::triggers::TriggerSubscriptionRecord,
+) -> Result<(), AppError> {
+    if affected_registration.source_type != CRON_SCHEDULE_SOURCE_TYPE {
+        return Ok(());
+    }
+    let job_key = cron_job_key(session_id, &affected_registration.source_key);
+    let surface = IngressCronJobSyncSurface {
+        client: lash_restate::RestateIngressClient::new(
+            lash_restate::RestateConnection::with_client(
+                &state.restate_ingress_url,
+                state.restate_http.clone(),
+            ),
+        ),
+    };
+    surface.cancel(&job_key).await?;
+    state.trace_for_session(
+        session_id,
+        "cron.restate.sync_cancelled",
+        json!({
+            "reason": "trigger_deleted",
+            "job_key": job_key,
+            "job_session_id": session_id,
+        }),
+    );
+    let mut known = state.restate_cron_job_keys.lock_recover();
+    let remove_session = known.get_mut(session_id).is_some_and(|keys| {
+        keys.remove(&job_key);
+        keys.is_empty()
+    });
+    if remove_session {
+        known.remove(session_id);
+    }
+    Ok(())
 }
 
 #[derive(Debug, PartialEq)]
