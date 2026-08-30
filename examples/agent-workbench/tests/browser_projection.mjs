@@ -63,7 +63,9 @@ vm.runInNewContext(
     beginStateRecovery,
     recoveryResponseIsCurrent,
     applyProjectionSnapshot,
-    busyAfterStateSnapshot
+    busyAfterStateSnapshot,
+    beginStateSnapshotRequest,
+    applySequencedBusySnapshot
   };`,
   context,
 );
@@ -73,6 +75,8 @@ const {
   recoveryResponseIsCurrent,
   applyProjectionSnapshot,
   busyAfterStateSnapshot,
+  beginStateSnapshotRequest,
+  applySequencedBusySnapshot,
 } = context.projectionExports;
 
 function markedSource(begin, end) {
@@ -1336,6 +1340,7 @@ test("durable failure and postCommand client errors remain distinct rows", async
     scrollToEnd() {},
     renderNote() {},
     setBusy() {},
+    refreshBusyState() {},
     refreshWork() {},
     async fetch() {
       fetchCalls += 1;
@@ -1756,16 +1761,158 @@ test("a new session never inherits another session's cursors or identities", () 
 });
 
 test("an authoritative settled snapshot clears a busy projection even when Done is pre-applied", () => {
+  const projection = createWorkbenchProjectionState();
+  let currentBusy = false;
   const settled = {
     ...snapshot("session-a", 3, ["turn-done"]),
     active_turns: [],
   };
 
-  assert.equal(busyAfterStateSnapshot(settled, true, true), false);
-  assert.equal(
-    busyAfterStateSnapshot({ ...settled, active_turns: [{ turn_id: "active" }] }, true, false),
-    true,
+  let sequence = beginStateSnapshotRequest(projection);
+  let result = applySequencedBusySnapshot(
+    projection,
+    { ...settled, active_turns: [{ turn_id: "active" }] },
+    sequence,
+    currentBusy,
   );
+  assert.equal(result.applied, true);
+  currentBusy = result.busy;
+  assert.equal(currentBusy, true);
+
+  sequence = beginStateSnapshotRequest(projection);
+  result = applySequencedBusySnapshot(
+    projection,
+    settled,
+    sequence,
+    currentBusy,
+  );
+  assert.equal(result.applied, true);
+  assert.equal(result.busy, false);
+});
+
+test("non-turn queued work requests authoritative busy state instead of latching it", () => {
+  const block = html.match(
+    /function renderQueuedWorkStarted\(event\) \{([\s\S]*?)\n    \}/,
+  )?.[0];
+  assert.ok(block, "production queued-work renderer is missing");
+  const calls = [];
+  vm.runInNewContext(
+    `${block}
+     renderQueuedWorkStarted({
+       causes: [{ event_type: "process.wake", text: "wake" }],
+       batch_ids: ["batch-a"]
+     });`,
+    {
+      renderEventRow(label, detail) { calls.push(["row", label, detail]); },
+      setBusy(value) { calls.push(["busy", value]); },
+      refreshBusyState() { calls.push(["refresh"]); },
+    },
+  );
+
+  assert.deepEqual(calls, [
+    ["row", "agent woken", "wake"],
+    ["refresh"],
+  ]);
+  assert.equal(busyAfterStateSnapshot({
+    active_turns: [],
+    queued_work: [{ batch_id: "still-pending" }],
+  }), false);
+});
+
+test("an older active snapshot cannot re-arm busy after a newer settled snapshot", () => {
+  const projection = createWorkbenchProjectionState();
+  let currentBusy = false;
+  const olderRunning = {
+    ...snapshot("session-a", 4),
+    active_turns: [{ turn_id: "turn-a" }],
+  };
+  const newerSettled = {
+    ...snapshot("session-a", 5, ["turn-a-done"]),
+    active_turns: [],
+  };
+
+  const olderSequence = beginStateSnapshotRequest(projection);
+  const newerSequence = beginStateSnapshotRequest(projection);
+  let result = applySequencedBusySnapshot(
+    projection,
+    newerSettled,
+    newerSequence,
+    currentBusy,
+  );
+  assert.equal(result.applied, true);
+  currentBusy = result.busy;
+  result = applySequencedBusySnapshot(
+    projection,
+    olderRunning,
+    olderSequence,
+    currentBusy,
+  );
+
+  assert.equal(result.applied, false);
+  currentBusy = result.busy;
+  assert.equal(currentBusy, false);
+});
+
+test("every tab refetches authoritative busy state for product-lane turn boundaries", () => {
+  function watcherCalls(event) {
+    const calls = [];
+    const reducerContext = {
+      Set,
+      projectionState: createWorkbenchProjectionState(),
+      renderedProductEvents: new Set(),
+      renderMessage() {},
+      renderIngressReceipt() {},
+      applyExecutionScorecardRecord() {},
+      renderExecutionScorecard() {},
+      executionScorecardState: new Map(),
+      executionScorecard: {},
+      finishTransientRows() {},
+      refreshUsage(turnId) { calls.push(`refresh:${turnId ?? "none"}`); },
+      recoverFromState() {},
+      refreshBusyState() { calls.push("refresh"); },
+      setBusy(value) { calls.push(`busy:${value}`); },
+    };
+    vm.runInNewContext(
+      `${markedSource("WORKBENCH_PRODUCT_EVENT_REDUCER", "WORKBENCH_PRODUCT_EVENT_REDUCER")}
+       applyProductEvent(${JSON.stringify(event)});`,
+      reducerContext,
+    );
+    return calls;
+  }
+
+  assert.deepEqual(watcherCalls({
+    event_id: "turn-a-started",
+    sequence: 1,
+    type: "message",
+    message: { id: "turn-a-user", role: "user", text: "start" },
+  }), ["refresh"]);
+  assert.deepEqual(watcherCalls({
+    event_id: "turn-a-done",
+    sequence: 2,
+    type: "done",
+    turn_id: "turn-a",
+    outcome: "completed",
+  }), ["refresh:turn-a"]);
+
+  const tabs = [createWorkbenchProjectionState(), createWorkbenchProjectionState()];
+  let tabBusy = [false, false];
+  const applyToEveryTab = (state) => {
+    tabs.forEach((projection, index) => {
+      const sequence = beginStateSnapshotRequest(projection);
+      const result = applySequencedBusySnapshot(
+        projection,
+        state,
+        sequence,
+        tabBusy[index],
+      );
+      assert.equal(result.applied, true);
+      tabBusy[index] = result.busy;
+    });
+  };
+  applyToEveryTab({ active_turns: [{ turn_id: "turn-a" }] });
+  assert.deepEqual(tabBusy, [true, true]);
+  applyToEveryTab({ active_turns: [] });
+  assert.deepEqual(tabBusy, [false, false]);
 });
 
 /* FIG-791: the shell may only claim "idle" / "no turns yet" from a snapshot it
@@ -2390,6 +2537,7 @@ test("a committed RLM printed-image message numbers multiple image alt labels", 
 test("a Done product event behaviorally retracts the provisional draft", () => {
   let draftRemoved = false;
   let busy = true;
+  let refreshes = 0;
   const reducerContext = {
     Set,
     projectionState: createWorkbenchProjectionState(),
@@ -2420,7 +2568,10 @@ test("a Done product event behaviorally retracts the provisional draft", () => {
     setBusy(value) {
       busy = value;
     },
-    refreshUsage() {},
+    refreshUsage(turnId) {
+      assert.equal(turnId, "cancel-turn");
+      refreshes += 1;
+    },
   };
   vm.runInNewContext(
     `${markedSource("WORKBENCH_TERMINAL_TURN_TOMBSTONES", "WORKBENCH_TERMINAL_TURN_TOMBSTONES")}
@@ -2442,7 +2593,8 @@ test("a Done product event behaviorally retracts the provisional draft", () => {
   );
 
   assert.equal(draftRemoved, true);
-  assert.equal(busy, false);
+  assert.equal(busy, true, "Done waits for the authoritative snapshot to clear busy");
+  assert.equal(refreshes, 1);
   assert.equal(reducerContext.result.assistantDraft, null);
   assert.equal(reducerContext.result.assistantDraftTurnId, null);
   assert.equal(reducerContext.result.assistantDraftText, "");
