@@ -80,8 +80,9 @@ pub use lashlang_graph::{
 /// projection metadata list to match the merged observation representation.
 /// Version 11 adds typed charge-safety decisions to retry attempts. Version 12
 /// types retry-attempt outcomes and adds generation disposition and
-/// provider-reported usage to each LLM attempt projection.
-pub const TRACE_SCHEMA_VERSION: u32 = 12;
+/// provider-reported usage to each LLM attempt projection. Version 13 adds the
+/// typed `attachment_degraded` continuation event.
+pub const TRACE_SCHEMA_VERSION: u32 = 13;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -286,6 +287,17 @@ pub enum TraceEvent {
         prompt_chars: usize,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         components: Vec<TracePromptComponent>,
+    },
+    /// One attachment was omitted so an otherwise valid session can continue.
+    AttachmentDegraded {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attachment_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        source: lash_sansio::AttachmentMaterializationSource,
+        reason: lash_sansio::AttachmentMaterializationReason,
     },
     /// Complete model-facing composition captured only when its fingerprint
     /// changes for a resident session.
@@ -611,6 +623,7 @@ impl TraceEvent {
             Self::SessionStarted { .. }
             | Self::TurnStarted { .. }
             | Self::PromptBuilt { .. }
+            | Self::AttachmentDegraded { .. }
             | Self::CompositionChanged { .. }
             | Self::RollingHistoryCompactionNeeded { .. }
             | Self::RollingHistoryCompactionStarted { .. }
@@ -647,6 +660,7 @@ impl TraceEvent {
             Self::SessionStarted { .. } => "session_started",
             Self::TurnStarted { .. } => "turn_started",
             Self::PromptBuilt { .. } => "prompt_built",
+            Self::AttachmentDegraded { .. } => "attachment_degraded",
             Self::CompositionChanged { .. } => "composition_changed",
             Self::RollingHistoryCompactionNeeded { .. } => "rolling_history_compaction_needed",
             Self::RollingHistoryCompactionStarted { .. } => "rolling_history_compaction_started",

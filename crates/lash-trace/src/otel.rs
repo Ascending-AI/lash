@@ -297,6 +297,9 @@ where
             }
             TraceEvent::SessionStarted { .. } => self.emit_instant(record, "lash.session", None),
             TraceEvent::PromptBuilt { .. } => self.emit_instant(record, "lash.prompt", None),
+            TraceEvent::AttachmentDegraded { .. } => {
+                self.emit_instant(record, "lash.attachment.degraded", None)
+            }
             TraceEvent::CompositionChanged { .. } => {
                 self.emit_instant(record, "lash.composition.changed", None)
             }
@@ -447,6 +450,31 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 "lash.prompt.components_json",
                 components,
             );
+        }
+        TraceEvent::AttachmentDegraded {
+            attachment_id,
+            label,
+            media_type,
+            source,
+            reason,
+        } => {
+            push_opt(&mut attrs, "lash.attachment.id", attachment_id);
+            push_opt(&mut attrs, "lash.attachment.label", label);
+            push_opt(&mut attrs, "lash.attachment.media_type", media_type);
+            attrs.push(KeyValue::new(
+                "lash.attachment.source",
+                serde_json::to_value(source)
+                    .ok()
+                    .and_then(|value| value.as_str().map(ToOwned::to_owned))
+                    .unwrap_or_else(|| "unknown".to_string()),
+            ));
+            attrs.push(KeyValue::new(
+                "lash.attachment.degradation_reason",
+                serde_json::to_value(reason)
+                    .ok()
+                    .and_then(|value| value.as_str().map(ToOwned::to_owned))
+                    .unwrap_or_else(|| "unknown".to_string()),
+            ));
         }
         TraceEvent::CompositionChanged {
             fingerprint,

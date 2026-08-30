@@ -9644,6 +9644,12 @@ lash::tracing::TraceError::raw
 lash::tracing::TraceError::retryable
 lash::tracing::TraceError::terminal_reason
 lash::tracing::TraceEvent
+lash::tracing::TraceEvent::AttachmentDegraded
+lash::tracing::TraceEvent::AttachmentDegraded::attachment_id
+lash::tracing::TraceEvent::AttachmentDegraded::label
+lash::tracing::TraceEvent::AttachmentDegraded::media_type
+lash::tracing::TraceEvent::AttachmentDegraded::reason
+lash::tracing::TraceEvent::AttachmentDegraded::source
 lash::tracing::TraceEvent::CompositionChanged
 lash::tracing::TraceEvent::CompositionChanged::fingerprint
 lash::tracing::TraceEvent::CompositionChanged::rendered_system_prompt

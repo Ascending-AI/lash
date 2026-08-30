@@ -3,7 +3,7 @@ mod file_store;
 
 pub use file_store::FileAttachmentStore;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -1410,6 +1410,100 @@ pub async fn resolve_llm_request_attachments(
             .insert(attachment_ref.id.clone(), stored.bytes);
     }
     Ok(request)
+}
+
+pub(crate) fn attachment_materialization_notice(
+    source: &crate::AttachmentSource,
+) -> Option<crate::AttachmentMaterializationNotice> {
+    crate::llm::transport::known_attachment_acceptors(source)
+        .is_empty()
+        .then(|| crate::AttachmentMaterializationNotice::no_provider_accepts(source))
+}
+
+/// Replace attachments accepted by no provider with deterministic text blocks.
+///
+/// The fast path neither clones nor mutates the request, keeping accepted
+/// attachment envelopes byte-for-byte identical. On the degradation path the
+/// rewritten request itself crosses the durable effect boundary, so replay
+/// observes the recorded decision rather than recomputing it after dispatch.
+pub(crate) fn degrade_unmaterializable_request_attachments(
+    request: &mut Arc<crate::llm::types::LlmRequest>,
+) -> Vec<crate::AttachmentMaterializationNotice> {
+    let notices = request
+        .attachments
+        .iter()
+        .map(attachment_materialization_notice)
+        .collect::<Vec<_>>();
+    if notices.iter().all(Option::is_none) {
+        return Vec::new();
+    }
+
+    let request = Arc::make_mut(request);
+    let mut remapped_indices = Vec::with_capacity(request.attachments.len());
+    let mut retained = Vec::with_capacity(request.attachments.len());
+    for (source, notice) in request.attachments.drain(..).zip(&notices) {
+        if notice.is_some() {
+            remapped_indices.push(None);
+        } else {
+            remapped_indices.push(Some(retained.len()));
+            retained.push(source);
+        }
+    }
+    request.attachments = retained;
+
+    for message in &mut request.messages {
+        if !message
+            .blocks
+            .iter()
+            .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Attachment { .. }))
+        {
+            continue;
+        }
+        let existing_placeholders = message
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                crate::llm::types::LlmContentBlock::Text { text, .. } => Some(text.to_string()),
+                crate::llm::types::LlmContentBlock::ToolResult { content, .. } => {
+                    Some(content.clone())
+                }
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        Arc::make_mut(&mut message.blocks).retain_mut(|block| {
+            let crate::llm::types::LlmContentBlock::Attachment { attachment_idx } = block else {
+                return true;
+            };
+            match notices.get(*attachment_idx) {
+                Some(Some(notice)) => {
+                    let placeholder = notice.model_placeholder();
+                    if existing_placeholders.contains(&placeholder) {
+                        return false;
+                    }
+                    *block = crate::llm::types::LlmContentBlock::Text {
+                        text: placeholder.into(),
+                        response_meta: None,
+                        cache_breakpoint: false,
+                    };
+                }
+                Some(None) => {
+                    *attachment_idx = remapped_indices[*attachment_idx]
+                        .expect("retained attachment has a remapped index");
+                }
+                None => {}
+            }
+            true
+        });
+    }
+
+    request.resolved_stored.retain(|attachment_id, _| {
+        request.attachments.iter().any(|source| {
+            source
+                .stored_ref()
+                .is_some_and(|attachment_ref| &attachment_ref.id == attachment_id)
+        })
+    });
+    notices.into_iter().flatten().collect()
 }
 
 #[cfg(test)]

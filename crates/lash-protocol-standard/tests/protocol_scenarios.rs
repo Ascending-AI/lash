@@ -360,6 +360,7 @@ impl StandardToolResult {
                     lash_core::facade_support::ModelToolReturnPart::text(outcome.model_addendum())
                 }))
                 .collect(),
+                attachment_notices: Vec::new(),
             },
             duration_ms: 1,
             intent_outcomes: self.intent_outcomes.clone(),

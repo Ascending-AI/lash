@@ -1596,3 +1596,72 @@ fn persistence_manifest_adapter_forwards_holds_ref() {
         vec![attachment_id]
     );
 }
+
+fn attachment_request(source: crate::AttachmentSource) -> Arc<crate::llm::types::LlmRequest> {
+    Arc::new(crate::llm::types::LlmRequest {
+        model: "attachment-model".to_string(),
+        messages: vec![crate::llm::types::LlmMessage::new(
+            crate::llm::types::LlmRole::User,
+            vec![crate::llm::types::LlmContentBlock::Attachment { attachment_idx: 0 }],
+        )],
+        attachments: vec![source],
+        resolved_stored: Default::default(),
+        tools: Arc::new(Vec::new()),
+        tool_choice: crate::llm::types::LlmToolChoice::None,
+        model_variant: crate::ReasoningSelection::ProviderDefault,
+        model_capability: crate::ModelCapability::default(),
+        generation: crate::llm::types::GenerationOptions::default(),
+        scope: crate::llm::types::LlmRequestScope::new(
+            "attachment-session",
+            "attachment-frame",
+            "attachment-request",
+        ),
+        output_spec: None,
+        stream_events: None,
+        provider_trace: None,
+    })
+}
+
+#[test]
+fn accepted_attachment_degradation_fast_path_preserves_exact_request() {
+    let mut request = attachment_request(crate::AttachmentSource::inline(
+        MediaType::parse("image/png").expect("image MIME"),
+        vec![1, 2, 3],
+    ));
+    let pointer_before = Arc::as_ptr(&request);
+    let bytes_before = serde_json::to_vec(request.as_ref()).expect("serialize request before");
+
+    let notices = degrade_unmaterializable_request_attachments(&mut request);
+
+    assert!(notices.is_empty());
+    assert_eq!(Arc::as_ptr(&request), pointer_before);
+    assert_eq!(
+        serde_json::to_vec(request.as_ref()).expect("serialize request after"),
+        bytes_before,
+        "accepted attachment envelopes must remain byte-for-byte unchanged"
+    );
+}
+
+#[test]
+fn unsupported_attachment_is_replaced_by_typed_placeholder() {
+    let attachment_ref = lash_sansio::AttachmentRef {
+        id: AttachmentId::parse("unsupported-binary").expect("attachment id"),
+        media_type: MediaType::parse("application/octet-stream").expect("binary MIME"),
+        byte_len: 34,
+        type_metadata: None,
+        label: Some("workspace_badge.bin".to_string()),
+    };
+    let mut request = attachment_request(crate::AttachmentSource::stored(attachment_ref));
+
+    let notices = degrade_unmaterializable_request_attachments(&mut request);
+
+    assert_eq!(notices.len(), 1);
+    assert!(request.attachments.is_empty());
+    assert!(matches!(
+        request.messages[0].blocks.as_slice(),
+        [crate::llm::types::LlmContentBlock::Text { text, .. }]
+            if text.contains("attachment_unavailable")
+                && text.contains("workspace_badge.bin")
+                && text.contains("no_provider_accepts_mime_and_source")
+    ));
+}
