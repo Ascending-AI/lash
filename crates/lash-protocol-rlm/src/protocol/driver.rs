@@ -522,8 +522,37 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         };
         let mut actions = Vec::new();
 
+        // Cancellation evidence is recorded at the effect handoff, after the
+        // executor returns and before this response is interpreted. It must
+        // win even when cancellation raced with a normal success or error, or
+        // that response could become feedback and re-enter the model.
+        if let Some(evidence) = ctx.observed_cancellation() {
+            return vec![DriverAction::FinishCancelled {
+                evidence: evidence.clone(),
+            }];
+        }
+
         match result {
             Ok(response) => {
+                let exec_error = response.error.map(|raw_error| {
+                    let kind = crate::feedback::RlmFeedbackKind::split(&raw_error).0;
+                    (kind, raw_error)
+                });
+                if matches!(
+                    exec_error,
+                    Some((crate::feedback::RlmFeedbackKind::Stop, _))
+                ) {
+                    return vec![
+                        DriverAction::AppendEvents(vec![diagnostic_event(
+                            "stop_without_cancellation_evidence",
+                            serde_json::json!({
+                                "code": "rlm_stop_without_cancellation_evidence",
+                                "constraint": "a Stop response must carry observed host cancellation evidence",
+                            }),
+                        )]),
+                        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
+                    ];
+                }
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                         "projection_rehydration",
@@ -549,7 +578,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         state.output.push(observation.text);
                     }
                 }
-                if let Some(raw_error) = response.error {
+                if let Some((
+                    crate::feedback::RlmFeedbackKind::Policy
+                    | crate::feedback::RlmFeedbackKind::Error,
+                    raw_error,
+                )) = exec_error
+                {
                     state.exec_error = Some(raw_error);
                 }
                 if let Some(finish_value) = response.terminal_finish {

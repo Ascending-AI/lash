@@ -260,6 +260,19 @@ pub struct ProtocolSessionMaterialization<'a> {
     pub is_root_session: bool,
 }
 
+/// How the runtime settled the code effect after observing its response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodeExecutionDisposition {
+    /// The response was accepted for normal protocol processing.
+    Accepted,
+    /// The response could not be handed to the protocol, so cell-local
+    /// mutations must be discarded.
+    Discarded,
+    /// A cancellation won at the response handoff, so cell-local mutations
+    /// must be discarded.
+    Cancelled,
+}
+
 #[async_trait::async_trait]
 pub trait CodeExecutorPlugin: Send + Sync {
     async fn execute_code(
@@ -319,6 +332,21 @@ pub trait CodeExecutorPlugin: Send + Sync {
     async fn acknowledge_execution_state_capture(&self) {}
 
     async fn abort_execution_state_capture(&self) {}
+
+    /// Settle the most recently returned code effect at the response handoff.
+    ///
+    /// This closes the cancellation race between the executor's final token
+    /// observation and the runtime consuming its response. Stateful executors
+    /// can retain a cell checkpoint until this call and roll it back when the
+    /// disposition is not [`CodeExecutionDisposition::Accepted`]. The runtime
+    /// settles each returned response before starting another code effect for
+    /// the same session.
+    async fn settle_code_execution(
+        &self,
+        _disposition: CodeExecutionDisposition,
+    ) -> Result<(), crate::SessionError> {
+        Ok(())
+    }
 
     async fn restore_execution_state(
         &self,

@@ -1521,6 +1521,12 @@ impl LashRuntime {
         };
         let assembled_cancelled = assembled_cancellation.is_some();
         let lease_was_lost = session_execution_lease.is_some_and(|lease| lease.is_lost());
+        if lease_was_lost && cancel_state.is_cancelled() && !assembled_cancelled {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::SessionExecutionLeaseLost,
+                "session execution lease was lost while the turn was active",
+            ));
+        }
         let cancellation = turn_control
             .settle_before_commit(
                 turn_control_resolver,

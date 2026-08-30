@@ -493,6 +493,17 @@ impl<'run> RuntimeExecutionContext<'run> {
         Arc::clone(&self.attachment_store)
     }
 
+    /// Reports whether the execution scope has been cancelled by its host.
+    ///
+    /// Language-runtime bridges use this cooperative probe to turn a host Stop
+    /// into their typed terminal instead of reporting it as a guest-program
+    /// failure.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+    }
+
     pub(super) fn process_id(&self) -> Option<&str> {
         self.process_execution
             .as_ref()

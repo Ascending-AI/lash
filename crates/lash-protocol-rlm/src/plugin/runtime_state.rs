@@ -296,6 +296,21 @@ impl RlmRuntimeState {
         let _ = self.execution.lock().await.abort_execution_state_capture();
     }
 
+    pub(super) async fn settle_code_execution(
+        &self,
+        disposition: lash_core::plugin::CodeExecutionDisposition,
+    ) -> Result<(), SessionError> {
+        let rolled_back = disposition != lash_core::plugin::CodeExecutionDisposition::Accepted;
+        self.execution
+            .lock()
+            .await
+            .settle_code_execution(disposition)?;
+        if rolled_back {
+            self.refresh_bound_variables_prompt().await?;
+        }
+        Ok(())
+    }
+
     pub(super) async fn restore_execution_state(
         &self,
         state: &lash_core::plugin::HydratedExecutionState,
@@ -426,6 +441,13 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
 
     async fn abort_execution_state_capture(&self) {
         self.state.abort_execution_state_capture().await;
+    }
+
+    async fn settle_code_execution(
+        &self,
+        disposition: lash_core::plugin::CodeExecutionDisposition,
+    ) -> Result<(), SessionError> {
+        self.state.settle_code_execution(disposition).await
     }
 }
 
@@ -631,6 +653,10 @@ mod tests {
                     first.error.is_some(),
                     "`web.fetch` resolves to nothing, so the parked cell ends in a link error"
                 );
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .await
+                    .expect("settle the first returned cell");
 
                 // The waiting cell, re-driven, now runs — on that same state.
                 let second = state
@@ -641,6 +667,10 @@ mod tests {
                     .await
                     .expect("the cell that waited now runs");
                 assert_eq!(second.error, None);
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .await
+                    .expect("settle the second returned cell");
 
                 let total = state
                     .execute_code(
@@ -651,6 +681,49 @@ mod tests {
                     .expect("execute code");
                 assert_eq!(total.error, None);
                 assert_eq!(total.terminal_finish, Some(serde_json::json!(2)));
+            });
+    }
+
+    #[test]
+    fn a_returned_cell_must_be_settled_before_another_cell_can_start() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
+                state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("first = 1"),
+                    )
+                    .await
+                    .expect("first cell");
+
+                let overlapping = state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("second = 2"),
+                    )
+                    .await
+                    .expect_err("an unsettled response fences the next cell");
+                assert!(matches!(
+                    overlapping,
+                    SessionError::Protocol(message)
+                        if message == "the previous code execution response has not been settled"
+                ));
+
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .await
+                    .expect("settle first response");
+                state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("second = 2"),
+                    )
+                    .await
+                    .expect("settlement releases the next cell");
             });
     }
 
@@ -682,6 +755,51 @@ mod tests {
                         .expect("prompt read")
                         .contains("- `scratch_note` = after execution")
                 );
+            });
+    }
+
+    #[test]
+    fn cancelled_settlement_refreshes_the_driver_bound_variables_snapshot() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_lashlang_for_tests().expect("runtime state");
+                let prompt = state.shared_bound_variables_prompt();
+
+                state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("survives = 7"),
+                    )
+                    .await
+                    .expect("execute accepted cell");
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
+                    .await
+                    .expect("accept first cell");
+                state
+                    .execute_code(
+                        lash_core::testing::code_execution_context(),
+                        cell("cancelled_tail = 1"),
+                    )
+                    .await
+                    .expect("execute cell before late cancellation");
+                assert!(
+                    prompt
+                        .read()
+                        .expect("prompt read")
+                        .contains("cancelled_tail")
+                );
+
+                state
+                    .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Cancelled)
+                    .await
+                    .expect("cancel second cell");
+                let rendered = prompt.read().expect("prompt read");
+                assert!(rendered.contains("survives"));
+                assert!(!rendered.contains("cancelled_tail"));
             });
     }
 

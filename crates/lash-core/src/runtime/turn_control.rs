@@ -72,19 +72,44 @@ impl TurnAddress {
 #[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct TurnCancelOriginHint {
-    origin: Arc<Mutex<Option<Option<String>>>>,
+    state: Arc<Mutex<TurnCancelOriginState>>,
+}
+
+#[derive(Default)]
+struct TurnCancelOriginState {
+    configured_origin: Option<Option<String>>,
+    observed_origin: Option<Option<String>>,
 }
 
 impl TurnCancelOriginHint {
+    /// Record the origin of an observed cancellation request.
     pub fn set(&self, origin: Option<String>) {
-        let mut hint = self.origin.lock_recover();
-        if hint.is_none() {
-            *hint = Some(origin);
+        let mut state = self.state.lock_recover();
+        if state.observed_origin.is_none() {
+            state.observed_origin = Some(origin);
         }
     }
 
     pub(crate) fn get(&self) -> Option<String> {
-        self.origin.lock_recover().clone().flatten()
+        let state = self.state.lock_recover();
+        state
+            .observed_origin
+            .clone()
+            .or_else(|| state.configured_origin.clone())
+            .flatten()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn was_set(&self) -> bool {
+        self.state.lock_recover().observed_origin.is_some()
+    }
+
+    /// Record a process-local token and the origin to use if that token fires
+    /// independently of a routed cancellation request.
+    #[doc(hidden)]
+    pub(crate) fn configure_local_token(&self, origin: Option<String>) {
+        let mut state = self.state.lock_recover();
+        state.configured_origin = Some(origin);
     }
 }
 
@@ -1009,19 +1034,44 @@ mod tests {
     #[test]
     fn local_cancel_origin_hint_preserves_first_origin() {
         let hint = TurnCancelOriginHint::default();
+        assert!(!hint.was_set());
         hint.set(Some("shutdown".to_string()));
         hint.set(Some("user".to_string()));
 
+        assert!(hint.was_set());
         assert_eq!(hint.get().as_deref(), Some("shutdown"));
     }
 
     #[test]
     fn local_cancel_origin_hint_preserves_explicit_absence() {
         let hint = TurnCancelOriginHint::default();
+        assert!(!hint.was_set());
         hint.set(None);
         hint.set(Some("user".to_string()));
 
+        assert!(hint.was_set());
         assert_eq!(hint.get(), None);
+    }
+
+    #[test]
+    fn installed_originless_token_does_not_block_a_later_registry_origin() {
+        let hint = TurnCancelOriginHint::default();
+        hint.configure_local_token(None);
+
+        assert!(!hint.was_set());
+
+        hint.set(Some("user".to_string()));
+        assert_eq!(hint.get().as_deref(), Some("user"));
+    }
+
+    #[test]
+    fn observed_registry_origin_wins_over_configured_token_origin() {
+        let hint = TurnCancelOriginHint::default();
+        hint.configure_local_token(Some("shutdown".to_string()));
+        assert_eq!(hint.get().as_deref(), Some("shutdown"));
+
+        hint.set(Some("user".to_string()));
+        assert_eq!(hint.get().as_deref(), Some("user"));
     }
 
     #[test]

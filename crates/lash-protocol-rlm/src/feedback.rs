@@ -6,6 +6,8 @@
 //! allowed, and resending it unchanged is guaranteed to fail again. Or the
 //! program can *run and fail* — a throw, a rejected tool call, a bad value —
 //! in which case the shape was fine and the logic was not.
+//! A host cancellation is neither: it terminates the turn and must never become
+//! model feedback.
 //!
 //! Until now both arrived as `Error:` followed by prose, and a model had to
 //! infer which it was from the wording of the diagnostic. Guessing wrong is
@@ -31,10 +33,14 @@ pub(crate) enum RlmFeedbackKind {
     /// an unterminated string — or run and thrown. Either way the approach was
     /// allowed and the code was not correct, so the fix is in the code.
     Error,
+    /// The host stopped the executing cell. The turn ends at its last
+    /// checkpoint; no part of the cancelled tail is repair feedback.
+    Stop,
 }
 
 const POLICY_TAG: &str = "[POLICY]";
 const ERROR_TAG: &str = "[ERROR]";
+const STOP_TAG: &str = "[STOP]";
 
 impl RlmFeedbackKind {
     /// The tag that opens the evidence line.
@@ -42,6 +48,7 @@ impl RlmFeedbackKind {
         match self {
             Self::Policy => POLICY_TAG,
             Self::Error => ERROR_TAG,
+            Self::Stop => STOP_TAG,
         }
     }
 
@@ -63,6 +70,8 @@ impl RlmFeedbackKind {
             (Self::Policy, evidence.trim_start_matches(' '))
         } else if let Some(evidence) = text.strip_prefix(ERROR_TAG) {
             (Self::Error, evidence.trim_start_matches(' '))
+        } else if let Some(evidence) = text.strip_prefix(STOP_TAG) {
+            (Self::Stop, evidence.trim_start_matches(' '))
         } else {
             (Self::Error, text)
         }
@@ -72,14 +81,15 @@ impl RlmFeedbackKind {
     /// to the evidence. The two halves answer different questions — what
     /// happened, and what to write next — and a model that has already read the
     /// diagnostic needs only the second.
-    pub(crate) fn imperative(self, cell_noun: &str) -> String {
+    pub(crate) fn imperative(self, cell_noun: &str) -> Option<String> {
         match self {
-            Self::Policy => format!(
+            Self::Policy => Some(format!(
                 "Next: the runtime refused this {cell_noun}; sending it again unchanged will be refused again. Rewrite it in the form named above."
-            ),
-            Self::Error => format!(
+            )),
+            Self::Error => Some(format!(
                 "Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected {cell_noun}."
-            ),
+            )),
+            Self::Stop => None,
         }
     }
 }
@@ -92,7 +102,11 @@ mod tests {
     /// its own label silently degrades every refusal into a runtime error.
     #[test]
     fn every_kind_round_trips_through_its_tag() {
-        for kind in [RlmFeedbackKind::Policy, RlmFeedbackKind::Error] {
+        for kind in [
+            RlmFeedbackKind::Policy,
+            RlmFeedbackKind::Error,
+            RlmFeedbackKind::Stop,
+        ] {
             let labelled = kind.label("classes are not in the TypeScript dialect");
             assert_eq!(
                 RlmFeedbackKind::split(&labelled),
@@ -113,13 +127,18 @@ mod tests {
     /// The two imperatives have to actually differ, or the split is decoration.
     #[test]
     fn the_two_imperatives_give_opposite_instructions() {
-        let policy = RlmFeedbackKind::Policy.imperative("cell");
-        let error = RlmFeedbackKind::Error.imperative("cell");
+        let policy = RlmFeedbackKind::Policy
+            .imperative("cell")
+            .expect("policy needs repair guidance");
+        let error = RlmFeedbackKind::Error
+            .imperative("cell")
+            .expect("error needs repair guidance");
         assert_ne!(policy, error);
         assert!(policy.contains("refused"), "{policy}");
         assert!(error.contains("the defect is in the program"), "{error}");
         // The Error branch also covers compile-time defects, which never ran, so
         // it must not claim the program did.
         assert!(!error.contains("ran and failed"), "{error}");
+        assert_eq!(RlmFeedbackKind::Stop.imperative("cell"), None);
     }
 }

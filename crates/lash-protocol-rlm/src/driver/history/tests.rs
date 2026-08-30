@@ -409,6 +409,23 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
     assert!(!threw.contains("refused"), "{threw}");
 }
 
+#[test]
+fn a_stop_carrier_never_renders_as_model_feedback() {
+    let transcript = rendered_text(&render(&[failed_step_event(
+        "lashlang_step_0",
+        "value = 1",
+        &crate::feedback::RlmFeedbackKind::Stop
+            .label("lashlang execution was cancelled by the host"),
+    )]));
+
+    assert!(!transcript.contains("[STOP]"), "{transcript}");
+    assert!(
+        !transcript.contains("cancelled by the host"),
+        "{transcript}"
+    );
+    assert!(!transcript.contains("Next:"), "{transcript}");
+}
+
 /// A host-authored System message is not the RLM protocol's to delete.
 ///
 /// `System` is a shared channel: a plugin directive enqueued at a mid-turn

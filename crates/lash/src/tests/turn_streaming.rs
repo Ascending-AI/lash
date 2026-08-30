@@ -5009,7 +5009,11 @@ async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
     let session = core.session("cancel-inflight").open().await?;
     let stopper = session.clone();
 
-    let stream = session.turn(TurnInput::text("hang forever")).stream()?;
+    let externally_owned_cancel = CancellationToken::new();
+    let stream = session
+        .turn(TurnInput::text("hang forever"))
+        .cancel_with_origin(externally_owned_cancel, Some("shutdown".to_string()))
+        .stream()?;
     started_rx.await.expect("provider reached");
     assert_eq!(
         stopper.cancel_running_turns_with_origin(Some("user".to_string())),

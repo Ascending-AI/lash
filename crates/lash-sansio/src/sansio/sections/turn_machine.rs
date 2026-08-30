@@ -147,6 +147,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
             termination: &self.termination,
+            observed_cancellation: self.observed_cancellation.as_ref(),
         }
     }
 
@@ -398,6 +399,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     if self.schedule_turn_limit_final(message) {
                         progress_dirty = true;
                     }
+                }
+                DriverAction::FinishCancelled { evidence } => {
+                    if progress_dirty {
+                        self.emit_progress();
+                        progress_dirty = false;
+                    }
+                    self.finish(TurnOutcome::Stopped(TurnStop::Cancelled { evidence }));
+                    break;
                 }
                 DriverAction::Finish(outcome) => {
                     if progress_dirty {

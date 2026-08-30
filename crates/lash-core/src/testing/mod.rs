@@ -590,6 +590,30 @@ pub fn code_execution_context() -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new().build().into_runtime()
 }
 
+/// Build an empty code-execution context whose cancellation is already visible.
+pub fn cancelled_code_execution_context() -> crate::RuntimeExecutionContext<'static> {
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    cancellation.cancel();
+    TestExecutionContextBuilder::new()
+        .build()
+        .into_runtime()
+        .with_cancellation_token(cancellation)
+}
+
+/// Build an empty code-execution context cancelled after its runtime yields.
+pub fn code_execution_context_cancelling_after_yield() -> crate::RuntimeExecutionContext<'static> {
+    let cancellation = tokio_util::sync::CancellationToken::new();
+    let cancellation_after_yield = cancellation.clone();
+    crate::task::spawn(async move {
+        tokio::task::yield_now().await;
+        cancellation_after_yield.cancel();
+    });
+    TestExecutionContextBuilder::new()
+        .build()
+        .into_runtime()
+        .with_cancellation_token(cancellation)
+}
+
 /// Build an empty code-execution context carrying the stable parent invocation
 /// that production installs around an `ExecCode` effect.
 pub fn code_execution_context_with_invocation(

@@ -366,6 +366,10 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     ScheduleTurnLimitFinal {
         message: Message,
     },
+    /// Finish for a cancellation whose host evidence was already observed.
+    FinishCancelled {
+        evidence: crate::TurnCancellationEvidence,
+    },
     Finish(TurnOutcome),
 }
 
@@ -377,6 +381,7 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     protocol_iteration: usize,
     protocol_run_offset: usize,
     termination: &'a TurnTerminationPolicyState,
+    observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
 }
 
 impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
@@ -417,6 +422,12 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
 
     pub fn termination(&self) -> &M::Termination {
         &self.config.termination
+    }
+
+    /// Host cancellation evidence observed before the current response was
+    /// handed to the protocol driver.
+    pub fn observed_cancellation(&self) -> Option<&crate::TurnCancellationEvidence> {
+        self.observed_cancellation
     }
 
     pub fn autonomous(&self) -> bool {

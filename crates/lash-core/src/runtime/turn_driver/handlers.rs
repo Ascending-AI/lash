@@ -436,6 +436,37 @@ impl RuntimeTurnDriver<'_> {
                     },
                 )
                 .await;
+                let cancellation_evidence = self.turn_control.evidence();
+                if let Some(code_executor) = self.session.plugins().code_executor() {
+                    code_executor
+                        .settle_code_execution(if cancellation_evidence.is_some() {
+                            crate::plugin::CodeExecutionDisposition::Cancelled
+                        } else {
+                            crate::plugin::CodeExecutionDisposition::Discarded
+                        })
+                        .await
+                        .map_err(|error| {
+                            RuntimeError::new(
+                                RuntimeErrorCode::ExecutionStateCaptureFailed,
+                                error.to_string(),
+                            )
+                        })?;
+                }
+                let abort_for_error = if cancellation_evidence.is_some() {
+                    self.should_abort_for_runtime_effect_error(err.code.clone())
+                        .await?
+                } else {
+                    false
+                };
+                if abort_for_error {
+                    return Err(err.into_runtime_error());
+                }
+                if let Some(evidence) = cancellation_evidence {
+                    machine.finish_with_outcome(crate::TurnOutcome::Stopped(TurnStop::Cancelled {
+                        evidence,
+                    }));
+                    return Ok(());
+                }
                 self.fail_or_abort_runtime_effect_controller(machine, err)
                     .await?;
                 return Ok(());
@@ -544,6 +575,28 @@ impl RuntimeTurnDriver<'_> {
                     error: error.clone(),
                 },
             );
+        }
+        // Name the request that stopped code execution before the protocol
+        // classifies its typed Stop response. This is the same evidence seam
+        // used for provider cancellation above.
+        let cancellation_evidence = self.turn_control.evidence();
+        if let Some(code_executor) = self.session.plugins().code_executor() {
+            code_executor
+                .settle_code_execution(if cancellation_evidence.is_some() {
+                    crate::plugin::CodeExecutionDisposition::Cancelled
+                } else {
+                    crate::plugin::CodeExecutionDisposition::Accepted
+                })
+                .await
+                .map_err(|error| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::ExecutionStateCaptureFailed,
+                        error.to_string(),
+                    )
+                })?;
+        }
+        if let Some(evidence) = cancellation_evidence {
+            machine.record_cancellation_evidence(evidence);
         }
         self.handle_machine_response(
             machine,

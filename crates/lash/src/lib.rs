@@ -371,13 +371,13 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        CheckpointApplication, CodeExecutorPlugin, ExecutionStateComponentSnapshot,
-        ExecutionStateSnapshot, HydratedExecutionState, PluginAbort, PluginSessionSnapshot,
-        PluginSnapshotArtifact, PluginSnapshotEntry, PrepareTurnRequest,
-        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-        ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
-        ProtocolSessionPlugin, RecordedSessionConfig, SessionAuthorityContext,
-        SessionCreationConfig, TurnFinalization, TurnPreparation,
+        CheckpointApplication, CodeExecutionDisposition, CodeExecutorPlugin,
+        ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState,
+        PluginAbort, PluginSessionSnapshot, PluginSnapshotArtifact, PluginSnapshotEntry,
+        PrepareTurnRequest, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
+        ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
+        ProtocolSessionMaterialization, ProtocolSessionPlugin, RecordedSessionConfig,
+        SessionAuthorityContext, SessionCreationConfig, TurnFinalization, TurnPreparation,
     };
     /// Plugin operations: the query / command / task vocabulary. A plugin
     /// author declares an operation by implementing [`PluginOperation`] plus

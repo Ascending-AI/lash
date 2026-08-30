@@ -57,11 +57,11 @@ pub use hooks::{
     TurnResultHookContext,
 };
 pub use protocol::{
-    AssistantProseProjectorPlugin, CodeExecutorPlugin, EXECUTION_STATE_LEAF_MIN_BODY_BYTES,
-    ExecutionStateComponentSnapshot, ExecutionStateSnapshot, HydratedExecutionState, PluginOptions,
-    ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
-    ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionMaterialization,
-    ProtocolSessionPlugin,
+    AssistantProseProjectorPlugin, CodeExecutionDisposition, CodeExecutorPlugin,
+    EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionStateComponentSnapshot, ExecutionStateSnapshot,
+    HydratedExecutionState, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
+    ProtocolLlmCallAction, ProtocolRuntimeContext, ProtocolSessionContext,
+    ProtocolSessionMaterialization, ProtocolSessionPlugin,
 };
 pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,

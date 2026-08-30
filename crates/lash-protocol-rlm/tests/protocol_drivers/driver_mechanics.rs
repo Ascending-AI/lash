@@ -740,6 +740,202 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
 }
 
 #[test]
+fn user_stop_is_terminal_without_feedback_or_model_reinvocation_in_both_dialects_live_and_replay() {
+    for dialect in ["lashlang", "typescript"] {
+        for restore_pending_exec in [false, true] {
+            for response_error in [
+                Some("[STOP] lashlang execution was cancelled by the host"),
+                Some("[ERROR] compilation lost a race with cancellation"),
+                None,
+            ] {
+                let case = format!(
+                    "dialect={dialect}, restored_pending_exec={restore_pending_exec}, response_error={response_error:?}"
+                );
+                let config = test_config_with_dialect(dialect);
+                let mut machine = TurnMachine::new(
+                    config,
+                    vec![user_message("run until I stop")],
+                    Arc::new(Vec::new()),
+                    0,
+                );
+
+                let effects = drain_effects(&mut machine);
+                let llm_id = *find_llm_call(&effects).expect("initial model call");
+                let source = format!("<{dialect}>\nvalue = 1\n</{dialect}>");
+                machine.handle_response(Response::LlmComplete {
+                    id: llm_id,
+                    text_streamed: false,
+                    result: Ok(rlm_response(vec![text_part(&source)])),
+                });
+
+                let mut effects = drain_effects(&mut machine);
+                if restore_pending_exec {
+                    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
+                    machine = TurnMachine::restore_from_checkpoint(
+                        test_config_with_dialect(dialect),
+                        checkpoint,
+                    );
+                    effects = drain_effects(&mut machine);
+                }
+                let exec_id = effects
+                    .iter()
+                    .find_map(|effect| match effect {
+                        Effect::ExecCode { id, .. } => Some(*id),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("{case}: pending cell execution"));
+                let cancellation_evidence = lash_sansio::TurnCancellationEvidence {
+                    request_id: format!("stop-{dialect}-{restore_pending_exec}"),
+                    origin: Some("test-host".to_string()),
+                    reason: Some("user pressed Stop".to_string()),
+                    undelivered: lash_sansio::TurnCancelDisposition::Defer,
+                };
+                machine.record_cancellation_evidence(cancellation_evidence.clone());
+                let mut stopped_response = exec_response(
+                    &["partial output from the cancelled tail"],
+                    response_error,
+                    None,
+                );
+                stopped_response
+                    .degraded_bindings
+                    .push(lash_sansio::DegradedBinding {
+                        name: "cancelled_tail".to_string(),
+                        reason: "must not be committed".to_string(),
+                    });
+                machine.handle_response(Response::ExecResult {
+                    id: exec_id,
+                    result: Ok(stopped_response),
+                });
+
+                let mut post_stop_effects = drain_effects(&mut machine);
+                if let Some((checkpoint_id, _)) = find_checkpoint(&post_stop_effects) {
+                    machine.handle_response(Response::Checkpoint {
+                        id: checkpoint_id,
+                        delivery: lash_sansio::CheckpointDelivery::default(),
+                    });
+                    post_stop_effects.extend(drain_effects(&mut machine));
+                }
+
+                let post_stop_requests = post_stop_effects
+                    .iter()
+                    .filter_map(|effect| match effect {
+                        Effect::LlmCall { request, .. } => Some(request.as_ref()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let model_bound_feedback_items = post_stop_requests
+                    .iter()
+                    .flat_map(|request| request.messages.iter())
+                    .flat_map(|message| message.blocks.iter())
+                    .filter(|block| {
+                        matches!(
+                            block,
+                            LlmContentBlock::Text { text, .. }
+                                if text.contains("[ERROR]")
+                                    || text.contains("[POLICY]")
+                                    || text.contains("[STOP]")
+                                    || text.contains("Next:")
+                        )
+                    })
+                    .count();
+                assert_eq!(
+                    model_bound_feedback_items, 0,
+                    "{case}: a user Stop must produce zero model-bound feedback items"
+                );
+                assert_eq!(
+                    post_stop_requests.len(),
+                    0,
+                    "{case}: the model must not be re-invoked after a user Stop"
+                );
+                assert!(
+                    machine_trajectory(&machine).is_empty(),
+                    "{case}: the stopped cell is an uncommitted tail, not trajectory feedback"
+                );
+                assert!(machine.is_done(), "{case}: the stopped turn must settle");
+                assert_eq!(
+                    find_turn_outcome(&post_stop_effects),
+                    Some(lash_sansio::TurnOutcome::Stopped(
+                        lash_sansio::TurnStop::Cancelled {
+                            evidence: cancellation_evidence,
+                        }
+                    )),
+                    "{case}: the settled terminal preserves the host's cancellation evidence"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn stop_without_host_evidence_never_fabricates_a_cancelled_terminal() {
+    let mut machine = TurnMachine::new(
+        test_config(),
+        vec![user_message("run until stopped")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("initial model call");
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(rlm_response(vec![text_part(
+            "<lashlang>\nvalue = 1\n</lashlang>",
+        )])),
+    });
+    let effects = drain_effects(&mut machine);
+    let exec_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ExecCode { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("cell execution");
+    machine.handle_response(Response::ExecResult {
+        id: exec_id,
+        result: Ok(exec_response(
+            &[],
+            Some("[STOP] execution token was cancelled without host evidence"),
+            None,
+        )),
+    });
+
+    let effects = drain_effects(&mut machine);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::LlmCall { .. })),
+        "a raw cancellation token never becomes model repair feedback"
+    );
+    assert_eq!(
+        find_turn_outcome(&effects),
+        Some(lash_sansio::TurnOutcome::Stopped(
+            lash_sansio::TurnStop::RuntimeError,
+        )),
+        "without observed host evidence, Stop must not fabricate Cancelled"
+    );
+    let diagnostic = machine.events().iter().find_map(|record| {
+        let lash_core::SessionHistoryRecord::Protocol(event) = record else {
+            return None;
+        };
+        match lash_protocol_rlm::decode_rlm_protocol_event(event) {
+            Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic))
+                if diagnostic.phase == "stop_without_cancellation_evidence" =>
+            {
+                Some(diagnostic)
+            }
+            _ => None,
+        }
+    });
+    assert_eq!(
+        diagnostic
+            .expect("durable missing-evidence diagnostic")
+            .payload["code"],
+        "rlm_stop_without_cancellation_evidence"
+    );
+}
+
+#[test]
 fn degraded_projection_bindings_are_announced_on_the_existing_diagnostic_path() {
     let mut machine = TurnMachine::new(
         test_config(),

@@ -2976,6 +2976,10 @@ lash::plugins::CheckpointHookContext::session_id
 lash::plugins::CheckpointHookContext::session_lifecycle
 lash::plugins::CheckpointHookContext::sessions
 lash::plugins::CheckpointHookContext::state
+lash::plugins::CodeExecutionDisposition
+lash::plugins::CodeExecutionDisposition::Accepted
+lash::plugins::CodeExecutionDisposition::Cancelled
+lash::plugins::CodeExecutionDisposition::Discarded
 lash::plugins::CodeExecutorPlugin
 lash::plugins::CodeExecutorPlugin::abort_execution_state_capture
 lash::plugins::CodeExecutorPlugin::acknowledge_execution_state_capture
@@ -2984,6 +2988,7 @@ lash::plugins::CodeExecutorPlugin::execution_state_dirty
 lash::plugins::CodeExecutorPlugin::hydrated_execution_state
 lash::plugins::CodeExecutorPlugin::probe_execution_state_capture
 lash::plugins::CodeExecutorPlugin::restore_execution_state
+lash::plugins::CodeExecutorPlugin::settle_code_execution
 lash::plugins::CodeExecutorPlugin::snapshot_execution_state
 lash::plugins::CompactionContext
 lash::plugins::CompactionContext::instructions
@@ -3563,6 +3568,7 @@ lash::plugins::RuntimeExecutionContext::captured_process_execution_env_ref
 lash::plugins::RuntimeExecutionContext::chronological_projection
 lash::plugins::RuntimeExecutionContext::execute_trigger_effect
 lash::plugins::RuntimeExecutionContext::execution_scope_id
+lash::plugins::RuntimeExecutionContext::is_cancelled
 lash::plugins::RuntimeExecutionContext::journaled_language_runtime_value
 lash::plugins::RuntimeExecutionContext::named_phase
 lash::plugins::RuntimeExecutionContext::parent_end_actions
