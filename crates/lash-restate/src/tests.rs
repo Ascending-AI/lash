@@ -7283,12 +7283,30 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     }
 }
 
+struct ZeroPermitSemaphore(tokio::sync::Semaphore);
+
+impl Default for ZeroPermitSemaphore {
+    fn default() -> Self {
+        Self(tokio::sync::Semaphore::new(0))
+    }
+}
+
+impl std::ops::Deref for ZeroPermitSemaphore {
+    type Target = tokio::sync::Semaphore;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Default)]
 struct ReplayableRecordingContext {
     sleeps: Mutex<Vec<u64>>,
     park_sleeps: AtomicBool,
     sleep_started: tokio::sync::Notify,
     sleep_release: tokio::sync::Notify,
+    crash_after_run_commit: AtomicBool,
+    run_committed: ZeroPermitSemaphore,
     runs: Mutex<Vec<String>>,
     records: Mutex<HashMap<String, Vec<u8>>>,
     replaying: AtomicBool,
@@ -7648,6 +7666,18 @@ impl ReplayableRecordingContext {
     fn release_sleep(&self) {
         self.park_sleeps.store(false, Ordering::SeqCst);
         self.sleep_release.notify_one();
+    }
+
+    fn crash_after_next_run_commit(&self) {
+        self.crash_after_run_commit.store(true, Ordering::SeqCst);
+    }
+
+    async fn await_run_committed(&self) {
+        self.run_committed
+            .acquire()
+            .await
+            .expect("post-commit semaphore remains open")
+            .forget();
     }
 
     fn start_replay(&self) {
@@ -8032,6 +8062,10 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             let value = future.await;
             let bytes = serde_json::to_vec(&value).map_err(TerminalError::from_error)?;
             context.records.lock_recover().insert(effect_name, bytes);
+            if context.crash_after_run_commit.swap(false, Ordering::SeqCst) {
+                context.run_committed.add_permits(1);
+                panic!("injected worker crash after the post-wake effect committed");
+            }
             Ok(Json(value))
         })
     }
@@ -15164,6 +15198,66 @@ async fn sleeping_process_registration(
     .with_execution_env_ref(Some(env_ref))
 }
 
+async fn sleeping_then_tool_process_registration(process_id: &str) -> ProcessRegistration {
+    let module = lashlang::parse(
+        r#"
+        process worker() {
+          sleep for "5m"
+          called = await tools.snapshot_echo({ line: "after wake" })?
+          finish called.echo
+        }
+        "#,
+    )
+    .expect("parse sleeping post-wake-effect process");
+    let contract = SnapshotRecoveryTool::definition().contract();
+    let mut resources = lashlang::LashlangHostCatalog::new();
+    resources
+        .add_module_operation(
+            ["tools"],
+            "Tools",
+            "snapshot_echo",
+            "tool:snapshot_echo",
+            lashlang::json_schema_to_type_expr(contract.input_schema.canonical()),
+            lashlang::json_schema_to_type_expr(contract.output_schema.canonical()),
+        )
+        .expect("link post-wake tool operation");
+    let linked = lashlang::LinkedModule::link(
+        module,
+        lashlang::LashlangHostEnvironment::new(
+            resources,
+            lashlang::LashlangAbilities::default()
+                .with_processes()
+                .with_sleep(),
+        ),
+    )
+    .expect("link sleeping post-wake-effect process");
+    lashlang::LashlangArtifactStore::put_module_artifact(
+        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &linked.artifact,
+    )
+    .await
+    .expect("store sleeping post-wake-effect artifact");
+    let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:ok").await;
+    ProcessRegistration::new(
+        process_id,
+        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: linked.module_ref,
+            process_ref: linked
+                .artifact
+                .process_ref("worker")
+                .expect("worker process ref")
+                .clone(),
+            host_requirements_ref: linked.host_requirements_ref,
+            process_name: "worker".to_string(),
+            args: serde_json::Map::new(),
+        }),
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+    )
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
+    .with_execution_env_ref(Some(env_ref))
+}
+
 #[tokio::test]
 async fn process_sleep_wake_settles_recorded_cancel_before_resuming_either_dialect() {
     for dialect in [
@@ -15383,6 +15477,152 @@ async fn process_sleep_wake_registry_failure_retries_before_settling_recorded_ca
             .await
             .expect("read retried process")
             .expect("retried process remains registered")
+            .status,
+        lash_core::ProcessStatus::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_effect() {
+    let process_id = "sleep-cancel-post-wake-effect";
+    let (registry, continuations) = process_stores();
+    let registration = sleeping_then_tool_process_registration(process_id).await;
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register sleeping post-wake-effect process");
+    let worker = recovery_worker_with_plugins(
+        Arc::clone(&registry),
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        vec![snapshot_recovery_tool_factory()],
+    );
+    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+        Arc::new(RestateCoreProcessRunner::new(worker)),
+        Arc::clone(&registry),
+        continuations,
+    ));
+    let context = Arc::new(ReplayableRecordingContext::default());
+    context.park_sleeps();
+    context.crash_after_next_run_commit();
+    let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id,
+        "sleep-cancel-post-wake-effect-invocation",
+    );
+    let first_run = {
+        let workflow = Arc::clone(&workflow);
+        let context = Arc::clone(&context);
+        let registration = registration.clone();
+        let execution_write_authority = execution_write_authority.clone();
+        tokio::spawn(async move {
+            let controller = RestateRuntimeEffectController::new(context);
+            workflow
+                .run_registration(
+                    registration,
+                    ProcessExecutionContext::default()
+                        .with_execution_write_authority(execution_write_authority),
+                    controller
+                        .scoped_effect_controller(ExecutionScope::process(process_id))
+                        .expect("sleeping post-wake-effect scope"),
+                    0,
+                    None,
+                    pending_process_cancel_signal(),
+                )
+                .await
+        })
+    };
+
+    context.await_sleep_started().await;
+    context.release_sleep();
+    context.await_run_committed().await;
+
+    let crash = first_run
+        .await
+        .expect_err("injected worker failure must crash the first attempt");
+    assert!(crash.is_panic(), "unexpected first-attempt exit: {crash}");
+
+    let recorded_before_crash = context.recorded_runtime_effect_envelopes();
+    assert_eq!(
+        recorded_before_crash.len(),
+        1,
+        "exactly one post-wake effect must commit before the injected crash"
+    );
+    assert!(
+        recorded_before_crash.iter().all(|(_, envelope)| matches!(
+            envelope.command,
+            RuntimeEffectCommand::ToolAttempt { .. }
+        )),
+        "the committed post-wake suffix must be the tool attempt: {recorded_before_crash:#?}"
+    );
+    assert_eq!(
+        context.sleeps.lock_recover().as_slice(),
+        &[300_000],
+        "the first attempt must cross exactly one sleep wake boundary"
+    );
+
+    assert_eq!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("read process after worker crash")
+            .expect("crashed process remains registered")
+            .status,
+        lash_core::ProcessStatus::Running,
+        "the crash must land before process settlement"
+    );
+
+    registry
+        .append_event(
+            process_id,
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                process_id,
+                Some("operator cancelled during the redelivery gap".to_string()),
+            ),
+        )
+        .await
+        .expect("commit cancellation in the redelivery gap");
+    let runs_before_redelivery = context.runs();
+    context.start_replay();
+
+    let controller = RestateRuntimeEffectController::new(Arc::clone(&context));
+    let redelivery = workflow
+        .run_registration(
+            registration,
+            ProcessExecutionContext::default()
+                .with_execution_write_authority(execution_write_authority),
+            controller
+                .scoped_effect_controller(ExecutionScope::process(process_id))
+                .expect("sleeping post-wake-effect redelivery scope"),
+            0,
+            None,
+            async { Ok(()) },
+        )
+        .await
+        .expect("ready cancellation must pre-empt guest replay");
+
+    assert!(
+        matches!(
+            redelivery,
+            lash_core::ProcessRunOutcome::Terminal { ref output, .. }
+                if output.terminal_status() == Some(lash_core::ProcessStatus::Cancelled)
+        ),
+        "redelivery must settle cancellation instead of replay mismatch: {redelivery:#?}"
+    );
+    assert_eq!(
+        context.sleeps.lock_recover().as_slice(),
+        &[300_000],
+        "the biased cancellation branch must win before guest sleep replay"
+    );
+    assert_eq!(
+        context.runs(),
+        runs_before_redelivery,
+        "the recorded post-wake effect must not be replayed after cancellation wins"
+    );
+    assert_eq!(
+        registry
+            .get_process(process_id)
+            .await
+            .expect("read redelivered process")
+            .expect("redelivered process remains registered")
             .status,
         lash_core::ProcessStatus::Cancelled
     );
