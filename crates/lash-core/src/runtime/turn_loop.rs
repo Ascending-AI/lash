@@ -4211,10 +4211,8 @@ async fn run_turn_effect_loop(
             }
             Ok(None) => drive.await,
             Err(err) => {
-                // Dropping `drive` aborts its in-flight provider/effect task
-                // through the existing abort-on-drop seam. The caller then
-                // observes any committed receipt and settles the turn.
                 cancellation.cancel();
+                let _ = drive.await;
                 Err(err)
             }
         },

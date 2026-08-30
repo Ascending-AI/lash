@@ -6034,6 +6034,48 @@ struct CountingEchoTool {
     executions: Arc<AtomicUsize>,
 }
 
+#[derive(Clone)]
+struct CancellationGatedTurnEvents {
+    events: RecordingTurnEvents,
+    cancellation: CancellationToken,
+    entered: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+}
+
+impl CancellationGatedTurnEvents {
+    fn new(cancellation: CancellationToken) -> (Self, tokio::sync::oneshot::Receiver<()>) {
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        (
+            Self {
+                events: RecordingTurnEvents::default(),
+                cancellation,
+                entered: Arc::new(Mutex::new(Some(entered_tx))),
+            },
+            entered_rx,
+        )
+    }
+
+    fn snapshot(&self) -> Vec<TurnActivity> {
+        self.events.snapshot()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::TurnActivitySink for CancellationGatedTurnEvents {
+    async fn emit(&self, activity: TurnActivity) {
+        if matches!(
+            &activity.event,
+            TurnEvent::AssistantProseDelta { text }
+                if text.as_ref() == "drained before effect abort"
+        ) {
+            if let Some(entered) = self.entered.lock_recover().take() {
+                let _ = entered.send(());
+            }
+            self.cancellation.cancelled().await;
+        }
+        self.events.events.lock_recover().push(activity);
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::ToolProvider for CountingEchoTool {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
@@ -6061,47 +6103,52 @@ async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_t
     let tool_executions = Arc::new(AtomicUsize::new(0));
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
-    let transport = TestProvider::builder()
-        .kind("mock")
-        .complete(move |_| {
-            let controller = Arc::clone(&controller_for_provider);
-            let observed_provider_calls = Arc::clone(&observed_provider_calls);
-            let provider_started_tx = Arc::clone(&provider_started_tx);
-            async move {
-                let call = observed_provider_calls.fetch_add(1, Ordering::SeqCst);
-                match call {
-                    0 => {
-                        if let Some(started) = provider_started_tx.lock_recover().take() {
-                            let _ = started.send(());
+    let transport =
+        TestProvider::builder()
+            .kind("mock")
+            .requires_streaming(true)
+            .complete(move |request| {
+                let controller = Arc::clone(&controller_for_provider);
+                let observed_provider_calls = Arc::clone(&observed_provider_calls);
+                let provider_started_tx = Arc::clone(&provider_started_tx);
+                async move {
+                    let call = observed_provider_calls.fetch_add(1, Ordering::SeqCst);
+                    match call {
+                        0 => {
+                            request.stream_events.expect("stream events").send(
+                                LlmStreamEvent::Delta("drained before effect abort".to_string()),
+                            );
+                            if let Some(started) = provider_started_tx.lock_recover().take() {
+                                let _ = started.send(());
+                            }
+                            controller.wait_for_cancel_watch_exhaustion().await;
+                            for _ in 0..32 {
+                                tokio::task::yield_now().await;
+                            }
+                            Ok(LlmResponse {
+                                parts: vec![LlmOutputPart::ToolCall {
+                                    call_id: "post-exhaustion-tool".to_string(),
+                                    tool_name: "echo_tool".to_string(),
+                                    input_json: serde_json::json!({"value": "zombie"}).to_string(),
+                                    replay: None,
+                                }],
+                                response_metadata: Default::default(),
+                                ..LlmResponse::default()
+                            })
                         }
-                        controller.wait_for_cancel_watch_exhaustion().await;
-                        for _ in 0..32 {
-                            tokio::task::yield_now().await;
-                        }
-                        Ok(LlmResponse {
-                            parts: vec![LlmOutputPart::ToolCall {
-                                call_id: "post-exhaustion-tool".to_string(),
-                                tool_name: "echo_tool".to_string(),
-                                input_json: serde_json::json!({"value": "zombie"}).to_string(),
-                                replay: None,
+                        1 => Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::Text {
+                                text: "zombie turn completed".to_string(),
+                                response_meta: None,
                             }],
                             response_metadata: Default::default(),
                             ..LlmResponse::default()
-                        })
+                        }),
+                        _ => panic!("unexpected provider call {call}"),
                     }
-                    1 => Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text: "zombie turn completed".to_string(),
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    }),
-                    _ => panic!("unexpected provider call {call}"),
                 }
-            }
-        })
-        .build();
+            })
+            .build();
     let clock = Arc::new(CancelWatchTestClock(crate::testing::TestClock::new(0)));
     let host_clock: Arc<dyn crate::Clock> = clock.clone();
     let config = super::effect::runtime_host_config_with_native_controller(controller.clone())
@@ -6121,11 +6168,15 @@ async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_t
     let turn_address = crate::TurnAddress::new("root", turn_id);
     let turn_cancel = CancellationToken::new();
     let observed_turn_cancel = turn_cancel.clone();
+    let (turn_events, stream_event_entered_rx) =
+        CancellationGatedTurnEvents::new(turn_cancel.clone());
+    let turn_events_for_task = turn_events.clone();
     let turn = crate::task::spawn(async move {
         runtime
             .stream_turn(
                 TurnInput::text("tear down after the cancellation watcher gives up"),
-                TurnOptions::new(turn_cancel, named_turn_scope("root", turn_id)),
+                TurnOptions::new(turn_cancel, named_turn_scope("root", turn_id))
+                    .with_turn_events(&turn_events_for_task),
             )
             .await
     });
@@ -6133,6 +6184,9 @@ async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_t
     provider_started_rx
         .await
         .expect("provider must start before cancellation is committed");
+    stream_event_entered_rx
+        .await
+        .expect("the buffered stream event must reach the gated sink");
     let receipt = turn_driver
         .request_cancel(crate::TurnCancelRequest::new(
             turn_address.clone(),
@@ -6177,6 +6231,16 @@ async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_t
         TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
             if evidence.request_id == "watch-exhaustion-cancel"
     ));
+    assert!(
+        turn_events.snapshot().iter().any(|activity| matches!(
+            &activity.event,
+            TurnEvent::AssistantProseDelta { text }
+                if text.as_ref() == "drained before effect abort"
+        )),
+        "cooperative teardown must drain the buffered stream event; provider_calls={}, tool_executions={}",
+        provider_calls.load(Ordering::SeqCst),
+        tool_executions.load(Ordering::SeqCst)
+    );
 
     let terminal = tokio::time::timeout(
         std::time::Duration::from_secs(1),
