@@ -34,6 +34,8 @@ impl Default for TestLocalProcessRegistry {
             wake_targets: Arc::new(Mutex::new(HashMap::new())),
             tombstones: Arc::new(Mutex::new(HashMap::new())),
             leases: Arc::new(Mutex::new(HashMap::new())),
+            process_lease_point_reads: Arc::new(Mutex::new(0)),
+            process_lease_batch_reads: Arc::new(Mutex::new(0)),
             handovers: Arc::new(Mutex::new(HashMap::new())),
             tool_intent_submissions: Arc::new(Mutex::new(HashMap::new())),
             execution_write_pause: Arc::new(std::sync::Mutex::new(None)),

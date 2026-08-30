@@ -184,9 +184,10 @@ pub const REWIND_PAST_56_ARTIFACTS: &str = "DROP TABLE lash_turn_cancel_requests
          DROP COLUMN parent_session_id;";
 
 /// Reconstructs the observer-intent portion common to every published
-/// component through 62 so migration tests exercise the real forward fold.
-pub const REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS: &str =
-    "ALTER TABLE lash_session_meta ADD COLUMN observer_intent_depth BIGINT NOT NULL DEFAULT 0;
+/// component through 62 and removes the component-65 process index so migration
+/// tests exercise the real source generation.
+pub const REWIND_PENDING_OBSERVER_INTENT_ARTIFACTS: &str = "DROP INDEX idx_lash_processes_updated;
+     ALTER TABLE lash_session_meta ADD COLUMN observer_intent_depth BIGINT NOT NULL DEFAULT 0;
      ALTER TABLE lash_session_meta ALTER COLUMN observer_intent_depth DROP DEFAULT;
      DROP TABLE lash_session_meta_pending_observer_intents;
      CREATE TABLE lash_session_meta_observer_intent_processes (

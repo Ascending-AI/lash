@@ -183,6 +183,56 @@ pub(super) async fn get_process_lease(
         .map_err(process_sqlite_error)?
 }
 
+pub(super) async fn get_process_leases(
+    registry: &SqliteProcessRegistry,
+    process_ids: &[String],
+) -> Result<Vec<Option<ProcessLease>>, lash_core::PluginError> {
+    if process_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let process_ids = process_ids.to_vec();
+    let process_ids_json = serde_json::to_string(&process_ids).map_err(process_decode_error)?;
+    registry
+        .conn
+        .call(move |conn| {
+            Ok((|| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT process_id, lease_owner_id, lease_token,
+                                lease_fencing_token, lease_claimed_at_ms,
+                                lease_expires_at_ms, lease_owner_incarnation_id
+                         FROM process_leases
+                         WHERE process_id IN (SELECT value FROM json_each(?1))",
+                    )
+                    .map_err(process_sqlite_error)?;
+                let rows = stmt
+                    .query_map(params![process_ids_json], |row| {
+                        let process_id = row.get::<_, String>(0)?;
+                        let lease = registry_transitions::ProcessLeaseRow {
+                            owner_id: row.get(1)?,
+                            incarnation_id: row.get(6)?,
+                            lease_token: row.get(2)?,
+                            fencing_token: row.get(3)?,
+                            claimed_at_ms: row.get(4)?,
+                            expires_at_ms: row.get(5)?,
+                        }
+                        .project(&process_id);
+                        Ok((process_id, lease))
+                    })
+                    .map_err(process_sqlite_error)?;
+                let leases_by_id = rows
+                    .collect::<Result<std::collections::HashMap<_, _>, _>>()
+                    .map_err(process_sqlite_error)?;
+                Ok(process_ids
+                    .iter()
+                    .map(|process_id| leases_by_id.get(process_id).cloned().flatten())
+                    .collect())
+            })())
+        })
+        .await
+        .map_err(process_sqlite_error)?
+}
+
 pub(super) async fn complete_process_lease(
     registry: &SqliteProcessRegistry,
     completion: &ProcessLeaseCompletion,

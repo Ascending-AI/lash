@@ -961,6 +961,8 @@ impl ProcessRegistry for PostgresProcessRegistry {
                     (record_json::JSONB #>> '{provenance,caused_by,subscription_id}') = $8)
                AND ($9::BIGINT IS NULL OR created_at_ms >= $9)
                AND ($10::BIGINT IS NULL OR created_at_ms < $10)
+               AND ($11::BIGINT IS NULL OR status IN ('running', 'waiting')
+                    OR updated_at_ms >= $11)
              ORDER BY process_id ASC",
         )
         .bind(filter.status.label())
@@ -973,6 +975,7 @@ impl ProcessRegistry for PostgresProcessRegistry {
         .bind(filter.caused_by_subscription_id.as_deref())
         .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
         .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
+        .bind(filter.retired_since_ms.map(clamp_epoch_ms))
         .fetch_all(&self.pool)
         .await
         .map_err(plugin_sqlx_error)?;
@@ -1343,6 +1346,44 @@ impl ProcessRegistry for PostgresProcessRegistry {
         let lease = load_process_lease_tx(&mut tx, process_id).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lease)
+    }
+
+    async fn get_process_leases(
+        &self,
+        process_ids: &[String],
+    ) -> Result<Vec<Option<ProcessLease>>, PluginError> {
+        if process_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows = sqlx::query(
+            "SELECT process_id, lease_owner_id, lease_token,
+                    lease_fencing_token, lease_claimed_at_ms,
+                    lease_expires_at_ms, lease_owner_incarnation_id
+             FROM lash_process_leases
+             WHERE process_id = ANY($1)",
+        )
+        .bind(process_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        let mut leases_by_id = std::collections::HashMap::with_capacity(rows.len());
+        for row in rows {
+            let process_id: String = row.get(0);
+            let lease = facade_support::registry_transitions::ProcessLeaseRow {
+                owner_id: row.get(1),
+                incarnation_id: row.get(6),
+                lease_token: row.get(2),
+                fencing_token: row.get(3),
+                claimed_at_ms: row.get(4),
+                expires_at_ms: row.get(5),
+            }
+            .project(&process_id);
+            leases_by_id.insert(process_id, lease);
+        }
+        Ok(process_ids
+            .iter()
+            .map(|process_id| leases_by_id.get(process_id).cloned().flatten())
+            .collect())
     }
 
     async fn complete_process_lease(

@@ -518,6 +518,9 @@ CREATE INDEX IF NOT EXISTS idx_processes_waiting
     ON processes(is_waiting);
 CREATE INDEX IF NOT EXISTS idx_processes_created
     ON processes(created_at_ms);
+CREATE INDEX IF NOT EXISTS idx_processes_recent_retired
+    ON processes(updated_at_ms, process_id)
+    WHERE status NOT IN ('running', 'waiting');
 CREATE INDEX IF NOT EXISTS idx_processes_wake_session
     ON processes(wake_session_id);
 

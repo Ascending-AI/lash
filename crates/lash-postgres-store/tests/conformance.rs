@@ -1408,7 +1408,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    assert_eq!(current_version, 64, "Postgres component schema pin");
+    assert_eq!(current_version, 65, "Postgres component schema pin");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'
@@ -2498,8 +2498,8 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        total, 1,
-        "expected exactly one status-list literal site in the PostgreSQL backend; \
+        total, 2,
+        "expected exactly two status-list literal sites in the PostgreSQL backend; \
          update this count when adding one"
     );
 }

@@ -127,6 +127,7 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
             "process_registry_change.rs",
             include_str!("../../src/process_registry_change.rs"),
         ),
+        ("schema.rs", include_str!("../../src/schema.rs")),
     ];
     let mut total = 0usize;
     for (name, source) in sources {
@@ -143,8 +144,8 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        total, 1,
-        "expected exactly one status-list literal site in the SQLite backend; \
+        total, 5,
+        "expected exactly five status-list literal sites in the SQLite backend; \
          update this count (and the derivation check) when adding one"
     );
 }

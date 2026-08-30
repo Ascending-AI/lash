@@ -1943,6 +1943,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
             caused_by_subscription_id,
             created_at_start_ms,
             created_at_end_ms,
+            retired_since_ms,
         } = value;
         Ok(Self {
             definition: definition.map(Into::into),
@@ -1955,6 +1956,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
             caused_by_subscription_id,
             created_at_start_ms,
             created_at_end_ms,
+            retired_since_ms,
         })
     }
 }
@@ -1972,6 +1974,7 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
             caused_by_subscription_id,
             created_at_start_ms,
             created_at_end_ms,
+            retired_since_ms,
         } = value;
         Self {
             definition: definition.map(Into::into),
@@ -1984,6 +1987,7 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
             caused_by_subscription_id,
             created_at_start_ms,
             created_at_end_ms,
+            retired_since_ms,
         }
     }
 }

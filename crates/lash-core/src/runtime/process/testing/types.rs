@@ -22,6 +22,8 @@ pub struct TestLocalProcessRegistry {
     pub(super) wake_targets: Arc<Mutex<HashMap<String, SessionId>>>,
     pub(super) tombstones: Arc<Mutex<HashMap<String, ProcessTombstone>>>,
     pub(super) leases: Arc<Mutex<ManagedLeaseMap>>,
+    pub(crate) process_lease_point_reads: Arc<Mutex<usize>>,
+    pub(crate) process_lease_batch_reads: Arc<Mutex<usize>>,
     pub(super) handovers: Arc<Mutex<HashMap<(String, u64), crate::PersistedSegmentHandover>>>,
     pub(super) tool_intent_submissions:
         Arc<Mutex<HashMap<String, crate::ToolIntentSubmissionRecord>>>,

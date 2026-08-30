@@ -982,11 +982,54 @@ async fn pre_queued_work_cutover_install_is_refused_even_under_warn_only() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 43")
-                && rendered.contains("expected 64")
+                && rendered.contains("expected 65")
                 && rendered.contains("does not relax it"),
             "the version boundary must dominate the incompatible queued-work shape: {rendered}"
         );
     }
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn component_64_adds_the_process_updated_index() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping component-64 process-index migration law: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "DROP INDEX idx_lash_processes_updated;
+             UPDATE lash_schema_versions
+                SET version = 64
+              WHERE component = 'lash-postgres-store'",
+        )
+        .await;
+
+    PostgresStorage::from_pool_with(
+        scratch.pool.clone(),
+        PostgresStoreConfig {
+            schema_provisioning: SchemaProvisioning::LashManaged,
+            schema_check: SchemaCheck::Enforce,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("the published component-64 shape migrates to 65");
+
+    let version: i32 = sqlx::query_scalar(
+        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
+    )
+    .fetch_one(&scratch.pool)
+    .await
+    .expect("read migrated component version");
+    assert_eq!(version, 65);
+    let index_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('idx_lash_processes_updated') IS NOT NULL")
+            .fetch_one(&scratch.pool)
+            .await
+            .expect("probe migrated process update index");
+    assert!(index_exists, "migration omitted the process update index");
     scratch.cleanup().await;
 }
 
@@ -1024,7 +1067,7 @@ async fn component_62_folds_pending_observer_intents_with_attribution() {
         },
     )
     .await
-    .expect("the exact component-62 shape migrates to 64");
+    .expect("the exact component-62 shape migrates to 65");
 
     let rows = sqlx::query_as::<_, (i64, String, Option<i64>, String)>(
         "SELECT process_index, process_id, process_incarnation, attribution
@@ -1064,14 +1107,14 @@ async fn component_62_folds_pending_observer_intents_with_attribution() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 64);
+    assert_eq!(version, 65);
     scratch.cleanup().await;
 }
 
-/// Main's published component-50 shape upgrades through the explicit 50 -> 64
+/// Main's published component-50 shape upgrades through the explicit 50 -> 65
 /// migration before the creation-only target DDL is evaluated.
 #[tokio::test]
-async fn main_component_50_store_upgrades_cleanly_to_64() {
+async fn main_component_50_store_upgrades_cleanly_to_65() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-50 migration law: database URL is not set");
         return;
@@ -1101,7 +1144,7 @@ async fn main_component_50_store_upgrades_cleanly_to_64() {
         },
     )
     .await
-    .expect("the exact published component-50 shape migrates to 64");
+    .expect("the exact published component-50 shape migrates to 65");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1109,7 +1152,7 @@ async fn main_component_50_store_upgrades_cleanly_to_64() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 64);
+    assert_eq!(version, 65);
     for table in [
         "lash_attachment_condemnations",
         "lash_process_parent_end_plans",
@@ -1131,7 +1174,7 @@ async fn main_component_50_store_upgrades_cleanly_to_64() {
 /// The published component-51 shape upgrades through the explicit 51 -> 62
 /// migration that introduces the attachment GC fence's condemnation table.
 #[tokio::test]
-async fn main_component_51_store_upgrades_cleanly_to_64() {
+async fn main_component_51_store_upgrades_cleanly_to_65() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-51 migration law: database URL is not set");
         return;
@@ -1159,7 +1202,7 @@ async fn main_component_51_store_upgrades_cleanly_to_64() {
         },
     )
     .await
-    .expect("the exact published component-51 shape migrates to 64");
+    .expect("the exact published component-51 shape migrates to 65");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1167,7 +1210,7 @@ async fn main_component_51_store_upgrades_cleanly_to_64() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 64);
+    assert_eq!(version, 65);
     for table in [
         "lash_attachment_condemnations",
         "lash_runtime_effect_group",
@@ -1188,7 +1231,7 @@ async fn main_component_51_store_upgrades_cleanly_to_64() {
 /// migration, which adds the two idle-arbitration ordering indexes on top of the
 /// whole effect-group journal.
 #[tokio::test]
-async fn main_component_52_store_upgrades_cleanly_to_64() {
+async fn main_component_52_store_upgrades_cleanly_to_65() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-52 migration law: database URL is not set");
         return;
@@ -1215,7 +1258,7 @@ async fn main_component_52_store_upgrades_cleanly_to_64() {
         },
     )
     .await
-    .expect("the exact published component-52 shape migrates to 64");
+    .expect("the exact published component-52 shape migrates to 65");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1223,7 +1266,7 @@ async fn main_component_52_store_upgrades_cleanly_to_64() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 64);
+    assert_eq!(version, 65);
     for index in [
         "idx_lash_queued_work_session_command_order",
         "idx_lash_pending_turn_input_order",
@@ -1249,7 +1292,7 @@ async fn main_component_52_store_upgrades_cleanly_to_64() {
 /// `lash_runtime_effect_replay` columns and the partial unique guard over them,
 /// and nothing else, or the source is refused as drifted.
 #[tokio::test]
-async fn main_component_53_store_upgrades_cleanly_to_64() {
+async fn main_component_53_store_upgrades_cleanly_to_65() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-53 migration law: database URL is not set");
         return;
@@ -1274,7 +1317,7 @@ async fn main_component_53_store_upgrades_cleanly_to_64() {
         },
     )
     .await
-    .expect("the exact published component-53 shape migrates to 64");
+    .expect("the exact published component-53 shape migrates to 65");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1282,7 +1325,7 @@ async fn main_component_53_store_upgrades_cleanly_to_64() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 64);
+    assert_eq!(version, 65);
     for relation in [
         "lash_runtime_effect_group",
         "idx_lash_runtime_effect_group_session",
@@ -1326,7 +1369,7 @@ async fn main_component_53_store_upgrades_cleanly_to_64() {
 /// because the shape checker does not compare non-unique indexes at all — so the
 /// only finding a conformant 54 store may present is the version stamp itself.
 #[tokio::test]
-async fn main_component_54_store_upgrades_cleanly_to_64() {
+async fn main_component_54_store_upgrades_cleanly_to_65() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-54 migration law: database URL is not set");
         return;
@@ -1351,7 +1394,7 @@ async fn main_component_54_store_upgrades_cleanly_to_64() {
         },
     )
     .await
-    .expect("the exact published component-54 shape migrates to 64");
+    .expect("the exact published component-54 shape migrates to 65");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1359,7 +1402,7 @@ async fn main_component_54_store_upgrades_cleanly_to_64() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 64);
+    assert_eq!(version, 65);
     // The index is the generation. Asserting the stamp alone would pass on a
     // migration whose only effect was the `UPDATE`, which is the one failure
     // this bump can have.
@@ -1376,7 +1419,7 @@ async fn main_component_54_store_upgrades_cleanly_to_64() {
 /// The immediate predecessor adds only the exact edge projection and the
 /// reverse root indexes needed by session-owner blob reclaim.
 #[tokio::test]
-async fn main_component_55_store_upgrades_cleanly_to_64() {
+async fn main_component_55_store_upgrades_cleanly_to_65() {
     let Some(database_url) = database_url() else {
         eprintln!("skipping component-55 migration law: database URL is not set");
         return;
@@ -1401,7 +1444,7 @@ async fn main_component_55_store_upgrades_cleanly_to_64() {
         },
     )
     .await
-    .expect("the exact published component-55 shape migrates to 64");
+    .expect("the exact published component-55 shape migrates to 65");
 
     let version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
@@ -1409,7 +1452,7 @@ async fn main_component_55_store_upgrades_cleanly_to_64() {
     .fetch_one(&scratch.pool)
     .await
     .expect("read migrated component version");
-    assert_eq!(version, 64);
+    assert_eq!(version, 65);
     for relation in [
         "lash_checkpoint_blob_refs",
         "idx_lash_checkpoint_blob_refs_blob_ref",
@@ -1469,7 +1512,7 @@ async fn component_53_stamp_with_one_new_artifact_is_refused_as_divergence() {
         let rendered = error.to_string();
         for fragment in [
             "has version 53",
-            "expected 64",
+            "expected 65",
             "schema artifacts newer than the recorded version",
             "uq_lash_runtime_effect_replay_group_seq",
             "inspect and recreate",
@@ -1691,7 +1734,7 @@ async fn component_50_stamp_with_newer_artifacts_is_refused_without_mutation() {
         let rendered = error.to_string();
         for fragment in [
             "has version 50",
-            "expected 64",
+            "expected 65",
             "schema artifacts newer than the recorded version",
             "lash_process_parent_end_plans",
             "inspect and recreate",
@@ -1792,7 +1835,7 @@ async fn drifted_component_50_source_is_refused_before_migration_ddl() {
     let rendered = error.to_string();
     for fragment in [
         "has version 50",
-        "expected 64",
+        "expected 65",
         "does not match the published component-50 migration source shape",
         "lash_processes: table is missing",
         "inspect and recreate",
@@ -1875,7 +1918,7 @@ async fn warn_only_refuses_component_50_before_process_workers_can_open() {
         let rendered = error.to_string();
         assert!(
             rendered.contains("has version 50")
-                && rendered.contains("expected 64")
+                && rendered.contains("expected 65")
                 && rendered.contains("does not relax it"),
             "typed version refusal was lost for {provisioning:?}: {rendered}"
         );
@@ -2117,7 +2160,7 @@ async fn report_remedies_match_the_finding_class() {
 
     scratch
         .apply(
-            "UPDATE lash_schema_versions SET version = 64 WHERE component = 'lash-postgres-store';
+            "UPDATE lash_schema_versions SET version = 65 WHERE component = 'lash-postgres-store';
              DROP INDEX idx_lash_process_events_key",
         )
         .await;
@@ -2248,7 +2291,7 @@ async fn the_schema_gate_emits_its_decision_basis() {
         capture,
         &scratch.name,
         "allowed",
-        &["found_version=Some(64)", "finding_total=0"],
+        &["found_version=Some(65)", "finding_total=0"],
     );
 
     // (b) denied on shape.
@@ -2420,7 +2463,7 @@ fn assert_evidence_with_provisioning(
             )
         });
     let provisioning = format!("provisioning={provisioning}");
-    for field in ["component=lash-postgres-store", "expected_version=64"]
+    for field in ["component=lash-postgres-store", "expected_version=65"]
         .iter()
         .chain(std::iter::once(&provisioning.as_str()))
         .chain(extra)

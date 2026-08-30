@@ -235,12 +235,23 @@ impl ProcessWorkObserver {
         &self,
         records: Vec<ProcessRecord>,
     ) -> Result<Vec<ObservedProcess>, PluginError> {
-        let mut observed = Vec::with_capacity(records.len());
-        for record in records {
-            let lease = self.registry.get_process_lease(&record.id).await?;
-            observed.push(ObservedProcess::from_record(record, lease));
+        let process_ids = records
+            .iter()
+            .map(|record| record.id.clone())
+            .collect::<Vec<_>>();
+        let leases = self.registry.get_process_leases(&process_ids).await?;
+        if records.len() != leases.len() {
+            return Err(PluginError::Session(format!(
+                "process registry batch lease read returned {} rows for {} process ids",
+                leases.len(),
+                records.len()
+            )));
         }
-        Ok(observed)
+        Ok(records
+            .into_iter()
+            .zip(leases)
+            .map(|(record, lease)| ObservedProcess::from_record(record, lease))
+            .collect())
     }
 
     pub async fn events_after(
@@ -480,6 +491,61 @@ mod tests {
             .expect("runtime process snapshot");
         assert_eq!(runtime_items.len(), 1);
         assert_eq!(runtime_items[0].process.process_id, "surviving-process");
+    }
+
+    #[tokio::test]
+    async fn list_batches_lease_reads_without_changing_mixed_results() {
+        let registry = Arc::new(super::super::TestLocalProcessRegistry::default());
+        for process_id in ["batch-leased", "batch-unleased", "batch-terminal"] {
+            registry
+                .register_process(external_registration(process_id, process_id))
+                .await
+                .expect("register batch observation fixture");
+        }
+        registry
+            .claim_process_lease(
+                "batch-leased",
+                &crate::LeaseOwnerIdentity::opaque("observer", "one"),
+                60_000,
+            )
+            .await
+            .expect("claim observed lease")
+            .acquired()
+            .expect("observed lease acquired");
+        registry
+            .complete_process(
+                "batch-terminal",
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete observed terminal process");
+
+        let watched = crate::facade_support::watch_process_registry(
+            Arc::clone(&registry) as Arc<dyn ProcessRegistry>
+        );
+        let observed = observer(Arc::clone(watched.registry()))
+            .list(&ProcessListFilter {
+                status: super::super::ProcessStatusFilter::Any,
+                ..ProcessListFilter::default()
+            })
+            .await
+            .expect("observe mixed records");
+
+        assert_eq!(observed.len(), 3);
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|process| process.lease_holder.is_some())
+                .count(),
+            1
+        );
+        assert_eq!(
+            observed.iter().filter(|process| process.terminal).count(),
+            1
+        );
+        assert_eq!(*registry.process_lease_batch_reads.lock().await, 1);
+        assert_eq!(*registry.process_lease_point_reads.lock().await, 0);
     }
 
     #[tokio::test]

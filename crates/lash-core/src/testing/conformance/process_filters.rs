@@ -229,3 +229,83 @@ pub(super) async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn 
         assert_rust_parity(&registry, filter).await;
     }
 }
+
+pub(super) async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    const KIND: &str = "recent-retired-filter-kind";
+    for process_id in ["recent-filter-running", "recent-filter-old"] {
+        registry
+            .register_process(registration(process_id).with_identity(ProcessIdentity::new(KIND)))
+            .await
+            .expect("register recent-retired fixture");
+    }
+    registry
+        .complete_process(
+            "recent-filter-old",
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"age": "old"}),
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete old terminal process");
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    registry
+        .register_process(
+            registration("recent-filter-fresh").with_identity(ProcessIdentity::new(KIND)),
+        )
+        .await
+        .expect("register fresh terminal process");
+    let fresh = registry
+        .complete_process(
+            "recent-filter-fresh",
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"age": "fresh"}),
+            )),
+            ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete fresh terminal process")
+        .stored()
+        .clone();
+
+    let recent = registry
+        .list_processes(&ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            identity_kind: Some(KIND.to_string()),
+            retired_since_ms: Some(fresh.updated_at_ms),
+            ..ProcessListFilter::default()
+        })
+        .await
+        .expect("list live plus recently retired processes")
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        recent,
+        ["recent-filter-fresh", "recent-filter-running"],
+        "the bounded read must retain old live rows and exclude old retired rows"
+    );
+
+    let all = registry
+        .list_processes(&ProcessListFilter {
+            status: ProcessStatusFilter::Any,
+            identity_kind: Some(KIND.to_string()),
+            ..ProcessListFilter::default()
+        })
+        .await
+        .expect("list all recent-retired fixtures")
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        all,
+        [
+            "recent-filter-fresh",
+            "recent-filter-old",
+            "recent-filter-running"
+        ],
+        "the unbounded list must preserve every status"
+    );
+}

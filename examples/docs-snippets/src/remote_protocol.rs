@@ -823,6 +823,7 @@ mod asserted_process_examples {
             caused_by_subscription_id: Some("subscription-nightly".to_string()),
             created_at_start_ms: Some(1_720_000_000_000),
             created_at_end_ms: Some(1_720_000_001_000),
+            retired_since_ms: Some(1_720_000_000_500),
         };
         RemoteProcessListFilter::validate(&list_filter).expect("valid process list filter");
         let list_json = serde_json::to_value(&list_filter).expect("list filter serializes");
@@ -839,6 +840,7 @@ mod asserted_process_examples {
         );
         assert_eq!(list_json["created_at_start_ms"], 1_720_000_000_000_u64);
         assert_eq!(list_json["created_at_end_ms"], 1_720_000_001_000_u64);
+        assert_eq!(list_json["retired_since_ms"], 1_720_000_000_500_u64);
         let list_response = RemoteProcessListResponse {
             // Bare body: the standalone transport call supplies the envelope.
             records: vec![observed_process()],

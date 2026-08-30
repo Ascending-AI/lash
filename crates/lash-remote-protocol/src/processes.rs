@@ -1419,7 +1419,7 @@ pub enum RemoteProcessStatusFilter {
     Any,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessListFilter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<RemoteProcessDefinitionIdentity>,
@@ -1441,23 +1441,10 @@ pub struct RemoteProcessListFilter {
     pub created_at_start_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_end_ms: Option<u64>,
-}
-
-impl Default for RemoteProcessListFilter {
-    fn default() -> Self {
-        Self {
-            definition: None,
-            status: RemoteProcessStatusFilter::Running,
-            waiting: None,
-            originator_id: None,
-            identity_kind: None,
-            identity_label: None,
-            caused_by_occurrence_id: None,
-            caused_by_subscription_id: None,
-            created_at_start_ms: None,
-            created_at_end_ms: None,
-        }
-    }
+    /// Inclusive lower bound for retired-process update timestamps. Live
+    /// processes remain eligible regardless of age.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retired_since_ms: Option<u64>,
 }
 
 impl RemoteProcessListFilter {

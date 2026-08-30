@@ -72,14 +72,14 @@ const POST_FLOOR_TABLES: [&str; 6] = [
 ];
 /// Indexes those generations added to tables the floor catalog already had, so
 /// dropping the post-floor tables does not take them with it (60: the session
-/// state inventory index; 57: the two root
+/// state inventory index; 65: the process update-time index; 57: the two root
 /// indexes; 56: trigger reclaim eligibility; 55: the drain's
 /// unsettled-children index; 54: the settlement uniqueness guard, both on the
 /// effect-replay table; 53: the ingress-family ordering pair). This list is the
 /// post-floor `introduced_relations` that are not
 /// themselves post-floor tables and do not belong to one, which is what
 /// `scripts/check_version_bump_fixtures.py` proves.
-const POST_FLOOR_INDEXES: [&str; 9] = [
+const POST_FLOOR_INDEXES: [&str; 10] = [
     "idx_lash_session_meta_state_version",
     "idx_lash_session_meta_catalog",
     "idx_lash_sessions_checkpoint_ref",
@@ -89,6 +89,7 @@ const POST_FLOOR_INDEXES: [&str; 9] = [
     "uq_lash_runtime_effect_replay_group_seq",
     "idx_lash_runtime_effect_replay_group_unsettled",
     "idx_lash_trigger_occurrences_reclaimable",
+    "idx_lash_processes_updated",
 ];
 /// Columns those generations added to tables the floor catalog already had, so
 /// dropping the post-floor tables does not take them with it either (54: the two
@@ -114,7 +115,7 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
 ];
 /// Every post-floor relation, for proving the fixture retained none of them: the
 /// floor migration's `introduced_relations`.
-const POST_FLOOR_ARTIFACTS: [&str; 19] = [
+const POST_FLOOR_ARTIFACTS: [&str; 20] = [
     "lash_turn_cancel_requests",
     "idx_lash_session_meta_state_version",
     "idx_lash_session_meta_catalog",
@@ -134,12 +135,13 @@ const POST_FLOOR_ARTIFACTS: [&str; 19] = [
     "lash_runtime_effect_group",
     "lash_tool_intent_submissions",
     "uq_lash_runtime_effect_replay_group_seq",
+    "idx_lash_processes_updated",
 ];
 /// What the newest generation alone introduced — the `introduced_relations` of
 /// the migration out of the immediate predecessor version. The divergent fixture
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
-const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_session_meta_pending_observer_intents"];
+const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_processes_updated"];
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
