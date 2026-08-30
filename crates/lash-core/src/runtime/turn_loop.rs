@@ -4180,20 +4180,8 @@ async fn run_turn_effect_loop(
     if pending_cancel.is_some() {
         cancellation.cancel();
     }
-    let cancel_watcher = crate::task::spawn({
-        let turn_control = Arc::clone(&turn_control);
-        let cancellation = cancellation.clone();
-        let clock = Arc::clone(&clock);
-        async move {
-            if await_turn_cancellation_with_retry(clock.as_ref(), || {
-                turn_control.await_cancel(turn_control_host.as_ref(), CancellationToken::new())
-            })
-            .await
-            .is_some()
-            {
-                cancellation.cancel();
-            }
-        }
+    let cancel_watcher = await_turn_cancellation_with_retry(clock.as_ref(), || {
+        turn_control.await_cancel(turn_control_host.as_ref(), CancellationToken::new())
     });
     // Canonical future-size seam: `driver.run` is boxed exactly once here.
     // Driver growth is absorbed by this allocation instead of accreting
@@ -4204,17 +4192,34 @@ async fn run_turn_effect_loop(
         cancellation.clone(),
         protocol_run_offset,
     ));
-    let result = drive_turn_to_completion(
+    let drive = drive_turn_to_completion(
         run_future,
         event_rx,
         assembler,
         child_usage_event_relay,
         events,
         turn_events,
-    )
-    .await;
-    cancel_watcher.abort();
-    result
+    );
+    tokio::pin!(cancel_watcher);
+    tokio::pin!(drive);
+    tokio::select! {
+        biased;
+        observation = cancel_watcher.as_mut() => match observation {
+            Ok(Some(_)) => {
+                cancellation.cancel();
+                drive.await
+            }
+            Ok(None) => drive.await,
+            Err(err) => {
+                // Dropping `drive` aborts its in-flight provider/effect task
+                // through the existing abort-on-drop seam. The caller then
+                // observes any committed receipt and settles the turn.
+                cancellation.cancel();
+                Err(err)
+            }
+        },
+        result = drive.as_mut() => result,
+    }
 }
 
 const TURN_CANCEL_WATCH_RETRY_INITIAL: std::time::Duration = std::time::Duration::from_millis(25);
@@ -4231,8 +4236,8 @@ const TURN_CANCEL_START_GATE_ATTEMPTS: usize = 3;
 /// Bound the live watcher to a useful transient-recovery window without letting
 /// a broken resolver outlive the turn indefinitely. Eight attempts traverse
 /// the whole exponential ladder through its one-second ceiling (2.575 seconds
-/// of injected sleep); exhaustion merely stops observation, which turn teardown
-/// already tolerates by aborting the watcher unconditionally.
+/// of injected sleep). Exhaustion fails closed through the same cancellation
+/// token that observed evidence uses, tearing down in-flight turn execution.
 pub(super) const TURN_CANCEL_WATCH_MAX_ATTEMPTS: usize = 8;
 
 async fn await_turn_cancellation_start_gate<F, C>(
@@ -4267,7 +4272,7 @@ where
 async fn await_turn_cancellation_with_retry<F, C>(
     clock: &dyn Clock,
     mut watch: F,
-) -> Option<TurnCancellationEvidence>
+) -> Result<Option<TurnCancellationEvidence>, RuntimeError>
 where
     F: FnMut() -> C,
     C: std::future::Future<Output = Result<Option<TurnCancellationEvidence>, RuntimeError>>,
@@ -4275,15 +4280,15 @@ where
     let mut backoff = TURN_CANCEL_WATCH_RETRY_INITIAL;
     for attempt in 1..=TURN_CANCEL_WATCH_MAX_ATTEMPTS {
         match watch().await {
-            Ok(observation) => return observation,
+            Ok(observation) => return Ok(observation),
             Err(err) if attempt == TURN_CANCEL_WATCH_MAX_ATTEMPTS => {
                 tracing::warn!(
                     error = %err,
                     attempts = attempt,
                     max_attempts = TURN_CANCEL_WATCH_MAX_ATTEMPTS,
-                    "turn cancellation watcher exhausted its retry budget; stopping observation"
+                    "turn cancellation watcher exhausted its retry budget; tearing down turn execution"
                 );
-                return None;
+                return Err(err);
             }
             Err(err) => {
                 tracing::warn!(
@@ -4540,6 +4545,7 @@ mod tests {
             }
         })
         .await
+        .expect("cancellation watch succeeds")
         .expect("cancellation evidence after retries");
 
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
@@ -4555,11 +4561,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancellation_watch_stops_after_its_error_budget() {
+    async fn cancellation_watch_fails_after_its_error_budget() {
         let clock = RecordingTestClock::new();
         let attempts = Arc::new(AtomicUsize::new(0));
         let observed_attempts = Arc::clone(&attempts);
-        let observed = await_turn_cancellation_with_retry(&clock, move || {
+        let err = await_turn_cancellation_with_retry(&clock, move || {
             observed_attempts.fetch_add(1, Ordering::SeqCst);
             async {
                 Err(RuntimeError::new(
@@ -4568,13 +4574,14 @@ mod tests {
                 ))
             }
         })
-        .await;
+        .await
+        .expect_err("the live cancellation watcher must fail closed after its retry budget");
 
-        assert!(observed.is_none());
+        assert_eq!(err.code, crate::RuntimeErrorCode::TransientCancelWatch);
         assert_eq!(
             attempts.load(Ordering::SeqCst),
             TURN_CANCEL_WATCH_MAX_ATTEMPTS,
-            "the live cancellation watcher must stop observing after its retry budget"
+            "the live cancellation watcher must exhaust its retry budget before teardown"
         );
         assert_eq!(clock.sleeps().len(), TURN_CANCEL_WATCH_MAX_ATTEMPTS - 1);
     }
