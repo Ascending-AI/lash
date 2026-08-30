@@ -298,6 +298,10 @@ where
                 "process `{process_id}` segment {segment_ordinal} omitted its validated handover"
             ))));
         }
+        let requires_cancelled_session_turn = matches!(
+            registration.input.as_ref(),
+            lash_core::ProcessInput::SessionTurn { .. }
+        );
         let cancellation = tokio_util::sync::CancellationToken::new();
         let parent_end_controller = scoped_effect_controller.clone();
         let runner = self.runner.run_process_segment(
@@ -315,7 +319,20 @@ where
                 signal?;
                 cancellation.cancel();
                 self.confirm_process_cancel_requested(&process_id).await?;
-                let _ = runner.await;
+                if requires_cancelled_session_turn {
+                    let settled = runner.await.map_err(handler_error_from_plugin)?;
+                    if settled
+                        .terminal_output()
+                        .and_then(ProcessAwaitOutput::terminal_status)
+                        != Some(lash_core::ProcessStatus::Cancelled)
+                    {
+                        return Err(handler_error_from_plugin(PluginError::Session(format!(
+                            "process `{process_id}` cancellation reached a non-cancelled runner outcome; retrying cleanup"
+                        ))));
+                    }
+                } else {
+                    let _ = runner.await;
+                }
                 Ok(lash_core::ProcessRunOutcome::Terminal {
                     output: Box::new(ProcessAwaitOutput::from_tool_output(
                         lash_core::ToolCallOutput::cancelled(
@@ -329,6 +346,25 @@ where
             }
             outcome = &mut runner => outcome
         };
+        let runner_settled_cancelled = matches!(
+            &outcome,
+            Ok(outcome)
+                if outcome
+                    .terminal_output()
+                    .and_then(ProcessAwaitOutput::terminal_status)
+                    == Some(lash_core::ProcessStatus::Cancelled)
+        );
+        if requires_cancelled_session_turn
+            && !runner_settled_cancelled
+            && self
+                .process_cancel_requested(&process_id)
+                .await
+                .map_err(handler_error_from_plugin)?
+        {
+            return Err(handler_error_from_plugin(PluginError::Session(format!(
+                "process `{process_id}` cancellation committed before terminalization; retrying cleanup"
+            ))));
+        }
         match outcome {
             Ok(lash_core::ProcessRunOutcome::Terminal { output, actions }) => {
                 self.finish_terminal_with_parent_end(
@@ -405,10 +441,9 @@ where
         }
         Ok(self
             .registry
-            .events_after(process_id, 0)
+            .count_events_through(process_id, "process.cancel_requested", i64::MAX as u64)
             .await?
-            .iter()
-            .any(|event| event.event_type == "process.cancel_requested"))
+            > 0)
     }
 
     async fn confirm_process_cancel_requested(&self, process_id: &str) -> Result<(), HandlerError> {

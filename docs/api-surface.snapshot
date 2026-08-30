@@ -8153,6 +8153,7 @@ lash::testing::TestLocalProcessRegistry::pause_next_wake_mark
 lash::testing::TestLocalProcessRegistry::pause_next_worklist_page_for_testing
 lash::testing::TestLocalProcessRegistry::raw_state_for_testing
 lash::testing::TestLocalProcessRegistry::replace_process_projection_for_testing
+lash::testing::TestLocalProcessRegistry::set_process_events_read_error_for_testing
 lash::testing::TestLocalProcessRegistry::set_process_lease_claim_error
 lash::testing::TestLocalProcessRegistry::set_process_lease_release_error
 lash::testing::TestLocalProcessRegistry::set_process_lease_renew_error

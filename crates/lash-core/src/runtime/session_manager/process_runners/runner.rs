@@ -44,19 +44,20 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 create_request,
                 turn_input,
                 ..
-            } => Ok(crate::ProcessRunOutcome::Terminal {
-                output: Box::new(
-                    Box::pin(self.run_process_session_turn(
-                        registration,
-                        *create_request.clone(),
-                        *turn_input.clone(),
-                        scoped_effect_controller,
-                        cancellation,
-                    ))
-                    .await,
-                ),
-                actions: Vec::new(),
-            }),
+            } => {
+                let output = Box::pin(self.run_process_session_turn(
+                    registration,
+                    *create_request.clone(),
+                    *turn_input.clone(),
+                    scoped_effect_controller,
+                    cancellation,
+                ))
+                .await?;
+                Ok(crate::ProcessRunOutcome::Terminal {
+                    output: Box::new(output),
+                    actions: Vec::new(),
+                })
+            }
             crate::ProcessInput::Engine { kind, payload } => {
                 let engine = match self.current.host.core.process_engines.require(kind) {
                     Ok(engine) => engine,

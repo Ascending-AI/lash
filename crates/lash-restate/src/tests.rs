@@ -5871,6 +5871,24 @@ fn rerunnable_registration(id: &str) -> ProcessRegistration {
     )
 }
 
+fn rerunnable_session_turn_registration(id: &str) -> ProcessRegistration {
+    ProcessRegistration::new(
+        id,
+        ProcessInput::SessionTurn {
+            definition_key: "test-session-turn:v1".to_string(),
+            create_request: Box::new(lash_core::SessionCreateRequest::child_session(
+                "test-parent",
+                lash_core::SessionStartPoint::Empty,
+                lash_core::PluginOptions::default(),
+            )),
+            turn_input: Box::new(lash_core::TurnInput::text("test child turn")),
+            output_contract: lash_core::ToolOutputContract::Static,
+        },
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+    )
+}
+
 fn owner_bound_registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
         id,
@@ -12117,6 +12135,7 @@ struct SegmentedRecordingRunner {
 struct CancellationAwareRunner {
     started: tokio::sync::Notify,
     finish_successfully: tokio::sync::Notify,
+    failure_after_cancel: Option<&'static str>,
 }
 
 #[derive(Debug, Default)]
@@ -12248,8 +12267,10 @@ impl RestateProcessRunner for CancellationAwareRunner {
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
         self.started.notify_one();
         tokio::select! {
-            _ = cancellation.cancelled() =>
-                Ok(process_cancellation("cancel signal observed", None).into()),
+            _ = cancellation.cancelled() => match self.failure_after_cancel {
+                Some(message) => Err(PluginError::Session(message.to_string())),
+                None => Ok(process_cancellation("cancel signal observed", None).into()),
+            },
             _ = self.finish_successfully.notified() =>
                 Ok(process_success(serde_json::json!("runner completed")).into()),
         }
@@ -12368,6 +12389,151 @@ async fn running_process_cancel_uses_native_signal_without_poll_delay() {
         requests[0].url,
         "https://restate.invalid/LashProcessWorkflow/prompt-cancel/await_cancel"
     );
+}
+
+#[tokio::test]
+async fn cancellation_cleanup_failure_does_not_write_a_false_terminal() {
+    let runner = Arc::new(CancellationAwareRunner {
+        failure_after_cancel: Some("simulated durable child cleanup failure"),
+        ..CancellationAwareRunner::default()
+    });
+    let registry = process_registry();
+    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+        Arc::clone(&runner),
+        Arc::clone(&registry),
+        continuation_store(),
+    ));
+    let registration = rerunnable_session_turn_registration("cancel-cleanup-failure");
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register process");
+    let (signal, cancellation_signal) = tokio::sync::oneshot::channel();
+    let run = {
+        let workflow = Arc::clone(&workflow);
+        tokio::spawn(async move {
+            workflow
+                .run_registration(
+                    registration,
+                    ProcessExecutionContext::default(),
+                    native_process_scope("cancel-cleanup-failure"),
+                    0,
+                    None,
+                    async move {
+                        cancellation_signal.await.map_err(|_| {
+                            HandlerError::from(TerminalError::new(
+                                "test cancellation signal sender dropped",
+                            ))
+                        })
+                    },
+                )
+                .await
+        })
+    };
+    runner.started.notified().await;
+    registry
+        .append_event(
+            "cancel-cleanup-failure",
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                "cancel-cleanup-failure",
+                Some("exercise cleanup failure".to_string()),
+            ),
+        )
+        .await
+        .expect("append cancel request");
+    signal.send(()).expect("resolve cancellation signal");
+
+    let error = tokio::time::timeout(Duration::from_secs(2), run)
+        .await
+        .expect("cleanup failure settles")
+        .expect("join running process")
+        .expect_err("cleanup failure must stay retryable");
+    let source: &(dyn std::error::Error + Send + Sync) = error.as_ref();
+    assert!(
+        source
+            .to_string()
+            .contains("simulated durable child cleanup failure"),
+        "unexpected handler error: {error:?}"
+    );
+    let record = registry
+        .get_process("cancel-cleanup-failure")
+        .await
+        .expect("read process after cleanup failure")
+        .expect("process remains registered");
+    assert!(
+        !record.is_terminal(),
+        "a cancelled SessionTurn cleanup failure must not write a false terminal"
+    );
+}
+
+#[tokio::test]
+async fn non_session_cancel_preserves_the_prior_cancelled_terminal_on_runner_failure() {
+    let runner = Arc::new(CancellationAwareRunner {
+        failure_after_cancel: Some("simulated non-session runner failure"),
+        ..CancellationAwareRunner::default()
+    });
+    let registry = process_registry();
+    let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
+        Arc::clone(&runner),
+        Arc::clone(&registry),
+        continuation_store(),
+    ));
+    let registration = rerunnable_registration("non-session-cancel-failure");
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register process");
+    let (signal, cancellation_signal) = tokio::sync::oneshot::channel();
+    let run = {
+        let workflow = Arc::clone(&workflow);
+        tokio::spawn(async move {
+            workflow
+                .run_registration(
+                    registration,
+                    ProcessExecutionContext::default(),
+                    native_process_scope("non-session-cancel-failure"),
+                    0,
+                    None,
+                    async move {
+                        cancellation_signal.await.map_err(|_| {
+                            HandlerError::from(TerminalError::new(
+                                "test cancellation signal sender dropped",
+                            ))
+                        })
+                    },
+                )
+                .await
+        })
+    };
+    runner.started.notified().await;
+    registry
+        .append_event(
+            "non-session-cancel-failure",
+            lash_core::ProcessEventAppendRequest::cancel_requested(
+                "non-session-cancel-failure",
+                Some("preserve prior non-session behavior".to_string()),
+            ),
+        )
+        .await
+        .expect("append cancel request");
+    signal.send(()).expect("resolve cancellation signal");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(2), run)
+        .await
+        .expect("non-session cancellation settles")
+        .expect("join running process")
+        .expect("non-session runner failure remains masked by cancellation");
+    assert!(matches!(
+        outcome,
+        lash_core::ProcessRunOutcome::Terminal { output, .. }
+            if is_process_cancellation(output.as_ref())
+    ));
+    let record = registry
+        .get_process("non-session-cancel-failure")
+        .await
+        .expect("read process")
+        .expect("process remains registered");
+    assert_eq!(record.status, lash_core::ProcessStatus::Cancelled);
 }
 
 #[tokio::test]

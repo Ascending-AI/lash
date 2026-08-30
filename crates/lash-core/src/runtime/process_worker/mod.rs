@@ -1295,6 +1295,10 @@ impl DurableProcessWorker {
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, RecoverFailure> {
         let process_id = registration.id.clone();
+        let requires_cancelled_session_turn = matches!(
+            registration.input.as_ref(),
+            ProcessInput::SessionTurn { .. }
+        );
         self.ensure_stable_process_id(&registration)
             .map_err(RecoverFailure::Run)?;
         if registration.disposition == RecoveryContract::ExternallyOwned {
@@ -1315,7 +1319,12 @@ impl DurableProcessWorker {
             }
         };
         let cancellation = CancellationToken::new();
-        let cancel_watcher = {
+        if requires_cancelled_session_turn
+            && self.cancellation_was_already_requested(&process_id).await?
+        {
+            cancellation.cancel();
+        }
+        let mut cancel_watcher = {
             let process_work = self.process_wiring();
             let process_id = process_id.clone();
             let cancellation = cancellation.clone();
@@ -1325,12 +1334,19 @@ impl DurableProcessWorker {
                     .await_event(&process_id, "process.cancel_requested", 0)
                     .await
                 {
-                    Ok(_) => cancellation.cancel(),
-                    Err(err) => tracing::warn!(
-                        process_id = %process_id,
-                        error = %err,
-                        "process cancel watcher stopped before observing cancellation",
-                    ),
+                    Ok(_) => {
+                        cancellation.cancel();
+                        std::future::pending::<Result<(), PluginError>>().await
+                    }
+                    Err(err) if requires_cancelled_session_turn => Err(err),
+                    Err(err) => {
+                        tracing::warn!(
+                            process_id = %process_id,
+                            error = %err,
+                            "process cancel watcher stopped before observing cancellation",
+                        );
+                        std::future::pending::<Result<(), PluginError>>().await
+                    }
                 }
             })
         };
@@ -1358,8 +1374,32 @@ impl DurableProcessWorker {
         tokio::pin!(pending);
         loop {
             tokio::select! {
+                biased;
+                watcher = &mut cancel_watcher => {
+                    return match watcher {
+                        Ok(Err(error)) => Err(RecoverFailure::BackendError(
+                            self.recovery_backend_error(
+                                &process_id,
+                                ProcessRecoveryOperation::ReadProcess,
+                                error,
+                            ),
+                        )),
+                        Ok(Ok(())) => unreachable!("successful cancel watcher remains pending"),
+                        Err(error) => Err(RecoverFailure::Run(PluginError::Session(format!(
+                            "process `{process_id}` cancel watcher task failed: {error}"
+                        )))),
+                    };
+                }
                 outcome = &mut pending => {
                     cancel_watcher.abort();
+                    if requires_cancelled_session_turn
+                        && self.cancellation_was_already_requested(&process_id).await?
+                        && runner_outcome_requires_cancel_fence(&outcome)
+                    {
+                        return Err(RecoverFailure::Run(PluginError::Session(format!(
+                            "process `{process_id}` cancellation committed before terminalization; deferring terminal write for cancelled replay"
+                        ))));
+                    }
                     return outcome.map_err(RecoverFailure::Run);
                 }
                 _ = self.config.runtime_host.clock.sleep(self.lease_timings().renew_interval()) => {
@@ -1393,6 +1433,24 @@ impl DurableProcessWorker {
                 }
             }
         }
+    }
+
+    async fn cancellation_was_already_requested(
+        &self,
+        process_id: &str,
+    ) -> Result<bool, RecoverFailure> {
+        self.config
+            .process_registry()
+            .count_events_through(process_id, "process.cancel_requested", i64::MAX as u64)
+            .await
+            .map_err(|error| {
+                RecoverFailure::BackendError(self.recovery_backend_error(
+                    process_id,
+                    ProcessRecoveryOperation::ReadProcess,
+                    error,
+                ))
+            })
+            .map(|count| count > 0)
     }
 
     pub async fn request_process_cancel(
@@ -1554,6 +1612,19 @@ impl DurableProcessWorker {
         }
         Ok(())
     }
+}
+
+fn runner_outcome_requires_cancel_fence(
+    outcome: &Result<crate::ProcessRunOutcome, PluginError>,
+) -> bool {
+    matches!(
+        outcome,
+        Ok(outcome)
+            if outcome
+                .terminal_output()
+                .and_then(crate::ProcessAwaitOutput::terminal_status)
+                != Some(crate::ProcessStatus::Cancelled)
+    )
 }
 
 #[cfg(test)]
