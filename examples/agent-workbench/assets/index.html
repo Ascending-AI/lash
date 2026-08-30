@@ -2908,14 +2908,25 @@
         observationCursor: null,
         replayIncarnationId: null,
         recoveryGeneration: 0,
+        snapshotRequestSequence: 0,
+        appliedSnapshotSequence: 0,
         renderedProductEvents: new Set(),
         appliedObservationEvents: new Set()
       };
     }
 
+    /* `/api/state` has no server revision spanning its live and durable reads,
+       so request order is the client authority. A request takes its sequence
+       before I/O starts; only the newest request may apply. */
+    function beginStateSnapshotRequest(projection) {
+      projection.snapshotRequestSequence += 1;
+      return projection.snapshotRequestSequence;
+    }
+
     function beginStateRecovery(projection) {
       return {
         generation: ++projection.recoveryGeneration,
+        snapshotSequence: beginStateSnapshotRequest(projection),
         sessionId: projection.sessionId,
         productCursor: projection.productCursor,
         observationCursor: projection.observationCursor,
@@ -2927,6 +2938,8 @@
       const snapshotSession = state?.settings?.session_id || null;
       const snapshotCursor = Number(state?.product_events?.cursor) || 0;
       return token.generation === projection.recoveryGeneration
+        && token.snapshotSequence === projection.snapshotRequestSequence
+        && token.snapshotSequence > projection.appliedSnapshotSequence
         && token.sessionId === projection.sessionId
         && snapshotSession === token.sessionId
         && token.observationCursor === projection.observationCursor
@@ -2960,9 +2973,21 @@
       }
     }
 
-    function busyAfterStateSnapshot(state, authoritative, currentBusy) {
-      if ((state?.active_turns || []).length) return true;
-      return authoritative ? false : currentBusy;
+    function busyAfterStateSnapshot(state) {
+      /* Pending inputs and queued-work rows are editable waiting state, not an
+         executing turn. A queued-work drain enters `active_turns` while it is
+         running, so that one authoritative lane covers foreground and
+         background turns without latching on pending work. */
+      return (state?.active_turns || []).length > 0;
+    }
+
+    function applySequencedBusySnapshot(projection, state, snapshotSequence, currentBusy) {
+      if (snapshotSequence !== projection.snapshotRequestSequence
+          || snapshotSequence <= projection.appliedSnapshotSequence) {
+        return { applied: false, busy: currentBusy };
+      }
+      projection.appliedSnapshotSequence = snapshotSequence;
+      return { applied: true, busy: busyAfterStateSnapshot(state) };
     }
     // END WORKBENCH_PROJECTION_STATE
 
@@ -4297,7 +4322,7 @@
         const count = (event.batch_ids || []).length;
         renderEventRow("queued turn started", count ? `${count} batch${count === 1 ? "" : "es"}` : "");
       }
-      setBusy(true, "agent running");
+      refreshBusyState();
     }
 
     // BEGIN WORKBENCH_TRANSIENT_SETTLEMENT
@@ -4344,7 +4369,10 @@
     // BEGIN WORKBENCH_TURN_EVENT_REDUCER
     function handleTurnEvent(event, turnId) {
       globalThis.__LASH_WORKBENCH_TURN_EVENT_HOOK__?.(event, turnId);
-      if (event.type === "model_request_started") clearRetryStatus(turnId);
+      if (event.type === "model_request_started") {
+        clearRetryStatus(turnId);
+        globalThis.refreshBusyState?.();
+      }
       if (event.type === "queued_work_started") renderQueuedWorkStarted(event);
       if (event.type === "turn_input_applied") recordTurnInputApplications(event.applications);
       if (event.type === "assistant_prose_delta") appendAssistantText(event.text, event.correlation_id, turnId);
@@ -4384,7 +4412,6 @@
       pendingCodeBlock = null;
       pendingTools = [];
       clearRetryStatus();
-      setBusy(true, "starting turn");
       try {
         const response = await fetch(url, {
           method: "POST",
@@ -4395,7 +4422,6 @@
         if (!response.ok) {
           await response.text();
           renderError("request could not be completed", { retry: true });
-          setBusy(false, "ready");
           return false;
         }
         /* The body is the command's outcome, not decoration: /api/turn reports
@@ -4413,11 +4439,13 @@
         } else {
           renderError("request could not be completed", { retry: true });
         }
-        if (!resetInFlight) setBusy(false, "ready");
         return false;
       } finally {
         if (controller === commandController) controller = null;
-        if (!resetInFlight) refreshWork();
+        if (!resetInFlight) {
+          refreshBusyState();
+          refreshWork();
+        }
       }
     }
     // END WORKBENCH_POST_COMMAND
@@ -4565,8 +4593,7 @@
       }
       if (event.type === "done") {
         finishTransientRows(event.turn_id);
-        setBusy(false, "ready");
-        refreshUsage();
+        refreshUsage(event.turn_id);
         /* A turn that failed committed nothing its optimistic rows can stand
            for, and the server has already retired them from the lane
            (FIG-1000). This tab may still be rendering them, and rows are only
@@ -4575,6 +4602,9 @@
         if (event.outcome === "failed") {
           recoverFromState("a turn failed; reload to restore the conversation");
         }
+      }
+      if (event.type === "message" || event.type === "turn_input") {
+        globalThis.refreshBusyState?.();
       }
     }
     // END WORKBENCH_PRODUCT_EVENT_REDUCER
@@ -4625,7 +4655,13 @@
           scheduleStateRetry();
           return;
         }
-        applyStateSnapshot(state, true, true, transcriptApplication);
+        applyStateSnapshot(
+          state,
+          true,
+          true,
+          transcriptApplication,
+          token.snapshotSequence
+        );
       } catch (error) {
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
@@ -4677,7 +4713,7 @@
         })
         .catch(() => renderError("the turn could not be stopped"))
         .finally(() => {
-          if (!resetInFlight) setBusy(false, "ready");
+          if (!resetInFlight) refreshBusyState();
         });
     }
     stopButton.addEventListener("click", stopTurn);
@@ -4742,14 +4778,20 @@
         controller.abort();
         controller = null;
       }
-      setBusy(true, "resetting");
+      const snapshotSequence = beginStateSnapshotRequest(projectionState);
       workRefreshGeneration += 1;
       try {
         const response = await fetch("/api/reset", { method: "POST" });
         if (!response.ok) throw new Error("reset failed (" + response.status + ")");
         const state = await response.json();
-        clearTerminalTurnTombstones();
-        clearTranscript();
+        const applied = applyStateSnapshot(
+          state,
+          true,
+          true,
+          SNAPSHOT_TRANSCRIPT_REPLACE,
+          snapshotSequence
+        );
+        if (!applied) return;
         clearExecutionState();
         clearAttachment();
         lastRequest = null;
@@ -4758,11 +4800,7 @@
            is what makes a late response for the old session land as "ignore" */
         cancelStateRetry();
         markShellChannel(shellAvailability, "state", true);
-        knownSessionLabel = state.settings.session_id || "—";
-        renderUsage(state.usage);
-        applyStateSnapshot(state, true);
         restartEventStreams(true);
-        setBusy(false, "ready");
       } catch (_) {
         renderError("the conversation could not be reset");
       } finally {
@@ -4770,7 +4808,7 @@
         resetButton.disabled = false;
         resetButton.classList.remove("loading");
         resetButton.textContent = "reset";
-        setBusy(false, "ready");
+        refreshBusyState();
         refreshWork();
       }
     }
@@ -4838,7 +4876,6 @@
          running, because one is. */
       if (accepted?.queued) {
         if (accepted.queued_input) renderIngressReceipt(accepted.queued_input);
-        setBusy(true, "queued next · waiting for the running turn");
       }
       if (accepted && selectedAttachment?.id === attachment?.id) clearAttachment();
     });
@@ -5510,14 +5547,33 @@
     const SNAPSHOT_TRANSCRIPT_REPLACE = "replace";
     const SNAPSHOT_TRANSCRIPT_PRESERVE_TRANSIENT = "preserve_transient";
 
+    function applyBusySnapshot(state, snapshotSequence) {
+      const busySnapshot = applySequencedBusySnapshot(
+        projectionState,
+        state,
+        snapshotSequence,
+        busy
+      );
+      if (!busySnapshot.applied) return false;
+      if (busySnapshot.busy !== busy) {
+        setBusy(
+          busySnapshot.busy,
+          busySnapshot.busy ? "turn running · restored" : "ready"
+        );
+      }
+      return true;
+    }
+
     function applyStateSnapshot(
       state,
       replaceTranscript = false,
       authoritative = replaceTranscript,
       transcriptApplication = replaceTranscript
         ? SNAPSHOT_TRANSCRIPT_REPLACE
-        : SNAPSHOT_TRANSCRIPT_APPEND
+        : SNAPSHOT_TRANSCRIPT_APPEND,
+      snapshotSequence = beginStateSnapshotRequest(projectionState)
     ) {
+      if (!applyBusySnapshot(state, snapshotSequence)) return false;
       const snapshotSessionId = state?.settings?.session_id || null;
       if (projectionState.sessionId !== null && projectionState.sessionId !== snapshotSessionId) {
         clearTerminalTurnTombstones();
@@ -5578,10 +5634,7 @@
         });
       }
       recordTurnInputApplications(state.turn_input_applications);
-      const nextBusy = busyAfterStateSnapshot(state, authoritative, busy);
-      if (nextBusy !== busy) {
-        setBusy(nextBusy, nextBusy ? "turn running · restored" : "ready");
-      }
+      return true;
     }
     // END WORKBENCH_STATE_SNAPSHOT
 
@@ -5684,11 +5737,46 @@
     }
     // END WORKBENCH_USAGE_PROJECTION
 
-    async function refreshUsage() {
+    const SETTLEMENT_STATE_REFRESH_DELAY_MS = 100;
+    const SETTLEMENT_STATE_REFRESH_ATTEMPTS = 50;
+
+    async function refreshUsage(
+      settlingTurnId = null,
+      attemptsRemaining = SETTLEMENT_STATE_REFRESH_ATTEMPTS
+    ) {
+      const snapshotSequence = beginStateSnapshotRequest(projectionState);
+      let retrySettlement = false;
       try {
         const state = await fetchStateSnapshot();
+        const applied = applyBusySnapshot(state, snapshotSequence);
+        retrySettlement = Boolean(settlingTurnId) && (
+          !applied || (state.active_turns || []).some(turn => turn.turn_id === settlingTurnId)
+        );
+        if (!applied) return;
         markShellChannel(shellAvailability, "state", true);
         renderUsage(state.usage);
+        renderShellStatus();
+      } catch (error) {
+        markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
+        renderShellStatus();
+        scheduleStateRetry();
+        retrySettlement = Boolean(settlingTurnId);
+      } finally {
+        if (retrySettlement && attemptsRemaining > 0) {
+          setTimeout(
+            () => refreshUsage(settlingTurnId, attemptsRemaining - 1),
+            SETTLEMENT_STATE_REFRESH_DELAY_MS
+          );
+        }
+      }
+    }
+
+    async function refreshBusyState() {
+      const snapshotSequence = beginStateSnapshotRequest(projectionState);
+      try {
+        const state = await fetchStateSnapshot();
+        if (!applyBusySnapshot(state, snapshotSequence)) return;
+        markShellChannel(shellAvailability, "state", true);
         renderShellStatus();
       } catch (error) {
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
@@ -5752,10 +5840,22 @@
         markShellChannel(shellAvailability, "state", true);
         cancelStateRetry();
         if (application === "initial") {
-          applyStateSnapshot(state);
+          applyStateSnapshot(
+            state,
+            false,
+            false,
+            SNAPSHOT_TRANSCRIPT_APPEND,
+            token.snapshotSequence
+          );
           return;
         }
-        applyStateSnapshot(state, true, true);
+        applyStateSnapshot(
+          state,
+          true,
+          true,
+          SNAPSHOT_TRANSCRIPT_REPLACE,
+          token.snapshotSequence
+        );
         /* re-attach the streams at the snapshot's cursors */
         restartEventStreams();
       } catch (error) {

@@ -99,93 +99,45 @@ truth.
 
 ## The busy-state contract
 
-Discovering this is part of the run. What follows was derived from
-[`index.html`](../../examples/agent-workbench/assets/index.html) **and confirmed by
-execution**, including the stack that writes the flag. Re-derive it if the client changes.
+`busy` is a projection of the latest accepted `/api/state` snapshot, never an event-lane
+latch. `active_turns` non-empty means running; empty means idle. Pending turn inputs and
+pending queued-work batches do not make the composer busy. Once queued work is actually
+draining, its turn appears in `active_turns`, so foreground and background turns share the
+same authority.
 
-`busy` is one client-local boolean per tab (`let busy = false`). Five things write it:
+The endpoint does not expose one server revision spanning all of its live and durable
+reads. Each tab therefore assigns a monotonic client-side sequence when it starts a state
+request. Only the newest request may apply, and an already-applied sequence never applies
+twice. An older active snapshot arriving after a newer settled snapshot cannot re-arm the
+composer.
 
-| writer | trigger | reaches | observed |
-|---|---|---|---|
-| `postCommand` → `setBusy(true, "starting turn")` | this tab POSTs `/api/turn` / `/api/reset` | **only this tab** (optimistic) | yes |
-| composer submit → `setBusy(true, "queued next · waiting for the running turn")` | `/api/turn` answered `queued: true`, so this send is the next turn's input (FIG-1000) | **only this tab** (the queued receipt itself fans out) | Phase 6 |
-| `applyStateSnapshot` → `setBusy(true, "turn running · restored")` | any authoritative `/api/state` read that sees `active_turns` non-empty | **every tab that performs one** | yes — the only cross-tab start path |
-| `applyProductEvent` `done` → `setBusy(false, "ready")` | the turn's `done` product event on `/api/events` | **every attached tab** | yes |
-| `renderQueuedWorkStarted` → `setBusy(true, "agent running")` | `queued_work_started` turn activity on `/api/observations` | every attached tab, in principle | **never fired** — see Phase 3d |
+Product and observation events are refresh signals, not busy-state writers:
 
-There is **no periodic `/api/state` poll** (the 1.4 s pollers are `/api/work`,
-`/api/queued-work`, `/api/triggers`, `/api/accounts`) and **no dedicated turn-started
-event**. Nevertheless a watching tab *does* reach `running`, promptly. The mechanism is
-the finding:
+| event or action | snapshot refresh |
+|---|---|
+| accepted or failed composer command | refresh busy from `/api/state` |
+| product `message` or `turn_input` | refresh busy in every attached tab |
+| turn `model_request_started` or `queued_work_started` activity | refresh busy in every attached tab |
+| product `done` | refresh usage and busy together from `/api/state` |
+| replay gap, terminal replacement, or resident replacement | apply the sequenced recovery snapshot |
+| Stop or reset completion | refresh or apply the returned sequenced snapshot |
 
-> When a turn starts, its first commit makes every **other** tab's
-> `subscribe_recoverable_chat` subscription emit a `terminal_replacement`. That drives
-> `recoverTerminalReplacement` → `recoverFromState` →
-> `applyStateSnapshot(state, true, true)`, an **authoritative** snapshot whose
-> `busyAfterStateSnapshot` reads the session-scoped `active_turns` and flips the pill to
-> `running`. The watching tab is never *told* a turn started; it **re-reads server truth**
-> after a stream-recovery event.
+There is still no periodic `/api/state` poll. Fan-out comes from the existing product and
+observation streams: every busy-relevant event makes every attached tab re-read the same
+session authority. A tab opened or reloaded mid-turn also derives its first busy value from
+its initial snapshot.
 
-Two observable fingerprints make that mechanism assertable rather than inferred, and Phase
-3 gates both:
+Phase 3 gates the result rather than an event edge: both tabs must show `running` while
+`/api/state.active_turns` contains the turn, both must clear after settlement, and neither
+may change busy without an accepted state snapshot. Phase 6 still gates concurrent
+submission separately: `/api/turn` may admit a second viewer's send as next-turn input,
+while the server lease and head CAS remain the execution authority.
 
-- the **subtitle** under the watching tab's pill reads `turn running · restored`, while
-  the acting tab reads `starting turn` / `running · Ns`. Same pill text, different
-  provenance.
-- the watching tab's busy-write stack is `applyStateSnapshot ← recoverFromState ←
-  recoverTerminalReplacement`.
-
-So:
-
-- **Turn end is agreed, directly.** Both tabs leave `busy` on the same shared `done`
-  event.
-- **Turn start reaches watching tabs indirectly but promptly** — measured at **0.26 s** in
-  this runbook's execution. Phase 3 measures the latency and records it rather than
-  assuming it.
-- **There is exactly one cross-tab start mechanism, and it is this one.** A wake turn is
-  *not* different: a trigger press reaches `postTriggerCommand`, which never touches
-  `busy`, so for a RED-started turn **even the tab that pressed the button** learns via
-  the same recovery re-read and shows `turn running · restored`. The
-  `renderQueuedWorkStarted` → `agent running` path was **never observed to fire** for a
-  trigger press in this configuration. Phase 3d asserts that observed behavior rather than
-  the code path's promise.
-- **A tab that arrives or reloads mid-turn agrees**, via the same `active_turns` read.
-
-Two consequences that matter more than the pill:
-
-- **Because the recovery is authoritative, `applyStateSnapshot` calls `clearTranscript()`
-  and rebuilds the watching tab's transcript from the committed projection — at every turn
-  start.** This is the deep reason multi-tab transcripts converge so robustly: a watching
-  tab is continuously re-backfilled from durable truth, so it is structurally incapable of
-  accumulating live-path drift. It is also a cost that scales with transcript size, not a
-  free win — every turn start re-derives the whole conversation in every watching tab.
-- **`POST /api/turn` admits a send against a busy session, it does not start one**
-  (FIG-1000). `send_turn` reads `active_turns` and, when the session already has a running
-  turn, enqueues the send as a `next_turn` input and answers `queued: true` with the same
-  receipt `/api/turn/input` returns — the same admission shape as `inject now` ("inject now
-  requires exactly one running turn") and `run_queued_work_batch` ("queued work cannot be
-  run while this session has an active turn"), which both refuse rather than lie. So the
-  **client-local** `busy` flag — `postCommand`'s early return and `sendButton.disabled` —
-  is no longer the only thing standing between a second viewer and a doomed concurrent
-  turn; it is now just the local affordance. The server check is advisory (two sends can
-  race past it), so a head-CAS loser has to be visible too: a failed turn retires the
-  rows the workbench published for it and publishes `done` with `outcome: "failed"`.
-  Phase 6 gates both halves.
-
-**What downstream multi-viewer hosts should expect.** Transcript convergence is strong and
-needs no host work: every viewer is re-backfilled from committed truth at each turn start,
-and the `done` event closes every viewer's busy state — both are real cross-viewer
-guarantees. Running state also reaches every viewer, fast (0.26 s measured), but it is a
-**side effect of stream recovery, not a signal**: nothing publishes "a turn started". Its
-label literally says `restored`, it costs a full transcript re-derivation in every viewer
-on every turn start, and it is the *only* path — a trigger press has no direct start
-signal either, not even in the tab that pressed. A host that wants a first-class
-turn-started fan-out must publish one itself. Concurrent submission, by contrast, needs no
-host invention: `/api/turn` holds a second viewer's send as the next turn's input and says
-so, and a turn that loses the head CAS surfaces as a failure row whose optimistic
-rows retire in every viewer (Phase 6). What a host does have to copy is the *shape*: an
-advisory admission check plus an honest failure path, because the lease and the CAS — never
-the handler — decide who commits.
+**What downstream multi-viewer hosts should expect.** The event streams tell clients when
+to refresh; `/api/state` tells them whether the session is running. Copy both halves. An
+edge-triggered local boolean will eventually miss a clearing event or accept a stale
+refetch, while a sequenced snapshot projection converges even when responses arrive out of
+order.
 
 ## Working material
 
@@ -298,7 +250,8 @@ Assert the contract above and record the **actual** behavior, one sub-gate per l
 was promised, what was observed.
 
 **3a — a composer turn from A.** Start a long turn from A. Require A's pill `running` with
-subtitle `starting turn` / `running · Ns`, `runningActions` shown, `aria-busy="true"`.
+subtitle `turn running · restored` / `running · Ns`, `runningActions` shown,
+`aria-busy="true"`.
 Require B renders the turn it did not start (its timeline grows while `active_turns` is
 non-empty).
 
@@ -306,38 +259,36 @@ non-empty).
 ~50 ms until its pill reads `running`, and **record the latency**. Require:
 
 - B reaches `running` without acting (bound it explicitly, e.g. 15 s; a timeout is a real
-  regression in the recovery path, not a slow model);
-- B's subtitle is **`turn running · restored`** — the fingerprint that this is a
-  server-truth re-read, not a start signal, and distinct from A's subtitle;
-- B's busy-write stack is `applyStateSnapshot ← recoverFromState ←
-  recoverTerminalReplacement`. Capture it by wrapping `window.setBusy` in B before the
-  turn and recording each call with `new Error().stack`. Asserting the *mechanism*, not
-  just the pill, is what makes this phase a regression gate rather than a screenshot.
+  regression in the snapshot-refresh path, not a slow model);
+- both tabs' busy writes carry `turn running · restored`; neither tab may record an
+  optimistic `starting turn` or `agent running` write;
+- each busy write follows an accepted `/api/state` response through `applyBusySnapshot`.
+  Capture state-request start order and the `setBusy` stack in both tabs. Require applied
+  request sequences to increase monotonically and every ignored response to have a lower
+  sequence than the latest request. Asserting the mechanism, not just the pill, is what
+  makes this phase a regression gate rather than a screenshot.
 - B's client-side concurrency guard arms on convergence: B's **send** control becomes
   disabled and its **inject now** / **queue next** controls become enabled.
 
 Screenshot side-by-side `03ab-inflight-both.png` with both pills and both subtitles
 legible; save `03-watcher-convergence.json` (latency, both shells) and
-`03-b-busylog.json`.
+`03-b-busylog.json` (request sequence, application verdict, and writer stack).
 
 **3c — turn end is agreed.** Let the turn settle. Require **both** pills `idle`, both
 `runningActions` hidden, and the cross-check clean with multisets equal. This is the
-direct cross-tab guarantee: the `done` product event reaches every attached client.
+cross-tab guarantee: the `done` product event makes every attached client refetch, and
+the settled snapshots all derive idle.
 Screenshot `03c-settled-both.png`.
 
 **3d — a wake turn's start uses the *same* mechanism.** Press RED once from A. Poll both
 tabs until **both** pills read `running`, then let the wake turn settle and require both
 pills return to `idle` with the cross-check clean.
 
-The discriminating assertion is on the **labels, collected over the whole wake turn** —
-not sampled at the instant the pills flip, which is too early to see a later writer.
-Require that **both** tabs' only busy-true label is `turn running · restored`, and that
-neither tab records `agent running`. That is the observed behavior, and it is the phase's
-finding: `postTriggerCommand` never sets `busy`, so a trigger press has no optimistic
-local start either, and the `queued_work_started` → `agent running` writer does not fire
-for a button-triggered wake. Every tab — including the one that pressed — converges
-through the single recovery path. If a future change makes `agent running` appear, that is
-a **contract change to record**, not a silent pass: re-derive this section.
+The discriminating assertion is on the **snapshot applications, collected over the whole
+wake turn**. Require both tabs to fetch `/api/state` on the busy-relevant stream event,
+accept a snapshot with one `active_turns` row, then accept a later empty snapshot after
+settlement. Neither tab may record `agent running`, `starting turn`, or any busy write
+outside `applyBusySnapshot`.
 
 Screenshot `03d-wake-both.png`; save `03d-wake.json` with both tabs' complete busy logs,
 each entry carrying its writer frame.
@@ -493,12 +444,12 @@ port-derived Restate container are gone.
 | Registration fans out | the watcher A registered renders in B's rail | | `02a-triggers.json`, `02a-registered-both.png` |
 | Cross-tab wake | RED from B adds exactly 1 assistant row **per tab**, 0 user rows; counts = API = store = `turn_completed` | | `02b-*.json`, `02b-after-red-both.png` |
 | Work rails agree | both rails render the same rows as the one scoped `/api/work` | | `02b-work-{a,b,api}.json` |
-| Acting tab busy | A `running` with subtitle `starting turn` / `running · Ns` | | `03-watcher-convergence.json` |
+| Acting tab busy | A `running` with subtitle `turn running · restored` / `running · Ns` | | `03-watcher-convergence.json` |
 | Watcher convergence | B reaches `running` without acting, within the bound; latency recorded | | `03-watcher-convergence.json`, `03ab-inflight-both.png` |
-| Convergence **mechanism** | B's subtitle `turn running · restored` **and** stack `applyStateSnapshot ← recoverFromState ← recoverTerminalReplacement` | | `03-b-busylog.json` |
+| Convergence **mechanism** | both busy writes follow accepted `/api/state` responses through `applyBusySnapshot`; applied request sequences increase monotonically | | `03-b-busylog.json` |
 | Watcher guard arms | on convergence B's send disables and inject/queue-next enable | | `03-watcher-convergence.json` |
-| Turn end agreed | both pills reach `idle` off the shared `done` event | | `03c-settled-both.png` |
-| Wake start uses the same path | both pills `running`; over the whole wake turn neither tab records `agent running`, both record only `turn running · restored` | | `03d-wake.json`, `03d-wake-both.png` |
+| Turn end agreed | shared `done` makes both tabs refetch; both settled snapshots derive `idle` | | `03c-settled-both.png` |
+| Wake start uses the same path | both tabs accept a running snapshot then a settled snapshot; neither records a non-snapshot busy write | | `03d-wake.json`, `03d-wake-both.png` |
 | Cross-tab queue-next | B's queued marker runs in exactly one drained turn and renders in both tabs | | `04-*.json`, `04-after-queued-both.png` |
 | Reload convergence | post-reload B multiset equals A's; pre-reload rows all survive; A unaffected | | `05-multiset-*.json`, `05-converged-both.png` |
 | Concurrent submission queued | `/api/turn` answers `queued: true` with a `next_turn` receipt; `active_turns` stays at 1; no second workflow; B's marker pending as `deferred_next_turn`; no optimistic user row for it in either tab | | `06-concurrent-submit.json`, `06-truth.json` |

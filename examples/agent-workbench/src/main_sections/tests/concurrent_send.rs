@@ -1040,13 +1040,18 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
 }
 
 /// The browser contract for both halves of FIG-1000: a queued send renders its
-/// receipt instead of a user row, and a failed turn's `done` rebuilds the
-/// transcript from the authoritative snapshot so the retired row disappears from
-/// every tab that already rendered it.
+/// receipt instead of a user row, busy remains a sequenced state projection, and
+/// a failed turn's `done` rebuilds the transcript from the authoritative snapshot
+/// so the retired row disappears from every tab that already rendered it.
 #[test]
 fn workbench_ui_renders_queued_sends_and_failed_turn_reconciliation() {
     assert!(ui::INDEX_HTML.contains("accepted?.queued"));
     assert!(ui::INDEX_HTML.contains("renderIngressReceipt(accepted.queued_input)"));
     assert!(ui::INDEX_HTML.contains("event.outcome === \"failed\""));
-    assert!(ui::INDEX_HTML.contains("queued next · waiting for the running turn"));
+    assert!(ui::INDEX_HTML.contains("function applySequencedBusySnapshot"));
+    assert_eq!(
+        ui::INDEX_HTML.matches("setBusy(").count(),
+        2,
+        "only the busy renderer and sequenced snapshot application may name setBusy"
+    );
 }
