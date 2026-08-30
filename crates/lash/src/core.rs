@@ -1097,8 +1097,9 @@ impl LashCoreBuilder {
     }
 
     /// Configure the lease timing capability for every durable single-writer
-    /// lane this deployment claims: session execution leases, turn-input and
-    /// queued-work claims, and process leases.
+    /// lease lane this deployment renews: session execution leases, process
+    /// leases, and durable effect-replay leases. Queued-work and turn-input
+    /// claims are not leases and carry no TTL.
     ///
     /// This is the failover-latency vs false-takeover-risk knob. Like
     /// [`process_execution_concurrency`](Self::process_execution_concurrency)
