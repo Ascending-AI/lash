@@ -190,6 +190,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         decision,
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -240,6 +241,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "retry_foreign_dialect_cell",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -284,6 +286,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "retry_output_limit_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -344,6 +347,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "retry_malformed_cell_fence",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -388,6 +392,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     llm_extraction_payload(
                         ctx.turn_id(),
                         &fingerprint,
+                        self.dialect.language_id(),
                         "finish_prose",
                         &termination,
                         LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -424,6 +429,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 llm_extraction_payload(
                     ctx.turn_id(),
                     &fingerprint,
+                    self.dialect.language_id(),
                     "request_finish",
                     &termination,
                     LlmExtractionCounts::prose_only(&assistant_text, &reasoning),
@@ -470,6 +476,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             llm_extraction_payload(
                 ctx.turn_id(),
                 &fingerprint,
+                self.dialect.language_id(),
                 self.dialect.execution_diagnostic_name(),
                 &termination,
                 LlmExtractionCounts::cell(&assistant_text, &reasoning, &cell),
@@ -1218,7 +1225,7 @@ struct LlmExtractionCounts {
     prose_chars: usize,
     code_chars: usize,
     reasoning_chars: usize,
-    lashlang_cell_count: usize,
+    cell_count: usize,
 }
 
 impl LlmExtractionCounts {
@@ -1228,7 +1235,7 @@ impl LlmExtractionCounts {
             prose_chars: assistant_text.chars().count(),
             code_chars: 0,
             reasoning_chars: reasoning_diagnostic_chars(reasoning),
-            lashlang_cell_count: 0,
+            cell_count: 0,
         }
     }
 
@@ -1238,7 +1245,7 @@ impl LlmExtractionCounts {
             prose_chars: cell.prose.chars().count(),
             code_chars: cell.code.chars().count(),
             reasoning_chars: reasoning_diagnostic_chars(reasoning),
-            lashlang_cell_count: cell.lashlang_cell_count,
+            cell_count: cell.cell_count,
         }
     }
 }
@@ -1273,22 +1280,30 @@ fn reasoning_diagnostic_chars(reasoning: &[RlmReasoningPart]) -> usize {
 fn llm_extraction_payload(
     turn_id: &str,
     reply_fingerprint: &str,
+    language_id: &str,
     decision: &str,
     termination: &RlmTermination,
     counts: LlmExtractionCounts,
 ) -> Value {
+    let mut count_payload = serde_json::json!({
+        "full_text_chars": counts.full_text_chars,
+        "prose_chars": counts.prose_chars,
+        "code_chars": counts.code_chars,
+        "reasoning_chars": counts.reasoning_chars,
+    });
+    count_payload
+        .as_object_mut()
+        .expect("extraction counts are an object")
+        .insert(
+            format!("{language_id}_cell_count"),
+            serde_json::json!(counts.cell_count),
+        );
     serde_json::json!({
         "turn_id": turn_id,
         "decision": decision,
         "reply_fingerprint": reply_fingerprint,
         "termination": termination_diagnostic_name(termination),
-        "counts": {
-            "full_text_chars": counts.full_text_chars,
-            "prose_chars": counts.prose_chars,
-            "code_chars": counts.code_chars,
-            "reasoning_chars": counts.reasoning_chars,
-            "lashlang_cell_count": counts.lashlang_cell_count,
-        },
+        "counts": count_payload,
     })
 }
 

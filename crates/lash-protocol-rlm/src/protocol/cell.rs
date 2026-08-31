@@ -9,7 +9,7 @@ use crate::dialect::CellTags;
 pub(super) struct CellExtraction {
     pub(super) prose: String,
     pub(super) code: String,
-    pub(super) lashlang_cell_count: usize,
+    pub(super) cell_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,7 +84,7 @@ pub(super) fn extract_cell(
     Ok(Some(CellExtraction {
         prose: text[..span.start_tag_start].trim_end().to_string(),
         code,
-        lashlang_cell_count: 1,
+        cell_count: 1,
     }))
 }
 
