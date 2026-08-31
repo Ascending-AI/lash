@@ -126,15 +126,13 @@ use conn::TxOutcome;
 pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
-pub use preflight::{SqliteDatabase, SqliteStorePreflight, verify_schema_at};
+pub use preflight::{SqliteStorePreflight, verify_schema_at};
+pub use schema::SqliteDatabase;
 
 use forks::*;
 use pending_turn_inputs::*;
 use queued_work::*;
-use schema::{
-    StoreBacking, apply_pragmas, ensure_effect_schema, ensure_process_schema, ensure_schema,
-    ensure_trigger_schema,
-};
+use schema::{StoreBacking, apply_pragmas, ensure_versioned_schema};
 
 /// The SQLite durable-core session schema version stamped in `PRAGMA user_version`.
 ///
@@ -876,7 +874,9 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let conn = SqliteConnection::open_with_policy(&path, self.options.connection_policy)
             .await
             .map_err(|err| err.to_string())?;
-        ensure_schema(&conn).await.map_err(|err| err.to_string())?;
+        ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
+            .await
+            .map_err(|err| err.to_string())?;
         let session_id = session_id.to_string();
         conn.call(move |conn| {
             conn.query_row(
@@ -1183,7 +1183,7 @@ async fn delete_session_from_catalog(
                 err.to_string(),
             ))
         })?;
-    ensure_schema(&conn)
+    ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
         .await
         .map_err(|err| lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(err)))?;
     conn.write_flow(move |tx| {
@@ -1482,7 +1482,7 @@ async fn delete_wake_allocation_floors_from_process_registry(
     let conn = SqliteConnection::open_with_policy(process_registry_path, policy)
         .await
         .map_err(|err| err.to_string())?;
-    ensure_process_schema(&conn)
+    ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry)
         .await
         .map_err(|err| err.to_string())?;
     let target_session_id = target_session_id.to_string();
