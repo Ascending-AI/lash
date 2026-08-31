@@ -28,6 +28,16 @@ impl ScenarioDurability {
     }
 }
 
+// Durability describes the persistence boundary; this independent contract
+// describes the phase vocabulary and counters emitted by each harness.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScenarioPhaseContract {
+    StableDurableTurn,
+    CheckpointCurve,
+    QueuedWorkContention,
+    HighTraffic,
+}
+
 // The shared `Scenario` suffix names the distinct perf harness kinds and reads
 // naturally at the ~50 macro-driven call sites; it is not redundant with the
 // `ScenarioHarnessKind` type name.
@@ -127,6 +137,7 @@ pub(crate) struct RuntimePerfScenarioMetadata {
     pub(crate) name: &'static str,
     pub(crate) execution_mode: ExecutionMode,
     pub(crate) durability: ScenarioDurability,
+    pub(crate) phase_contract: ScenarioPhaseContract,
     pub(crate) scenario_harness: ScenarioHarnessKind,
     pub(crate) harness_rationale: &'static str,
     pub(crate) correctness_coverage_ids: &'static [&'static str],
@@ -134,20 +145,60 @@ pub(crate) struct RuntimePerfScenarioMetadata {
 
 macro_rules! runtime_perf_metadata {
     ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal) => {
-        runtime_perf_metadata!($scenario, $name, $mode, $harness, $rationale, Ephemeral, [])
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            Ephemeral,
+            StableDurableTurn,
+            []
+        )
     };
     ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, [$($coverage_id:literal),* $(,)?]) => {
-        runtime_perf_metadata!($scenario, $name, $mode, $harness, $rationale, Ephemeral, [$($coverage_id),*])
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            Ephemeral,
+            StableDurableTurn,
+            [$($coverage_id),*]
+        )
     };
     ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident) => {
-        runtime_perf_metadata!($scenario, $name, $mode, $harness, $rationale, $durability, [])
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            $durability,
+            StableDurableTurn,
+            []
+        )
     };
-    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, [$($coverage_id:literal),* $(,)?]) => {
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident) => {
+        runtime_perf_metadata!(
+            $scenario,
+            $name,
+            $mode,
+            $harness,
+            $rationale,
+            $durability,
+            $phase_contract,
+            []
+        )
+    };
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, $phase_contract:ident, [$($coverage_id:literal),* $(,)?]) => {
         RuntimePerfScenarioMetadata {
             scenario: RuntimePerfScenario::$scenario,
             name: $name,
             execution_mode: ExecutionMode::$mode,
             durability: ScenarioDurability::$durability,
+            phase_contract: ScenarioPhaseContract::$phase_contract,
             scenario_harness: ScenarioHarnessKind::$harness,
             harness_rationale: $rationale,
             correctness_coverage_ids: &[$($coverage_id),*],
@@ -529,7 +580,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against SQLite. The fixed transcript/message/graph/component center point is CLI-configurable.",
-            Durable
+            Durable,
+            CheckpointCurve
         ),
         runtime_perf_metadata!(
             DurableCheckpointCurvePostgres,
@@ -537,7 +589,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against PostgreSQL. The fixed transcript/message/graph/component center point is CLI-configurable.",
-            Durable
+            Durable,
+            CheckpointCurve
         ),
         runtime_perf_metadata!(
             DurableQueuedWorkContentionSqlite,
@@ -545,7 +598,8 @@ impl RuntimePerfScenario {
             Standard,
             RuntimeScenario,
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
-            Durable
+            Durable,
+            QueuedWorkContention
         ),
         runtime_perf_metadata!(
             DurableQueuedWorkContentionPostgres,
@@ -553,7 +607,8 @@ impl RuntimePerfScenario {
             Standard,
             RuntimeScenario,
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared PostgreSQL backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
-            Durable
+            Durable,
+            QueuedWorkContention
         ),
         runtime_perf_metadata!(
             WriterContention2Workers,
@@ -589,7 +644,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence.",
-            Durable
+            Durable,
+            HighTraffic
         ),
         runtime_perf_metadata!(
             HighTrafficLoadPostgres,
@@ -597,7 +653,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared PostgreSQL persistence.",
-            Durable
+            Durable,
+            HighTraffic
         ),
         runtime_perf_metadata!(
             HighTrafficKneeSqlite,
@@ -605,7 +662,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
-            Durable
+            Durable,
+            HighTraffic
         ),
         runtime_perf_metadata!(
             HighTrafficKneePostgres,
@@ -613,7 +671,8 @@ impl RuntimePerfScenario {
             Rlm,
             RuntimeScenario,
             "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
-            Durable
+            Durable,
+            HighTraffic
         ),
     ];
     pub(crate) const KNOWN: [Self; 59] = runtime_perf_known_scenarios();
@@ -650,6 +709,10 @@ impl RuntimePerfScenario {
 
     pub(crate) fn is_durable(self) -> bool {
         self.metadata().durability.is_durable()
+    }
+
+    pub(crate) fn phase_contract(self) -> ScenarioPhaseContract {
+        self.metadata().phase_contract
     }
 
     pub(crate) fn uses_postgres(self) -> bool {
@@ -690,10 +753,7 @@ impl RuntimePerfScenario {
     }
 
     pub(crate) fn is_checkpoint_curve(self) -> bool {
-        matches!(
-            self,
-            Self::DurableCheckpointCurveSqlite | Self::DurableCheckpointCurvePostgres
-        )
+        self.phase_contract() == ScenarioPhaseContract::CheckpointCurve
     }
 
     pub(crate) fn has_guard_budget(self) -> bool {

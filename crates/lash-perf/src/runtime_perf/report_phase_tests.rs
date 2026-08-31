@@ -12,6 +12,7 @@ use crate::runtime_perf::measurement::{
     HighTrafficConfig, RuntimePerfPhaseProbe, checkpoint_curve_points, phase_name, run_once,
     run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths,
 };
+use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::{SessionListFilter, SessionStoreFactory};
 
@@ -157,10 +158,15 @@ fn ending_an_unstarted_phase_is_a_no_op() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
+async fn stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls() {
     for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS
         .into_iter()
         .filter(|scenario| !scenario.uses_postgres())
+        // Curves, contention, and load have explicit scenario-specific phase
+        // contracts and dedicated structural tests below. This test covers
+        // every durable scenario whose contract includes the stable turn
+        // phases and decorated store-call counters.
+        .filter(|scenario| scenario.phase_contract() == ScenarioPhaseContract::StableDurableTurn)
     {
         let result = Box::pin(run_once(
             scenario,
@@ -379,6 +385,10 @@ fn durable_queued_work_contention_inventory_is_backend_complete_and_opt_in() {
     for scenario in scenarios {
         assert!(scenario.is_durable());
         assert!(scenario.is_queued_work_contention());
+        assert_eq!(
+            scenario.phase_contract(),
+            ScenarioPhaseContract::QueuedWorkContention
+        );
         assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
         let metadata = RuntimePerfScenario::METADATA
             .iter()
@@ -403,6 +413,10 @@ fn durable_checkpoint_curve_inventory_is_backend_complete_and_opt_in() {
     for scenario in scenarios {
         assert!(scenario.is_durable());
         assert!(scenario.is_checkpoint_curve());
+        assert_eq!(
+            scenario.phase_contract(),
+            ScenarioPhaseContract::CheckpointCurve
+        );
         assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
         let metadata = RuntimePerfScenario::METADATA
             .iter()
@@ -824,6 +838,7 @@ async fn high_traffic_sqlite_smoke_reports_load_structure() {
     );
     assert!(result.phase_profile.contains_key("wait.store_transaction"));
     assert!(result.phase_profile.contains_key("wait.queue_enqueue"));
+    assert!(result.phase_profile.contains_key("prepared_turn"));
     assert!(
         result
             .extra_counters
@@ -877,6 +892,7 @@ async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
         result.extra_counters.get("knee.step.0.population"),
         Some(&2)
     );
+    assert!(result.phase_profile.contains_key("prepared_turn"));
     assert_eq!(
         result.extra_counters.get("knee.step.1.population"),
         Some(&4)
