@@ -320,7 +320,9 @@ CREATE TABLE lash_durable_read_fixture.lash_process_wake_deliveries (
     next_attempt_at_ms bigint NOT NULL,
     expires_at_ms bigint NOT NULL,
     discard_reason text,
-    delivery_json text NOT NULL
+    delivery_json text NOT NULL,
+    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK ((discard_reason = ANY (ARRAY['expired'::text, 'target_gone'::text, 'retargeted'::text, 'sequence_rewound'::text]))),
+    CONSTRAINT ck_process_wake_deliveries_state CHECK ((state = ANY (ARRAY['pending'::text, 'enqueuing'::text, 'enqueued'::text, 'discarded'::text])))
 );
 
 
@@ -340,7 +342,8 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     updated_at_ms bigint NOT NULL,
     change_seq bigint NOT NULL,
     status text NOT NULL,
-    record_json text NOT NULL
+    record_json text NOT NULL,
+    CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
 
 
@@ -436,7 +439,8 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
     group_key text,
     settlement_seq bigint,
     created_at_ms bigint NOT NULL,
-    updated_at_ms bigint NOT NULL
+    updated_at_ms bigint NOT NULL,
+    CONSTRAINT ck_runtime_effect_replay_status CHECK ((status = ANY (ARRAY['in_progress'::text, 'completed'::text, 'failed'::text])))
 );
 
 
@@ -510,7 +514,10 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     caused_by_node_id text,
     source_session_id text,
     source_node_id text,
-    observer_inheritance_kind text
+    observer_inheritance_kind text,
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK ((caused_by_kind = ANY (ARRAY['turn'::text, 'effect'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text]))),
+    CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK ((observer_inheritance_kind = ANY (ARRAY['all'::text, 'none'::text, 'only'::text]))),
+    CONSTRAINT ck_session_meta_relation_kind CHECK ((relation_kind = ANY (ARRAY['root'::text, 'child'::text, 'fork'::text])))
 );
 
 
@@ -564,7 +571,8 @@ CREATE TABLE lash_durable_read_fixture.lash_tool_intent_submissions (
     intent_index bigint NOT NULL,
     kind text NOT NULL,
     payload_hash text NOT NULL,
-    submission_json text NOT NULL
+    submission_json text NOT NULL,
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK ((kind = ANY (ARRAY['start_process'::text, 'signal_process'::text, 'cancel_process'::text, 'emit_process_event'::text, 'emit_trigger'::text])))
 );
 
 
@@ -627,7 +635,8 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_subscriptions (
     tombstoned boolean NOT NULL,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL,
-    record_json text NOT NULL
+    record_json text NOT NULL,
+    CONSTRAINT ck_trigger_subscriptions_live_enabled CHECK ((NOT (enabled AND tombstoned)))
 );
 
 
@@ -795,9 +804,9 @@ INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-rea
 -- Data for Name: lash_graph_nodes; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', NULL, 0, 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', '{"schema_version":3,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"initial-frame","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', 1, 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', '{"schema_version":3,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c","role":"User","parts":[{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
-INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 2, 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', '{"schema_version":3,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', NULL, 0, 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', '{"schema_version":5,"timestamp":"2023-11-14T22:13:20+00:00","kind":"frame_open","frame_key":"initial-frame","reason":"initial","assignment":{"policy":{"model":{"id":"","variant":"provider_default","limits":{"context_window_tokens":1}},"provider_id":"","session_id":null,"autonomous":false,"turn_budget":"unbounded"},"plugin_options":{}},"protocol_turn_options":{"schema_version":1,"payload":{}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', 1, 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', '{"schema_version":5,"timestamp":"2023-11-14T22:13:20+00:00","kind":"event","event":{"Conversation":{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c","role":"User","parts":[{"id":"m_append_9304aea3269b249d9b8e240f046976a16b2a95e618eb374edf1eded586a60e3c.p0","kind":"Text","content":"durable read user message","prune_state":"Intact"}],"origin":{"kind":"plugin","plugin_id":"plugin"}}}}', false);
+INSERT INTO lash_durable_read_fixture.lash_graph_nodes VALUES ('durable-read-fixture', 'n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a', 'n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08', 2, 'frame-node/v3/1048507f59612bb72e9ffd582198122e898b23fb20afe19ffc9aa78968f2fe8a', '{"schema_version":5,"timestamp":"2023-11-14T22:13:20+00:00","kind":"plugin","plugin_type":"durable-read-plugin","body":{"fixture":true,"order":2}}', false);
 
 
 --
@@ -926,7 +935,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 65);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 66);
 
 
 --

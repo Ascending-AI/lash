@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 65.
+-- lash-postgres-store schema, component version 66.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -125,7 +125,10 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     caused_by_node_id TEXT,
     source_session_id TEXT,
     source_node_id TEXT,
-    observer_inheritance_kind TEXT
+    observer_inheritance_kind TEXT,
+    CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_session_meta_catalog
     ON lash_session_meta(created_at_ms, session_id);
@@ -300,7 +303,8 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     updated_at_ms BIGINT NOT NULL,
     change_seq BIGINT NOT NULL,
     status TEXT NOT NULL,
-    record_json TEXT NOT NULL
+    record_json TEXT NOT NULL,
+    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_processes_status
     ON lash_processes(status);
@@ -353,7 +357,9 @@ CREATE TABLE IF NOT EXISTS lash_process_wake_deliveries (
     next_attempt_at_ms BIGINT NOT NULL,
     expires_at_ms BIGINT NOT NULL,
     discard_reason TEXT,
-    delivery_json TEXT NOT NULL
+    delivery_json TEXT NOT NULL,
+    CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
+    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_wake_deliveries_pending
     ON lash_process_wake_deliveries(
@@ -412,7 +418,8 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     intent_index BIGINT NOT NULL,
     kind TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
-    submission_json TEXT NOT NULL
+    submission_json TEXT NOT NULL,
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index);
@@ -434,6 +441,7 @@ CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
     settlement_seq BIGINT,
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
+    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
     PRIMARY KEY (scope_id, replay_key)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_replay_lease
@@ -512,6 +520,7 @@ CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions (
     created_at_ms BIGINT NOT NULL,
     updated_at_ms BIGINT NOT NULL,
     record_json TEXT NOT NULL,
+    CONSTRAINT ck_trigger_subscriptions_live_enabled CHECK (NOT (enabled AND tombstoned)),
     UNIQUE(owner_scope, subscription_key)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_subscriptions_registrant
@@ -567,7 +576,7 @@ CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 65)
+VALUES ('lash-postgres-store', 66)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (singleton, current_seq)

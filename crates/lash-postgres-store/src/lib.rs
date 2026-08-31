@@ -253,7 +253,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 64 switches content and semantic identities to domain-tagged BLAKE3.
 // Existing stores are rejected rather than reinterpreting SHA-256 rows.
 // Version 65 indexes process update timestamps for bounded retired-process polls.
-const SCHEMA_VERSION: i32 = 65;
+// Version 66 adds DDL-enforced vocabularies for session metadata, process state,
+// wake delivery, effect replay, and tool intents, plus the trigger live/enabled
+// invariant. This is a destructive semantic cutover: component-65 databases
+// are rejected at open and there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 66;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -1,11 +1,18 @@
 use super::*;
 
 #[test]
-fn immediate_predecessor_adds_the_process_updated_index() {
+fn current_destructive_cutover_has_no_migration_arm() {
+    assert!(
+        SCHEMA_MIGRATIONS
+            .iter()
+            .all(|migration| migration.to != SCHEMA_VERSION),
+        "component 66 must reject every pre-CHECK schema rather than migrate it"
+    );
+
     let declared = SCHEMA_MIGRATIONS
         .iter()
-        .find(|migration| migration.from == SCHEMA_VERSION - 1)
-        .expect("component 64 must have an explicit migration");
+        .find(|migration| migration.from == 64 && migration.to == 65)
+        .expect("the historical component 64 to 65 creation-only migration must remain declared");
 
     assert_eq!(
         declared.introduced_relations,
@@ -14,7 +21,7 @@ fn immediate_predecessor_adds_the_process_updated_index() {
     assert_eq!(
         declared.statements,
         &[PROCESS_UPDATED_INDEX_DDL],
-        "component 64 must create the bounded-poll index while migrating to 65"
+        "the historical migration must still create the bounded-poll index"
     );
 }
 

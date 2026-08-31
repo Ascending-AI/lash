@@ -54,7 +54,11 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
     let expected = SqliteDatabase::DurableCore.expected_version();
-    assert_eq!(expected, 45, "the pinned BLAKE3 target changed");
+    // Component 45 introduced BLAKE3 identities and 46 the durable vocabulary
+    // CHECKs. Both are reject-and-recreate boundaries, so the pin tracks the
+    // current target while the refusal below still names a SHA-256-era
+    // generation: nothing older than 45 may ever open, whatever the target is.
+    assert_eq!(expected, 46, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 

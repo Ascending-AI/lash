@@ -1,3 +1,6 @@
+//! Process-retention laws: the live-status contract and the SQL literals
+//! that spell it.
+
 use super::*;
 
 /// Drive one process into `waiting` and assert the retention contract: live rows
@@ -81,42 +84,33 @@ async fn assert_waiting_process_is_live_not_prunable(
     );
 }
 
-/// A waiting process is live, not prunable.
-///
-/// `lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS`
-/// is the shared retention contract, but this backend's SQL spells the label set
-/// out as `status IN ('running', 'waiting')` and `status NOT IN (…)`. The law test
-/// in core proves the constant partitions `ProcessStatus`; this is the
-/// behavioural half, which is what fails if the SQL literals stop agreeing with
-/// it and a live waiting process becomes prune-eligible.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_waiting_processes_are_live_not_prunable() {
-    let dir = tempfile::tempdir().expect("waiting retention tempdir");
-    let registry = SqliteProcessRegistry::open(
-        &dir.path().join("processes.db"),
-        dir.path().join("sessions"),
-    )
-    .await
-    .expect("open waiting retention registry");
+/// A waiting process is live, not prunable. The PostgreSQL half of
+/// `sqlite_waiting_processes_are_live_not_prunable`: both backends spell
+/// `LIVE_PROCESS_STATUS_LABELS` out as SQL literals, so both need the
+/// behavioural referee.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping PostgreSQL waiting-retention regression: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let registry = storage.process_registry();
     let process_id = format!("waiting-retention:{}", uuid::Uuid::new_v4());
     assert_waiting_process_is_live_not_prunable(&registry, &process_id).await;
 }
 
-/// Lexical half of the retention contract: every `status IN`/`status NOT IN`
-/// literal in this backend's SQL must spell exactly the label list its site
-/// calls for. The partition law proves the constants track `ProcessStatus`; the
-/// behavioural referee above proves today's labels retain; this closes the
-/// remaining gap where a future label grows a constant while a stale SQL
-/// literal silently prunes live rows.
+/// Lexical half of the retention contract, mirroring
+/// `sqlite_status_list_literals_derive_from_the_shared_constant`: every
+/// `status IN`/`status NOT IN` literal in this backend's SQL must spell
+/// exactly the label list its site calls for, so a grown constant with a stale
+/// SQL literal fails here instead of silently pruning live rows.
 ///
-/// Two site kinds, deliberately distinguished rather than merged. A retention
-/// query selects **live** rows, so its literal renders
-/// `LIVE_PROCESS_STATUS_LABELS`. The DDL's `ck_processes_status` admits the
-/// **whole** durable vocabulary (ADR 0081), so its literal renders live plus
-/// retired — the same partition, unioned. Holding them to one list would either
-/// let retention prune a live row or make the CHECK reject a legal status.
+/// Retention queries render `LIVE_PROCESS_STATUS_LABELS`; the DDL's
+/// `ck_processes_status` renders live plus retired, because the constraint
+/// admits the whole durable vocabulary (ADR 0081) rather than the live subset.
 #[test]
-fn sqlite_status_list_literals_derive_from_the_shared_constant() {
+fn postgres_status_list_literals_derive_from_the_shared_constant() {
     let render = |labels: &[&str]| {
         format!(
             "({})",
@@ -148,13 +142,9 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     let sources = [
         (
             "process_registry.rs",
-            include_str!("../../src/process_registry.rs"),
+            include_str!("../../src/postgres/process_registry.rs"),
         ),
-        (
-            "process_registry_change.rs",
-            include_str!("../../src/process_registry_change.rs"),
-        ),
-        ("schema.rs", include_str!("../../src/schema.rs")),
+        ("schema.sql", include_str!("../../schema.sql")),
     ];
     let mut live_sites = 0usize;
     let mut vocabulary_sites = 0usize;
@@ -189,9 +179,10 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
         }
     }
     assert_eq!(
-        live_sites, 5,
-        "expected exactly five live-status list literal sites in the SQLite backend; \
-         update this count (and the derivation check) when adding one"
+        live_sites, 3,
+        "expected exactly three live-status list literal sites in the PostgreSQL backend \
+         (two registry queries plus the partial process index in schema.sql); \
+         update this count when adding one"
     );
     assert_eq!(
         foreign_sites, 1,
@@ -200,6 +191,6 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
     );
     assert_eq!(
         vocabulary_sites, 1,
-        "expected exactly one `ck_processes_status` vocabulary literal in the SQLite DDL"
+        "expected exactly one `ck_processes_status` vocabulary literal in schema.sql"
     );
 }

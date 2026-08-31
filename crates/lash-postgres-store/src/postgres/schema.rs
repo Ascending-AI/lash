@@ -293,7 +293,13 @@ const EFFECT_GROUP_GUARDS: &[DeclaredGuard] = &[DeclaredGuard {
 /// no creation-only migration may silently carry it into component 61.
 const RETIRED_HARD_CUTOVER_COLUMNS: &[(&str, &str)] = &[("lash_graph_nodes", "seq")];
 
-/// Explicit, creation-only migrations into the current component generation.
+/// Explicit, creation-only migrations retained for the most recent migratable
+/// component generation.
+///
+/// A destructive cutover may advance `SCHEMA_VERSION` without adding a row to
+/// this table. In that phase these declarations remain the migration seam but
+/// are deliberately inapplicable at open: `apply_schema_migration` only selects
+/// a row whose `to` equals the running build's `SCHEMA_VERSION`.
 ///
 /// The version-bump recreation harness
 /// (`runbooks/restate-postgres-workers/src/bin/version_bump.rs`) pins its

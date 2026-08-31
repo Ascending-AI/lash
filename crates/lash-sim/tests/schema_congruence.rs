@@ -32,6 +32,121 @@ struct TablePair {
     parity: Parity,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ExpectedConstraint {
+    table: &'static str,
+    name: &'static str,
+    expression: &'static str,
+}
+
+const SQLITE_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
+        "session_meta",
+        "ck_session_meta_relation_kind",
+        "relation_kind IN ('root', 'child', 'fork')",
+    ),
+    expected_constraint(
+        "session_meta",
+        "ck_session_meta_caused_by_kind",
+        "caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+    ),
+    expected_constraint(
+        "session_meta",
+        "ck_session_meta_observer_inheritance_kind",
+        "observer_inheritance_kind IN ('all', 'none', 'only')",
+    ),
+    expected_constraint(
+        "processes",
+        "ck_processes_status",
+        "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')",
+    ),
+    expected_constraint(
+        "process_wake_deliveries",
+        "ck_process_wake_deliveries_state",
+        "state IN ('pending', 'enqueuing', 'enqueued', 'discarded')",
+    ),
+    expected_constraint(
+        "process_wake_deliveries",
+        "ck_process_wake_deliveries_discard_reason",
+        "discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')",
+    ),
+    expected_constraint(
+        "tool_intent_submissions",
+        "ck_tool_intent_submissions_kind",
+        "kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger')",
+    ),
+    expected_constraint(
+        "trigger_subscriptions",
+        "ck_trigger_subscriptions_live_enabled",
+        "NOT (enabled AND tombstoned)",
+    ),
+    expected_constraint(
+        "runtime_effect_replay",
+        "ck_runtime_effect_replay_status",
+        "status IN ('in_progress', 'completed', 'failed')",
+    ),
+];
+
+const POSTGRES_EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
+    expected_constraint(
+        "lash_session_meta",
+        "ck_session_meta_relation_kind",
+        "relation_kind IN ('root', 'child', 'fork')",
+    ),
+    expected_constraint(
+        "lash_session_meta",
+        "ck_session_meta_caused_by_kind",
+        "caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')",
+    ),
+    expected_constraint(
+        "lash_session_meta",
+        "ck_session_meta_observer_inheritance_kind",
+        "observer_inheritance_kind IN ('all', 'none', 'only')",
+    ),
+    expected_constraint(
+        "lash_processes",
+        "ck_processes_status",
+        "status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')",
+    ),
+    expected_constraint(
+        "lash_process_wake_deliveries",
+        "ck_process_wake_deliveries_state",
+        "state IN ('pending', 'enqueuing', 'enqueued', 'discarded')",
+    ),
+    expected_constraint(
+        "lash_process_wake_deliveries",
+        "ck_process_wake_deliveries_discard_reason",
+        "discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')",
+    ),
+    expected_constraint(
+        "lash_tool_intent_submissions",
+        "ck_tool_intent_submissions_kind",
+        "kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger')",
+    ),
+    expected_constraint(
+        "lash_trigger_subscriptions",
+        "ck_trigger_subscriptions_live_enabled",
+        "NOT (enabled AND tombstoned)",
+    ),
+    expected_constraint(
+        "lash_runtime_effect_replay",
+        "ck_runtime_effect_replay_status",
+        "status IN ('in_progress', 'completed', 'failed')",
+    ),
+];
+
+const fn expected_constraint(
+    table: &'static str,
+    name: &'static str,
+    expression: &'static str,
+) -> ExpectedConstraint {
+    ExpectedConstraint {
+        table,
+        name,
+        expression,
+    }
+}
+
 const TABLE_REGISTRY: &[TablePair] = &[
     pair("attachment_condemnations", "lash_attachment_condemnations"),
     pair("attachment_manifest", "lash_attachment_manifest"),
@@ -247,6 +362,57 @@ fn postgres_table_columns(source: &str, table: &str) -> BTreeSet<String> {
         .collect()
 }
 
+fn ddl_table_body<'a>(source: &'a str, table: &str) -> Option<&'a str> {
+    let declaration = format!("CREATE TABLE IF NOT EXISTS {table} (");
+    source
+        .split_once(&declaration)
+        .and_then(|(_, rest)| rest.split_once("\n);").map(|(body, _)| body))
+}
+
+fn normalize_sql(source: &str) -> String {
+    source.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn validate_expected_constraints(
+    source: &str,
+    registry: &[ExpectedConstraint],
+    dialect: &str,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    let mut declared = BTreeSet::new();
+    for expected in registry {
+        if !declared.insert((expected.table, expected.name)) {
+            failures.push(format!(
+                "{dialect} expected-constraints registry duplicates {}.{}",
+                expected.table, expected.name
+            ));
+            continue;
+        }
+        let Some(body) = ddl_table_body(source, expected.table) else {
+            failures.push(format!(
+                "{dialect} DDL is missing table `{}` required by constraint `{}`",
+                expected.table, expected.name
+            ));
+            continue;
+        };
+        let declaration = format!(
+            "CONSTRAINT {} CHECK ({})",
+            expected.name, expected.expression
+        );
+        if !normalize_sql(body).contains(&normalize_sql(&declaration)) {
+            failures.push(format!(
+                "{dialect} DDL table `{}` is missing registered constraint `{}` with expression `{}`",
+                expected.table, expected.name, expected.expression
+            ));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
 fn row_name(row: &TablePair) -> String {
     format!(
         "TABLE_REGISTRY row sqlite_table={:?}, postgres_table={:?}",
@@ -413,6 +579,293 @@ fn schema_congruence_registry_matches_both_backends() {
     if let Err(failures) = validate_registry(SQLITE_SCHEMA_SOURCE, POSTGRES_SCHEMA_SHAPE) {
         panic!("cross-backend schema registry validation failed:\n{failures}");
     }
+}
+
+#[test]
+fn schema_congruence_expected_constraints_match_both_backends() {
+    for (dialect, source, registry) in [
+        ("SQLite", SQLITE_SCHEMA_SOURCE, SQLITE_EXPECTED_CONSTRAINTS),
+        (
+            "Postgres",
+            POSTGRES_SCHEMA_SOURCE,
+            POSTGRES_EXPECTED_CONSTRAINTS,
+        ),
+    ] {
+        if let Err(failures) = validate_expected_constraints(source, registry, dialect) {
+            panic!("{dialect} expected-constraints validation failed:\n{failures}");
+        }
+    }
+}
+
+#[test]
+fn schema_congruence_rejects_a_dropped_registered_constraint() {
+    for (dialect, source, registry, declaration) in [
+        (
+            "SQLite",
+            SQLITE_SCHEMA_SOURCE,
+            SQLITE_EXPECTED_CONSTRAINTS,
+            "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))\n",
+        ),
+        (
+            "Postgres",
+            POSTGRES_SCHEMA_SOURCE,
+            POSTGRES_EXPECTED_CONSTRAINTS,
+            "    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))\n",
+        ),
+    ] {
+        let dropped = source.replacen(declaration, "", 1);
+        assert_ne!(
+            dropped, source,
+            "{dialect} witness did not drop a constraint"
+        );
+        let failure = validate_expected_constraints(&dropped, registry, dialect)
+            .expect_err("dropping a registered constraint must fail the congruence gate");
+        assert!(
+            failure.contains("missing registered constraint `ck_processes_status`"),
+            "unexpected {dialect} dropped-constraint failure: {failure}"
+        );
+    }
+}
+
+#[test]
+fn registered_constraint_vocabularies_match_the_rust_writers() {
+    use lash_core::facade_support::effect_replay_driver::EffectRowStatus;
+    use lash_core::store_backend_support::SessionMetaCodec;
+    use lash_core::{
+        CausalRef, ObserverInheritance, ProcessStatus, SessionMeta, SessionRelation,
+        ToolIntentKind, WakeDeliveryState, WakeDiscardReason,
+    };
+
+    assert_eq!(
+        [
+            ProcessStatus::Running,
+            ProcessStatus::Waiting,
+            ProcessStatus::Completed,
+            ProcessStatus::Failed,
+            ProcessStatus::Cancelled,
+            ProcessStatus::Abandoned,
+            ProcessStatus::CallerDeparted,
+        ]
+        .map(|status| status.label()),
+        [
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled",
+            "abandoned",
+            "caller_departed",
+        ]
+    );
+    assert_eq!(
+        [
+            WakeDeliveryState::Pending,
+            WakeDeliveryState::Enqueuing,
+            WakeDeliveryState::Enqueued,
+            WakeDeliveryState::Discarded,
+        ]
+        .map(WakeDeliveryState::as_str),
+        ["pending", "enqueuing", "enqueued", "discarded"]
+    );
+    assert_eq!(
+        [
+            WakeDiscardReason::Expired,
+            WakeDiscardReason::TargetGone,
+            WakeDiscardReason::Retargeted,
+            WakeDiscardReason::SequenceRewound,
+        ]
+        .map(WakeDiscardReason::as_str),
+        ["expired", "target_gone", "retargeted", "sequence_rewound"]
+    );
+    assert_eq!(
+        [
+            EffectRowStatus::InProgress,
+            EffectRowStatus::Completed,
+            EffectRowStatus::Failed,
+        ]
+        .map(EffectRowStatus::column),
+        ["in_progress", "completed", "failed"]
+    );
+    assert_eq!(
+        [
+            ToolIntentKind::StartProcess,
+            ToolIntentKind::SignalProcess,
+            ToolIntentKind::CancelProcess,
+            ToolIntentKind::EmitProcessEvent,
+            ToolIntentKind::EmitTrigger,
+        ]
+        .map(ToolIntentKind::as_str),
+        [
+            "start_process",
+            "signal_process",
+            "cancel_process",
+            "emit_process_event",
+            "emit_trigger",
+        ]
+    );
+
+    let codec = SessionMetaCodec::new("INTEGER");
+    let encode = |relation| {
+        codec
+            .encode(&SessionMeta {
+                session_id: "session".to_string(),
+                relation,
+                pending_observer_intents: Vec::new(),
+            })
+            .expect("encode session metadata vocabulary witness")
+    };
+    assert_eq!(encode(SessionRelation::Root).relation_kind, "root");
+    assert_eq!(
+        encode(SessionRelation::Child {
+            parent_session_id: "parent".to_string(),
+            caused_by: None,
+        })
+        .relation_kind,
+        "child"
+    );
+    let inheritance_kinds = [
+        ObserverInheritance::All,
+        ObserverInheritance::None,
+        ObserverInheritance::Only(vec!["process".into()]),
+    ]
+    .map(|observer_inheritance| {
+        encode(SessionRelation::Fork {
+            source_session_id: "source".to_string(),
+            source_node_id: "node".to_string(),
+            observer_inheritance,
+        })
+        .observer_inheritance_kind
+        .expect("fork metadata carries an inheritance kind")
+    });
+    assert_eq!(inheritance_kinds, ["all", "none", "only"]);
+
+    let causal_kinds = [
+        CausalRef::Turn {
+            session_id: "session".to_string(),
+            turn_id: "turn".to_string(),
+        },
+        CausalRef::Effect {
+            session_id: "session".to_string(),
+            turn_id: None,
+            effect_id: "effect".to_string(),
+        },
+        CausalRef::ToolCall {
+            session_id: "session".to_string(),
+            call_id: "call".to_string(),
+        },
+        CausalRef::Process {
+            process_id: "process".to_string(),
+        },
+        CausalRef::ProcessEvent {
+            process_id: "process".to_string(),
+            sequence: 1,
+        },
+        CausalRef::TriggerOccurrence {
+            occurrence_id: "occurrence".to_string(),
+            subscription_id: None,
+            subscription_incarnation: None,
+            subscription_revision: None,
+        },
+        CausalRef::SessionNode {
+            session_id: "session".to_string(),
+            node_id: "node".to_string(),
+        },
+    ]
+    .map(|caused_by| {
+        encode(SessionRelation::Child {
+            parent_session_id: "parent".to_string(),
+            caused_by: Some(caused_by),
+        })
+        .cause
+        .kind
+        .expect("causal metadata carries a kind")
+    });
+    assert_eq!(
+        causal_kinds,
+        [
+            "turn",
+            "effect",
+            "tool_call",
+            "process",
+            "process_event",
+            "trigger_occurrence",
+            "session_node",
+        ]
+    );
+
+    // Exhaustiveness guards. The vocabularies above are spelled by hand so a
+    // silent drift in one generator cannot move both the DDL and the test, but
+    // a hand-written list cannot notice a *new* variant on its own. These
+    // matches make adding one a compile error until the variant is spelled
+    // above and admitted by both dialects' CHECK. `WakeDiscardReason` is
+    // `#[non_exhaustive]` and deliberately additive, so it has no guard: the
+    // wake-delivery `discard_reason` CHECK must be widened deliberately.
+    fn exhaustive_process_status(status: ProcessStatus) {
+        match status {
+            ProcessStatus::Running
+            | ProcessStatus::Waiting
+            | ProcessStatus::Completed
+            | ProcessStatus::Failed
+            | ProcessStatus::Cancelled
+            | ProcessStatus::Abandoned
+            | ProcessStatus::CallerDeparted => {}
+        }
+    }
+    fn exhaustive_wake_delivery_state(state: WakeDeliveryState) {
+        match state {
+            WakeDeliveryState::Pending
+            | WakeDeliveryState::Enqueuing
+            | WakeDeliveryState::Enqueued
+            | WakeDeliveryState::Discarded => {}
+        }
+    }
+    fn exhaustive_tool_intent_kind(kind: ToolIntentKind) {
+        match kind {
+            ToolIntentKind::StartProcess
+            | ToolIntentKind::SignalProcess
+            | ToolIntentKind::CancelProcess
+            | ToolIntentKind::EmitProcessEvent
+            | ToolIntentKind::EmitTrigger => {}
+        }
+    }
+    fn exhaustive_effect_row_status(status: EffectRowStatus) {
+        match status {
+            EffectRowStatus::InProgress | EffectRowStatus::Completed | EffectRowStatus::Failed => {}
+        }
+    }
+    fn exhaustive_session_relation(relation: &SessionRelation) {
+        match relation {
+            SessionRelation::Root
+            | SessionRelation::Child { .. }
+            | SessionRelation::Fork { .. } => {}
+        }
+    }
+    fn exhaustive_observer_inheritance(inheritance: &ObserverInheritance) {
+        match inheritance {
+            ObserverInheritance::All | ObserverInheritance::None | ObserverInheritance::Only(_) => {
+            }
+        }
+    }
+    fn exhaustive_causal_ref(caused_by: &CausalRef) {
+        match caused_by {
+            CausalRef::Turn { .. }
+            | CausalRef::Effect { .. }
+            | CausalRef::ToolCall { .. }
+            | CausalRef::Process { .. }
+            | CausalRef::ProcessEvent { .. }
+            | CausalRef::TriggerOccurrence { .. }
+            | CausalRef::SessionNode { .. } => {}
+        }
+    }
+    exhaustive_process_status(ProcessStatus::Running);
+    exhaustive_wake_delivery_state(WakeDeliveryState::Pending);
+    exhaustive_tool_intent_kind(ToolIntentKind::StartProcess);
+    exhaustive_effect_row_status(EffectRowStatus::InProgress);
+    exhaustive_session_relation(&SessionRelation::Root);
+    exhaustive_observer_inheritance(&ObserverInheritance::All);
+    exhaustive_causal_ref(&CausalRef::Process {
+        process_id: "process".to_string(),
+    });
 }
 
 #[test]

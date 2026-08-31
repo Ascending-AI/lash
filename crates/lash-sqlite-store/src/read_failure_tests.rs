@@ -272,6 +272,12 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     // while the store's long-lived connection remains open.
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
 
+    // `ck_session_meta_relation_kind` makes this row unreachable through any
+    // ordinary write, which is exactly what the constraint is for. The read-side
+    // detector still has to hold: a catalog restored from a pre-CHECK dump, or
+    // one a host ALTERed, can present the byte the driver must refuse to decode.
+    raw.pragma_update(None, "ignore_check_constraints", true)
+        .expect("permit manufacturing a row the DDL now forbids");
     raw.execute(
         "INSERT INTO session_meta
          (session_id, relation_kind)
@@ -279,6 +285,8 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         [],
     )
     .expect("insert malformed relation");
+    raw.pragma_update(None, "ignore_check_constraints", false)
+        .expect("restore CHECK enforcement");
     assert_corrupt(store.load_session_meta().await, "SessionMeta relation");
     raw.execute(
         "UPDATE session_meta SET relation_kind = 'root' WHERE session_id = 'corrupt'",
