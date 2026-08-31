@@ -153,3 +153,18 @@ where
     drop(guard);
     (value, capture)
 }
+
+/// Run `body` with a capture layer installed and make the capture available to
+/// the body for an observation rendezvous before the dispatcher is released.
+pub(crate) async fn capturing_with_capture<F, Fut, T>(body: F) -> (T, EventCapture)
+where
+    F: FnOnce(EventCapture) -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let capture = EventCapture::default();
+    let subscriber = Registry::default().with(capture.clone());
+    let guard = tracing::subscriber::set_default(subscriber);
+    let value = body(capture.clone()).await;
+    drop(guard);
+    (value, capture)
+}
