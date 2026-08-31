@@ -329,14 +329,18 @@ impl TriggerStore for InMemoryTriggerStore {
             idempotency_key: request.idempotency_key.clone(),
             source: request.source,
             session_id: request.session_id,
+            outcome: request.outcome,
             occurred_at_ms: self.clock.timestamp_ms(),
         };
         state
             .occurrence_id_by_idempotency_key
             .insert(request.idempotency_key, occurrence_id.clone());
         state.occurrences.insert(occurrence_id, record.clone());
-        let reservations =
-            reserve_in_memory_for_occurrence(&mut state, &record, self.clock.as_ref())?;
+        let reservations = if record.outcome == TriggerOccurrenceOutcome::Fired {
+            reserve_in_memory_for_occurrence(&mut state, &record, self.clock.as_ref())?
+        } else {
+            Vec::new()
+        };
         if reservations.is_empty() {
             state
                 .occurrence_reclaimable_at_ms

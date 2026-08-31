@@ -201,6 +201,35 @@ impl TriggerEmitReport {
     }
 }
 
+/// Terminal fate of one observed trigger occurrence.
+///
+/// `Fired` is the legacy/default shape and is omitted from serialized records,
+/// preserving the bytes of existing fired occurrences. Non-fired outcomes are
+/// durable audit records and never reserve trigger deliveries.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TriggerOccurrenceOutcome {
+    /// The occurrence fired and may reserve matching deliveries.
+    #[default]
+    Fired,
+    /// The occurrence was folded into the named fired occurrence.
+    CoalescedInto {
+        /// Durable occurrence id of the fired tick that absorbed this one.
+        occurrence_id: String,
+    },
+    /// The occurrence was deliberately dropped at an observed decision point.
+    Dropped {
+        /// Stable host-defined reason code for the drop.
+        reason: String,
+    },
+}
+
+impl TriggerOccurrenceOutcome {
+    fn is_fired(&self) -> bool {
+        matches!(self, Self::Fired)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TriggerOccurrenceRequest {
     pub source_type: String,
@@ -214,6 +243,8 @@ pub struct TriggerOccurrenceRequest {
     /// registered by this session can reserve deliveries for the occurrence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "TriggerOccurrenceOutcome::is_fired")]
+    pub outcome: TriggerOccurrenceOutcome,
 }
 
 impl TriggerOccurrenceRequest {
@@ -232,6 +263,7 @@ impl TriggerOccurrenceRequest {
             idempotency_key: idempotency_key.into(),
             source: None,
             session_id: None,
+            outcome: TriggerOccurrenceOutcome::Fired,
         }
     }
 
@@ -248,6 +280,13 @@ impl TriggerOccurrenceRequest {
         self.session_id = Some(session_id.into());
         self
     }
+
+    /// Marks this request as a non-fired audit outcome. Stores persist it on
+    /// the occurrence surface without reserving deliveries.
+    pub fn with_outcome(mut self, outcome: TriggerOccurrenceOutcome) -> Self {
+        self.outcome = outcome;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -262,6 +301,8 @@ pub struct TriggerOccurrenceRecord {
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "TriggerOccurrenceOutcome::is_fired")]
+    pub outcome: TriggerOccurrenceOutcome,
     pub occurred_at_ms: u64,
 }
 

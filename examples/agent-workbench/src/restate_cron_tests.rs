@@ -52,11 +52,7 @@ impl ScriptedCronObjectSurface {
     }
 
     fn info(&self, job_key: &str) -> Option<serde_json::Value> {
-        self.infos
-            .lock_recover()
-            .get(job_key)
-            .cloned()
-            .flatten()
+        self.infos.lock_recover().get(job_key).cloned().flatten()
     }
 
     fn calls(&self) -> Vec<String> {
@@ -70,10 +66,7 @@ async fn spawn_scripted_cron_object_surface(surface: ScriptedCronObjectSurface) 
         axum::extract::State(surface): axum::extract::State<ScriptedCronObjectSurface>,
         body: axum::body::Bytes,
     ) -> axum::Json<serde_json::Value> {
-        surface
-            .calls
-            .lock_recover()
-            .push(path.clone());
+        surface.calls.lock_recover().push(path.clone());
         let mut parts = path.split('/');
         let object = parts.next();
         let job_key = parts.next();
@@ -578,13 +571,10 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     let key_a = super::cron_job_key(&session_a, &record_a.source_key);
     let session_b = "fig1067-session-b";
     let key_b = super::cron_job_key(session_b, "cron-source:b");
-    state
-        .restate_cron_job_keys
-        .lock_recover()
-        .insert(
-            session_b.to_string(),
-            std::collections::BTreeSet::from([key_b.clone()]),
-        );
+    state.restate_cron_job_keys.lock_recover().insert(
+        session_b.to_string(),
+        std::collections::BTreeSet::from([key_b.clone()]),
+    );
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&key_b);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
@@ -633,10 +623,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
         );
     }
     assert_eq!(
-        state
-            .restate_cron_job_keys
-            .lock_recover()
-            .get(session_b),
+        state.restate_cron_job_keys.lock_recover().get(session_b),
         Some(&std::collections::BTreeSet::from([key_b]))
     );
 }
@@ -674,12 +661,7 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
 
     assert!(response.changed);
     assert!(!response.registration.expect("button registration").enabled);
-    assert!(
-        state
-            .restate_cron_job_keys
-            .lock_recover()
-            .is_empty()
-    );
+    assert!(state.restate_cron_job_keys.lock_recover().is_empty());
 }
 
 #[tokio::test]
@@ -859,10 +841,8 @@ impl lash_test_internals::store::RuntimePersistenceDecorator for ContendedRuntim
         owner: &lash::persistence::LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
-    ) -> Result<
-        lash::persistence::SessionExecutionLeaseClaimOutcome,
-        lash::persistence::StoreError,
-    > {
+    ) -> Result<lash::persistence::SessionExecutionLeaseClaimOutcome, lash::persistence::StoreError>
+    {
         if self.contend.load(std::sync::atomic::Ordering::SeqCst) {
             self.contended_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -936,7 +916,8 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn lash::persistence::RuntimePersistence>, lash::persistence::StoreError> {
-        let inner = lash::persistence::SessionStoreFactory::create_store(&self.inner, request).await?;
+        let inner =
+            lash::persistence::SessionStoreFactory::create_store(&self.inner, request).await?;
         Ok(Arc::new(ContendedRuntimePersistence {
             inner,
             contend: Arc::clone(&self.contend),
@@ -1095,7 +1076,7 @@ fn cron_tick_decision_runs_for_a_live_session() {
 fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
     let state = cron_tick_test_state("retired-cron-session");
 
-    let super::CronTick::Cancel { trace } =
+    let super::CronTick::Cancel { reason, trace } =
         super::cron_tick_decision(CronSessionDisposition::Retired, &state, "cron-job-retired")
     else {
         panic!("a retired session must cancel its cron tick");
@@ -1105,13 +1086,14 @@ fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
     assert_eq!(trace["decision_basis"], "deleted_session_tombstone");
     assert_eq!(trace["session_state"], "retired");
     assert_eq!(trace["reason"], "session_retired");
+    assert_eq!(reason, "session_retired");
 }
 
 #[test]
 fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     let state = cron_tick_test_state("absent-cron-session");
 
-    let super::CronTick::Cancel { trace } =
+    let super::CronTick::Cancel { reason, trace } =
         super::cron_tick_decision(CronSessionDisposition::Unknown, &state, "cron-job-absent")
     else {
         panic!("an absent session must cancel its orphaned cron tick");
@@ -1121,6 +1103,7 @@ fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     assert_eq!(trace["decision_basis"], "session_store_meta_absent");
     assert_eq!(trace["session_state"], "unknown");
     assert_eq!(trace["reason"], "session_absent");
+    assert_eq!(reason, "session_absent");
 }
 
 #[tokio::test]
@@ -1249,8 +1232,9 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
     let disposition = cron_session_disposition(&state.core, session_id)
         .await
         .expect("read retired session tombstone state");
-    let cron_state = cron_tick_test_state(session_id);
-    let super::CronTick::Cancel { trace } =
+    let mut cron_state = cron_tick_test_state(session_id);
+    cron_state.request.source_key = source_key.to_string();
+    let super::CronTick::Cancel { reason, trace } =
         super::cron_tick_decision(disposition, &cron_state, "cron-job-retired-integration")
     else {
         panic!("a retired session must produce a cancel decision");
@@ -1264,5 +1248,55 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
             "session_state": "retired",
             "reason": "session_retired",
         })
+    );
+
+    let controller = CountingProcessEffectController::default();
+    let scoped = lash::runtime::ScopedEffectController::borrowed(
+        &controller,
+        lash::runtime::ExecutionScope::runtime_operation("fig2316-retired-cron-outcome"),
+    )
+    .expect("scope retired cron outcome");
+    let outcome_id = super::record_cron_tick_outcome_with_effect_controller(
+        state,
+        cron_state.request.clone(),
+        cron_state.next_execution_time.clone(),
+        "cron-job-retired-integration",
+        lash::triggers::TriggerOccurrenceOutcome::Dropped {
+            reason: reason.to_string(),
+        },
+        scoped,
+    )
+    .await
+    .expect("record retired cron tick outcome");
+
+    let occurrences = lash::triggers::TriggerStore::list_occurrences(
+        trigger_store.as_ref(),
+        lash::triggers::TriggerOccurrenceFilter::default(),
+    )
+    .await
+    .expect("list retired cron tick outcomes");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "every observed cron tick decision must persist exactly one typed outcome; records={occurrences:?}"
+    );
+    assert_eq!(occurrences[0].occurrence_id, outcome_id);
+    assert_eq!(occurrences[0].source_key, source_key);
+    assert_eq!(
+        occurrences[0].payload,
+        serde_json::json!({ "scheduled_for": cron_state.next_execution_time })
+    );
+    assert_eq!(
+        occurrences[0].outcome,
+        lash::triggers::TriggerOccurrenceOutcome::Dropped {
+            reason: "session_retired".to_string(),
+        }
+    );
+    assert!(
+        lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())
+            .await
+            .expect("list retired cron tick deliveries")
+            .is_empty(),
+        "a dropped tick outcome must not wake its retired subscription"
     );
 }

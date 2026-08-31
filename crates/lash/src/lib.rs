@@ -154,7 +154,7 @@ pub mod triggers {
         LashSchema, TriggerCommandOutcome, TriggerDeliveryReservation,
         TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
         TriggerIngressReceipt, TriggerInputBinding, TriggerMutationOutcome, TriggerMutationReceipt,
-        TriggerOccurrenceFilter, TriggerOccurrenceReclamationReport,
+        TriggerOccurrenceFilter, TriggerOccurrenceOutcome, TriggerOccurrenceReclamationReport,
         TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
         TriggerOperationError, TriggerOwnerScope, TriggerRetentionReconciliationReport,
         TriggerSubscriptionDraft, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
@@ -602,11 +602,11 @@ pub mod remote {
         pub use lash_remote_protocol::triggers::{
             RemoteTriggerDeliveryEmitOutcome, RemoteTriggerDeliveryEmitReceipt,
             RemoteTriggerEmitReport, RemoteTriggerInputBinding, RemoteTriggerInputTemplate,
-            RemoteTriggerListSubscriptionsResponse, RemoteTriggerOccurrenceRecord,
-            RemoteTriggerOccurrenceRequest, RemoteTriggerRegisterSubscriptionReceipt,
-            RemoteTriggerRegisterSubscriptionRequest, RemoteTriggerRegistration,
-            RemoteTriggerSubscriptionDraft, RemoteTriggerSubscriptionFilter,
-            RemoteTriggerSubscriptionRecord, RemoteTriggerTarget,
+            RemoteTriggerListSubscriptionsResponse, RemoteTriggerOccurrenceOutcome,
+            RemoteTriggerOccurrenceRecord, RemoteTriggerOccurrenceRequest,
+            RemoteTriggerRegisterSubscriptionReceipt, RemoteTriggerRegisterSubscriptionRequest,
+            RemoteTriggerRegistration, RemoteTriggerSubscriptionDraft,
+            RemoteTriggerSubscriptionFilter, RemoteTriggerSubscriptionRecord, RemoteTriggerTarget,
         };
     }
 

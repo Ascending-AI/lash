@@ -25,6 +25,7 @@ where
     owner_namespaces_are_exact_and_session_cleanup_is_scoped(make()).await;
     explicit_prune_is_journaled_and_owner_scoped(make()).await;
     occurrence_and_reservations_are_atomic_and_idempotent(make()).await;
+    non_fired_occurrences_are_durable_and_never_reserve(make()).await;
     occurrence_time_bounds_match_the_rust_predicate(make()).await;
     session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(make()).await;
     host_tombstone_remains_a_permanent_revive_fence(make()).await;
@@ -1553,6 +1554,96 @@ async fn cutoff_defers_but_never_initiates_occurrence_reclaim(store: Arc<dyn cra
             .expect("only live occurrence remains")
             .len(),
         1
+    );
+}
+
+async fn non_fired_occurrences_are_durable_and_never_reserve(store: Arc<dyn crate::TriggerStore>) {
+    let owner_scope = crate::TriggerOwnerScope::session("tick-outcome-session");
+    mutate(
+        &store,
+        "register-tick-outcome",
+        crate::TriggerCommand::Register {
+            owner_scope,
+            actor: crate::ProcessOriginator::session(crate::SessionScope::new(
+                "tick-outcome-session",
+            )),
+            draft: sample_draft(
+                "tick-outcome-session",
+                "tick-outcome-subscription",
+                "tick-outcome-source",
+                "tick-worker",
+            ),
+        },
+    )
+    .await;
+
+    let fired = store
+        .ingest_occurrence(button_occurrence("tick-outcome-source", "tick-fired"))
+        .await
+        .expect("ingest fired tick");
+    assert_eq!(fired.reservations.len(), 1);
+    assert_eq!(
+        fired.occurrence.outcome,
+        crate::TriggerOccurrenceOutcome::Fired
+    );
+
+    let dropped_request = button_occurrence("tick-outcome-source", "tick-dropped").with_outcome(
+        crate::TriggerOccurrenceOutcome::Dropped {
+            reason: "session_retired".to_string(),
+        },
+    );
+    let dropped = store
+        .ingest_occurrence(dropped_request.clone())
+        .await
+        .expect("record dropped tick");
+    assert!(
+        dropped.reservations.is_empty(),
+        "a dropped tick is an audit record, not a delivery"
+    );
+    assert_eq!(
+        dropped.occurrence.outcome,
+        crate::TriggerOccurrenceOutcome::Dropped {
+            reason: "session_retired".to_string(),
+        }
+    );
+    assert!(
+        store
+            .ingest_occurrence(dropped_request)
+            .await
+            .expect("replay dropped tick")
+            .reservations
+            .is_empty(),
+        "replaying a dropped tick cannot discover a delivery"
+    );
+
+    let coalesced = store
+        .ingest_occurrence(
+            button_occurrence("tick-outcome-source", "tick-coalesced").with_outcome(
+                crate::TriggerOccurrenceOutcome::CoalescedInto {
+                    occurrence_id: fired.occurrence.occurrence_id.clone(),
+                },
+            ),
+        )
+        .await
+        .expect("record coalesced tick");
+    assert!(
+        coalesced.reservations.is_empty(),
+        "a coalesced tick is an audit record, not a second delivery"
+    );
+    assert_eq!(
+        coalesced.occurrence.outcome,
+        crate::TriggerOccurrenceOutcome::CoalescedInto {
+            occurrence_id: fired.occurrence.occurrence_id,
+        }
+    );
+    assert_eq!(
+        store
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list tick outcomes")
+            .len(),
+        3,
+        "each fired, dropped, and coalesced tick has exactly one durable occurrence row"
     );
 }
 

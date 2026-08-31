@@ -418,6 +418,19 @@ fn trigger_dtos_round_trip_core_values() {
     let core = lash_core::TriggerOccurrenceRequest::try_from(remote).expect("core request");
     assert_eq!(core, request);
 
+    let request = request.with_outcome(lash_core::TriggerOccurrenceOutcome::CoalescedInto {
+        occurrence_id: "trigger:fired-tick".to_string(),
+    });
+    let remote = RemoteTriggerOccurrenceRequest::from(request.clone());
+    assert_eq!(
+        remote.outcome,
+        RemoteTriggerOccurrenceOutcome::CoalescedInto {
+            occurrence_id: "trigger:fired-tick".to_string(),
+        }
+    );
+    let core = lash_core::TriggerOccurrenceRequest::try_from(remote).expect("core request");
+    assert_eq!(core, request);
+
     let report = lash_core::facade_support::TriggerEmitReport {
         occurrence_id: "occurrence:1".to_string(),
         deliveries: vec![lash_core::facade_support::TriggerDeliveryEmitReceipt {

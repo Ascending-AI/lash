@@ -523,6 +523,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             idempotency_key: request.idempotency_key,
                             source: request.source,
                             session_id: request.session_id,
+                            outcome: request.outcome,
                             occurred_at_ms,
                         };
                         tx.execute(
@@ -543,14 +544,17 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                         (record, true)
                     };
-                    let reservations = if is_new {
-                        reserve_sqlite_deliveries(tx, &record, occurred_at_ms)?
-                    } else {
-                        sqlite_delivery_snapshots(
+                    let reservations = match (
+                        is_new,
+                        record.outcome == lash_core::TriggerOccurrenceOutcome::Fired,
+                    ) {
+                        (true, true) => reserve_sqlite_deliveries(tx, &record, occurred_at_ms)?,
+                        (false, true) => sqlite_delivery_snapshots(
                             tx,
                             &record,
                             lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
-                        )?
+                        )?,
+                        (_, false) => Vec::new(),
                     };
                     if is_new && reservations.is_empty() {
                         tx.execute(

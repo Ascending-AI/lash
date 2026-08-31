@@ -1121,6 +1121,34 @@ fn remote_trigger_dtos_json_round_trip() {
             .expect("deserialize request");
     assert_eq!(decoded.source_type, "ui.button.pressed");
     assert_eq!(decoded.source.as_ref().unwrap()["id"], "blue");
+    assert_eq!(decoded.outcome, RemoteTriggerOccurrenceOutcome::Fired);
+
+    let dropped = RemoteTriggerOccurrenceRequest::new(
+        "cron.Schedule",
+        "cron-source",
+        serde_json::json!({ "scheduled_for": "2026-08-30T12:00:00Z" }),
+        "cron-outcome-1",
+    )
+    .with_outcome(RemoteTriggerOccurrenceOutcome::Dropped {
+        reason: "session_retired".to_string(),
+    });
+    assert_eq!(
+        serde_json::to_value(&dropped).expect("serialize dropped occurrence"),
+        serde_json::json!({
+            "source_type": "cron.Schedule",
+            "source_key": "cron-source",
+            "payload": { "scheduled_for": "2026-08-30T12:00:00Z" },
+            "idempotency_key": "cron-outcome-1",
+            "outcome": { "kind": "dropped", "reason": "session_retired" },
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<RemoteTriggerOccurrenceRequest>(
+            serde_json::to_value(&dropped).expect("serialize dropped occurrence again")
+        )
+        .expect("deserialize dropped occurrence"),
+        dropped
+    );
 
     let report = RemoteTriggerEmitReport {
         occurrence_id: "occurrence:1".to_string(),
@@ -1365,7 +1393,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&wire).expect("inspect emitted envelope"),
         serde_json::json!({
-            "protocol_version": 50,
+            "protocol_version": 51,
             "session_id": "resident-session",
             "replay_incarnation_id": "resident-incarnation",
             "revision": 7,
@@ -1380,7 +1408,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
     assert!(matches!(
         error,
         RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 50,
+            actual: 51,
             expected: 41,
         }
     ));
@@ -1406,7 +1434,7 @@ fn protocol_41_peer_rejects_current_resident_changed_without_commit_fallback() {
 
 #[test]
 fn remote_process_dtos_json_round_trip() {
-    assert_eq!(REMOTE_PROTOCOL_VERSION, 50, "process DTO wire-shape pin");
+    assert_eq!(REMOTE_PROTOCOL_VERSION, 51, "process DTO wire-shape pin");
     let start = RemoteProcessStartRequest {
         id: "process:1".to_string(),
         input: RemoteProcessInput::External {
@@ -1720,7 +1748,7 @@ fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
         decode_empty_envelope(33),
         Err(RemoteProtocolError::UnsupportedProtocolVersion {
             actual: 33,
-            expected: 50,
+            expected: 51,
         })
     ));
 }
@@ -1760,7 +1788,7 @@ fn protocol_37_peer_rejects_protocol_38_language_runtime_effect_before_kind_deco
             decode_empty_envelope(37),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 37,
-                expected: 50,
+                expected: 51,
             })
         ),
         "the version gate refuses a 37 peer before any payload is interpreted"
@@ -1796,7 +1824,7 @@ fn protocol_38_peer_rejects_protocol_39_emit_trigger_intent_before_kind_decode()
             decode_empty_envelope(38),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 38,
-                expected: 50,
+                expected: 51,
             })
         ),
         "the version gate refuses a 38 peer before any payload is interpreted"
@@ -1852,7 +1880,7 @@ fn protocol_39_peer_rejects_protocol_40_assistant_response_hooks_before_kind_dec
             decode_empty_envelope(39),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 39,
-                expected: 50,
+                expected: 51,
             })
         ),
         "the version gate refuses a 39 peer before any payload is interpreted"
@@ -1884,7 +1912,7 @@ fn protocol_40_peer_rejects_protocol_41_caller_departed_before_status_decode() {
             decode_empty_envelope(40),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 40,
-                expected: 50,
+                expected: 51,
             })
         ),
         "the version gate refuses a 40 peer before any payload is interpreted"

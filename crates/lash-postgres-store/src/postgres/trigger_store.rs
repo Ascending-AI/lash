@@ -319,6 +319,7 @@ impl TriggerStore for PostgresTriggerStore {
                 idempotency_key: request.idempotency_key,
                 source: request.source,
                 session_id: request.session_id,
+                outcome: request.outcome,
                 occurred_at_ms: self.clock.timestamp_ms(),
             };
             sqlx::query(
@@ -338,10 +339,15 @@ impl TriggerStore for PostgresTriggerStore {
             .map_err(plugin_sqlx_error)?;
             (occurrence, true)
         };
-        let reservations = if is_new {
-            reserve_postgres_deliveries(&mut tx, &occurrence, self.clock.timestamp_ms()).await?
-        } else {
-            postgres_delivery_snapshots(&mut tx, &occurrence).await?
+        let reservations = match (
+            is_new,
+            occurrence.outcome == lash_core::TriggerOccurrenceOutcome::Fired,
+        ) {
+            (true, true) => {
+                reserve_postgres_deliveries(&mut tx, &occurrence, self.clock.timestamp_ms()).await?
+            }
+            (false, true) => postgres_delivery_snapshots(&mut tx, &occurrence).await?,
+            (_, false) => Vec::new(),
         };
         if is_new && reservations.is_empty() {
             sqlx::query(
