@@ -1,6 +1,8 @@
 //! Durable session-config command conformance.
 
 use super::*;
+#[cfg(test)]
+use crate::{Clock, SessionStoreFactory};
 
 pub(super) async fn session_store_factory_coalesces_config_command_claims(
     factory: Arc<dyn crate::SessionStoreFactory>,
@@ -197,10 +199,89 @@ async fn commit_session_command_claim(
         .expect("commit config-command claim");
 }
 
+/// Virtual clock for runtime settlement tests. Its sleeps advance the same
+/// epoch used by the in-memory store and yield once, so settlement deadlines
+/// are exercised without waiting on wall time.
+#[cfg(test)]
+#[derive(Debug)]
+struct ConfigSettlementClock {
+    epoch_ms: std::sync::atomic::AtomicU64,
+    monotonic_origin: std::time::Instant,
+    epoch_origin_ms: u64,
+}
+
+#[cfg(test)]
+impl ConfigSettlementClock {
+    fn new(epoch_ms: u64) -> Self {
+        Self {
+            epoch_ms: std::sync::atomic::AtomicU64::new(epoch_ms),
+            monotonic_origin: std::time::Instant::now(),
+            epoch_origin_ms: epoch_ms,
+        }
+    }
+
+    fn advance(&self, duration: std::time::Duration) {
+        let duration_ms = u64::try_from(duration.as_millis()).expect("clock duration fits u64");
+        self.epoch_ms
+            .fetch_add(duration_ms, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl crate::Clock for ConfigSettlementClock {
+    fn now(&self) -> std::time::Instant {
+        self.monotonic_origin
+            + std::time::Duration::from_millis(
+                self.epoch_ms
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    .saturating_sub(self.epoch_origin_ms),
+            )
+    }
+
+    fn timestamp_ms(&self) -> u64 {
+        self.epoch_ms.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn timestamp_rfc3339(&self) -> String {
+        self.timestamp_datetime().to_rfc3339()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms()),
+        )
+    }
+
+    async fn sleep(&self, duration: std::time::Duration) {
+        self.advance(duration);
+        tokio::task::yield_now().await;
+    }
+
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        self.sleep(deadline.saturating_duration_since(self.now()))
+            .await;
+    }
+}
+
+#[cfg(test)]
+async fn config_settlement_store(
+    clock: Arc<ConfigSettlementClock>,
+    request: &crate::SessionStoreCreateRequest,
+) -> Arc<dyn crate::RuntimePersistence> {
+    let factory =
+        crate::InMemorySessionStoreFactory::with_clock(Arc::clone(&clock) as Arc<dyn crate::Clock>);
+    factory
+        .create_store(request)
+        .await
+        .expect("create in-memory config-settlement store")
+}
+
+#[cfg(test)]
 async fn runtime_for_config_settlement(
     store: Arc<dyn crate::RuntimePersistence>,
     request: &crate::SessionStoreCreateRequest,
-    settlement_timeout: std::time::Duration,
+    clock: Arc<ConfigSettlementClock>,
 ) -> crate::LashRuntime {
     let mut state = crate::load_persisted_session_state(store.as_ref())
         .await
@@ -225,9 +306,7 @@ async fn runtime_for_config_settlement(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     )
-    .with_lease_timings(
-        crate::LeaseTimings::from_ttl(settlement_timeout).expect("valid config-settlement timing"),
-    );
+    .with_clock(clock as Arc<dyn crate::Clock>);
     crate::LashRuntime::from_persistent_embedded_state(
         request.policy.clone(),
         crate::EmbeddedRuntimeHost::new(host),
@@ -239,6 +318,7 @@ async fn runtime_for_config_settlement(
     .expect("build config-settlement runtime")
 }
 
+#[cfg(test)]
 async fn enqueue_config_settlement_blocker(
     store: &dyn crate::RuntimePersistence,
     session_id: &str,
@@ -257,6 +337,7 @@ async fn enqueue_config_settlement_blocker(
         .expect("enqueue config-settlement blocker");
 }
 
+#[cfg(test)]
 fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
     crate::SessionConfigPatch {
         model: Some(
@@ -269,41 +350,31 @@ fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
     }
 }
 
-pub(super) async fn session_config_settlement_timeout_is_typed(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-) {
+#[cfg(test)]
+pub(super) async fn session_config_settlement_timeout_is_typed() {
+    let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
         "config-settlement-timeout",
         "config-settlement-original",
         crate::SessionRelation::Root,
     );
-    let store = factory
-        .create_store(&request)
-        .await
-        .expect("create config-settlement timeout store");
+    let store = config_settlement_store(Arc::clone(&clock), &request).await;
     enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
-    let mut runtime = runtime_for_config_settlement(
-        Arc::clone(&store),
-        &request,
-        std::time::Duration::from_millis(300),
-    )
-    .await;
+    let mut runtime =
+        runtime_for_config_settlement(Arc::clone(&store), &request, Arc::clone(&clock)).await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
-    let started = std::time::Instant::now();
-    let error = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        runtime.update_session_config(config_settlement_patch("must-remain-pending")),
-    )
-    .await
-    .expect("config setter must return within its settlement bound")
-    .expect_err("blocked config setter must return a typed pending error");
+    let started = clock.now();
+    let error = runtime
+        .update_session_config(config_settlement_patch("must-remain-pending"))
+        .await
+        .expect_err("blocked config setter must return a typed pending error");
     assert!(
         matches!(error, crate::SessionError::SessionCommandPending(_)),
         "blocked config setter returned {error:?}"
     );
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(1),
-        "300ms settlement timeout must not hang the facade writer"
+        clock.now().saturating_duration_since(started) == std::time::Duration::from_secs(30),
+        "the injected 30s settlement bound must not hang the facade writer"
     );
     assert_eq!(
         runtime.export_persistence_state().policy.model,
@@ -311,25 +382,18 @@ pub(super) async fn session_config_settlement_timeout_is_typed(
     );
 }
 
-pub(super) async fn cancelled_session_config_settlement_is_typed(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-) {
+#[cfg(test)]
+pub(super) async fn cancelled_session_config_settlement_is_typed() {
+    let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
         "config-settlement-cancelled",
         "config-settlement-original",
         crate::SessionRelation::Root,
     );
-    let store = factory
-        .create_store(&request)
-        .await
-        .expect("create config-settlement cancellation store");
+    let store = config_settlement_store(Arc::clone(&clock), &request).await;
     enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
-    let runtime = runtime_for_config_settlement(
-        Arc::clone(&store),
-        &request,
-        std::time::Duration::from_secs(3),
-    )
-    .await;
+    let runtime =
+        runtime_for_config_settlement(Arc::clone(&store), &request, Arc::clone(&clock)).await;
     let original_model = runtime.export_persistence_state().policy.model.clone();
     let setter = crate::task::spawn(async move {
         let mut runtime = runtime;
@@ -339,22 +403,18 @@ pub(super) async fn cancelled_session_config_settlement_is_typed(
         (result, runtime)
     });
 
-    let command_batch = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            if let Some(batch) = store
-                .list_queued_work(&request.session_id)
-                .await
-                .expect("list queued config command")
-                .into_iter()
-                .find(crate::QueuedWorkBatch::is_session_command_work)
-            {
-                break batch;
-            }
-            tokio::task::yield_now().await;
+    let command_batch = loop {
+        if let Some(batch) = store
+            .list_queued_work(&request.session_id)
+            .await
+            .expect("list queued config command")
+            .into_iter()
+            .find(crate::QueuedWorkBatch::is_session_command_work)
+        {
+            break batch;
         }
-    })
-    .await
-    .expect("accepted config command must become visible");
+        tokio::task::yield_now().await;
+    };
     let cancelled = store
         .cancel_queued_work_batch(&request.session_id, &command_batch.batch_id)
         .await
@@ -369,10 +429,7 @@ pub(super) async fn cancelled_session_config_settlement_is_typed(
         "cancellation must not manufacture completion evidence"
     );
 
-    let (result, runtime) = tokio::time::timeout(std::time::Duration::from_secs(2), setter)
-        .await
-        .expect("cancelled setter must resolve promptly")
-        .expect("cancelled setter task");
+    let (result, runtime) = setter.await.expect("cancelled setter task");
     let error = result.expect_err("cancelled config setter must be typed");
     assert!(
         matches!(

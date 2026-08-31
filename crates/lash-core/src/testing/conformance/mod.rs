@@ -659,6 +659,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_config_settlement_timeout_is_typed() {
+        session_store_factory::session_config_settlement_timeout_is_typed().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_session_config_settlement_is_typed() {
+        session_store_factory::cancelled_session_config_settlement_is_typed().await;
+    }
+
+    #[tokio::test]
     async fn in_memory_session_delete_blob_reclaim_conformance() {
         session_delete_blob_reclaim_conformance("in-memory", || {
             let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
