@@ -160,8 +160,11 @@ impl SessionExecutionLeaseStore for FacadeStore {
     async fn get_session_execution_lease(
         &self,
         _session_id: &str,
-    ) -> Result<Option<SessionExecutionLease>, StoreError> {
-        Ok(None)
+    ) -> Result<lash::persistence::SessionExecutionLeaseObservation, StoreError> {
+        Ok(lash::persistence::SessionExecutionLeaseObservation {
+            observed_at_epoch_ms: 0,
+            lease: None,
+        })
     }
 }
 

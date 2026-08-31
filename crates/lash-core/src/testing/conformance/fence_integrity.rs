@@ -97,6 +97,7 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
             .get_session_execution_lease("signed-write-lease")
             .await
             .expect("read after refused session lease")
+            .lease
             .is_none()
     );
 

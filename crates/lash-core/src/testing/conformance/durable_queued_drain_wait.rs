@@ -182,6 +182,7 @@ async fn gives_up_on_a_renewing_holder_without_touching_its_row(
         .get_session_execution_lease(session_id)
         .await
         .expect("read the live holder's row after the drain gave up")
+        .lease
         .expect("the live holder still holds the lane");
     assert_eq!(after, renewed);
     store

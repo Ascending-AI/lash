@@ -4977,6 +4977,7 @@ async fn retained_turn_graph_service_does_not_extend_the_execution_lane() {
             )
             .await
             .expect("read released lane")
+            .lease
             .is_none()
             {
                 break;
@@ -5143,7 +5144,8 @@ async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff() {
         "root",
     )
     .await
-    .expect("read final session lane state");
+    .expect("read final session lane state")
+    .lease;
     assert!(
         final_lease.is_none(),
         "settling the loud durable failure must clear the expired owner row"
@@ -5274,7 +5276,8 @@ async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff() {
         "root",
     )
     .await
-    .expect("read final session lane state");
+    .expect("read final session lane state")
+    .lease;
     assert!(
         final_lease.is_none(),
         "settling the loud in-process failure must clear the expired owner row"
@@ -7257,6 +7260,7 @@ async fn durable_controller_reports_a_retryable_busy_lane_when_the_holder_is_ali
     )
     .await
     .expect("read the holder row after the drain gave up")
+    .lease
     .expect("the live holder still holds the lane");
     assert_eq!(holder_after, renewed);
     assert_eq!(
@@ -7340,6 +7344,7 @@ async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pending() {
         )
         .await
         .expect("read holder after cancellation")
+        .lease
         .expect("holder remains installed"),
         held_lease
     );
@@ -7411,6 +7416,7 @@ async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait_budget() {
     )
     .await
     .expect("read the holder row after the wait budget elapsed")
+    .lease
     .expect("the frozen holder still holds the lane");
     assert_eq!(holder_after, held_lease);
     assert_eq!(
@@ -7475,6 +7481,7 @@ async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_contract() 
     )
     .await
     .expect("read the holder row after the one-shot no-op")
+    .lease
     .expect("the holder still holds the lane");
     assert_eq!(holder_after.lease_token, held_lease.lease_token);
     assert_eq!(holder_after.fencing_token, held_lease.fencing_token);

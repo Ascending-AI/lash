@@ -3849,6 +3849,7 @@ pub async fn borrowed_session_execution_lease_commit_contract(store: Arc<dyn Run
         .get_session_execution_lease(session_id)
         .await
         .expect("read lane after stale borrow rejection")
+        .lease
         .expect("stale borrow rejection leaves successor live");
     assert_eq!(after_rejection.lease_token, rotated.lease_token);
     release_session_execution_lease_for_test(&store, &rotated).await;
@@ -3903,6 +3904,7 @@ async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn Runti
         .get_session_execution_lease("root")
         .await
         .expect("read overlap successor after predecessor win")
+        .lease
         .expect("stale predecessor release must leave successor live");
     assert_eq!(live_after_win.lease_token, overlap_successor.lease_token);
 
@@ -3922,6 +3924,7 @@ async fn same_incarnation_rotation_gates_claims_not_commits(store: Arc<dyn Runti
         .get_session_execution_lease("root")
         .await
         .expect("read overlap successor after predecessor loss")
+        .lease
         .expect("CAS-losing predecessor must leave successor live");
     assert_eq!(live_after_loss.lease_token, overlap_successor.lease_token);
     release_session_execution_lease_for_test(&store, &overlap_successor).await;
@@ -3982,6 +3985,7 @@ pub async fn same_host_distinct_executors_are_lane_less_without_revoking_holder(
         .get_session_execution_lease("fig1133-same-host-session")
         .await
         .expect("read holder after busy result")
+        .lease
         .expect("busy result leaves holder row present");
     assert_eq!(holder_after_busy, first);
 
@@ -4131,6 +4135,7 @@ async fn concurrent_session_execution_lease_rotation_and_stale_renewal_are_linea
         .get_session_execution_lease(session_id)
         .await
         .expect("read durable lease after concurrent probe")
+        .lease
         .expect("successor remains live after concurrent probe");
     assert_eq!(durable.lease_token, successor.lease_token);
     release_session_execution_lease_for_test(&store, &successor).await;
@@ -4354,16 +4359,21 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
             .get_session_execution_lease("lease-diagnostics-unknown")
             .await
             .expect("diagnostic read of an unknown session succeeds")
+            .lease
             .is_none(),
         "an unknown session id must read as no lease rather than erroring"
     );
 
     let held = claim_session_execution_lease_for_test(&store, "lease-diagnostics", "diag-a").await;
-    let observed = store
+    let observation = store
         .get_session_execution_lease("lease-diagnostics")
         .await
-        .expect("diagnostic read of a held lease")
-        .expect("a held lease must be reported");
+        .expect("diagnostic read of a held lease");
+    assert!(
+        observation.observed_at_epoch_ms >= held.claimed_at_epoch_ms,
+        "diagnostic store-now must not precede the lease claim"
+    );
+    let observed = observation.lease.expect("a held lease must be reported");
     assert_eq!(observed.session_id, held.session_id);
     assert_eq!(observed.owner, held.owner);
     assert_eq!(observed.fencing_token, held.fencing_token);
@@ -4384,6 +4394,7 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
             .get_session_execution_lease("lease-diagnostics")
             .await
             .expect("diagnostic read after release")
+            .lease
             .is_none(),
         "a released row must read as no holder even though its generation persists"
     );
@@ -4405,6 +4416,7 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
         .get_session_execution_lease("lease-diagnostics")
         .await
         .expect("diagnostic read of a lapsed lease")
+        .lease
         .expect("a lapsed holder must still be reported");
     assert_eq!(lapsed.owner, lapsing.owner);
     assert_eq!(lapsed.fencing_token, lapsing.fencing_token);
@@ -4415,6 +4427,7 @@ async fn session_execution_lease_diagnostic_read_contract(store: Arc<dyn Runtime
         .get_session_execution_lease("lease-diagnostics")
         .await
         .expect("diagnostic read after takeover")
+        .lease
         .expect("the successor holds the row");
     assert_eq!(after_takeover.owner, successor.owner);
     assert!(

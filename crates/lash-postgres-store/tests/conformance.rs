@@ -499,6 +499,7 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
         .get_session_execution_lease(session_id)
         .await
         .expect("read successor lease")
+        .lease
         .expect("successor lease remains live");
     assert_eq!(durable.lease_token, successor.lease_token);
     store

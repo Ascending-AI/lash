@@ -62,6 +62,7 @@ pub async fn session_execution_lease_zero_row_renewal_is_refused(
         .get_session_execution_lease(SESSION_ID)
         .await
         .expect("read lease after refused zero-row renewal")
+        .lease
         .expect("refused zero-row renewal preserves the current lease");
     assert_same_lease(&durable, &held);
 }

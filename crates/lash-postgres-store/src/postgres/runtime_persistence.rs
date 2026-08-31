@@ -1714,18 +1714,24 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> Result<Option<SessionExecutionLease>, StoreError> {
+    ) -> Result<lash_core::SessionExecutionLeaseObservation, StoreError> {
         // Non-locking on purpose: observation must never be able to delay the
         // lane it observes. See `read_session_execution_lease_unlocked`.
-        let current = read_session_execution_lease_unlocked(&self.pool, session_id).await?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        let observed_at_epoch_ms = postgres_transaction_epoch_ms(&mut tx).await?;
+        let current = read_session_execution_lease_unlocked(&mut tx, session_id).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
         // A released row keeps its generation but clears owner and token; only a
         // held row is reported. Expiry stays a raw fact for the caller.
-        let Some(current) =
-            current.filter(|lease| lease.owner.is_some() && lease.lease_token.is_some())
-        else {
-            return Ok(None);
-        };
-        Ok(Some(row_to_session_execution_lease(session_id, current)?))
+        let lease = current
+            .filter(|lease| lease.owner.is_some() && lease.lease_token.is_some())
+            .map(|row| row_to_session_execution_lease(session_id, row))
+            .transpose()?;
+        Ok(lash_core::SessionExecutionLeaseObservation {
+            observed_at_epoch_ms,
+            lease,
+        })
     }
 }
 
@@ -4112,13 +4118,13 @@ async fn claim_pending_turn_inputs_postgres(
 /// atomic under READ COMMITTED. A diagnostic read must never take that lock: an
 /// operator polling a stuck session would otherwise make the holder's renewal or
 /// a peer's claim wait behind the observer's transaction, so watching the lease
-/// could itself delay the lane it is watching. This runs as a single autocommit
-/// statement on the pool with no `FOR UPDATE` and no surrounding transaction.
+/// could itself delay the lane it is watching. The caller owns a short read
+/// transaction so the row and `transaction_timestamp()` share one transaction;
+/// this SELECT itself still has no `FOR UPDATE`.
 pub(crate) async fn read_session_execution_lease_unlocked(
-    pool: &PgPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &str,
 ) -> Result<Option<SessionExecutionLeaseRow>, StoreError> {
-    let mut connection = acquire_runtime_connection(pool).await?;
     let row = sqlx::query(
         "SELECT lease_owner_id, lease_token, lease_fencing_token,
                 lease_claimed_at_ms, lease_expires_at_ms,
@@ -4127,7 +4133,7 @@ pub(crate) async fn read_session_execution_lease_unlocked(
          WHERE session_id = $1",
     )
     .bind(session_id)
-    .fetch_optional(&mut *connection)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
     row.map(session_execution_lease_row_from_columns)

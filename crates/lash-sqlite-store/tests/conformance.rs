@@ -1168,10 +1168,22 @@ async fn sqlite_store_uses_injected_clock_for_expiry() {
             .await
             .expect("clock-driven sqlite store"),
     ) as Arc<dyn RuntimePersistence>;
-    lash_core::testing::conformance::runtime_persistence_clock_expiry(store, |duration_ms| {
-        clock.advance(duration_ms);
-    })
+    lash_core::testing::conformance::runtime_persistence_clock_expiry(
+        Arc::clone(&store),
+        |duration_ms| {
+            clock.advance(duration_ms);
+        },
+    )
     .await;
+    let observation = store
+        .get_session_execution_lease("sqlite-injected-clock-diagnostic")
+        .await
+        .expect("read SQLite session-lease diagnostics");
+    assert_eq!(
+        observation.observed_at_epoch_ms,
+        lash_core::Clock::timestamp_ms(clock.as_ref()),
+        "SQLite diagnostics must return the same injected clock that authors lease timestamps"
+    );
 }
 
 #[tokio::test]

@@ -35,8 +35,8 @@ use crate::{EmbedError, LashCore, Result};
 pub struct SessionLeaseDiagnostics {
     /// The session whose lane was read.
     pub session_id: String,
-    /// Host-clock reading taken alongside the row, so `renewal` classifies
-    /// expiry against one consistent instant instead of a later "now".
+    /// Store-clock reading taken alongside the row, so `renewal` compares two
+    /// instants from one clock domain instead of mixing store and host time.
     pub observed_at_epoch_ms: u64,
     /// The row's holder facts, or `None` when no owner holds the lane: never
     /// claimed, or released by its last holder (typically at commit).
@@ -171,12 +171,12 @@ impl LashCore {
         else {
             return Ok(None);
         };
-        let row = store.get_session_execution_lease(&session_id).await?;
+        let observation = store.get_session_execution_lease(&session_id).await?;
         Ok(Some(
             crate::session_lease::SessionLeaseDiagnostics::from_row(
                 session_id,
-                self.env.core.clock.timestamp_ms(),
-                row,
+                observation.observed_at_epoch_ms,
+                observation.lease,
             ),
         ))
     }
@@ -185,96 +185,153 @@ impl LashCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
-    fn holder_expiring_at(expires_at_epoch_ms: u64) -> Option<SessionLeaseHolder> {
-        Some(SessionLeaseHolder {
-            owner: LeaseOwnerIdentity::opaque("worker-a", "worker-a:boot-1"),
-            executor_id: "executor-a".to_string(),
-            generation: 4,
-            claimed_at_epoch_ms: 1_000,
-            expires_at_epoch_ms,
-        })
+    use lash_core::SessionStoreFactory as _;
+
+    const SESSION_ID: &str = "session-lease-clock-domain";
+    const STORE_NOW_MS: u64 = 5_000;
+
+    struct ClockDomainFixture {
+        core: LashCore,
+        store: Arc<dyn lash_core::RuntimePersistence>,
     }
 
-    #[test]
-    fn renewal_classifies_unheld_current_and_lapsed_against_the_observation() {
-        let unheld = SessionLeaseDiagnostics {
-            session_id: "s".to_string(),
-            observed_at_epoch_ms: 5_000,
-            holder: None,
+    async fn clock_domain_fixture(host_now_ms: u64) -> ClockDomainFixture {
+        let store_clock: Arc<dyn lash_core::Clock> =
+            Arc::new(lash_core::testing::TestClock::new(STORE_NOW_MS));
+        let host_clock: Arc<dyn lash_core::Clock> =
+            Arc::new(lash_core::testing::TestClock::new(host_now_ms));
+        let factory = Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::with_clock(store_clock),
+        );
+        let request = lash_core::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SESSION_ID.to_string(),
+            relation: lash_core::SessionRelation::default(),
+            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
-        assert_eq!(unheld.renewal(), SessionLeaseRenewal::Unheld);
+        let store = factory
+            .create_store(&request)
+            .await
+            .expect("create clock-domain fixture store");
+        let core = LashCore::standard_builder(lash_core::TurnBudget::Unbounded)
+            .model(
+                lash_core::ModelSpec::builder("session-lease-clock-domain-model")
+                    .context_window_tokens(4_096)
+                    .build()
+                    .expect("valid fixture model"),
+            )
+            .store_factory(factory)
+            .clock(host_clock)
+            .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
+            .effect_host(Arc::new(
+                lash_core::facade_support::NativeEffectHost::default()
+                    .allow_process_lifetime_completion_keys(),
+            ))
+            .attachment_store(Arc::new(
+                lash_core::facade_support::InMemoryAttachmentStore::new(),
+            ))
+            .process_env_store(Arc::new(
+                lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
+            ))
+            .without_queued_work()
+            .build(crate::testing::runtime_lease_owner())
+            .expect("build clock-domain fixture core");
+        ClockDomainFixture { core, store }
+    }
 
-        let current = SessionLeaseDiagnostics {
-            session_id: "s".to_string(),
-            observed_at_epoch_ms: 5_000,
-            holder: holder_expiring_at(7_500),
-        };
+    async fn read_diagnostics(fixture: &ClockDomainFixture) -> SessionLeaseDiagnostics {
+        fixture
+            .core
+            .session_lease_diagnostics(SESSION_ID)
+            .await
+            .expect("read session lease diagnostics")
+            .expect("fixture session exists")
+    }
+
+    #[tokio::test]
+    async fn facade_renewal_is_current_when_the_host_clock_is_ahead_of_the_store() {
+        let fixture = clock_domain_fixture(50_000).await;
+        fixture
+            .store
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &LeaseOwnerIdentity::opaque("worker-a", "worker-a:boot-1"),
+                "executor-a",
+                2_500,
+            )
+            .await
+            .expect("claim fixture lease")
+            .acquired()
+            .expect("fixture lane is unheld");
+
+        let current = read_diagnostics(&fixture).await;
         assert_eq!(
             current.renewal(),
             SessionLeaseRenewal::Current {
                 expires_in_ms: 2_500
             }
         );
+        assert_eq!(current.observed_at_epoch_ms, STORE_NOW_MS);
+    }
 
-        let lapsed = SessionLeaseDiagnostics {
-            session_id: "s".to_string(),
-            observed_at_epoch_ms: 5_000,
-            holder: holder_expiring_at(4_250),
-        };
+    #[tokio::test]
+    async fn facade_renewal_is_lapsed_when_the_host_clock_is_behind_the_store() {
+        let fixture = clock_domain_fixture(500).await;
+        fixture
+            .store
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &LeaseOwnerIdentity::opaque("worker-a", "worker-a:boot-1"),
+                "executor-a",
+                0,
+            )
+            .await
+            .expect("claim fixture lease")
+            .acquired()
+            .expect("fixture lane is unheld");
+
+        let lapsed = read_diagnostics(&fixture).await;
         assert_eq!(
             lapsed.renewal(),
-            SessionLeaseRenewal::Lapsed {
-                expired_for_ms: 750
-            }
-        );
-    }
-
-    #[test]
-    fn an_expiry_exactly_at_the_observation_has_already_lapsed() {
-        // The store treats `expires_at <= now` as expired when it decides
-        // whether a lane is claimable; the diagnostic reading must not disagree
-        // with the substrate at the boundary.
-        let boundary = SessionLeaseDiagnostics {
-            session_id: "s".to_string(),
-            observed_at_epoch_ms: 5_000,
-            holder: holder_expiring_at(5_000),
-        };
-        assert_eq!(
-            boundary.renewal(),
             SessionLeaseRenewal::Lapsed { expired_for_ms: 0 }
         );
+        assert_eq!(lapsed.observed_at_epoch_ms, STORE_NOW_MS);
     }
 
-    #[test]
-    fn a_released_row_reads_as_unheld() {
-        let diagnostics = SessionLeaseDiagnostics::from_row("s".to_string(), 5_000, None);
+    #[tokio::test]
+    async fn a_released_row_reads_as_unheld() {
+        let fixture = clock_domain_fixture(50_000).await;
+        let diagnostics = read_diagnostics(&fixture).await;
         assert_eq!(diagnostics.holder, None);
         assert_eq!(diagnostics.renewal(), SessionLeaseRenewal::Unheld);
+        assert_eq!(diagnostics.observed_at_epoch_ms, STORE_NOW_MS);
     }
 
-    #[test]
-    fn a_held_row_projects_the_generation_and_holder_identity() {
-        let diagnostics = SessionLeaseDiagnostics::from_row(
-            "s".to_string(),
-            5_000,
-            Some(lash_core::SessionExecutionLease {
-                session_id: "s".to_string(),
-                owner: LeaseOwnerIdentity::opaque("worker-b", "worker-b:boot-2"),
-                executor_id: "executor-b".to_string(),
-                lease_token: "token".to_string(),
-                fencing_token: 9,
-                claimed_at_epoch_ms: 4_000,
-                lease_term_ms: 5_000,
-                expires_at_epoch_ms: 9_000,
-            }),
-        );
+    #[tokio::test]
+    async fn a_held_row_projects_the_generation_and_holder_identity() {
+        let fixture = clock_domain_fixture(50_000).await;
+        let lease = fixture
+            .store
+            .try_claim_session_execution_lease(
+                SESSION_ID,
+                &LeaseOwnerIdentity::opaque("worker-b", "worker-b:boot-2"),
+                "executor-b",
+                4_000,
+            )
+            .await
+            .expect("claim fixture lease")
+            .acquired()
+            .expect("fixture lane is unheld");
+        let diagnostics = read_diagnostics(&fixture).await;
         let holder = diagnostics.holder.expect("held row reports a holder");
         assert_eq!(holder.owner.owner_id, "worker-b");
         assert_eq!(holder.owner.incarnation_id, "worker-b:boot-2");
         assert_eq!(holder.executor_id, "executor-b");
-        assert_eq!(holder.generation, 9);
-        assert_eq!(holder.claimed_at_epoch_ms, 4_000);
+        assert_eq!(holder.generation, lease.fencing_token);
+        assert_eq!(holder.claimed_at_epoch_ms, STORE_NOW_MS);
         assert_eq!(holder.expires_at_epoch_ms, 9_000);
     }
 }

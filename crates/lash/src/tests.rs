@@ -551,13 +551,19 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
     async fn get_session_execution_lease(
         &self,
         session_id: &str,
-    ) -> std::result::Result<Option<lash_core::SessionExecutionLease>, lash_core::store::StoreError>
-    {
-        Ok(self
+    ) -> std::result::Result<
+        lash_core::SessionExecutionLeaseObservation,
+        lash_core::store::StoreError,
+    > {
+        let lease = self
             .session_execution_leases
             .lock_recover()
             .get(session_id)
-            .cloned())
+            .cloned();
+        Ok(lash_core::SessionExecutionLeaseObservation {
+            observed_at_epoch_ms: now_epoch_ms(),
+            lease,
+        })
     }
 }
 
@@ -1069,9 +1075,14 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
     async fn get_session_execution_lease(
         &self,
         _session_id: &str,
-    ) -> std::result::Result<Option<lash_core::SessionExecutionLease>, lash_core::store::StoreError>
-    {
-        Ok(None)
+    ) -> std::result::Result<
+        lash_core::SessionExecutionLeaseObservation,
+        lash_core::store::StoreError,
+    > {
+        Ok(lash_core::SessionExecutionLeaseObservation {
+            observed_at_epoch_ms: now_epoch_ms(),
+            lease: None,
+        })
     }
 }
 

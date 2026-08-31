@@ -1258,7 +1258,8 @@ pub(crate) async fn collapse_crashed_executor_lease(
     let lease = store
         .get_session_execution_lease(session_id)
         .await
-        .expect("read the crashed turn's session execution lease");
+        .expect("read the crashed turn's session execution lease")
+        .lease;
     let Some(lease) = lease else {
         return false;
     };
