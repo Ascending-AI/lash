@@ -1,4 +1,5 @@
-use super::javascript::{javascript_array_method, js_stdlib_error, utf16_value};
+use super::javascript::{js_stdlib_error, utf16_value};
+use super::javascript_array::javascript_regexp_match_method;
 use super::*;
 use crate::runtime::{
     ErrorKind, canonical_regexp_flags, ensure_javascript_string_size, javascript_array_index_key,
@@ -275,7 +276,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let HeapObject::RegExpMatch(result) = self.heap.get(receiver)? else {
             return Ok(false);
         };
-        let value = javascript_array_method(method, &result.items, args)?;
+        let value = javascript_regexp_match_method(method, receiver, &result.items, args)?;
         self.stack.push(value);
         Ok(true)
     }

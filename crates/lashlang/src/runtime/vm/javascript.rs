@@ -2,6 +2,7 @@ use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
     javascript_to_string,
 };
+use super::javascript_array::javascript_array_method_for_value;
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 pub(super) use super::javascript_stdlib::*;
 use super::*;
@@ -855,7 +856,7 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
     match target {
         Value::String(value) => javascript_string_method(method, value, args),
         Value::List(items) | Value::Tuple(items) => {
-            javascript_array_method(method, items.as_ref(), args)
+            javascript_array_method_for_value(method, target, items.as_ref(), args)
         }
         Value::Number(value) => javascript_number_method(method, *value, args),
         // Reading a member of `null`/`undefined` is an ECMA `TypeError` about
