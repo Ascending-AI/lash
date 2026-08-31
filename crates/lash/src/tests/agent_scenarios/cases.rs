@@ -493,8 +493,13 @@ fn agent_scenario_nested_process_start_await() -> Result<()> {
             )
             .response(lashlang_block(
                 r#"
+process grandchild() {
+  finish { grandchild: "done" }
+}
 process child() {
-  finish { child: "done" }
+  handle = start grandchild()
+  result = (await handle)?
+  finish { child: result.grandchild }
 }
 process parent() {
   @label(title: "Start nested child process")
@@ -510,8 +515,11 @@ finish result"#,
             .labeled_node("Start nested child process")
             .completed_process("parent")
             .completed_process("child")
+            .completed_process("grandchild")
             .observer_visible_process("lashlang", "parent")
-            .min_completed_process_graphs(2),
+            .observer_visible_process("lashlang", "child")
+            .observer_visible_process("lashlang", "grandchild")
+            .min_completed_process_graphs(3),
         )
         .await?;
         insta::assert_snapshot!(agent_scenario_transcript(&run, "root"), @r#"
@@ -528,9 +536,13 @@ finish result"#,
         root                     plugin_snapshot       stored logical=267B
         root                     execution_state       stored logical=unknown
         process-001  outcome   process.completed       label="child" kind="lashlang" terminal=true
-        process-002  outcome   process.completed       label="parent" kind="lashlang" terminal=true
+        process-002  outcome   process.completed       label="grandchild" kind="lashlang" terminal=true
+        process-003  outcome   process.completed       label="parent" kind="lashlang" terminal=true
         "#);
-        assert_lashlang_process_ids_unique_for_labels(&run.final_process_list, ["parent", "child"]);
+        assert_lashlang_process_ids_unique_for_labels(
+            &run.final_process_list,
+            ["parent", "child", "grandchild"],
+        );
         Ok(())
     })
 }

@@ -1022,9 +1022,9 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
         .await?;
     wait_for_terminal(&core, process_id, lash_core::ProcessStatus::Completed).await;
 
-    // The child inherited the session originator and indexed wake target, while
-    // observation remained the explicit start-time decision for the parent.
-    // No child observer is minted implicitly from its wake subscription.
+    // The child inherited the session originator and indexed wake target. Under
+    // FIG-2346, session-originated descendants propagate the root-session
+    // observer edge. Host-originated chains still mint no observer.
     let completed = core
         .processes()
         .list(&lash_core::ProcessListFilter {
@@ -1047,10 +1047,23 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let snapshot = core.processes().session_snapshot(session_id).await?;
     assert_eq!(
         snapshot.items.len(),
-        1,
-        "only the explicitly observed parent is visible in the originating session"
+        2,
+        "the originating session observes both the parent and its descendant"
     );
-    assert_eq!(snapshot.items[0].process.process_id, process_id);
+    assert!(
+        snapshot
+            .items
+            .iter()
+            .any(|item| item.process.process_id == process_id),
+        "the explicitly observed parent remains visible"
+    );
+    assert!(
+        snapshot
+            .items
+            .iter()
+            .any(|item| item.process.process_id != process_id),
+        "the session-originated child inherits the root-session observer edge"
+    );
     Ok(())
 }
 

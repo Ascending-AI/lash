@@ -14357,6 +14357,168 @@ async fn process_parent_lashlang_registration(
     .with_execution_env_ref(Some(env_ref))
 }
 
+async fn segmented_child_await_registration(
+    process_id: &str,
+    env_ref: lash_core::ProcessExecutionEnvRef,
+) -> ProcessRegistration {
+    let module = lashlang::parse(
+        r#"
+        process child() {
+          finish { from: "child" }
+        }
+
+        process main() {
+          handle = start child()
+          result = (await handle)?
+          finish result.from
+        }
+        "#,
+    )
+    .expect("parse segmented child-await law");
+    let linked = lashlang::LinkedModule::link(
+        module,
+        lashlang::LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::new(),
+            lashlang::LashlangAbilities::default().with_processes(),
+        ),
+    )
+    .expect("link segmented child-await law");
+    lashlang::LashlangArtifactStore::put_module_artifact(
+        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        &linked.artifact,
+    )
+    .await
+    .expect("store segmented child-await artifact");
+    ProcessRegistration::new(
+        process_id,
+        lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: linked.module_ref,
+            process_ref: linked
+                .artifact
+                .process_ref("main")
+                .expect("main process ref")
+                .clone(),
+            host_requirements_ref: linked.host_requirements_ref,
+            process_name: "main".to_string(),
+            args: serde_json::Map::new(),
+        }),
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
+            "segmented-child-await-root",
+        )),
+    )
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
+    .with_execution_env_ref(Some(env_ref))
+}
+
+#[tokio::test]
+async fn lashlang_process_retains_child_possession_across_restate_segments() {
+    let (registry, continuations) = process_stores();
+    let worker = recovery_worker(
+        Arc::clone(&registry),
+        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+    );
+    let workflow = Arc::new(
+        LashProcessWorkflowImpl::new_for_test(
+            Arc::new(RestateCoreProcessRunner::new(worker.clone())),
+            Arc::clone(&registry),
+            Arc::clone(&continuations),
+        )
+        .with_segment_effect_budget_selector(|_| 1),
+    );
+    let registration = segmented_child_await_registration(
+        "segmented-child-await-parent",
+        persist_recovery_env_ref().await,
+    )
+    .await;
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register segmented child-await parent");
+
+    let mut ordinal = 0_u64;
+    let mut input_handover = None;
+    let mut boundary_count = 0_usize;
+    let mut execution_id = None::<String>;
+    let restate_events = Arc::new(RecordingContext::default());
+    loop {
+        let context = Arc::new(ReplayableRecordingContext {
+            events: Arc::clone(&restate_events),
+            ..ReplayableRecordingContext::default()
+        });
+        context.install_process_worker(worker.clone());
+        let controller = RestateRuntimeEffectController::with_options(
+            Arc::clone(&context),
+            RestateEffectControllerOptions::default().segment_effect_budget(1),
+        );
+        let retained = registry
+            .get_process(&registration.id)
+            .await
+            .expect("read retained child-await parent")
+            .expect("segmented child-await parent exists");
+        let (current_execution_id, execution_authority) = segment_execution_authority(
+            &registration.id,
+            ordinal,
+            execution_id.as_deref(),
+            &format!("segmented-child-await-invocation-{ordinal}"),
+            retained.first_started.as_deref(),
+        )
+        .expect("derive segmented child-await authority");
+        execution_id = Some(current_execution_id);
+        let outcome = workflow
+            .run_registration(
+                registration.clone(),
+                ProcessExecutionContext::default()
+                    .with_execution_write_authority(execution_authority),
+                controller
+                    .scoped_effect_controller(ExecutionScope::process(&registration.id))
+                    .expect("segmented child-await scope"),
+                ordinal,
+                input_handover.take(),
+                pending_process_cancel_signal(),
+            )
+            .await
+            .expect("run segmented child-await process");
+        match outcome {
+            lash_core::ProcessRunOutcome::SegmentBoundary(boundary) => {
+                boundary_count += 1;
+                let next = ordinal + 1;
+                continuations
+                    .put_segment_handover(
+                        &registration.id,
+                        lash_core::PersistedSegmentHandover {
+                            segment_ordinal: next,
+                            handover: boundary,
+                        },
+                    )
+                    .await
+                    .expect("store segmented child-await handover");
+                input_handover = Some(
+                    continuations
+                        .get_segment_handover(&registration.id, next)
+                        .await
+                        .expect("reload segmented child-await handover")
+                        .expect("stored segmented child-await handover")
+                        .handover,
+                );
+                ordinal = next;
+            }
+            lash_core::ProcessRunOutcome::Terminal { output, .. } => {
+                assert_eq!(
+                    *output,
+                    process_success(serde_json::json!("child")),
+                    "a resumed Lashlang segment retains possession of children started by this run"
+                );
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        boundary_count, 2,
+        "start and await each cross an effect-count segment boundary"
+    );
+}
+
 #[tokio::test]
 async fn process_parents_teardown_after_durable_end_across_segments_and_tool_call_route() {
     let (registry, continuations) = process_stores();

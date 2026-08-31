@@ -3603,12 +3603,14 @@ lash::plugins::RuntimeExecutionContext::parent_end_actions
 lash::plugins::RuntimeExecutionContext::parent_invocation
 lash::plugins::RuntimeExecutionContext::process_handle_json
 lash::plugins::RuntimeExecutionContext::restore_parent_end_actions
+lash::plugins::RuntimeExecutionContext::restore_started_process_ids
 lash::plugins::RuntimeExecutionContext::session_id
 lash::plugins::RuntimeExecutionContext::session_scope
 lash::plugins::RuntimeExecutionContext::signal_process_by_id
 lash::plugins::RuntimeExecutionContext::signal_tool_handle
 lash::plugins::RuntimeExecutionContext::sleep_process
 lash::plugins::RuntimeExecutionContext::start_child_process
+lash::plugins::RuntimeExecutionContext::started_process_ids
 lash::plugins::RuntimeExecutionContext::tool_catalog
 lash::plugins::RuntimeExecutionContext::trigger_actor
 lash::plugins::RuntimeExecutionContext::trigger_owner_scope

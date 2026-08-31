@@ -144,6 +144,25 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.dispatch.recorded_intent_outcomes.snapshot()
     }
 
+    /// Restore run-local child possession for a resumed process-engine segment.
+    pub fn restore_started_process_ids(&self, process_ids: &[String]) {
+        self.started_process_ids
+            .lock_recover()
+            .extend(process_ids.iter().cloned());
+    }
+
+    /// Snapshot run-local child possession before a process-engine segment handover.
+    pub fn started_process_ids(&self) -> Vec<String> {
+        let mut process_ids = self
+            .started_process_ids
+            .lock_recover()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        process_ids.sort_unstable();
+        process_ids
+    }
+
     /// Executes a nondeterministic language-runtime operation behind the
     /// durable effect controller so replay returns the recorded sample.
     pub async fn journaled_language_runtime_value(
@@ -529,6 +548,16 @@ impl<'run> RuntimeExecutionContext<'run> {
             })
     }
 
+    fn child_process_observers(&self) -> Vec<crate::SessionId> {
+        match self.process_execution.as_ref() {
+            Some(exec) => match &exec.originator {
+                crate::ProcessOriginator::Host { .. } => Vec::new(),
+                crate::ProcessOriginator::Session { session_id, .. } => vec![session_id.clone()],
+            },
+            None => vec![self.session_id.clone()],
+        }
+    }
+
     pub(crate) async fn attach_captured_process_execution_env(
         &self,
         registration: crate::ProcessRegistration,
@@ -585,8 +614,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             }
         };
         let process_id = registration.id.clone();
-        let mut options =
-            crate::ProcessStartOptions::new().with_initial_observer(self.session_id.clone());
+        let mut options = crate::ProcessStartOptions::new()
+            .with_initial_observers(self.child_process_observers());
         if let Some(spawn) = self.process_spawn_provenance() {
             options = options.with_spawn_provenance(spawn);
         }
