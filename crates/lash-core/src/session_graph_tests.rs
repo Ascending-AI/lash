@@ -610,6 +610,49 @@ fn active_read_replacement_persists_messages_only() {
 }
 
 #[test]
+fn active_read_rewrite_preserves_draft_node_id_sequence() {
+    let first = text_message("m1", MessageRole::User, "first");
+    let mut graph = SessionGraph::default();
+    graph.append_message(first.clone());
+
+    let leaf_node_id = graph.leaf_node_id.clone().expect("initial leaf");
+    let draft_namespace = format!("unscoped-replacement:{leaf_node_id}");
+    for ordinal in 0..2 {
+        graph.push_node_record(SessionNodeRecord {
+            node_id: draft_node_id(&draft_namespace, ordinal),
+            parent_node_id: Some(leaf_node_id.clone()),
+            timestamp: "2026-08-20T00:00:00Z".to_string(),
+            payload: SessionNodePayload::Plugin {
+                plugin_type: "pre-existing-draft".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"ordinal": ordinal})),
+            },
+        });
+    }
+
+    graph.rewrite_active_read_tail(&[
+        first,
+        text_message("m2", MessageRole::Assistant, "second"),
+        text_message("m3", MessageRole::User, "third"),
+    ]);
+
+    let emitted_ids = graph
+        .nodes
+        .iter()
+        .skip(3)
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        emitted_ids,
+        vec![
+            "draft-node/v3/f7ef57eb86b29cc4d182cf4c0d163df45d482bae218563bdbb1daeeaaa28a128"
+                .to_string(),
+            "draft-node/v3/9c31574ab8d7b250a1978293986829b6a999eb527b8ba2b4d1d15f598da0c487"
+                .to_string(),
+        ]
+    );
+}
+
+#[test]
 fn projection_and_replacement_retain_the_same_prefix() {
     let first = text_message("m1", MessageRole::User, "first");
     let second = text_message("m2", MessageRole::Assistant, "second");
@@ -624,11 +667,6 @@ fn projection_and_replacement_retain_the_same_prefix() {
     graph.append_message(transient.clone());
     graph.append_protocol_event(protocol_event());
     graph.append_message(second.clone());
-    let existing_ids = graph
-        .nodes
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect::<HashSet<_>>();
     let current_parts = graph
         .nodes
         .iter()
@@ -664,8 +702,7 @@ fn projection_and_replacement_retain_the_same_prefix() {
     for (case, messages, expected) in cases {
         let replacement = build_active_read_replacement(
             graph.nodes.iter(),
-            &existing_ids,
-            "active-read-prefix-differential-test",
+            graph.append_builder_in_namespace("active-read-prefix-differential-test"),
             &messages,
             "2026-08-20T00:00:00Z".to_string(),
         );

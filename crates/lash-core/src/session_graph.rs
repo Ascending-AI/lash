@@ -462,7 +462,6 @@ impl SessionGraphAppendBuilder {
         self.leaf_node_id.as_ref()
     }
 
-    #[cfg(test)]
     pub(crate) fn set_leaf_node_id(&mut self, leaf_node_id: Option<String>) {
         self.leaf_node_id = leaf_node_id;
     }
@@ -1311,18 +1310,12 @@ impl SessionGraph {
         if frame_node_id.is_some() && current_nodes.is_empty() {
             return;
         }
-        let existing_ids = self
-            .nodes
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect::<HashSet<_>>();
         let replacement = build_active_read_replacement(
             current_nodes.iter().copied(),
-            &existing_ids,
-            &format!(
+            self.append_builder_in_namespace(format!(
                 "unscoped-replacement:{}",
                 self.leaf_node_id.as_deref().unwrap_or("root")
-            ),
+            )),
             messages,
             crate::SystemClock.timestamp_rfc3339(),
         );
@@ -1452,8 +1445,7 @@ fn build_tree_children(
 
 pub(crate) fn build_active_read_replacement<'a>(
     current_nodes: impl IntoIterator<Item = &'a SessionNodeRecord>,
-    existing_node_ids: &HashSet<String>,
-    draft_namespace: &str,
+    mut append_builder: SessionGraphAppendBuilder,
     messages: &[Message],
     timestamp: String,
 ) -> ActiveReadReplacement {
@@ -1463,35 +1455,22 @@ pub(crate) fn build_active_read_replacement<'a>(
         .collect::<Vec<_>>();
 
     let prefix = active_read_prefix(current_nodes, &target);
-    let mut leaf_node_id = prefix
-        .retained_nodes
-        .last()
-        .map(|node| node.node_id.clone());
-
-    let mut new_node_ids = HashSet::new();
-    let mut new_tail_nodes = Vec::new();
-
-    for message in target.into_iter().skip(prefix.retained_message_count) {
-        let parent_node_id = leaf_node_id.clone();
-        let node_id =
-            next_replacement_draft_node_id(existing_node_ids, &new_node_ids, draft_namespace);
-        let node = SessionNodeRecord {
-            node_id,
-            parent_node_id,
-            timestamp: timestamp.clone(),
-            payload: SessionNodePayload::Event {
-                event: SessionHistoryRecord::Conversation(ConversationRecord::from_message(
-                    message.clone(),
-                )),
-            },
-        };
-        new_node_ids.insert(node.node_id.clone());
-        leaf_node_id = Some(node.node_id.clone());
-        new_tail_nodes.push(node);
-    }
+    append_builder.set_leaf_node_id(
+        prefix
+            .retained_nodes
+            .last()
+            .map(|node| node.node_id.clone()),
+    );
+    let new_tail_nodes = append_builder.append_messages_at(
+        target
+            .into_iter()
+            .skip(prefix.retained_message_count)
+            .cloned(),
+        timestamp,
+    );
 
     ActiveReadReplacement {
-        leaf_node_id,
+        leaf_node_id: append_builder.leaf_node_id().cloned(),
         new_tail_nodes,
     }
 }
@@ -1567,20 +1546,6 @@ fn push_active_read_node(
     {
         active_messages.push(message);
     }
-}
-
-fn next_replacement_draft_node_id(
-    existing_ids: &HashSet<String>,
-    new_ids: &HashSet<String>,
-    draft_namespace: &str,
-) -> String {
-    for ordinal in 0_u64.. {
-        let candidate = draft_node_id(draft_namespace, ordinal);
-        if !existing_ids.contains(&candidate) && !new_ids.contains(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("draft node id space exhausted")
 }
 
 #[cfg(test)]
