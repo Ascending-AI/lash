@@ -930,15 +930,15 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
             .expect("clock")
             .as_nanos()
     ));
-    assert_sender_absent(
+    Box::pin(assert_sender_absent(
         test_host_config_with_trace_path(trace_path.clone()),
         "standard-trace-level",
-    )
+    ))
     .await;
 
     let mut no_sink = test_host_config();
     no_sink.core.tracing.trace_level = lash_trace::TraceLevel::Extended;
-    assert_sender_absent(no_sink, "extended-without-sink").await;
+    Box::pin(assert_sender_absent(no_sink, "extended-without-sink")).await;
 
     let _ = std::fs::remove_file(trace_path);
 }
