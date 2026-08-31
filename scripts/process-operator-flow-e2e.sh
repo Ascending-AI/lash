@@ -90,11 +90,13 @@ DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
 
 python3 - "$scenario" "$artifact_dir" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
 scenario = sys.argv[1]
 artifacts = Path(sys.argv[2])
+expected_dialect = os.environ.get("LASH_RUNBOOK_DIALECT", "lashlang")
 
 
 def fail(message):
@@ -115,6 +117,10 @@ def checkpoint(name):
 if scenario == "drain":
     seed = checkpoint("seeded_drain_deployment")
     observed = checkpoint("graceful_drain_observed")
+    if seed.get("dialect") != expected_dialect:
+        fail(
+            f"seeded checkpoint did not record served dialect {expected_dialect!r}: {seed}"
+        )
     if seed["provider_calls"] != 1 or not seed["journal_active"]:
         fail(f"fixture did not hold one in-flight effect: {seed}")
     for field in ("in_flight_effect_completed", "provider_closed", "trace_flushed"):

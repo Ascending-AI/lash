@@ -680,6 +680,7 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
 
     emit(json!({
         "checkpoint": "seeded_drain_deployment",
+        "dialect": runbook_dialect().language_id(),
         "seeded_session_id": TURN_SESSION_ID,
         "in_flight_turn_id": "graceful-drain-in-flight",
         "provider_calls": provider.calls.load(Ordering::SeqCst),

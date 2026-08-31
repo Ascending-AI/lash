@@ -59,11 +59,13 @@ harness direct-turn 2>&1 | tee "$artifact_dir/08-direct-turn-recovery.jsonl" | t
 
 python3 - "$artifact_dir" "$backends" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
 artifacts = Path(sys.argv[1])
 backends = sys.argv[2].split(",")
+expected_dialect = os.environ.get("LASH_RUNBOOK_DIALECT", "lashlang")
 
 LEASE_EVENTS = (
     "session_execution_lease.acquired",
@@ -94,6 +96,12 @@ def checkpoints(name, filename):
     for backend in backends:
         if backend not in found:
             fail(f"missing {name!r} checkpoint for backend {backend!r} in {path}")
+    for backend, record in found.items():
+        if record.get("dialect") != expected_dialect:
+            fail(
+                f"{name}/{backend}: checkpoint did not record served dialect "
+                f"{expected_dialect!r}: {record}"
+            )
     return found
 
 
