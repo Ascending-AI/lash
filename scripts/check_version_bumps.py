@@ -103,8 +103,11 @@ IDENTIFIER_RENAME_BASELINES = {
     # carrier, field, tag, or byte changed and REMOTE_PROTOCOL_VERSION 45 is
     # still the wire truth. Ruled on FIG-1964; the baseline pins this state --
     # any further guarded-shape drift in lash-remote-protocol re-fails the gate.
+    # FIG-1801: removing the Default derive/impl from remote turn outcomes
+    # changed the guarded Rust shape while leaving serde bytes identical;
+    # REMOTE_PROTOCOL_VERSION remains 51. Reviewer-confirmed one-time baseline.
     "crates/lash-remote-protocol/src/lib.rs:REMOTE_PROTOCOL_VERSION": (
-        "sha256:8ae2ee20e8e39f2c17b3ef1ee78d399ef75d2d588ed35f04cf40fc084ce528a2"
+        "sha256:e63751d1347ed1fbc0263f55af39b38006dff17b0f55e130e60fc07b5bcb8f78"
     ),
     # FIG-2144: ChargeSafetyPolicy is live host configuration deliberately
     # omitted from SessionPolicyWire, and RetryDecision.charge_safety is

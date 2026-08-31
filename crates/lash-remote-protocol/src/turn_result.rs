@@ -18,6 +18,8 @@ pub struct RemoteTurnReport {
     pub session_id: String,
     pub turn_id: String,
     /// Derived from `outcome` on encode and checked against it on decode.
+    /// Its removal awaits the next coordinated `REMOTE_PROTOCOL_VERSION`
+    /// window (FIG-2406).
     pub status: RemoteTurnStatus,
     pub outcome: RemoteTurnOutcome,
     /// Wire projection of the cancellation evidence carried by
@@ -179,10 +181,9 @@ pub enum RemoteCausalRef {
 /// outcome by [`RemoteTurnReport::validate`]. It never states a fact the
 /// outcome does not already carry, so there is no in-progress status: a turn
 /// report exists only once the turn has a terminal outcome.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteTurnStatus {
-    #[default]
     Completed,
     Failed,
     Cancelled,
@@ -194,14 +195,6 @@ pub enum RemoteTurnOutcome {
     Finished { finish: RemoteTurnFinish },
     AgentFrameSwitch { frame_key: String, task: String },
     Stopped { stop: RemoteTurnStop },
-}
-
-impl Default for RemoteTurnOutcome {
-    fn default() -> Self {
-        Self::Stopped {
-            stop: RemoteTurnStop::Incomplete,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

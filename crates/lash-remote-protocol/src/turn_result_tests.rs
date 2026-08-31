@@ -5,6 +5,16 @@ use crate::REMOTE_PROTOCOL_VERSION;
 use crate::registry_errors::RemoteProtocolError;
 
 #[test]
+fn remote_turn_status_projects_explicit_stopped_outcome_as_failed() {
+    assert_eq!(
+        RemoteTurnStatus::from(&RemoteTurnOutcome::Stopped {
+            stop: RemoteTurnStop::Incomplete,
+        }),
+        RemoteTurnStatus::Failed
+    );
+}
+
+#[test]
 fn remote_turn_status_no_longer_accepts_in_progress_on_the_wire() {
     // Version 44 removed the variant; a version 43 peer can still emit the
     // literal, so pin that the decoder and the published schema both refuse
