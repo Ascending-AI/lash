@@ -100,6 +100,17 @@ def shell_function_body(script: str, function_name: str) -> str:
     return script[start_match.end() : start_match.end() + next_function.start()]
 
 
+def shell_function_definition(script: str, function_name: str) -> str:
+    match = re.search(
+        rf"^{re.escape(function_name)}\(\) \{{\n.*?^\}}\n",
+        script,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"missing shell function {function_name}")
+    return match.group(0)
+
+
 def shell_logical_commands(script: str) -> list[str]:
     commands: list[str] = []
     current = ""
@@ -216,6 +227,79 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertEqual(artifact_paths[key], path, raw_row)
                 self.assertIn(key, declaration_keys, key)
                 self.assertIn(path, gate, path)
+
+    def test_area_scoping_filters_execution_predicates_like_the_plan(self) -> None:
+        gate = GATE.read_text(encoding="utf-8")
+        marker = "confidence_schedule_table=(\n"
+        table_body = gate.split(marker, 1)[1].split("\n)\n", 1)[0]
+        rows = [
+            ast.literal_eval(line.strip())
+            for line in table_body.splitlines()
+            if line.strip().startswith('"')
+        ]
+        areas = ("store", "process", "trigger", "effect-host", "protocol", "provider", "sim")
+        cases = (
+            ("default+area:store", "default", "all", "store"),
+            ("broad+area:store", "broad", "all", "store"),
+            ("fast:fault-matrix+area:trigger", "fast", "fault-matrix", "trigger"),
+            ("fast:sim-generated", "fast", "sim-generated", "all"),
+        )
+
+        schedule_selector = shell_function_definition(gate, "schedule_selector")
+        schedule_row_matches_area = shell_function_definition(
+            gate, "schedule_row_matches_area"
+        )
+        schedule_has_area = shell_function_definition(gate, "schedule_has_area")
+        area_selected = shell_function_definition(gate, "area_selected")
+
+        for selector, lane, fast_shard, requested_area in cases:
+            effective_selector = (
+                f"fast:{fast_shard}" if lane == "fast" else lane
+            )
+            expected = {
+                candidate: any(
+                    row.split("|", 4)[0] == effective_selector
+                    and row.split("|", 4)[1] == candidate
+                    and (
+                        requested_area == "all"
+                        or row.split("|", 4)[1] == requested_area
+                    )
+                    for row in rows
+                )
+                for candidate in areas
+            }
+            harness = "\n".join(
+                (
+                    "set -eu",
+                    f'lane={lane!r}',
+                    f'fast_shard={fast_shard!r}',
+                    'sim_search_shard=""',
+                    f'area={requested_area!r}',
+                    marker.rstrip("\\n"),
+                    table_body,
+                    ")",
+                    schedule_selector,
+                    schedule_row_matches_area,
+                    schedule_has_area,
+                    area_selected,
+                    "for candidate in " + " ".join(areas) + "; do",
+                    '  if area_selected "$candidate"; then printf "%s\\n" "$candidate"; fi',
+                    "done",
+                )
+            )
+            completed = subprocess.run(
+                ["bash", "-c", harness],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            actual = set(filter(None, completed.stdout.splitlines()))
+            self.assertEqual(
+                {candidate for candidate, selected in expected.items() if selected},
+                actual,
+                f"execution area predicate drifted for {selector}",
+            )
 
     def test_heavy_suites_are_split_between_shard_and_heavy_profiles(self) -> None:
         """The shard/heavy split lives in nextest profiles, not job scripts.

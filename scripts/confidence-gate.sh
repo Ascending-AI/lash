@@ -310,7 +310,7 @@ USAGE
 }
 
 area_selected() {
-  schedule_has_area "$1"
+  schedule_has_area "$1" && schedule_row_matches_area "$1"
 }
 
 # Each row is selector|area|suite|plan description|artifact_key=relative_path,...
@@ -397,6 +397,14 @@ schedule_has_area() {
     fi
   done
   return 1
+}
+
+schedule_lane_fallback_reason() {
+  if [ "$area" = "all" ]; then
+    printf 'not_in_%s_lane\n' "$lane"
+  else
+    printf 'not_in_%s_lane_or_area\n' "$lane"
+  fi
 }
 
 schedule_has_artifact() {
@@ -1330,13 +1338,13 @@ write_sim_lane_declarations() {
   "operational_cases": "queueing_inputs,triggers,cancellation,observer_reconnects,provider_failures_mutations,process_wakes,tool_exec,durable_effects,worker_lease_failover,backend_choices,retries,duplicates",
   "scenario_contract_manifests": "included_in_lash_sim_summary",
   "scenario_contract_slices": "included_in_lash_sim_summary_with_generated_shape_transition_kind_and_negative_fixture",
-  "sim_search_run": "$(scheduled_existing_artifact_path sim_search_run sim/search.json "not_in_${lane}_lane")",
+  "sim_search_run": "$(scheduled_existing_artifact_path sim_search_run sim/search.json "$(schedule_lane_fallback_reason)")",
   "focused_sqlite_seed_tail_repro": "$(scheduled_existing_artifact_path focused_sqlite_seed_tail_repro sim/focused-sqlite-seed-tail/focused-sqlite-seed-tail.json not_written)",
-  "generated_postgres_dynamic_replay": "$(scheduled_artifact_path generated_postgres_dynamic_replay sim/postgres-generated-rerun/summary.json "not_in_${lane}_lane")",
+  "generated_postgres_dynamic_replay": "$(scheduled_artifact_path generated_postgres_dynamic_replay sim/postgres-generated-rerun/summary.json "$(schedule_lane_fallback_reason)")",
   "model_only_boundary_reviews": "included_in_lash_sim_summary",
   "provider_transport_exclusions": "$(scheduled_artifact_path provider_transport_exclusions sim/provider-transport-exclusions.json not_in_selected_schedule)",
-  "backend_contention": "$(scheduled_artifact_path backend_contention sim/backend-contention/backend-contention.json "not_in_${lane}_lane")",
-  "model_replay_evidence": "$(scheduled_artifact_path model_replay_evidence sim/model-replay/summary.json "not_in_${lane}_lane")",
+  "backend_contention": "$(scheduled_artifact_path backend_contention sim/backend-contention/backend-contention.json "$(schedule_lane_fallback_reason)")",
+  "model_replay_evidence": "$(scheduled_artifact_path model_replay_evidence sim/model-replay/summary.json "$(schedule_lane_fallback_reason)")",
   "postgres_backend_conformance": "${postgres_status}",
   "postgres_trace_replay": "${postgres_status}",
   "postgres_native_effect_history_replay": "native_postgres_runtime_effect_controller",
@@ -2639,7 +2647,7 @@ run_fast_shard() {
       ;;
     sim-generated)
       run_sim_generated_lane
-      if area_selected store; then
+      if [ "$area" = "all" ] || area_selected store; then
         run_focused_sqlite_seed_tail_repro
       fi
       write_provider_transport_exclusion_evidence
