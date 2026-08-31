@@ -9,6 +9,19 @@ const WORKBENCH_MAX_TURNS: usize = 128;
 /// above ordinary repair and far below a loop worth paying for.
 const WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS: usize = 12;
 
+fn apply_workbench_lease_timings(
+    config: lash::durability::RuntimeHostConfig,
+) -> lash::durability::RuntimeHostConfig {
+    let timings = lash::durability::LeaseTimings::new(
+        Duration::from_secs(2),
+        Duration::from_millis(666),
+    )
+    .expect("workbench lease timings satisfy the three-renewal TTL invariant");
+    // Workbench-only: keeps takeover terminal inside the 5s attach budget;
+    // tolerates one missed renew; fencing (ADR 0029) bounds stale-owner risk.
+    config.with_lease_timings(timings)
+}
+
 fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
     tavily_api_key: String,
@@ -233,12 +246,14 @@ async fn async_main() -> AnyhowResult<()> {
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.join("attachments"),
     )) as Arc<dyn lash::persistence::AttachmentStore>;
-    let runtime_host_config = lash::durability::RuntimeHostConfig::new(
-        turn_deployment.effect_host(),
-        Arc::clone(&attachment_store),
-        Arc::clone(&stores.process_env_store),
-        lash::CommitBudget::bounded(1024 * 1024, 512),
-        lash::QueuedWorkBatchingConfig::new(1024),
+    let runtime_host_config = apply_workbench_lease_timings(
+        lash::durability::RuntimeHostConfig::new(
+            turn_deployment.effect_host(),
+            Arc::clone(&attachment_store),
+            Arc::clone(&stores.process_env_store),
+            lash::CommitBudget::bounded(1024 * 1024, 512),
+            lash::QueuedWorkBatchingConfig::new(1024),
+        ),
     );
 
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -502,6 +517,20 @@ fn workbench_context_window_tokens() -> usize {
 #[cfg(test)]
 mod startup_tests {
     use super::*;
+
+    #[test]
+    fn workbench_runtime_host_keeps_takeover_inside_terminal_attach_budget() {
+        let host = apply_workbench_lease_timings(lash::durability::RuntimeHostConfig::in_memory(
+            lash::CommitBudget::bounded(1024, 16),
+            lash::QueuedWorkBatchingConfig::new(16),
+        ));
+
+        assert_eq!(host.control.lease_timings.ttl(), Duration::from_secs(2));
+        assert_eq!(
+            host.control.lease_timings.renew_interval(),
+            Duration::from_millis(666)
+        );
+    }
 
     #[test]
     fn startup_honors_context_window_environment_override() {

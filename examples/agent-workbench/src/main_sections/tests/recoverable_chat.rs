@@ -2325,10 +2325,7 @@ async fn workbench_sequential_settled_turn_cancels_each_emit_done() {
             .expect("cancel settled turn");
         assert!(matches!(
             receipts.as_slice(),
-            [TurnCancelReceipt {
-                outcome: lash::TurnCancelOutcome::CompletionWonRace,
-                ..
-            }]
+            [TurnCancelReceipt::CompletionWonRace { .. }]
         ));
     }
 

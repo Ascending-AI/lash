@@ -4781,7 +4781,7 @@
           const committed = (receipt.cancellations || []).find(item => item.terminal?.status === "committed");
           const evidence = committed?.terminal?.outcome?.stopped?.cancelled?.evidence;
           const unresolved = (receipt.cancellations || []).find(item =>
-            item.terminal_error?.code === "turn_terminal_await_timeout");
+            item.status === "cancellation_recorded_terminal_pending");
           if (evidence) renderNote("turn stopped · request " + evidence.request_id);
           else if (unresolved) renderNote("turn route cleared · terminal outcome unknown");
           else if (!receipt.accepted) renderNote("turn already finished");
