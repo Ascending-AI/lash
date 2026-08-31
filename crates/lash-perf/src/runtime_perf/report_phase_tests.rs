@@ -327,7 +327,7 @@ async fn durable_sqlite_scenarios_report_phases_and_store_calls() {
 #[test]
 fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
     assert_eq!(
-        RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS,
+        RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS.as_slice(),
         [
             RuntimePerfScenario::DurableStandardToolTurnSqlite,
             RuntimePerfScenario::DurableStandardToolTurnPostgres,
@@ -335,6 +335,14 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
             RuntimePerfScenario::DurableRlmCheckpointTurnPostgres,
             RuntimePerfScenario::DurableAgentChildTurnSqlite,
             RuntimePerfScenario::DurableAgentChildTurnPostgres,
+            RuntimePerfScenario::DurableCheckpointCurveSqlite,
+            RuntimePerfScenario::DurableCheckpointCurvePostgres,
+            RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
+            RuntimePerfScenario::DurableQueuedWorkContentionPostgres,
+            RuntimePerfScenario::HighTrafficLoadSqlite,
+            RuntimePerfScenario::HighTrafficLoadPostgres,
+            RuntimePerfScenario::HighTrafficKneeSqlite,
+            RuntimePerfScenario::HighTrafficKneePostgres,
         ]
     );
 

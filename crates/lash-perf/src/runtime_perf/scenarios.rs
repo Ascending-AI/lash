@@ -16,6 +16,18 @@ impl ExecutionMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScenarioDurability {
+    Ephemeral,
+    Durable,
+}
+
+impl ScenarioDurability {
+    pub(crate) fn is_durable(self) -> bool {
+        matches!(self, Self::Durable)
+    }
+}
+
 // The shared `Scenario` suffix names the distinct perf harness kinds and reads
 // naturally at the ~50 macro-driven call sites; it is not redundant with the
 // `ScenarioHarnessKind` type name.
@@ -114,6 +126,7 @@ pub(crate) struct RuntimePerfScenarioMetadata {
     pub(crate) scenario: RuntimePerfScenario,
     pub(crate) name: &'static str,
     pub(crate) execution_mode: ExecutionMode,
+    pub(crate) durability: ScenarioDurability,
     pub(crate) scenario_harness: ScenarioHarnessKind,
     pub(crate) harness_rationale: &'static str,
     pub(crate) correctness_coverage_ids: &'static [&'static str],
@@ -121,13 +134,20 @@ pub(crate) struct RuntimePerfScenarioMetadata {
 
 macro_rules! runtime_perf_metadata {
     ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal) => {
-        runtime_perf_metadata!($scenario, $name, $mode, $harness, $rationale, [])
+        runtime_perf_metadata!($scenario, $name, $mode, $harness, $rationale, Ephemeral, [])
     };
     ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, [$($coverage_id:literal),* $(,)?]) => {
+        runtime_perf_metadata!($scenario, $name, $mode, $harness, $rationale, Ephemeral, [$($coverage_id),*])
+    };
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident) => {
+        runtime_perf_metadata!($scenario, $name, $mode, $harness, $rationale, $durability, [])
+    };
+    ($scenario:ident, $name:literal, $mode:ident, $harness:ident, $rationale:literal, $durability:ident, [$($coverage_id:literal),* $(,)?]) => {
         RuntimePerfScenarioMetadata {
             scenario: RuntimePerfScenario::$scenario,
             name: $name,
             execution_mode: ExecutionMode::$mode,
+            durability: ScenarioDurability::$durability,
             scenario_harness: ScenarioHarnessKind::$harness,
             harness_rationale: $rationale,
             correctness_coverage_ids: &[$($coverage_id),*],
@@ -136,13 +156,22 @@ macro_rules! runtime_perf_metadata {
 }
 
 impl RuntimePerfScenario {
-    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 6] = [
+    #[cfg(test)]
+    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 14] = [
         Self::DurableStandardToolTurnSqlite,
         Self::DurableStandardToolTurnPostgres,
         Self::DurableRlmCheckpointTurnSqlite,
         Self::DurableRlmCheckpointTurnPostgres,
         Self::DurableAgentChildTurnSqlite,
         Self::DurableAgentChildTurnPostgres,
+        Self::DurableCheckpointCurveSqlite,
+        Self::DurableCheckpointCurvePostgres,
+        Self::DurableQueuedWorkContentionSqlite,
+        Self::DurableQueuedWorkContentionPostgres,
+        Self::HighTrafficLoadSqlite,
+        Self::HighTrafficLoadPostgres,
+        Self::HighTrafficKneeSqlite,
+        Self::HighTrafficKneePostgres,
     ];
 
     pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 59] = [
@@ -451,70 +480,80 @@ impl RuntimePerfScenario {
             "durable_standard_tool_turn_sqlite",
             Standard,
             RuntimeScenario,
-            "Measures a complete Standard tool turn through the runtime against the decorated SQLite persistence boundary."
+            "Measures a complete Standard tool turn through the runtime against the decorated SQLite persistence boundary.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableStandardToolTurnPostgres,
             "durable_standard_tool_turn_postgres",
             Standard,
             RuntimeScenario,
-            "Measures a complete Standard tool turn through the runtime against the decorated PostgreSQL persistence boundary."
+            "Measures a complete Standard tool turn through the runtime against the decorated PostgreSQL persistence boundary.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableRlmCheckpointTurnSqlite,
             "durable_rlm_checkpoint_turn_sqlite",
             Rlm,
             RuntimeScenario,
-            "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated SQLite persistence boundary."
+            "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated SQLite persistence boundary.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableRlmCheckpointTurnPostgres,
             "durable_rlm_checkpoint_turn_postgres",
             Rlm,
             RuntimeScenario,
-            "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated PostgreSQL persistence boundary."
+            "Measures a complete RLM checkpoint-producing turn through the runtime against the decorated PostgreSQL persistence boundary.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableAgentChildTurnSqlite,
             "durable_agent_child_turn_sqlite",
             Rlm,
             RuntimeScenario,
-            "Measures a complete parent and child agent turn through the runtime against the decorated SQLite persistence boundary."
+            "Measures a complete parent and child agent turn through the runtime against the decorated SQLite persistence boundary.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableAgentChildTurnPostgres,
             "durable_agent_child_turn_postgres",
             Rlm,
             RuntimeScenario,
-            "Measures a complete parent and child agent turn through the runtime against the decorated PostgreSQL persistence boundary."
+            "Measures a complete parent and child agent turn through the runtime against the decorated PostgreSQL persistence boundary.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableCheckpointCurveSqlite,
             "durable_checkpoint_curve_sqlite",
             Rlm,
             RuntimeScenario,
-            "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against SQLite. The fixed transcript/message/graph/component center point is CLI-configurable."
+            "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against SQLite. The fixed transcript/message/graph/component center point is CLI-configurable.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableCheckpointCurvePostgres,
             "durable_checkpoint_curve_postgres",
             Rlm,
             RuntimeScenario,
-            "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against PostgreSQL. The fixed transcript/message/graph/component center point is CLI-configurable."
+            "Measures capture, serialization, commit, and load across paired component-count and changed-body-byte checkpoint curves against PostgreSQL. The fixed transcript/message/graph/component center point is CLI-configurable.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableQueuedWorkContentionSqlite,
             "durable_queued_work_contention_sqlite",
             Standard,
             RuntimeScenario,
-            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box."
+            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
+            Durable
         ),
         runtime_perf_metadata!(
             DurableQueuedWorkContentionPostgres,
             "durable_queued_work_contention_postgres",
             Standard,
             RuntimeScenario,
-            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared PostgreSQL backend. Wall-clock throughput and latency are meaningful only on a quiet box."
+            "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared PostgreSQL backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
+            Durable
         ),
         runtime_perf_metadata!(
             WriterContention2Workers,
@@ -549,28 +588,32 @@ impl RuntimePerfScenario {
             "high_traffic_load_sqlite",
             Rlm,
             RuntimeScenario,
-            "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence."
+            "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence.",
+            Durable
         ),
         runtime_perf_metadata!(
             HighTrafficLoadPostgres,
             "high_traffic_load_postgres",
             Rlm,
             RuntimeScenario,
-            "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared PostgreSQL persistence."
+            "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared PostgreSQL persistence.",
+            Durable
         ),
         runtime_perf_metadata!(
             HighTrafficKneeSqlite,
             "high_traffic_knee_sqlite",
             Rlm,
             RuntimeScenario,
-            "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search."
+            "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
+            Durable
         ),
         runtime_perf_metadata!(
             HighTrafficKneePostgres,
             "high_traffic_knee_postgres",
             Rlm,
             RuntimeScenario,
-            "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search."
+            "Searches mixed-session saturation steps below protocol and facade ownership against an isolated PostgreSQL database per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
+            Durable
         ),
     ];
     pub(crate) const KNOWN: [Self; 59] = runtime_perf_known_scenarios();
@@ -606,18 +649,7 @@ impl RuntimePerfScenario {
     }
 
     pub(crate) fn is_durable(self) -> bool {
-        Self::DURABLE_REPRESENTATIVE_TURNS.contains(&self)
-            || matches!(
-                self,
-                Self::DurableCheckpointCurveSqlite
-                    | Self::DurableCheckpointCurvePostgres
-                    | Self::DurableQueuedWorkContentionSqlite
-                    | Self::DurableQueuedWorkContentionPostgres
-                    | Self::HighTrafficLoadSqlite
-                    | Self::HighTrafficLoadPostgres
-                    | Self::HighTrafficKneeSqlite
-                    | Self::HighTrafficKneePostgres
-            )
+        self.metadata().durability.is_durable()
     }
 
     pub(crate) fn uses_postgres(self) -> bool {
