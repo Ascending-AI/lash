@@ -29,12 +29,12 @@ destructive-change posture. Operators recreate the affected trust domain from
 the new published schema rather than asking Lash to reinterpret or repair rows
 accepted by the old schema.
 
-This is a current-phase policy, not a permanent ban on migrations. Future phases
-are expected to add migration support where the product requires it. The schema
-version and at-open migration machinery remain the intentional seam for that
-work. Existing and future creation-only at-open migrations remain valid for
-creation-only changes; this decision says only that a destructive change does
-not acquire such an arm in the current phase.
+This is a current-phase policy, not a permanent ban on migrations. At present,
+`apply_schema_migration` is unreachable: no rows in `SCHEMA_MIGRATIONS` target
+the current `SCHEMA_VERSION`. Behavioural coverage of that seam returns with
+the next creation-only bump, when a migration row targets the new current
+version. Until then, this decision says only that a destructive change does not
+acquire such an arm in the current phase.
 
 Vocabulary and kind constraints remain ordinary DDL `CHECK` constraints under
 ADR 0067. The lash-sim schema-congruence gate owns a declared expected-

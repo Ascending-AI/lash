@@ -373,6 +373,35 @@ fn normalize_sql(source: &str) -> String {
     source.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn ddl_constraints(source: &str) -> BTreeSet<(&str, &str)> {
+    let mut constraints = BTreeSet::new();
+    let mut table = None;
+
+    for line in source.lines() {
+        let line = line.trim();
+        if let Some(declaration) = line.strip_prefix("CREATE TABLE IF NOT EXISTS ") {
+            table = declaration.strip_suffix(" (");
+        } else if line == ");" {
+            table = None;
+        }
+
+        let Some(table_name) = table else {
+            continue;
+        };
+        let Some(declaration) = line.strip_prefix("CONSTRAINT ") else {
+            continue;
+        };
+        let Some((name, _)) = declaration.split_once(" CHECK (") else {
+            continue;
+        };
+        if name.starts_with("ck_") {
+            constraints.insert((table_name, name));
+        }
+    }
+
+    constraints
+}
+
 fn validate_expected_constraints(
     source: &str,
     registry: &[ExpectedConstraint],
@@ -403,6 +432,16 @@ fn validate_expected_constraints(
             failures.push(format!(
                 "{dialect} DDL table `{}` is missing registered constraint `{}` with expression `{}`",
                 expected.table, expected.name, expected.expression
+            ));
+        }
+    }
+    for (table, name) in ddl_constraints(source) {
+        if !registry
+            .iter()
+            .any(|expected| expected.table == table && expected.name == name)
+        {
+            failures.push(format!(
+                "{dialect} DDL table `{table}` contains unregistered constraint `{name}`; add it to the expected-constraints registry"
             ));
         }
     }
