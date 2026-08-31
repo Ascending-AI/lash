@@ -12,9 +12,11 @@ over that turn's ingress.
 
 **Mid-turn contract.** Trigger occurrence dispatch and its durable process may run while
 the session has a foreground turn. Any resulting session wake is durable queued work; it
-must not submit a competing turn while that foreground turn owns ingress. After the turn
-terminalizes and releases ingress, the queued wake is claimed as the next turn. The
-implementation seam is `WorkbenchQueuedWorkSubmitter::run_queued_work` in
+must not submit a competing turn while that foreground turn owns ingress. The host may
+claim that queued work at either legal boundary: `active_turn_checkpoint` while the
+foreground turn still owns ingress, or `idle` after terminalization releases ingress. An
+`active_turn_checkpoint` claim is part of the current turn; an `idle` claim starts the
+next turn. The implementation seam is `WorkbenchQueuedWorkSubmitter::run_queued_work` in
 [`state.rs`](../../examples/agent-workbench/src/main_sections/state.rs), with the release
 and re-claim in `terminalize_turn_execution` in
 [`restate.rs`](../../examples/agent-workbench/src/restate.rs). The deterministic companion
@@ -146,11 +148,14 @@ but it cannot take over foreground ingress. Screenshot `08-midturn-overlap.png` 
 running pill and new work item visible.
 
 Then poll until the original turn commits and `active_turns` empties, the new process is
-terminal, exactly one personal copy exists, and any resulting queued wake has drained as
-the next turn. Save `09-midturn-settled-state.json` and `09-midturn-work.json`; screenshot
-the newest transcript and work rail as `09-midturn-settled.png`. A process that appears
-only after the foreground turn is not a failure, but it does not satisfy the overlap
-gate; the deterministic companion remains the authoritative scheduler gate.
+terminal, exactly one personal copy exists, and any resulting queued wake has been
+claimed at either `active_turn_checkpoint` or `idle`. Both boundaries are a PASS:
+`active_turn_checkpoint` means the wake joined the current turn, while `idle` means it
+was claimed as the next turn. Save `09-midturn-settled-state.json` and
+`09-midturn-work.json`; screenshot the newest transcript and work rail as
+`09-midturn-settled.png`. A process that appears only after the foreground turn is not a
+failure, but it does not satisfy the overlap gate; the deterministic companion remains
+the authoritative scheduler gate.
 
 ## Phase 6 — Delete, provoke, and prove permanent silence
 
@@ -175,7 +180,7 @@ Restate container are gone.
 | Repeated fires | two originals yield exactly two copies; bounded terminal runs | | `03-repeat-inboxes.png`, `04-repeat-work-rail.png` |
 | Disable silence | same reference key disabled; fenced probe creates no copy or process | | `05-disabled.png`, `06-disabled-silent.png` |
 | Re-enable | same reference key enabled and next probe forwards exactly once | | `07-reenabled-fired.png`, API artifacts |
-| Mid-turn ingress | process observed with the one original active address; queued wake drains after settle | | `08-midturn-overlap.png`, `09-midturn-settled.png`, state JSON |
+| Mid-turn ingress | process observed with the one original active address; queued wake claimed at `active_turn_checkpoint` or `idle` | | `08-midturn-overlap.png`, `09-midturn-settled.png`, `09-midturn-settled-state.json`, `09-midturn-work.json` |
 | Delete silence | reference key absent; fenced probe creates no copy or process | | `10-deleted.png`, `11-deleted-silent.png` |
 | UI/API agreement | registration, inbox, active-turn, and work surfaces agree throughout | | screenshots + saved API responses |
 
