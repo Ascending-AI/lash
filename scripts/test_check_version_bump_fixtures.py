@@ -95,6 +95,7 @@ const POST_FLOOR_ARTIFACTS: [&str; 4] = [
     "lash_plans",
 ];
 const DIVERGENT_ARTIFACTS: [&str; 1] = ["lash_fence"];
+const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::DivergentArtifacts;
 const DIVERGENT_ARTIFACTS_MARKER: &str = "schema artifacts newer than the recorded version";
 const SOURCE_MISMATCH_MARKER: &str = "does not match the published component-";
 const NO_APPLICABLE_MIGRATION_MARKER: &str = "has no applicable migration";
@@ -310,10 +311,60 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         self.assertIn("DIVERGENT_ARTIFACTS is not", message)
         self.assertIn("stale lash_plans", message)
 
-    def test_bump_without_a_predecessor_migration_fails(self) -> None:
+    def test_destructive_bump_keeps_the_predecessor_generation_migrations(self) -> None:
+        valid, message = self.check(
+            version="const SCHEMA_VERSION: i32 = 53;\n",
+            fixture=FIXTURE_SOURCE.replace(
+                "RefusalKind::DivergentArtifacts;", "RefusalKind::NoApplicableMigration;"
+            ),
+            gate=GATE_SOURCE.replace(
+                '"refused_divergent_store": "divergent_artifacts"',
+                '"refused_divergent_store": "no_applicable_migration"',
+            ),
+        )
+        self.assertTrue(valid, message)
+        self.assertIn("component 53", message)
+
+    def test_destructive_bump_still_claiming_migration_divergence_fails(self) -> None:
         valid, message = self.check(version="const SCHEMA_VERSION: i32 = 53;\n")
         self.assertFalse(valid)
-        self.assertIn("not the current component version 53", message)
+        self.assertIn(
+            "PRE_CUTOVER_REFUSAL_KIND emits 'divergent_artifacts'", message
+        )
+        self.assertIn("requires 'no_applicable_migration'", message)
+
+    def test_creation_only_bump_claiming_no_applicable_migration_fails(self) -> None:
+        valid, message = self.check(
+            fixture=FIXTURE_SOURCE.replace(
+                "RefusalKind::DivergentArtifacts;", "RefusalKind::NoApplicableMigration;"
+            ),
+            gate=GATE_SOURCE.replace(
+                '"refused_divergent_store": "divergent_artifacts"',
+                '"refused_divergent_store": "no_applicable_migration"',
+            ),
+        )
+        self.assertFalse(valid)
+        self.assertIn(
+            "PRE_CUTOVER_REFUSAL_KIND emits 'no_applicable_migration'", message
+        )
+        self.assertIn("requires 'divergent_artifacts'", message)
+
+    def test_gate_disagreeing_with_the_pre_cutover_refusal_kind_fails(self) -> None:
+        valid, message = self.check(
+            version="const SCHEMA_VERSION: i32 = 53;\n",
+            fixture=FIXTURE_SOURCE.replace(
+                "RefusalKind::DivergentArtifacts;", "RefusalKind::NoApplicableMigration;"
+            ),
+        )
+        self.assertFalse(valid)
+        self.assertIn(
+            "refused_divergent_store demands 'divergent_artifacts'", message
+        )
+
+    def test_stale_migrations_older_than_the_pre_cutover_generation_fail(self) -> None:
+        valid, message = self.check(version="const SCHEMA_VERSION: i32 = 54;\n")
+        self.assertFalse(valid)
+        self.assertIn("neither the current component 54 nor its retained pre-cutover", message)
 
     def test_predecessor_generation_must_be_migratable(self) -> None:
         valid, message = self.check(

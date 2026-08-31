@@ -320,7 +320,9 @@ CREATE TABLE lash_durable_read_fixture.lash_process_wake_deliveries (
     next_attempt_at_ms bigint NOT NULL,
     expires_at_ms bigint NOT NULL,
     discard_reason text,
-    delivery_json text NOT NULL
+    delivery_json text NOT NULL,
+    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK ((discard_reason = ANY (ARRAY['expired'::text, 'target_gone'::text, 'retargeted'::text, 'sequence_rewound'::text]))),
+    CONSTRAINT ck_process_wake_deliveries_state CHECK ((state = ANY (ARRAY['pending'::text, 'enqueuing'::text, 'enqueued'::text, 'discarded'::text])))
 );
 
 
@@ -340,7 +342,8 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     updated_at_ms bigint NOT NULL,
     change_seq bigint NOT NULL,
     status text NOT NULL,
-    record_json text NOT NULL
+    record_json text NOT NULL,
+    CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
 
 
@@ -436,7 +439,8 @@ CREATE TABLE lash_durable_read_fixture.lash_runtime_effect_replay (
     group_key text,
     settlement_seq bigint,
     created_at_ms bigint NOT NULL,
-    updated_at_ms bigint NOT NULL
+    updated_at_ms bigint NOT NULL,
+    CONSTRAINT ck_runtime_effect_replay_status CHECK ((status = ANY (ARRAY['in_progress'::text, 'completed'::text, 'failed'::text])))
 );
 
 
@@ -510,7 +514,10 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     caused_by_node_id text,
     source_session_id text,
     source_node_id text,
-    observer_inheritance_kind text
+    observer_inheritance_kind text,
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK ((caused_by_kind = ANY (ARRAY['turn'::text, 'effect'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text]))),
+    CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK ((observer_inheritance_kind = ANY (ARRAY['all'::text, 'none'::text, 'only'::text]))),
+    CONSTRAINT ck_session_meta_relation_kind CHECK ((relation_kind = ANY (ARRAY['root'::text, 'child'::text, 'fork'::text])))
 );
 
 
@@ -564,7 +571,8 @@ CREATE TABLE lash_durable_read_fixture.lash_tool_intent_submissions (
     intent_index bigint NOT NULL,
     kind text NOT NULL,
     payload_hash text NOT NULL,
-    submission_json text NOT NULL
+    submission_json text NOT NULL,
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK ((kind = ANY (ARRAY['start_process'::text, 'signal_process'::text, 'cancel_process'::text, 'emit_process_event'::text, 'emit_trigger'::text])))
 );
 
 
@@ -627,7 +635,8 @@ CREATE TABLE lash_durable_read_fixture.lash_trigger_subscriptions (
     tombstoned boolean NOT NULL,
     created_at_ms bigint NOT NULL,
     updated_at_ms bigint NOT NULL,
-    record_json text NOT NULL
+    record_json text NOT NULL,
+    CONSTRAINT ck_trigger_subscriptions_live_enabled CHECK ((NOT (enabled AND tombstoned)))
 );
 
 
@@ -927,7 +936,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 64);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 66);
 
 
 --
@@ -1577,6 +1586,13 @@ CREATE INDEX idx_lash_processes_originator ON lash_durable_read_fixture.lash_pro
 --
 
 CREATE INDEX idx_lash_processes_status ON lash_durable_read_fixture.lash_processes USING btree (status);
+
+
+--
+-- Name: idx_lash_processes_updated; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_updated ON lash_durable_read_fixture.lash_processes USING btree (updated_at_ms);
 
 
 --

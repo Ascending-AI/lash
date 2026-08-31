@@ -222,7 +222,10 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
-    observer_inheritance_kind         TEXT
+    observer_inheritance_kind         TEXT,
+    CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
+    CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
+    CONSTRAINT ck_session_meta_observer_inheritance_kind CHECK (observer_inheritance_kind IN ('all', 'none', 'only'))
 );
 
 CREATE TABLE IF NOT EXISTS session_meta_pending_observer_intents (
@@ -522,7 +525,10 @@ CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
 /// is migrated forward in place; older stores remain recreate-only.
 /// Version 45 switches content and semantic identities to domain-tagged BLAKE3.
 /// Existing stores are rejected rather than reinterpreting SHA-256 rows.
-pub(crate) const SCHEMA_VERSION: i32 = 45;
+/// Version 46 adds DDL-enforced session relation, causal-reference, and observer-
+/// inheritance vocabularies. Existing durable-core catalogs are rejected rather
+/// than migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 46;
 
 const SESSION_43_TO_44_MIGRATION: &str = "
 CREATE TABLE session_meta_pending_observer_intents (
@@ -584,7 +590,8 @@ CREATE TABLE IF NOT EXISTS processes (
     updated_at_ms         INTEGER NOT NULL,
     change_seq            INTEGER NOT NULL,
     status                TEXT NOT NULL,
-    record_json           TEXT NOT NULL
+    record_json           TEXT NOT NULL,
+    CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_processes_status
@@ -651,6 +658,8 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     expires_at_ms     INTEGER NOT NULL,
     discard_reason    TEXT,
     delivery_json     TEXT NOT NULL,
+    CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
+    CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
@@ -714,7 +723,8 @@ CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     intent_index        INTEGER NOT NULL,
     kind                TEXT NOT NULL,
     payload_hash        TEXT NOT NULL,
-    submission_json     TEXT NOT NULL
+    submission_json     TEXT NOT NULL,
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
     ON tool_intent_submissions(session_id, execution_scope_id, intent_index);
@@ -756,7 +766,9 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 // Version 23 indexes the bounded non-terminal recovery worklist by process id.
 // Version 24 durably retains pending process-parent teardown beside terminal completion.
 // Version 25 switches durable process identities to domain-tagged BLAKE3.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 25;
+// Version 26 adds DDL-enforced process status, wake state/discard reason, and
+// tool-intent kind vocabularies. Existing process registries are rejected.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 26;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -773,6 +785,7 @@ CREATE TABLE IF NOT EXISTS trigger_subscriptions (
     created_at_ms        INTEGER NOT NULL,
     updated_at_ms        INTEGER NOT NULL,
     record_json          TEXT NOT NULL,
+    CONSTRAINT ck_trigger_subscriptions_live_enabled CHECK (NOT (enabled AND tombstoned)),
     UNIQUE(owner_scope, subscription_key)
 );
 
@@ -832,7 +845,9 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // definition fingerprints after the required per-turn budget cutover.
 // Version 6 durably arms occurrence reclaim eligibility at fan-out terminality.
 // Version 7 switches durable trigger identities to domain-tagged BLAKE3.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 7;
+// Version 8 prevents a tombstoned trigger subscription from remaining enabled.
+// Existing trigger stores are rejected rather than migrated.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 8;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS runtime_effect_replay (
@@ -852,6 +867,7 @@ CREATE TABLE IF NOT EXISTS runtime_effect_replay (
     settlement_seq       INTEGER,
     created_at_ms        INTEGER NOT NULL,
     updated_at_ms        INTEGER NOT NULL,
+    CONSTRAINT ck_runtime_effect_replay_status CHECK (status IN ('in_progress', 'completed', 'failed')),
     PRIMARY KEY (scope_id, replay_key)
 );
 
@@ -964,7 +980,9 @@ CREATE TABLE IF NOT EXISTS await_event_revoked_sessions (
 // comments around it, so prose inside `EFFECT_SCHEMA` would demand the very
 // bump the carve-out exists to avoid.
 // Version 14 switches durable effect identities to domain-tagged BLAKE3.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 14;
+// Version 15 adds the DDL-enforced effect-replay status vocabulary. Existing
+// effect journals are rejected rather than migrated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 15;
 
 pub(crate) async fn apply_pragmas(
     conn: &SqliteConnection,
@@ -1032,7 +1050,7 @@ fn prepare_versioned_schema_at_version<'connection>(
         return Ok(tx);
     }
     // Deliberately historical: tests pin the 43-to-44 migration, but the arm is
-    // unreachable for production opens now that SCHEMA_VERSION is 45.
+    // unreachable for production opens now that SCHEMA_VERSION is 46.
     if database == SqliteDatabase::DurableCore && user_version == 43 && schema_version == 44 {
         tx.execute_batch(SESSION_43_TO_44_MIGRATION)?;
         tx.execute_batch(database.schema())?;
@@ -1219,6 +1237,129 @@ mod schema_metadata_tests {
         assert_eq!(
             SqliteDatabase::DurableCore.remedy(),
             SchemaRemedy::DeleteDatabase
+        );
+    }
+}
+
+#[cfg(test)]
+mod check_constraint_tests {
+    use super::*;
+
+    fn assert_check_rejects(connection: &Connection, statement: &str, constraint: &str) {
+        let error = connection
+            .execute_batch(statement)
+            .expect_err("an illegal durable vocabulary must violate its schema CHECK");
+        assert!(
+            error.to_string().contains(constraint),
+            "SQLite reported the wrong CHECK for {constraint}: {error}"
+        );
+    }
+
+    #[test]
+    fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
+        let core = Connection::open_in_memory().expect("open durable-core constraint fixture");
+        core.execute_batch(SCHEMA)
+            .expect("create durable-core constraint fixture");
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind)
+             VALUES ('bad-relation', 'sibling')",
+            "ck_session_meta_relation_kind",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind)
+             VALUES ('bad-cause', 'child', 'timer')",
+            "ck_session_meta_caused_by_kind",
+        );
+        assert_check_rejects(
+            &core,
+            "INSERT INTO session_meta (
+                 session_id, relation_kind, observer_inheritance_kind
+             ) VALUES ('bad-inheritance', 'fork', 'selected')",
+            "ck_session_meta_observer_inheritance_kind",
+        );
+
+        let process = Connection::open_in_memory().expect("open process constraint fixture");
+        process
+            .execute_batch(PROCESS_SCHEMA)
+            .expect("create process constraint fixture");
+        let process_columns = "process_id, registration_fingerprint, originator_id,
+            identity_kind, is_waiting, created_at_ms, updated_at_ms, change_seq,
+            status, record_json";
+        assert_check_rejects(
+            &process,
+            &format!(
+                "INSERT INTO processes ({process_columns}) VALUES
+                 ('bad-status', 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                  'paused', '{{}}')"
+            ),
+            "ck_processes_status",
+        );
+        process
+            .execute_batch(&format!(
+                "INSERT INTO processes ({process_columns}) VALUES
+                 ('wake-parent', 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+                  'running', '{{}}')"
+            ))
+            .expect("insert valid wake parent");
+        assert_check_rejects(
+            &process,
+            "INSERT INTO process_wake_deliveries (
+                 delivery_id, process_id, target_session_id, sequence, state,
+                 next_attempt_at_ms, expires_at_ms, delivery_json
+             ) VALUES ('bad-state', 'wake-parent', 'target', 1, 'claimed', 0, 1, '{}')",
+            "ck_process_wake_deliveries_state",
+        );
+        assert_check_rejects(
+            &process,
+            "INSERT INTO process_wake_deliveries (
+                 delivery_id, process_id, target_session_id, sequence, state,
+                 next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
+             ) VALUES (
+                 'bad-discard', 'wake-parent', 'target', 2, 'discarded', 0, 1,
+                 'unroutable', '{}'
+             )",
+            "ck_process_wake_deliveries_discard_reason",
+        );
+        assert_check_rejects(
+            &process,
+            "INSERT INTO tool_intent_submissions (
+                 replay_key, session_id, execution_scope_id, tool_call_id,
+                 intent_index, kind, payload_hash, submission_json
+             ) VALUES ('bad-tool-kind', 'session', 'scope', 'call', 0,
+                       'restart_process', 'hash', '{}')",
+            "ck_tool_intent_submissions_kind",
+        );
+
+        let triggers = Connection::open_in_memory().expect("open trigger constraint fixture");
+        triggers
+            .execute_batch(TRIGGER_SCHEMA)
+            .expect("create trigger constraint fixture");
+        assert_check_rejects(
+            &triggers,
+            "INSERT INTO trigger_subscriptions (
+                 subscription_id, owner_scope, subscription_key, incarnation, revision,
+                 definition_fingerprint, source_type, source_key, enabled, tombstoned,
+                 created_at_ms, updated_at_ms, record_json
+             ) VALUES (
+                 'bad-pair', 'owner', 'key', 'incarnation', 1, 'fingerprint',
+                 'source', 'key', 1, 1, 0, 0, '{}'
+             )",
+            "ck_trigger_subscriptions_live_enabled",
+        );
+
+        let effects = Connection::open_in_memory().expect("open effect constraint fixture");
+        effects
+            .execute_batch(EFFECT_SCHEMA)
+            .expect("create effect constraint fixture");
+        assert_check_rejects(
+            &effects,
+            "INSERT INTO runtime_effect_replay (
+                 scope_id, replay_key, envelope_hash, envelope_json, status,
+                 created_at_ms, updated_at_ms
+             ) VALUES ('scope', 'bad-effect-status', 'hash', '{}', 'cancelled', 0, 0)",
+            "ck_runtime_effect_replay_status",
         );
     }
 }

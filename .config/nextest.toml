@@ -37,7 +37,7 @@
 #
 # Deliberately NOT in this group: `lash-sim`'s Postgres-backed unit tests
 # (`crates/lash-sim/src/postgres_test_isolation.rs`) and anything else built on
-# `IsolatedDatabase`, plus the four `lash-internal-postgres-store` binaries excluded by
+# `IsolatedDatabase`, plus the three `lash-internal-postgres-store` binaries excluded by
 # name below — those provision a database or a UUID-named scratch schema per
 # test (`crates/lash-postgres-store/tests/schema_drift/harness.rs`) and have
 # nothing to serialize against. Serializing them was measured at 7.7s -> 31.0s
@@ -80,7 +80,6 @@ filter = '''
           binary(schema_drift)
         + binary(preflight_durable_walk)
         + binary(preflight_schema_status)
-        + binary(checkpoint_projection_migration)
       )
     )
   + (package(lash-sim) & binary(cross_backend_store_differential))

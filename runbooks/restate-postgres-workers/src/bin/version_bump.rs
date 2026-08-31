@@ -142,6 +142,11 @@ const POST_FLOOR_ARTIFACTS: [&str; 20] = [
 /// records that predecessor over the *current* catalog, so these are exactly the
 /// artifacts its refusal must enumerate.
 const DIVERGENT_ARTIFACTS: [&str; 1] = ["idx_lash_processes_updated"];
+/// A creation-only generation expects the predecessor stamp over its current
+/// catalog to be classified as migration divergence. A destructive generation
+/// has no migration arm, so that same pre-cutover stamp is the ordinary
+/// reject-and-recreate boundary.
+const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.
@@ -700,15 +705,16 @@ async fn refuse(database_url: &str) -> Result<()> {
         expected_version == divergent + 1,
         "the refusal expected {expected_version}, which is not one ahead of the recorded {divergent}"
     );
-    let divergent_kind = refusal_kind("divergent-store", RefusalKind::DivergentArtifacts, &error)?;
-    // The refusal must enumerate what the newest generation introduced, not
-    // merely mention divergence: that list is what tells an operator which
-    // artifacts to inspect.
-    for artifact in DIVERGENT_ARTIFACTS {
-        anyhow::ensure!(
-            error.contains(artifact),
-            "the divergence refusal did not enumerate {artifact}: {error}"
-        );
+    let divergent_kind = refusal_kind("pre-cutover store", PRE_CUTOVER_REFUSAL_KIND, &error)?;
+    if PRE_CUTOVER_REFUSAL_KIND == RefusalKind::DivergentArtifacts {
+        // Creation-only generations must enumerate what the newest migration
+        // introduced; destructive generations never enter this branch.
+        for artifact in DIVERGENT_ARTIFACTS {
+            anyhow::ensure!(
+                error.contains(artifact),
+                "the divergence refusal did not enumerate {artifact}: {error}"
+            );
+        }
     }
     // Summary mode here, deliberately: this is the shape a host runs at boot,
     // and the claim is that the cheap walk already refuses.
@@ -718,7 +724,11 @@ async fn refuse(database_url: &str) -> Result<()> {
         "probe": divergent_probe,
         "direction": "recorded predecessor, current schema artifacts",
         "refusal_kind": divergent_kind.as_str(),
-        "divergent_artifacts": DIVERGENT_ARTIFACTS,
+        "divergent_artifacts": if PRE_CUTOVER_REFUSAL_KIND == RefusalKind::DivergentArtifacts {
+            DIVERGENT_ARTIFACTS.as_slice()
+        } else {
+            &[]
+        },
         "found_version": divergent,
         "expected_version": expected_version,
         "opened": opened,

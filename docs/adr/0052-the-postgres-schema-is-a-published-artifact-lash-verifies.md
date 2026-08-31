@@ -271,6 +271,12 @@ verify against; shape-checking there would be lash verifying itself.
   and RLS would be a separate decision with its own false-positive surface, and
   drawing it there is a choice rather than an oversight.
 
+  Lash's *own* `CHECK` constraints are pinned elsewhere rather than left
+  unpinned: ADR 0081 puts them in a declared expected-constraints registry that
+  the lash-sim schema-congruence gate asserts against the published DDL. That
+  registry reads the committed artifacts, not a live catalog, so it neither
+  widens this fingerprint's object classes nor changes what a host may add.
+
 - A pre-version-9 database's leftover `lash_process_change_seq` sequence is never
   cleaned up now that the artifact is creation-only. Such a database is rejected at
   open by the version gate regardless, so the sequence is unreachable garbage an

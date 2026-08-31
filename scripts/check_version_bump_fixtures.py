@@ -63,6 +63,10 @@ EXPECTED_KINDS_TABLE = re.compile(
     r"^EXPECTED_REFUSAL_KINDS = \{$(.*?)^\}$", re.MULTILINE | re.DOTALL
 )
 EXPECTED_KINDS_ENTRY = re.compile(r'^\s*"(\w+)": "([a-z_]+)",$', re.MULTILINE)
+PRE_CUTOVER_KIND = re.compile(
+    r"^const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::(\w+);$",
+    re.MULTILINE,
+)
 
 
 class CheckError(RuntimeError):
@@ -292,27 +296,41 @@ def check(repo: Path) -> tuple[bool, str]:
         version_text, VERSION_SOURCE, VERSION_CONSTANT, "SCHEMA_VERSION"
     )
     migrations = parse_migrations(migrations_text)
+    migration_targets = {migration.to_version for migration in migrations}
+    if len(migration_targets) != 1:
+        versions = ", ".join(str(version) for version in sorted(migration_targets))
+        return False, (
+            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets multiple generations: {versions}"
+        )
+    migration_target = migration_targets.pop()
+    if migration_target not in {component_version, component_version - 1}:
+        return False, (
+            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets component {migration_target}, "
+            f"which is neither the current component {component_version} nor its retained "
+            "pre-cutover generation"
+        )
+    destructive_cutover = migration_target == component_version - 1
     off_target = [
-        migration for migration in migrations if migration.to_version != component_version
+        migration for migration in migrations if migration.to_version != migration_target
     ]
     if off_target:
         versions = ", ".join(str(migration.to_version) for migration in off_target)
         return False, (
-            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets {versions}, not the current "
-            f"component version {component_version} in {VERSION_SOURCE}"
+            f"{MIGRATIONS_SOURCE}: SCHEMA_MIGRATIONS targets {versions}, not the selected "
+            f"migration generation {migration_target}"
         )
 
     floor = min(migrations, key=lambda migration: migration.from_version)
     predecessors = [
         migration
         for migration in migrations
-        if migration.from_version == component_version - 1
+        if migration.from_version == migration_target - 1
     ]
     if len(predecessors) != 1:
         return False, (
-            f"{MIGRATIONS_SOURCE}: no migration from component {component_version - 1}. The "
-            "divergent fixture stamps the immediate predecessor over the current catalog, so "
-            "that generation must be explicitly migratable"
+            f"{MIGRATIONS_SOURCE}: no migration from component {migration_target - 1}. The "
+            "historical divergence fixture needs the immediate predecessor of the retained "
+            "migration generation"
         )
     predecessor = predecessors[0]
 
@@ -459,6 +477,34 @@ def check(repo: Path) -> tuple[bool, str]:
             + ", ".join(repr(kind) for kind in sorted(emitted.values()))
             + ")"
         )
+    pre_cutover_matches = PRE_CUTOVER_KIND.findall(fixture_text)
+    if len(pre_cutover_matches) != 1:
+        raise CheckError(
+            f"{FIXTURE_SOURCE}: expected exactly one PRE_CUTOVER_REFUSAL_KIND declaration, "
+            f"found {len(pre_cutover_matches)}"
+        )
+    pre_cutover_variant = pre_cutover_matches[0]
+    if pre_cutover_variant not in emitted:
+        failures.append(
+            f"{FIXTURE_SOURCE}: PRE_CUTOVER_REFUSAL_KIND names unknown variant "
+            f"{pre_cutover_variant}"
+        )
+    else:
+        configured_kind = emitted[pre_cutover_variant]
+        expected_kind = (
+            "no_applicable_migration" if destructive_cutover else "divergent_artifacts"
+        )
+        if configured_kind != expected_kind:
+            failures.append(
+                f"{FIXTURE_SOURCE}: PRE_CUTOVER_REFUSAL_KIND emits {configured_kind!r}, but "
+                f"component {component_version} requires {expected_kind!r}"
+            )
+        gate_kind = demanded.get("refused_divergent_store")
+        if gate_kind != configured_kind:
+            failures.append(
+                f"{GATE_SOURCE}: refused_divergent_store demands {gate_kind!r}, but the "
+                f"harness pre-cutover refusal emits {configured_kind!r}"
+            )
 
     if failures:
         return False, "\n".join(

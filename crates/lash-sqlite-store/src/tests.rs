@@ -573,12 +573,19 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
         .expect("create requested session");
     drop(store);
     let raw = rusqlite::Connection::open(factory.catalog_path()).expect("open raw catalog");
+    // `ck_session_meta_relation_kind` forbids this row on any ordinary write.
+    // The refusal below is still the contract for a catalog that carries one
+    // anyway — restored from a pre-CHECK dump, or ALTERed by a host.
+    raw.pragma_update(None, "ignore_check_constraints", true)
+        .expect("permit manufacturing a row the DDL now forbids");
     raw.execute(
         "UPDATE session_meta SET relation_kind = 'corrupt'
              WHERE session_id = ?1",
         params![request.session_id],
     )
     .expect("corrupt requested session metadata");
+    raw.pragma_update(None, "ignore_check_constraints", false)
+        .expect("restore CHECK enforcement");
     drop(raw);
 
     let result = factory.open_existing_store(&request).await;

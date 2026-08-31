@@ -75,6 +75,9 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     copy_sqlite_fixture(&fixture_dir, temp.path());
     let durable_core = temp.path().join("durable-core.db");
     let connection = rusqlite::Connection::open(&durable_core).expect("open copied v32 fixture");
+    connection
+        .pragma_update(None, "ignore_check_constraints", true)
+        .expect("permit manufacturing a pre-CHECK malformed fixture");
     let updated = connection
         .execute(
             "UPDATE session_meta
@@ -84,6 +87,9 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
         )
         .expect("inject an unknown denormalized relation kind");
     assert_eq!(updated, 1, "the v32 proof must mutate its fixture row");
+    connection
+        .pragma_update(None, "ignore_check_constraints", false)
+        .expect("restore CHECK enforcement after manufacturing the stale fixture");
     connection
         .pragma_update(None, "user_version", 32)
         .expect("stamp the pre-denormalization v32 fixture");
@@ -103,7 +109,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 45"),
+        message.contains("supports schema version 46"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -128,7 +134,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 45"),
+        message.contains("supports schema version 46"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
