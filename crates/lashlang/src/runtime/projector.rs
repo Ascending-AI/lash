@@ -69,11 +69,20 @@ pub trait ValueProjector: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct BudgetedJsonProjector {
     config: BudgetedJsonProjectionConfig,
+    quote_top_level_strings: bool,
 }
 
 impl BudgetedJsonProjector {
     pub const fn new(config: BudgetedJsonProjectionConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            quote_top_level_strings: false,
+        }
+    }
+
+    pub const fn with_quoted_top_level_strings(mut self) -> Self {
+        self.quote_top_level_strings = true;
+        self
     }
 
     pub const fn config(&self) -> BudgetedJsonProjectionConfig {
@@ -107,7 +116,9 @@ impl BudgetedJsonProjector {
                     write_number(&mut out, *value).expect("string writes should not fail");
                     out
                 }
-                Value::String(value) if top_level => value.to_string(),
+                Value::String(value) if top_level && !self.quote_top_level_strings => {
+                    value.to_string()
+                }
                 Value::String(value) => json_string(&clip_nested_string(value, self.config)),
                 Value::Image(image) => {
                     serde_json::to_string(image).unwrap_or_else(|_| "null".to_string())
@@ -324,6 +335,20 @@ mod tests {
         assert_eq!(default_project(&Value::Bool(true)), "true");
         assert_eq!(default_project(&Value::Number(42.0)), "42");
         assert_eq!(default_project(&Value::String("hello".into())), "hello");
+    }
+
+    #[test]
+    fn top_level_string_quoting_is_opt_in() {
+        let value = Value::String("{'location': {'name': 'Utrecht'}}".into());
+        let config = BudgetedJsonProjectionConfig::new(4096, 200, 6);
+
+        assert_eq!(project(&value, config), "{'location': {'name': 'Utrecht'}}");
+        assert_eq!(
+            BudgetedJsonProjector::new(config)
+                .with_quoted_top_level_strings()
+                .project_blocking(ValueProjectionContext::new(&value)),
+            r#""{'location': {'name': 'Utrecht'}}""#
+        );
     }
 
     #[test]

@@ -171,7 +171,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
         let next_tail = wire_message_text(next_messages.last().expect("second volatile tail"));
         assert!(
             next_tail.contains("=== CURRENT ITERATION: 2 ===")
-                && next_tail.contains("- `scratch_note` = saved"),
+                && next_tail.contains(r#"- `scratch_note` = "saved""#),
             "updated volatile suffix was not last for {model}: {next_tail}"
         );
         assert!(

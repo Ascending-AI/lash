@@ -1415,13 +1415,15 @@ mod tests {
         let tail = message_text(request.messages.last().expect("volatile tail"));
 
         assert!(tail.contains("=== BOUND VARIABLES ==="), "{tail}");
-        assert!(tail.contains("- `scratch_note` = saved"), "{tail}");
+        assert!(tail.contains(r#"- `scratch_note` = "saved""#), "{tail}");
         assert!(
             tail.contains("- `history` currently has 3 entries"),
             "{tail}"
         );
         let alpha = tail.find("- `alpha` = 1").expect("alpha row");
-        let scratch = tail.find("- `scratch_note` = saved").expect("scratch row");
+        let scratch = tail
+            .find(r#"- `scratch_note` = "saved""#)
+            .expect("scratch row");
         let zeta = tail.find("- `zeta` = 3").expect("zeta row");
         assert!(alpha < scratch && scratch < zeta, "{tail}");
     }
