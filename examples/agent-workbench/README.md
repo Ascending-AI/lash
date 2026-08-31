@@ -539,6 +539,18 @@ are Restate-journaled. Tick and zombie-guard traces record
 `agent_workbench.cron.restate.run`, and
 `agent_workbench.cron.restate.zombie_cancelled` events.
 
+The trigger occurrence history is also the durable tick-audit surface. Fired
+ticks keep the existing `cron.Tick` payload and serialized record bytes; their
+omitted `outcome` field decodes as `fired`. An observed zombie-guard refusal
+records one delivery-free occurrence with `outcome.kind: "dropped"`, a stable
+reason such as `session_retired`, and the scheduled timestamp. The workbench
+cron chain has only one armed invocation at a time, so it does not coalesce
+cron ticks; any queued-work coalescing happens after each fired occurrence is
+already durable.
+An invocation canceled before its handler runs, or reaching the handler after
+its cron state was cleared, exposes no source or scheduled-tick identity to
+record and therefore remains outside this audit guarantee.
+
 Host wiring has two pieces: source constructors such as `cron.Schedule` and
 `mail.received` are declared through the plugin's `lashlang_resources()` hook,
 while the button is a zero-config source exposed by its trigger declaration. The

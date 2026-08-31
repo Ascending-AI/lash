@@ -763,6 +763,16 @@ pub fn validate_trigger_occurrence_request(
             "trigger occurrence requires idempotency_key".to_string(),
         ));
     }
+    match &request.outcome {
+        TriggerOccurrenceOutcome::Fired => {}
+        TriggerOccurrenceOutcome::Dropped { reason } => {
+            if reason.trim().is_empty() {
+                return Err(PluginError::Session(
+                    "dropped trigger occurrence requires reason".to_string(),
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -777,6 +787,7 @@ pub fn trigger_occurrence_request_matches_record(
         idempotency_key: _,
         source,
         session_id: _,
+        outcome,
     } = request;
     let TriggerOccurrenceRecord {
         occurrence_id: _,
@@ -786,12 +797,14 @@ pub fn trigger_occurrence_request_matches_record(
         idempotency_key: _,
         source: stored_source,
         session_id: _,
+        outcome: stored_outcome,
         occurred_at_ms: _,
     } = record;
     source_type == stored_source_type
         && source_key == stored_source_key
         && crate::identity_json::payloads_equal(payload, stored_payload)
         && crate::identity_json::optional_payloads_equal(source.as_ref(), stored_source.as_ref())
+        && outcome == stored_outcome
 }
 
 #[cfg(test)]
@@ -852,8 +865,28 @@ mod tests {
             idempotency_key: request.idempotency_key.clone(),
             source: request.source.clone(),
             session_id: None,
+            outcome: TriggerOccurrenceOutcome::Fired,
             occurred_at_ms: 42,
         };
+        assert_eq!(
+            serde_json::to_string(&request).expect("serialize fired occurrence request"),
+            r#"{"source_type":"source","source_key":"key","payload":{"value":1},"idempotency_key":"caller:key","source":{"origin":true}}"#,
+            "the default fired request must stay byte-for-byte stable"
+        );
+        assert_eq!(
+            serde_json::to_string(&record).expect("serialize fired occurrence record"),
+            r#"{"occurrence_id":"trigger:caller:key","source_type":"source","source_key":"key","payload":{"value":1},"idempotency_key":"caller:key","source":{"origin":true},"occurred_at_ms":42}"#,
+            "the default fired record must stay byte-for-byte stable"
+        );
+        assert_eq!(
+            serde_json::from_str::<TriggerOccurrenceRecord>(
+                r#"{"occurrence_id":"trigger:caller:key","source_type":"source","source_key":"key","payload":{"value":1},"idempotency_key":"caller:key","source":{"origin":true},"occurred_at_ms":42}"#,
+            )
+            .expect("decode a pre-outcome occurrence record")
+            .outcome,
+            TriggerOccurrenceOutcome::Fired,
+            "records written before the outcome field must decode as fired"
+        );
         assert!(trigger_occurrence_request_matches_record(&request, &record));
         let mut normalized = request.clone();
         normalized.payload = serde_json::json!({"value": -0.0});

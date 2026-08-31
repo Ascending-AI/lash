@@ -113,7 +113,10 @@ pub use usage_activity::*;
 // Bumped to 49: process-environment refs move to the domain-tagged BLAKE3 v4
 // identity family. Exact-version negotiation rejects SHA-256-era peers.
 // Bumped to 50: process-list filters carry a retired-process recency bound.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 50;
+// Bumped to 51: trigger occurrences carry typed fired or dropped
+// outcomes. Exact-version negotiation prevents older peers from erasing the
+// audit fate of a non-fired occurrence.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 51;
 
 /// One versioned remote-protocol message.
 ///

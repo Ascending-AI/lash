@@ -1,3 +1,21 @@
+impl From<RemoteTriggerOccurrenceOutcome> for lash_core::TriggerOccurrenceOutcome {
+    fn from(value: RemoteTriggerOccurrenceOutcome) -> Self {
+        match value {
+            RemoteTriggerOccurrenceOutcome::Fired => Self::Fired,
+            RemoteTriggerOccurrenceOutcome::Dropped { reason } => Self::Dropped { reason },
+        }
+    }
+}
+
+impl From<lash_core::TriggerOccurrenceOutcome> for RemoteTriggerOccurrenceOutcome {
+    fn from(value: lash_core::TriggerOccurrenceOutcome) -> Self {
+        match value {
+            lash_core::TriggerOccurrenceOutcome::Fired => Self::Fired,
+            lash_core::TriggerOccurrenceOutcome::Dropped { reason } => Self::Dropped { reason },
+        }
+    }
+}
+
 impl From<RemoteProtocolTurnOptions> for lash_core::ProtocolTurnOptions {
     fn from(value: RemoteProtocolTurnOptions) -> Self {
         let RemoteProtocolTurnOptions { payload } = value;
@@ -24,6 +42,7 @@ impl TryFrom<RemoteTriggerOccurrenceRequest> for lash_core::TriggerOccurrenceReq
             idempotency_key,
             source,
             session_id,
+            outcome,
         } = value;
         let mut request = lash_core::TriggerOccurrenceRequest::new(
             source_type,
@@ -33,6 +52,7 @@ impl TryFrom<RemoteTriggerOccurrenceRequest> for lash_core::TriggerOccurrenceReq
         );
         request.source = source;
         request.session_id = session_id;
+        request.outcome = outcome.into();
         Ok(request)
     }
 }
@@ -46,6 +66,7 @@ impl From<lash_core::TriggerOccurrenceRequest> for RemoteTriggerOccurrenceReques
             idempotency_key,
             source,
             session_id,
+            outcome,
         } = value;
         Self {
             source_type,
@@ -54,6 +75,7 @@ impl From<lash_core::TriggerOccurrenceRequest> for RemoteTriggerOccurrenceReques
             idempotency_key,
             source,
             session_id,
+            outcome: outcome.into(),
         }
     }
 }
@@ -68,6 +90,7 @@ impl From<lash_core::TriggerOccurrenceRecord> for RemoteTriggerOccurrenceRecord 
             idempotency_key,
             source,
             session_id,
+            outcome,
             occurred_at_ms,
         } = value;
         Self {
@@ -78,6 +101,7 @@ impl From<lash_core::TriggerOccurrenceRecord> for RemoteTriggerOccurrenceRecord 
             idempotency_key,
             source,
             session_id,
+            outcome: outcome.into(),
             occurred_at_ms,
         }
     }
@@ -93,6 +117,7 @@ impl From<RemoteTriggerOccurrenceRecord> for lash_core::TriggerOccurrenceRecord 
             idempotency_key,
             source,
             session_id,
+            outcome,
             occurred_at_ms,
         } = value;
         Self {
@@ -103,6 +128,7 @@ impl From<RemoteTriggerOccurrenceRecord> for lash_core::TriggerOccurrenceRecord 
             idempotency_key,
             source,
             session_id,
+            outcome: outcome.into(),
             occurred_at_ms,
         }
     }

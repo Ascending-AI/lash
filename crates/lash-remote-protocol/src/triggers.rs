@@ -11,6 +11,22 @@ use crate::processes::{
 };
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RemoteTriggerOccurrenceOutcome {
+    #[default]
+    Fired,
+    Dropped {
+        reason: String,
+    },
+}
+
+impl RemoteTriggerOccurrenceOutcome {
+    fn is_fired(&self) -> bool {
+        matches!(self, Self::Fired)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteTriggerOccurrenceRequest {
     pub source_type: String,
@@ -22,6 +38,11 @@ pub struct RemoteTriggerOccurrenceRequest {
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteTriggerOccurrenceOutcome::is_fired"
+    )]
+    pub outcome: RemoteTriggerOccurrenceOutcome,
 }
 
 impl RemoteTriggerOccurrenceRequest {
@@ -38,6 +59,7 @@ impl RemoteTriggerOccurrenceRequest {
             idempotency_key: idempotency_key.into(),
             source: None,
             session_id: None,
+            outcome: RemoteTriggerOccurrenceOutcome::Fired,
         }
     }
 
@@ -48,6 +70,11 @@ impl RemoteTriggerOccurrenceRequest {
 
     pub fn for_session(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = Some(session_id.into());
+        self
+    }
+
+    pub fn with_outcome(mut self, outcome: RemoteTriggerOccurrenceOutcome) -> Self {
+        self.outcome = outcome;
         self
     }
 
@@ -70,6 +97,12 @@ impl RemoteTriggerOccurrenceRequest {
         if let Some(session_id) = &self.session_id {
             require_non_empty("RemoteTriggerOccurrenceRequest", "session_id", session_id)?;
         }
+        match &self.outcome {
+            RemoteTriggerOccurrenceOutcome::Fired => {}
+            RemoteTriggerOccurrenceOutcome::Dropped { reason } => {
+                require_non_empty("RemoteTriggerOccurrenceRequest", "outcome.reason", reason)?;
+            }
+        }
         Ok(())
     }
 }
@@ -86,6 +119,11 @@ pub struct RemoteTriggerOccurrenceRecord {
     pub source: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "RemoteTriggerOccurrenceOutcome::is_fired"
+    )]
+    pub outcome: RemoteTriggerOccurrenceOutcome,
     pub occurred_at_ms: u64,
 }
 

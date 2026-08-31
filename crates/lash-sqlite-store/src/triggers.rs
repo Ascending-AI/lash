@@ -523,6 +523,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             idempotency_key: request.idempotency_key,
                             source: request.source,
                             session_id: request.session_id,
+                            outcome: request.outcome,
                             occurred_at_ms,
                         };
                         tx.execute(
@@ -543,16 +544,22 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                         (record, true)
                     };
-                    let reservations = if is_new {
-                        reserve_sqlite_deliveries(tx, &record, occurred_at_ms)?
-                    } else {
-                        sqlite_delivery_snapshots(
+                    let reservations = match (
+                        is_new,
+                        record.outcome == lash_core::TriggerOccurrenceOutcome::Fired,
+                    ) {
+                        (true, true) => reserve_sqlite_deliveries(tx, &record, occurred_at_ms)?,
+                        (false, true) => sqlite_delivery_snapshots(
                             tx,
                             &record,
                             lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
-                        )?
+                        )?,
+                        (_, false) => Vec::new(),
                     };
-                    if is_new && reservations.is_empty() {
+                    if is_new
+                        && record.outcome == lash_core::TriggerOccurrenceOutcome::Fired
+                        && reservations.is_empty()
+                    {
                         tx.execute(
                             "UPDATE trigger_occurrences
                              SET reclaimable_at_ms = ?2
@@ -819,7 +826,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                 )?;
                 let reclaimed_occurrence_count = tx.execute(
                     "DELETE FROM trigger_occurrences
-                     WHERE NOT EXISTS (
+                     WHERE COALESCE(
+                               json_extract(record_json, '$.outcome.kind'),
+                               'fired'
+                           ) = 'fired'
+                       AND NOT EXISTS (
                          SELECT 1 FROM trigger_deliveries
                          WHERE trigger_deliveries.occurrence_id =
                                trigger_occurrences.occurrence_id
@@ -932,6 +943,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     "UPDATE trigger_occurrences
                      SET reclaimable_at_ms = ?2
                      WHERE reclaimable_at_ms IS NULL
+                       AND COALESCE(
+                               json_extract(record_json, '$.outcome.kind'),
+                               'fired'
+                           ) = 'fired'
                        AND NOT EXISTS (
                            SELECT 1 FROM trigger_deliveries
                            WHERE trigger_deliveries.occurrence_id =
@@ -973,9 +988,23 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                      SELECT COUNT(*) AS inspected_count,
                                             COUNT(*) FILTER (
                                                 WHERE reclaimable_at_ms IS NULL
+                                                   OR COALESCE(
+                                                          json_extract(
+                                                              record_json,
+                                                              '$.outcome.kind'
+                                                          ),
+                                                          'fired'
+                                                      ) != 'fired'
                                             ) AS live_fan_out_count,
                                             COUNT(*) FILTER (
                                                 WHERE reclaimable_at_ms > ?1
+                                                  AND COALESCE(
+                                                          json_extract(
+                                                              record_json,
+                                                              '$.outcome.kind'
+                                                          ),
+                                                          'fired'
+                                                      ) = 'fired'
                                             ) AS grace_deferred_count
                                      FROM trigger_occurrences
                                  ), candidates AS (
@@ -983,6 +1012,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                      FROM trigger_occurrences
                                      WHERE reclaimable_at_ms IS NOT NULL
                                        AND reclaimable_at_ms <= ?1
+                                       AND COALESCE(
+                                               json_extract(record_json, '$.outcome.kind'),
+                                               'fired'
+                                           ) = 'fired'
                                  )
                                  SELECT scope.inspected_count,
                                         scope.live_fan_out_count,
@@ -1040,6 +1073,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                  WHERE occurrence_id = ?1
                                    AND reclaimable_at_ms IS NOT NULL
                                    AND reclaimable_at_ms <= ?2
+                                   AND COALESCE(
+                                           json_extract(record_json, '$.outcome.kind'),
+                                           'fired'
+                                       ) = 'fired'
                                    AND NOT EXISTS (
                                        SELECT 1 FROM trigger_deliveries
                                        WHERE trigger_deliveries.occurrence_id =

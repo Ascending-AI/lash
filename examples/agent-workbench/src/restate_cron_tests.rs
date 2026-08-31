@@ -52,11 +52,7 @@ impl ScriptedCronObjectSurface {
     }
 
     fn info(&self, job_key: &str) -> Option<serde_json::Value> {
-        self.infos
-            .lock_recover()
-            .get(job_key)
-            .cloned()
-            .flatten()
+        self.infos.lock_recover().get(job_key).cloned().flatten()
     }
 
     fn calls(&self) -> Vec<String> {
@@ -70,10 +66,7 @@ async fn spawn_scripted_cron_object_surface(surface: ScriptedCronObjectSurface) 
         axum::extract::State(surface): axum::extract::State<ScriptedCronObjectSurface>,
         body: axum::body::Bytes,
     ) -> axum::Json<serde_json::Value> {
-        surface
-            .calls
-            .lock_recover()
-            .push(path.clone());
+        surface.calls.lock_recover().push(path.clone());
         let mut parts = path.split('/');
         let object = parts.next();
         let job_key = parts.next();
@@ -578,13 +571,10 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
     let key_a = super::cron_job_key(&session_a, &record_a.source_key);
     let session_b = "fig1067-session-b";
     let key_b = super::cron_job_key(session_b, "cron-source:b");
-    state
-        .restate_cron_job_keys
-        .lock_recover()
-        .insert(
-            session_b.to_string(),
-            std::collections::BTreeSet::from([key_b.clone()]),
-        );
+    state.restate_cron_job_keys.lock_recover().insert(
+        session_b.to_string(),
+        std::collections::BTreeSet::from([key_b.clone()]),
+    );
     let surface = ScriptedCronObjectSurface::default();
     surface.arm(&key_b);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
@@ -633,10 +623,7 @@ async fn syncing_session_a_leaves_session_bs_armed_cron_untouched() {
         );
     }
     assert_eq!(
-        state
-            .restate_cron_job_keys
-            .lock_recover()
-            .get(session_b),
+        state.restate_cron_job_keys.lock_recover().get(session_b),
         Some(&std::collections::BTreeSet::from([key_b]))
     );
 }
@@ -674,12 +661,7 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
 
     assert!(response.changed);
     assert!(!response.registration.expect("button registration").enabled);
-    assert!(
-        state
-            .restate_cron_job_keys
-            .lock_recover()
-            .is_empty()
-    );
+    assert!(state.restate_cron_job_keys.lock_recover().is_empty());
 }
 
 #[tokio::test]
@@ -859,10 +841,8 @@ impl lash_test_internals::store::RuntimePersistenceDecorator for ContendedRuntim
         owner: &lash::persistence::LeaseOwnerIdentity,
         executor_id: &str,
         lease_ttl_ms: u64,
-    ) -> Result<
-        lash::persistence::SessionExecutionLeaseClaimOutcome,
-        lash::persistence::StoreError,
-    > {
+    ) -> Result<lash::persistence::SessionExecutionLeaseClaimOutcome, lash::persistence::StoreError>
+    {
         if self.contend.load(std::sync::atomic::Ordering::SeqCst) {
             self.contended_attempts
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -936,7 +916,8 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn lash::persistence::RuntimePersistence>, lash::persistence::StoreError> {
-        let inner = lash::persistence::SessionStoreFactory::create_store(&self.inner, request).await?;
+        let inner =
+            lash::persistence::SessionStoreFactory::create_store(&self.inner, request).await?;
         Ok(Arc::new(ContendedRuntimePersistence {
             inner,
             contend: Arc::clone(&self.contend),
@@ -1081,6 +1062,75 @@ fn cron_tick_test_state(session_id: &str) -> super::WorkbenchCronState {
     }
 }
 
+struct RecordingCronTickCancelSurface {
+    state: crate::AppState,
+    controller: CountingProcessEffectController,
+    job_key: String,
+    events: std::sync::Mutex<Vec<&'static str>>,
+    cleared: std::sync::atomic::AtomicBool,
+}
+
+impl RecordingCronTickCancelSurface {
+    fn new(state: crate::AppState, job_key: &str) -> Self {
+        Self {
+            state,
+            controller: CountingProcessEffectController::default(),
+            job_key: job_key.to_string(),
+            events: std::sync::Mutex::new(Vec::new()),
+            cleared: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn events(&self) -> Vec<&'static str> {
+        self.events.lock_recover().clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl super::CronTickCancelSurface for RecordingCronTickCancelSurface {
+    async fn record_trace(
+        &self,
+        _session_id: String,
+        _trace: serde_json::Value,
+    ) -> restate_sdk::errors::HandlerResult<()> {
+        self.events.lock_recover().push("trace");
+        Ok(())
+    }
+
+    async fn record_outcome(
+        &self,
+        request: WorkbenchCronRequest,
+        scheduled_for: String,
+        outcome: lash::triggers::TriggerOccurrenceOutcome,
+    ) -> restate_sdk::errors::HandlerResult<String> {
+        assert!(
+            !self.cleared.load(std::sync::atomic::Ordering::SeqCst),
+            "the public cancel path must persist its outcome before clearing cron state"
+        );
+        self.events.lock_recover().push("record");
+        let scoped = lash::runtime::ScopedEffectController::borrowed(
+            &self.controller,
+            lash::runtime::ExecutionScope::runtime_operation("fig2316-public-cancel-path"),
+        )
+        .expect("scope public cron cancel outcome");
+        super::record_cron_tick_outcome_with_effect_controller(
+            self.state.clone(),
+            request,
+            scheduled_for,
+            &self.job_key,
+            outcome,
+            scoped,
+        )
+        .await
+    }
+
+    fn clear_cron_state(&self) {
+        self.events.lock_recover().push("clear");
+        self.cleared
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 #[test]
 fn cron_tick_decision_runs_for_a_live_session() {
     let state = cron_tick_test_state("live-cron-session");
@@ -1095,7 +1145,7 @@ fn cron_tick_decision_runs_for_a_live_session() {
 fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
     let state = cron_tick_test_state("retired-cron-session");
 
-    let super::CronTick::Cancel { trace } =
+    let super::CronTick::Cancel { reason, trace } =
         super::cron_tick_decision(CronSessionDisposition::Retired, &state, "cron-job-retired")
     else {
         panic!("a retired session must cancel its cron tick");
@@ -1105,13 +1155,14 @@ fn cron_tick_decision_cancels_a_retired_session_with_typed_trace() {
     assert_eq!(trace["decision_basis"], "deleted_session_tombstone");
     assert_eq!(trace["session_state"], "retired");
     assert_eq!(trace["reason"], "session_retired");
+    assert_eq!(reason, "session_retired");
 }
 
 #[test]
 fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     let state = cron_tick_test_state("absent-cron-session");
 
-    let super::CronTick::Cancel { trace } =
+    let super::CronTick::Cancel { reason, trace } =
         super::cron_tick_decision(CronSessionDisposition::Unknown, &state, "cron-job-absent")
     else {
         panic!("an absent session must cancel its orphaned cron tick");
@@ -1121,6 +1172,7 @@ fn cron_tick_decision_cancels_an_unknown_session_with_typed_trace() {
     assert_eq!(trace["decision_basis"], "session_store_meta_absent");
     assert_eq!(trace["session_state"], "unknown");
     assert_eq!(trace["reason"], "session_absent");
+    assert_eq!(reason, "session_absent");
 }
 
 #[tokio::test]
@@ -1249,14 +1301,16 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
     let disposition = cron_session_disposition(&state.core, session_id)
         .await
         .expect("read retired session tombstone state");
-    let cron_state = cron_tick_test_state(session_id);
-    let super::CronTick::Cancel { trace } =
-        super::cron_tick_decision(disposition, &cron_state, "cron-job-retired-integration")
+    let mut cron_state = cron_tick_test_state(session_id);
+    cron_state.request.source_key = source_key.to_string();
+    let decision =
+        super::cron_tick_decision(disposition, &cron_state, "cron-job-retired-integration");
+    let super::CronTick::Cancel { trace, .. } = &decision
     else {
         panic!("a retired session must produce a cancel decision");
     };
     assert_eq!(
-        trace,
+        *trace,
         serde_json::json!({
             "job_key": "cron-job-retired-integration",
             "job_session_id": session_id,
@@ -1264,5 +1318,53 @@ async fn cron_tick_cancels_a_retired_session_with_typed_decision() {
             "session_state": "retired",
             "reason": "session_retired",
         })
+    );
+
+    let cancel_surface = RecordingCronTickCancelSurface::new(
+        state.clone(),
+        "cron-job-retired-integration",
+    );
+    assert_eq!(
+        super::handle_observed_cron_tick(&cancel_surface, &cron_state, decision)
+            .await
+            .expect("run the public retired-session cancel branch"),
+        super::CronTickHandling::Cancelled
+    );
+    assert_eq!(cancel_surface.events(), vec!["trace", "record", "clear"]);
+    assert!(
+        cancel_surface
+            .cleared
+            .load(std::sync::atomic::Ordering::SeqCst),
+        "the public cancel path clears cron state after recording the decision"
+    );
+
+    let occurrences = lash::triggers::TriggerStore::list_occurrences(
+        trigger_store.as_ref(),
+        lash::triggers::TriggerOccurrenceFilter::default(),
+    )
+    .await
+    .expect("list retired cron tick outcomes");
+    assert_eq!(
+        occurrences.len(),
+        1,
+        "every observed cron tick decision must persist exactly one typed outcome; records={occurrences:?}"
+    );
+    assert_eq!(occurrences[0].source_key, source_key);
+    assert_eq!(
+        occurrences[0].payload,
+        serde_json::json!({ "scheduled_for": cron_state.next_execution_time })
+    );
+    assert_eq!(
+        occurrences[0].outcome,
+        lash::triggers::TriggerOccurrenceOutcome::Dropped {
+            reason: "session_retired".to_string(),
+        }
+    );
+    assert!(
+        lash::triggers::TriggerStore::list_deliveries(trigger_store.as_ref())
+            .await
+            .expect("list retired cron tick deliveries")
+            .is_empty(),
+        "a dropped tick outcome must not wake its retired subscription"
     );
 }

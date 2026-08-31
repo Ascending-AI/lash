@@ -166,13 +166,17 @@ There are no dedup or time-window carve-outs:
 
 * `tool_intent_submissions` takes its owner from emission scoping — the
   submission belongs to the emission that produced it (FIG-1599, FIG-1509).
-* A trigger occurrence's owner is its delivery fan-out, in both directions. An
-  occurrence that matches zero deliveries is terminal at ingest-accounting time
-  and therefore immediately reclaimable. A *matched* occurrence becomes
-  reclaimable when its last delivery reaches a terminal state — which is what
-  makes the `trigger_deliveries` cascade stop being inert, since today the
-  parent never dies. FIG-1507 specs against both arms; neither is an exception
-  to the axiom, they are the axiom applied to a fan-out owner.
+* A fired trigger occurrence's owner is its delivery fan-out, in both directions.
+  A fired occurrence that matches zero deliveries is terminal at ingest-accounting
+  time and therefore immediately reclaimable. A *matched* fired occurrence becomes
+  reclaimable when its last delivery reaches a terminal state — which is what makes
+  the `trigger_deliveries` cascade stop being inert, since today the parent never
+  dies. An outcome-bearing non-fired occurrence is instead factory-owned durable
+  audit history. It reserves no fan-out and is never armed or selected by either
+  occurrence-retention path; delivery-free does not mean ownerless for this typed
+  row. FIG-1507 specs against both fired arms, while FIG-2316's shared conformance
+  law proves the non-fired audit exemption after both a host cutoff and a deleted
+  session frontier.
 
 ### 3. Scope-split trigger topology
 
@@ -207,7 +211,8 @@ terminal frontier, so its name fence remains durable.
 | Host or platform subscription tombstone | Host or platform namespace | Never. It is the permanent `Revive` name fence, and there is no purge lever. |
 | Session mutation receipt | Registering session's replay eligibility | The same ADR 0049 frontier and trigger-store reconciliation transaction. Receipts survive while any delivery owned by that session remains. Once the frontier is crossed and the delivery set is witnessed empty, post-deletion replay is impossible and the journal is reclaimed. |
 | Host or platform mutation receipt | Host or platform replay eligibility | The existing host-invoked `prune_mutation_receipts` cutoff. This policy is unchanged. |
-| Trigger occurrence | Committed delivery fan-out | Delivery-retention reconciliation deletes the occurrence only after witnessing zero remaining delivery rows. A zero-match occurrence has a committed empty fan-out at ingest, so the same predicate reclaims it. A matched occurrence waits for its last delivery. |
+| Fired trigger occurrence | Committed delivery fan-out | Delivery-retention reconciliation deletes the occurrence only after witnessing zero remaining delivery rows. A zero-match fired occurrence has a committed empty fan-out at ingest, so the same predicate reclaims it. A matched fired occurrence waits for its last delivery. |
+| Non-fired trigger occurrence | Factory-owned durable audit history | Never through delivery-fan-out retention. Its typed outcome is the history being retained, including after a scoped session crosses the deleted frontier. |
 | Trigger delivery | Deterministic process run | ADR 0021 process retention. This policy is unchanged. |
 
 The owner namespace added to new receipt JSON is not retroactive. Legacy

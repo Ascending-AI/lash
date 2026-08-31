@@ -329,15 +329,19 @@ impl TriggerStore for InMemoryTriggerStore {
             idempotency_key: request.idempotency_key.clone(),
             source: request.source,
             session_id: request.session_id,
+            outcome: request.outcome,
             occurred_at_ms: self.clock.timestamp_ms(),
         };
         state
             .occurrence_id_by_idempotency_key
             .insert(request.idempotency_key, occurrence_id.clone());
         state.occurrences.insert(occurrence_id, record.clone());
-        let reservations =
-            reserve_in_memory_for_occurrence(&mut state, &record, self.clock.as_ref())?;
-        if reservations.is_empty() {
+        let reservations = if record.outcome == TriggerOccurrenceOutcome::Fired {
+            reserve_in_memory_for_occurrence(&mut state, &record, self.clock.as_ref())?
+        } else {
+            Vec::new()
+        };
+        if record.outcome == TriggerOccurrenceOutcome::Fired && reservations.is_empty() {
             state
                 .occurrence_reclaimable_at_ms
                 .insert(record.occurrence_id.clone(), record.occurred_at_ms);
@@ -473,14 +477,15 @@ impl TriggerStore for InMemoryTriggerStore {
 
         let occurrence_ids = staged
             .occurrences
-            .keys()
-            .filter(|occurrence_id| {
-                !staged
-                    .deliveries
-                    .values()
-                    .any(|delivery| &delivery.occurrence_id == *occurrence_id)
+            .iter()
+            .filter(|(occurrence_id, occurrence)| {
+                occurrence.outcome == TriggerOccurrenceOutcome::Fired
+                    && !staged
+                        .deliveries
+                        .values()
+                        .any(|delivery| &delivery.occurrence_id == *occurrence_id)
             })
-            .cloned()
+            .map(|(occurrence_id, _)| occurrence_id.clone())
             .collect::<Vec<_>>();
         for occurrence_id in &occurrence_ids {
             #[cfg(any(test, feature = "testing"))]
@@ -589,7 +594,10 @@ impl TriggerStore for InMemoryTriggerStore {
         let deleted = before.saturating_sub(state.deliveries.len());
         let armed_at_ms = self.clock.timestamp_ms();
         for occurrence_id in affected_occurrence_ids {
-            if state.occurrences.contains_key(&occurrence_id)
+            if state
+                .occurrences
+                .get(&occurrence_id)
+                .is_some_and(|occurrence| occurrence.outcome == TriggerOccurrenceOutcome::Fired)
                 && !state
                     .deliveries
                     .values()
