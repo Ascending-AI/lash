@@ -520,6 +520,9 @@ pub mod facade_support {
     pub use crate::triggers::trigger_operation_receipt_id;
     pub use crate::triggers::validate_trigger_occurrence_request;
     pub use lash_sansio::AcceptedInjectedTurnInput;
+    pub use lash_sansio::AttachmentMaterializationNotice;
+    pub use lash_sansio::AttachmentMaterializationReason;
+    pub use lash_sansio::AttachmentMaterializationSource;
     pub use lash_sansio::AttachmentMeta;
     pub use lash_sansio::EffectId;
     pub use lash_sansio::ErrorEnvelope;

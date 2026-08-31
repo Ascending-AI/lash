@@ -321,6 +321,7 @@ fn project_tool_result_with_spill(
         call_id: ctx.call_id.clone(),
         tool_name: ctx.tool_name.clone(),
         parts,
+        attachment_notices: Vec::new(),
     })
 }
 

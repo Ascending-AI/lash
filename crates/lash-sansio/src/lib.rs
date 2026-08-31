@@ -80,12 +80,13 @@ pub use tool_contract::{
     schema_for, validate_tool_input,
 };
 pub use tool_output::{
-    ModelToolReturn, ModelToolReturnPart, ProcessParentEndPolicy, ToolCallOutcome, ToolCallOutput,
-    ToolCallRecord, ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
-    ToolFailureSource, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    ToolIntentParentEnd, ToolIntentParentEndAction, ToolIntentParentEndOutcome,
-    ToolIntentRefusalReason, ToolRetryStatus, ToolValue, format_tool_output_content,
-    model_parts_from_tool_output,
+    AttachmentMaterializationNotice, AttachmentMaterializationReason,
+    AttachmentMaterializationSource, ModelToolReturn, ModelToolReturnPart, ProcessParentEndPolicy,
+    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCallStatus, ToolCancellation, ToolControl,
+    ToolFailure, ToolFailureClass, ToolFailureSource, ToolIntentExecutionOutcome,
+    ToolIntentIdentity, ToolIntentKind, ToolIntentParentEnd, ToolIntentParentEndAction,
+    ToolIntentParentEndOutcome, ToolIntentRefusalReason, ToolRetryStatus, ToolValue,
+    format_tool_output_content, model_parts_from_tool_output,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

@@ -284,6 +284,7 @@ impl StandardContractToolResult {
                 parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
                 )],
+                attachment_notices: Vec::new(),
             },
             duration_ms: 1,
             intent_outcomes: Vec::new(),

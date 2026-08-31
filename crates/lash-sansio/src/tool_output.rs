@@ -883,11 +883,93 @@ pub enum ToolControl {
     },
 }
 
+/// Why Lash replaced an attachment with a model-visible placeholder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentMaterializationReason {
+    /// No provider in the shared adapter capability registry accepts this MIME/source pair.
+    NoProviderAcceptsMimeAndSource,
+}
+
+/// Stable source category carried by an attachment-materialization notice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentMaterializationSource {
+    /// Transient caller bytes.
+    Inline,
+    /// Session-owned durable bytes.
+    Stored,
+    /// Borrowed URL whose bytes Lash does not fetch.
+    ExternalUrl,
+    /// Provider-owned file reference.
+    ProviderFile,
+}
+
+/// Typed information explaining why an attachment is absent from model input.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentMaterializationNotice {
+    /// Stable attachment or provider-file id when the source carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment_id: Option<String>,
+    /// Human-facing attachment label when one was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Caller-declared MIME when the source carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// Ownership/source category of the omitted attachment.
+    pub source: AttachmentMaterializationSource,
+    /// Typed reason the attachment was omitted.
+    pub reason: AttachmentMaterializationReason,
+}
+
+impl AttachmentMaterializationNotice {
+    /// Build the deterministic notice for a MIME/source pair accepted by no known provider.
+    pub fn no_provider_accepts(source: &AttachmentSource) -> Self {
+        let media_type = source.media_type().map(ToString::to_string);
+        let (attachment_id, label, source) = match source {
+            AttachmentSource::Inline { .. } => {
+                (None, None, AttachmentMaterializationSource::Inline)
+            }
+            AttachmentSource::Stored { attachment_ref } => (
+                Some(attachment_ref.id.to_string()),
+                attachment_ref.label.clone(),
+                AttachmentMaterializationSource::Stored,
+            ),
+            AttachmentSource::ExternalUrl { .. } => {
+                (None, None, AttachmentMaterializationSource::ExternalUrl)
+            }
+            AttachmentSource::ProviderFile { id, .. } => (
+                Some(id.clone()),
+                None,
+                AttachmentMaterializationSource::ProviderFile,
+            ),
+        };
+        Self {
+            attachment_id,
+            label,
+            media_type,
+            source,
+            reason: AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource,
+        }
+    }
+
+    /// Render the typed notice as a deterministic model-facing placeholder.
+    pub fn model_placeholder(&self) -> String {
+        let payload = serde_json::to_string(self)
+            .unwrap_or_else(|_| "{\"reason\":\"no_provider_accepts_mime_and_source\"}".to_string());
+        format!("<attachment_unavailable>{payload}</attachment_unavailable>")
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelToolReturn {
     pub call_id: String,
     pub tool_name: String,
     pub parts: Vec<ModelToolReturnPart>,
+    /// Admission-time warnings attached without changing the tool's success outcome.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachment_notices: Vec<AttachmentMaterializationNotice>,
 }
 
 impl ModelToolReturn {
@@ -897,6 +979,7 @@ impl ModelToolReturn {
             call_id,
             tool_name,
             parts,
+            attachment_notices: Vec::new(),
         }
     }
 
@@ -905,6 +988,7 @@ impl ModelToolReturn {
             call_id,
             tool_name,
             parts: vec![ModelToolReturnPart::text(content)],
+            attachment_notices: Vec::new(),
         }
     }
 }
@@ -1156,6 +1240,38 @@ mod tests {
                 ModelToolReturnPart::Attachment(attachment_source("img")),
                 ModelToolReturnPart::text(",\"after\"]"),
             ]
+        );
+    }
+
+    #[test]
+    fn model_tool_return_skips_empty_notices_and_round_trips_typed_notice() {
+        let mut model_return = ModelToolReturn::from_output(
+            "call".to_string(),
+            "tool".to_string(),
+            &ToolCallOutput::success("ok"),
+        );
+        let accepted = serde_json::to_value(&model_return).expect("serialize accepted return");
+        assert!(accepted.get("attachment_notices").is_none());
+
+        let unsupported = AttachmentSource::stored(crate::AttachmentRef {
+            id: AttachmentId::parse("unsupported").expect("valid attachment id"),
+            media_type: MediaType::parse("application/octet-stream").expect("binary MIME"),
+            byte_len: 34,
+            type_metadata: None,
+            label: Some("artifact.bin".to_string()),
+        });
+        let notice = AttachmentMaterializationNotice::no_provider_accepts(&unsupported);
+        model_return.attachment_notices.push(notice.clone());
+        let encoded = serde_json::to_value(&model_return).expect("serialize noticed return");
+        assert_eq!(
+            encoded["attachment_notices"][0]["reason"],
+            "no_provider_accepts_mime_and_source"
+        );
+        assert_eq!(
+            serde_json::from_value::<ModelToolReturn>(encoded)
+                .expect("decode noticed return")
+                .attachment_notices,
+            vec![notice]
         );
     }
 

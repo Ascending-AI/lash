@@ -181,6 +181,7 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
             set_span(context, None, parent);
         }
         TraceEvent::PromptBuilt { .. }
+        | TraceEvent::AttachmentDegraded { .. }
         | TraceEvent::CompositionChanged { .. }
         | TraceEvent::RollingHistoryCompactionNeeded { .. }
         | TraceEvent::RollingHistoryPromptPruned { .. }

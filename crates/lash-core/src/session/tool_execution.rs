@@ -325,6 +325,7 @@ fn cancelled_completed_tool_call(
             parts: vec![crate::ModelToolReturnPart::text(
                 "[Tool execution cancelled]\ntool call cancelled".to_string(),
             )],
+            attachment_notices: Vec::new(),
         },
         output,
         duration_ms: 0,
@@ -567,8 +568,6 @@ impl RuntimeExecutionContext<'_> {
         let projection_args = outcome.record.args.clone();
         let projection_duration_ms = outcome.record.duration_ms;
         let projection_call_id = call_id.clone();
-        // Substrate-boundary allowlist: cooperative yield, no time decision.
-        tokio::task::yield_now().await;
         let plugins = std::sync::Arc::clone(&self.dispatch.plugins);
         let projection_context = crate::plugin::ToolResultProjectionContext {
             session_id: self.dispatch.session_id.clone(),
@@ -586,6 +585,7 @@ impl RuntimeExecutionContext<'_> {
                 err.to_string(),
             ),
         };
+        surface_attachment_materialization_notices(&output, &mut model_return);
         for intent_outcome in &outcome.intent_outcomes {
             model_return.parts.push(crate::ModelToolReturnPart::text(
                 intent_outcome.model_addendum(),
@@ -1102,6 +1102,63 @@ impl RuntimeExecutionContext<'_> {
     ) -> ToolInvocationReply {
         self.signal_process_handle(call_id, handle, signal_name, payload)
             .await
+    }
+}
+
+fn surface_attachment_materialization_notices(
+    output: &ToolCallOutput,
+    model_return: &mut ModelToolReturn,
+) {
+    for notice in output
+        .attachments()
+        .iter()
+        .filter_map(crate::attachments::attachment_materialization_notice)
+    {
+        model_return
+            .parts
+            .push(crate::ModelToolReturnPart::text(notice.model_placeholder()));
+        model_return.attachment_notices.push(notice);
+    }
+}
+
+#[cfg(test)]
+mod attachment_materialization_tests {
+    use super::*;
+
+    #[test]
+    fn successful_unsupported_attachment_surfaces_typed_admission_notice() {
+        let attachment_ref = crate::AttachmentRef {
+            id: crate::AttachmentId::parse("unsupported-tool-attachment").expect("attachment id"),
+            media_type: crate::MediaType::parse("application/octet-stream").expect("binary MIME"),
+            byte_len: 34,
+            type_metadata: None,
+            label: Some("workspace_badge.bin".to_string()),
+        };
+        let output = crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
+            crate::AttachmentSource::stored(attachment_ref),
+        ));
+        let mut model_return = crate::ModelToolReturn::from_output(
+            "call".to_string(),
+            "workspace_badge".to_string(),
+            &output,
+        );
+
+        surface_attachment_materialization_notices(&output, &mut model_return);
+
+        assert!(output.is_success(), "admission must not fail the tool");
+        assert_eq!(model_return.attachment_notices.len(), 1);
+        assert_eq!(
+            model_return.attachment_notices[0].reason,
+            crate::AttachmentMaterializationReason::NoProviderAcceptsMimeAndSource
+        );
+        assert!(model_return.parts.iter().any(|part| {
+            matches!(
+                part,
+                crate::ModelToolReturnPart::Text { text }
+                    if text.contains("attachment_unavailable")
+                        && text.contains("workspace_badge.bin")
+            )
+        }));
     }
 }
 

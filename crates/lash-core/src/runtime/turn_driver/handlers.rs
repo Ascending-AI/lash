@@ -99,6 +99,21 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         }
+        let mut request = request;
+        let degraded =
+            crate::attachments::degrade_unmaterializable_request_attachments(&mut request);
+        for notice in degraded {
+            self.emit_trace(
+                machine.protocol_iteration(),
+                lash_trace::TraceEvent::AttachmentDegraded {
+                    attachment_id: notice.attachment_id,
+                    label: notice.label,
+                    media_type: notice.media_type,
+                    source: notice.source,
+                    reason: notice.reason,
+                },
+            );
+        }
         self.ensure_queued_work_cost_is_bounded(&request)?;
         let (result, text_streamed, call_record) = match self
             .invoke_turn_llm_effect(machine, id, request, event_tx, cancel)

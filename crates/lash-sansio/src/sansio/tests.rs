@@ -199,6 +199,7 @@ fn completed_tool(
             call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
             parts: vec![ModelToolReturnPart::text(format!("{tool_name} result"))],
+            attachment_notices: Vec::new(),
         },
         duration_ms: 1,
         intent_outcomes: Vec::new(),
