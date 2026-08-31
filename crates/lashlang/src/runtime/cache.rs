@@ -227,6 +227,7 @@ struct CachedLinkedProgram {
     source_hash: u64,
     source: Arc<str>,
     dialect: CompilationDialect,
+    process_handles: std::collections::BTreeSet<String>,
     program: Arc<CompiledLinkedProgram>,
 }
 
@@ -343,6 +344,7 @@ impl LinkedProgramCache {
             source_hash,
             source: Arc::<str>::from(source),
             dialect,
+            process_handles: surface.process_handles.clone(),
             program: program.clone(),
         });
         Ok(program)
@@ -493,6 +495,7 @@ fn linked_program_matches(
         source_hash,
         source,
     ) && entry.dialect == dialect
+        && entry.process_handles == surface.process_handles
         && surface.satisfies(&entry.program.linked.artifact.host_requirements)
 }
 

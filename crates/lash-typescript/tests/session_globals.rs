@@ -47,6 +47,21 @@ fn a_live_session_global_can_be_read_shaped_and_rebound() {
 }
 
 #[test]
+fn a_restored_process_handle_is_awaitable_from_a_later_cell() {
+    let process_environment = environment(["handle"]).with_process_handles(["handle"]);
+    lash_typescript::link("finish(await handle);", &process_environment)
+        .expect("a restored live process handle must remain awaitable");
+
+    let ordinary_environment = environment(["handle"]);
+    let error = lash_typescript::link("finish(await handle);", &ordinary_environment)
+        .expect_err("an ordinary ambient value must not become awaitable");
+    assert!(
+        error.to_string().contains("TS_AWAIT_UNSUPPORTED"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_name_no_one_has_is_still_rejected_at_parse() {
     let environment = environment(["findings"]);
     let error = lash_typescript::link("finish(nowhere);", &environment)

@@ -7050,10 +7050,12 @@ lash::rlm::LashlangHostEnvironment::abilities
 lash::rlm::LashlangHostEnvironment::globals
 lash::rlm::LashlangHostEnvironment::language_features
 lash::rlm::LashlangHostEnvironment::new
+lash::rlm::LashlangHostEnvironment::process_handles
 lash::rlm::LashlangHostEnvironment::resources
 lash::rlm::LashlangHostEnvironment::satisfies
 lash::rlm::LashlangHostEnvironment::with_globals
 lash::rlm::LashlangHostEnvironment::with_language_features
+lash::rlm::LashlangHostEnvironment::with_process_handles
 lash::rlm::LashlangLanguageFeatures
 lash::rlm::LashlangLanguageFeatures::label_annotations
 lash::rlm::LashlangLanguageFeatures::satisfies

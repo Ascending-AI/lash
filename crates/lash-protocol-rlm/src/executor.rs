@@ -319,6 +319,8 @@ async fn execute_code_inner(
         live_global_names.extend(extension.bindings.names());
     }
     host_environment = host_environment.with_globals(live_global_names);
+    host_environment =
+        host_environment.with_process_handles(process_handle_names(state.rlm.globals()));
 
     // The kind is decided here, while the failure is still a typed diagnostic.
     // "Compilation failed" is not enough to classify it: a misspelled name and a
@@ -356,29 +358,33 @@ async fn execute_code_inner(
                 // Rendered against the cell source, not `to_string()`: the
                 // diagnostic carries a span and the model needs the line it
                 // wrote. Lashlang's parse failures have always arrived this way.
-                None => lash_typescript::parse_with_globals(code, &host_environment.globals)
-                    .map_err(|error| {
-                        (
-                            typescript_feedback_kind(&error),
-                            lash_typescript::format_diagnostic(code, &error),
+                None => lash_typescript::parse_with_globals_and_process_handles(
+                    code,
+                    &host_environment.globals,
+                    &host_environment.process_handles,
+                )
+                .map_err(|error| {
+                    (
+                        typescript_feedback_kind(&error),
+                        lash_typescript::format_diagnostic(code, &error),
+                    )
+                })
+                .and_then(|program| {
+                    state
+                        .linked_programs
+                        .get_or_compile_ast(
+                            code,
+                            program,
+                            &host_environment,
+                            lashlang::CompilationDialect::Typescript,
                         )
-                    })
-                    .and_then(|program| {
-                        state
-                            .linked_programs
-                            .get_or_compile_ast(
-                                code,
-                                program,
-                                &host_environment,
-                                lashlang::CompilationDialect::Typescript,
+                        .map_err(|error| {
+                            (
+                                lashlang_link_feedback_kind(&error),
+                                format_rlm_link_diagnostic(code, &error),
                             )
-                            .map_err(|error| {
-                                (
-                                    lashlang_link_feedback_kind(&error),
-                                    format_rlm_link_diagnostic(code, &error),
-                                )
-                            })
-                    }),
+                        })
+                }),
             },
         }
     };
@@ -591,6 +597,18 @@ async fn execute_code_inner(
         start,
         degraded_bindings,
     )
+}
+
+fn process_handle_names(globals: &lashlang::Record) -> BTreeSet<String> {
+    globals
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .as_record()
+                .is_some_and(lashlang::is_process_handle)
+                .then_some(name.to_string())
+        })
+        .collect()
 }
 
 /// Classifies a typed Lashlang runtime outcome before it enters the persisted
@@ -2309,6 +2327,29 @@ mod tests {
     }
 
     #[test]
+    fn process_handle_derivation_matches_runtime_await_authority() {
+        let globals = lashlang::from_json(serde_json::json!({
+            "canonical": { "__handle__": "process", "id": "p1" },
+            "alternate": { "handle": "p2" },
+            "empty_id": { "__handle__": "process", "id": "" },
+            "other_kind": { "__handle__": "tool", "id": "t1" },
+            "plain_record": { "id": "not-a-handle" },
+            "scalar": 1,
+        }));
+        let globals = globals.as_record().expect("fixture globals are a record");
+
+        assert_eq!(
+            process_handle_names(globals),
+            BTreeSet::from([
+                "alternate".to_string(),
+                "canonical".to_string(),
+                "empty_id".to_string(),
+                "other_kind".to_string(),
+            ])
+        );
+    }
+
+    #[test]
     fn execute_code_stores_process_module_artifact_once() {
         block_on(async {
             let mut state = RlmExecutionState::new();
@@ -2778,9 +2819,10 @@ mod tests {
                 session_policy,
             ),
         );
+        let mut state = RlmExecutionState::for_engine("typescript");
         let response = execute_code_with_dialect_and_bounds(
-            &mut RlmExecutionState::for_engine("typescript"),
-            ctx,
+            &mut state,
+            ctx.clone(),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
@@ -2794,8 +2836,8 @@ mod tests {
                 "#
                 .to_string(),
             },
-            artifact_store,
-            surface,
+            artifact_store.clone(),
+            surface.clone(),
             None,
             RlmProjectedBindings::default(),
             Arc::new(ProjectionRegistry::new()),
@@ -2839,6 +2881,139 @@ mod tests {
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!({ "ok": true }),
             ))
+        );
+    }
+
+    #[tokio::test]
+    async fn typescript_restored_process_handle_await_crosses_turn_boundary() {
+        let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+            Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+            Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
+        let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
+            lash_core::facade_support::NativeRuntimeEffectController::default()
+                .allow_process_lifetime_completion_keys(),
+        );
+        let surface = LashlangSurface::new(
+            lashlang::LashlangAbilities::default().with_processes(),
+            lashlang::LashlangLanguageFeatures::default(),
+            lashlang::LashlangHostCatalog::new(),
+        );
+        let session_policy = lash_core::SessionPolicy {
+            model: lash_core::ModelSpec::builder("mock-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("TypeScript cross-turn test model"),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        };
+        let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::new(controller.clone())
+                    .allow_process_lifetime_completion_keys(),
+            ),
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            process_env_store.clone(),
+            lash_core::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_process_engine(Arc::new(lash_lashlang_runtime::LashlangProcessEngine::new(
+            artifact_store.clone(),
+            surface.clone(),
+        )));
+        let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+        let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
+        let worker = lash_core::facade_support::DurableProcessWorker::new(
+            lash_core::facade_support::DurableProcessWorkerConfig::new(
+                Arc::new(lash_core::facade_support::PluginHost::new(
+                    lash_core::testing::test_code_protocol_factories(),
+                )),
+                runtime_host,
+                Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+                lash_core::WorkerProcessWork::SelfNative(watched),
+                Arc::new(lash_core::NoQueuedWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(session_policy.clone()),
+        )
+        .expect("valid test native substrate config");
+        let processes: Arc<dyn lash_core::ProcessService> =
+            Arc::new(TypeScriptSignalProcessService {
+                registry: registry.clone(),
+                controller: controller.clone(),
+            });
+        let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
+            Arc::new(EmptyTypeScriptSignalToolProvider),
+            lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
+            None,
+            processes,
+            controller,
+            process_env_store,
+            lash_core::ProcessExecutionEnvSpec::new(
+                lash_core::PluginOptions::default(),
+                session_policy,
+            ),
+        );
+        let mut state = RlmExecutionState::for_engine("typescript");
+        let turn_n = execute_code_with_dialect_and_bounds(
+            &mut state,
+            ctx.clone(),
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: r#"
+                    const worker = defineProcess({
+                      name: "worker", signals: {},
+                      run: async () => { return "done"; }
+                    });
+                    const handle = start(worker);
+                    finish("started");
+                "#
+                .to_string(),
+            },
+            artifact_store.clone(),
+            surface.clone(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            SourceDialect::Typescript,
+        )
+        .await;
+        assert!(turn_n.error.is_none(), "{:?}", turn_n.error);
+        assert_eq!(turn_n.terminal_finish, Some(serde_json::json!("started")));
+
+        let (turn_n_plus_one, _) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(
+                execute_code_with_dialect_and_bounds(
+                    &mut state,
+                    ctx,
+                    ExecRequest {
+                        language: "typescript".to_string(),
+                        code: "finish(await handle);".to_string(),
+                    },
+                    artifact_store,
+                    surface,
+                    None,
+                    RlmProjectedBindings::default(),
+                    Arc::new(ProjectionRegistry::new()),
+                    RlmLashlangExecutionTraceConfig::default(),
+                    lashlang::ExecutionBounds::unbounded(),
+                    SourceDialect::Typescript,
+                ),
+                worker.drive_pending_processes()
+            )
+        })
+        .await
+        .expect("turn N+1 process-handle await must not hang");
+        assert!(
+            turn_n_plus_one.error.is_none(),
+            "{:?}",
+            turn_n_plus_one.error
+        );
+        assert_eq!(
+            turn_n_plus_one.terminal_finish,
+            Some(serde_json::json!("done"))
         );
     }
 

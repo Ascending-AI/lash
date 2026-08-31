@@ -250,6 +250,11 @@ pub struct LashlangHostEnvironment {
     /// misspelled top-level names before execution starts.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub globals: BTreeSet<String>,
+    /// Names in `globals` whose live values are process handles. Dialects use
+    /// this semantic fact when classifying an ambient binding; it is separate
+    /// from membership because an ordinary restored value is not awaitable.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub process_handles: BTreeSet<String>,
     #[serde(default)]
     pub abilities: LashlangAbilities,
     #[serde(default)]
@@ -261,6 +266,7 @@ impl LashlangHostEnvironment {
         Self {
             resources,
             globals: BTreeSet::new(),
+            process_handles: BTreeSet::new(),
             abilities,
             language_features: LashlangLanguageFeatures::default(),
         }
@@ -268,6 +274,15 @@ impl LashlangHostEnvironment {
 
     pub fn with_globals(mut self, globals: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.globals.extend(globals.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn with_process_handles(
+        mut self,
+        process_handles: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.process_handles
+            .extend(process_handles.into_iter().map(Into::into));
         self
     }
 
