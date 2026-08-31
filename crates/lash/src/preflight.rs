@@ -164,6 +164,86 @@ struct Walk {
     not_scanned: Vec<NotScanned>,
 }
 
+/// Where a durable format gets its readability evidence.
+///
+/// This is deliberately exhaustive over [`DurableFormat`]. A new durable
+/// format must choose a bounded surface, a carrier, an explicit unwalkable
+/// disposition or the non-persisted case before the preflight can compile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SurfaceRelation {
+    /// The format is read directly from this surface. `primary` marks the
+    /// format used when a surface item cannot be attributed more precisely.
+    Walk {
+        surface: DurableSurface,
+        primary: bool,
+    },
+    /// The format's boundary is enforced by another durable format.
+    CarriedBy(DurableFormat),
+    /// No bounded preflight surface enumerates this format.
+    Unwalkable(&'static str),
+    /// The format has no stored counterpart.
+    NotPersisted,
+}
+
+const PRIMARY_FORMATS: [DurableFormat; 5] = [
+    DurableFormat::ModuleArtifact,
+    DurableFormat::SessionCheckpointManifest,
+    DurableFormat::ProcessWakeDelivery,
+    DurableFormat::LashlangSegmentHandover,
+    DurableFormat::RlmSnapshotEnvelope,
+];
+
+/// The single format-to-surface relation used by the preflight.
+fn format_surface(format: DurableFormat) -> SurfaceRelation {
+    match format {
+        DurableFormat::ModuleArtifact => SurfaceRelation::Walk {
+            surface: DurableSurface::ModuleArtifact,
+            primary: true,
+        },
+        DurableFormat::SessionCheckpointManifest => SurfaceRelation::Walk {
+            surface: DurableSurface::SessionCheckpoint,
+            primary: true,
+        },
+        DurableFormat::CheckpointComponentEncoding => SurfaceRelation::Walk {
+            surface: DurableSurface::SessionCheckpoint,
+            primary: false,
+        },
+        DurableFormat::SessionHeadMeta => SurfaceRelation::Unwalkable(
+            "no bounded surface: one row per session, refused at open rather than at rest",
+        ),
+        DurableFormat::ProcessWakeDelivery => SurfaceRelation::Walk {
+            surface: DurableSurface::PendingWake,
+            primary: true,
+        },
+        DurableFormat::SessionNodeBody => SurfaceRelation::Unwalkable(
+            "no bounded surface: one row per graph node, and the boundary is forward-only",
+        ),
+        DurableFormat::Bytecode => SurfaceRelation::Walk {
+            surface: DurableSurface::ParkedSegment,
+            primary: false,
+        },
+        DurableFormat::VmContinuation => SurfaceRelation::Walk {
+            surface: DurableSurface::ParkedSegment,
+            primary: false,
+        },
+        DurableFormat::LashlangSnapshot => {
+            SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope)
+        }
+        DurableFormat::HeapSizeSchedule => {
+            SurfaceRelation::CarriedBy(DurableFormat::VmContinuation)
+        }
+        DurableFormat::LashlangSegmentHandover => SurfaceRelation::Walk {
+            surface: DurableSurface::ParkedSegment,
+            primary: true,
+        },
+        DurableFormat::RlmSnapshotEnvelope => SurfaceRelation::Walk {
+            surface: DurableSurface::SessionExecutionState,
+            primary: true,
+        },
+        DurableFormat::VmAbi => SurfaceRelation::NotPersisted,
+    }
+}
+
 impl Walk {
     /// Page through one surface to exhaustion, folding every item into both the
     /// per-format tallies and the drain list.
@@ -367,18 +447,10 @@ impl Walk {
                 matches!(skipped, NotScanned::Surface { surface: skipped_surface, .. } if *skipped_surface == surface)
             })
         };
-        match format {
-            DurableFormat::ModuleArtifact => !unwalked(DurableSurface::ModuleArtifact),
-            DurableFormat::LashlangSegmentHandover
-            | DurableFormat::VmContinuation
-            | DurableFormat::Bytecode => !unwalked(DurableSurface::ParkedSegment),
-            DurableFormat::ProcessWakeDelivery => !unwalked(DurableSurface::PendingWake),
-            DurableFormat::SessionCheckpointManifest
-            | DurableFormat::CheckpointComponentEncoding => {
-                !unwalked(DurableSurface::SessionCheckpoint)
-            }
-            DurableFormat::RlmSnapshotEnvelope => !unwalked(DurableSurface::SessionExecutionState),
-            _ => false,
+        match format_surface(format) {
+            SurfaceRelation::Walk { surface, .. } => !unwalked(surface),
+            SurfaceRelation::CarriedBy(carrier) => self.walked(carrier),
+            SurfaceRelation::Unwalkable(_) | SurfaceRelation::NotPersisted => false,
         }
     }
 }
@@ -402,20 +474,22 @@ fn carrier_verdict(
 /// invented an independent check for them would be reporting a boundary that
 /// does not exist.
 fn carrier_of(format: DurableFormat) -> Option<DurableFormat> {
-    match format {
-        DurableFormat::LashlangSnapshot => Some(DurableFormat::RlmSnapshotEnvelope),
-        DurableFormat::HeapSizeSchedule => Some(DurableFormat::VmContinuation),
-        _ => None,
+    match format_surface(format) {
+        SurfaceRelation::CarriedBy(carrier) => Some(carrier),
+        SurfaceRelation::Walk { .. }
+        | SurfaceRelation::Unwalkable(_)
+        | SurfaceRelation::NotPersisted => None,
     }
 }
 
 fn evidence_for(format: DurableFormat, probe: FormatProbe) -> FormatEvidence {
-    if probe == FormatProbe::NotPersisted {
-        return FormatEvidence::NotPersisted;
-    }
-    match carrier_of(format) {
-        Some(carrier) => FormatEvidence::CarriedBy(carrier.name()),
-        None => FormatEvidence::Direct,
+    match format_surface(format) {
+        SurfaceRelation::NotPersisted => FormatEvidence::NotPersisted,
+        SurfaceRelation::CarriedBy(carrier) => FormatEvidence::CarriedBy(carrier.name()),
+        SurfaceRelation::Walk { .. } | SurfaceRelation::Unwalkable(_) => {
+            debug_assert_ne!(probe, FormatProbe::NotPersisted);
+            FormatEvidence::Direct
+        }
     }
 }
 
@@ -426,17 +500,15 @@ fn evidence_for(format: DurableFormat, probe: FormatProbe) -> FormatEvidence {
 /// highest-cardinality tables in the store. Naming them is the honest answer;
 /// walking them on every boot would make the preflight the outage it exists to
 /// prevent.
-fn unwalkable_formats() -> [(DurableFormat, &'static str); 2] {
-    [
-        (
-            DurableFormat::SessionHeadMeta,
-            "no bounded surface: one row per session, refused at open rather than at rest",
-        ),
-        (
-            DurableFormat::SessionNodeBody,
-            "no bounded surface: one row per graph node, and the boundary is forward-only",
-        ),
-    ]
+fn unwalkable_formats() -> impl Iterator<Item = (DurableFormat, &'static str)> {
+    durable_formats()
+        .iter()
+        .filter_map(|entry| match format_surface(entry.format) {
+            SurfaceRelation::Unwalkable(reason) => Some((entry.format, reason)),
+            SurfaceRelation::Walk { .. }
+            | SurfaceRelation::CarriedBy(_)
+            | SurfaceRelation::NotPersisted => None,
+        })
 }
 
 /// How an item is named on a drain list.
