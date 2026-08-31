@@ -183,6 +183,21 @@ pub mod store_backend_support {
         )
     }
 
+    /// Quote one turn-input state for interpolation into backend SQL.
+    pub fn state_sql_literal(state: crate::TurnInputState) -> String {
+        format!("'{}'", state.as_str())
+    }
+
+    /// Quote a turn-input state list for interpolation into backend SQL.
+    pub fn state_sql_literal_list(states: &[crate::TurnInputState]) -> String {
+        states
+            .iter()
+            .copied()
+            .map(state_sql_literal)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
     pub use crate::store::session_execution_lease::{
         SessionExecutionLeaseClaimIdentity, SessionExecutionLeaseFenceFacts,
