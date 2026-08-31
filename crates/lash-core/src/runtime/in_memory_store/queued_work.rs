@@ -476,6 +476,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                     .as_deref()
                     .map(str::to_string);
                 entry.claim_owner = None;
+                // A non-null pair at generation zero is the interrupted
+                // predecessor record, not a live claim. A live worker must
+                // reclaim it under a different, nonzero lease generation,
+                // replacing the predecessor pair before settlement.
                 entry.claim_session_lease_generation = 0;
             }
         }

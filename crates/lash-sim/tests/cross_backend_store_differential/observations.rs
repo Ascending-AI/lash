@@ -298,7 +298,6 @@ pub(super) fn queued_work_observation(
     ordinal: usize,
     batch: QueuedWorkBatch,
     claim_id: Option<String>,
-    _claim_owner: Option<LeaseOwnerIdentity>,
     claim_token_present: bool,
     claim_fencing_token: u64,
     claim_session_lease_generation: Option<u64>,

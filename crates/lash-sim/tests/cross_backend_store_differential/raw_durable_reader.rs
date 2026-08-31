@@ -66,7 +66,7 @@ impl RawDurableReader {
                             (
                                 batch,
                                 claim_id,
-                                claim_owner,
+                                _claim_owner,
                                 claim_token_present,
                                 claim_fencing_token,
                                 claim_session_lease_generation,
@@ -76,7 +76,6 @@ impl RawDurableReader {
                                 ordinal,
                                 batch,
                                 claim_id,
-                                claim_owner,
                                 claim_token_present,
                                 claim_fencing_token,
                                 claim_session_lease_generation,

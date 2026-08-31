@@ -291,10 +291,10 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     merge_key         TEXT,
     available_at_ms   INTEGER NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
-    claim_id          TEXT,
-    claim_token       TEXT,
+    claim_id          TEXT, -- With claim_token, names a live claim for a nonzero generation.
+    claim_token       TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
     claim_fencing_token INTEGER NOT NULL DEFAULT 0,
-    claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
+    claim_session_lease_generation INTEGER NOT NULL DEFAULT 0, -- Zero disambiguates the predecessor record from a live claim.
     CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
