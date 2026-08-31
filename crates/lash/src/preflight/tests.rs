@@ -246,6 +246,179 @@ fn component(report: &PreflightReport, format: DurableFormat) -> &ComponentReada
         .unwrap_or_else(|| panic!("the report has a row for {}", format.name()))
 }
 
+#[test]
+fn every_durable_format_has_one_explicit_surface_relation() {
+    let relations = [
+        (
+            DurableFormat::ModuleArtifact,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::ModuleArtifact,
+                primary: true,
+            },
+        ),
+        (
+            DurableFormat::SessionCheckpointManifest,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::SessionCheckpoint,
+                primary: true,
+            },
+        ),
+        (
+            DurableFormat::CheckpointComponentEncoding,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::SessionCheckpoint,
+                primary: false,
+            },
+        ),
+        (
+            DurableFormat::SessionHeadMeta,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: one row per session, refused at open rather than at rest",
+            ),
+        ),
+        (
+            DurableFormat::ProcessWakeDelivery,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::PendingWake,
+                primary: true,
+            },
+        ),
+        (
+            DurableFormat::SessionNodeBody,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: one row per graph node, and the boundary is forward-only",
+            ),
+        ),
+        (
+            DurableFormat::Bytecode,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::ParkedSegment,
+                primary: false,
+            },
+        ),
+        (
+            DurableFormat::VmContinuation,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::ParkedSegment,
+                primary: false,
+            },
+        ),
+        (
+            DurableFormat::LashlangSnapshot,
+            SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope),
+        ),
+        (
+            DurableFormat::HeapSizeSchedule,
+            SurfaceRelation::CarriedBy(DurableFormat::VmContinuation),
+        ),
+        (
+            DurableFormat::LashlangSegmentHandover,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::ParkedSegment,
+                primary: true,
+            },
+        ),
+        (
+            DurableFormat::RlmSnapshotEnvelope,
+            SurfaceRelation::Walk {
+                surface: DurableSurface::SessionExecutionState,
+                primary: true,
+            },
+        ),
+        (DurableFormat::VmAbi, SurfaceRelation::NotPersisted),
+    ];
+
+    assert_eq!(relations.len(), 13);
+    for (format, expected) in relations {
+        assert_eq!(
+            format_surface(format),
+            expected,
+            "{} relation",
+            format.name()
+        );
+    }
+    assert_eq!(
+        unwalkable_formats().collect::<Vec<_>>(),
+        vec![
+            (
+                DurableFormat::SessionHeadMeta,
+                "no bounded surface: one row per session, refused at open rather than at rest",
+            ),
+            (
+                DurableFormat::SessionNodeBody,
+                "no bounded surface: one row per graph node, and the boundary is forward-only",
+            ),
+        ]
+    );
+}
+
+#[test]
+fn named_formats_retain_walk_primary_and_evidence_answers() {
+    let named = [
+        (
+            DurableFormat::ModuleArtifact,
+            DurableSurface::ModuleArtifact,
+            FormatProbe::IdentityOnly,
+            DurableFormat::ModuleArtifact,
+        ),
+        (
+            DurableFormat::LashlangSegmentHandover,
+            DurableSurface::ParkedSegment,
+            FormatProbe::Comparable,
+            DurableFormat::LashlangSegmentHandover,
+        ),
+        (
+            DurableFormat::VmContinuation,
+            DurableSurface::ParkedSegment,
+            FormatProbe::Comparable,
+            DurableFormat::LashlangSegmentHandover,
+        ),
+        (
+            DurableFormat::Bytecode,
+            DurableSurface::ParkedSegment,
+            FormatProbe::IdentityOnly,
+            DurableFormat::LashlangSegmentHandover,
+        ),
+        (
+            DurableFormat::ProcessWakeDelivery,
+            DurableSurface::PendingWake,
+            FormatProbe::Comparable,
+            DurableFormat::ProcessWakeDelivery,
+        ),
+        (
+            DurableFormat::SessionCheckpointManifest,
+            DurableSurface::SessionCheckpoint,
+            FormatProbe::Comparable,
+            DurableFormat::SessionCheckpointManifest,
+        ),
+        (
+            DurableFormat::CheckpointComponentEncoding,
+            DurableSurface::SessionCheckpoint,
+            FormatProbe::Comparable,
+            DurableFormat::SessionCheckpointManifest,
+        ),
+        (
+            DurableFormat::RlmSnapshotEnvelope,
+            DurableSurface::SessionExecutionState,
+            FormatProbe::Comparable,
+            DurableFormat::RlmSnapshotEnvelope,
+        ),
+    ];
+
+    let walk = Walk::default();
+    for (format, surface, probe, expected_primary) in named {
+        assert!(walk.walked(format), "{} remains walkable", format.name());
+        assert_eq!(carrier_of(format), None, "{} remains direct", format.name());
+        assert_eq!(evidence_for(format, probe), FormatEvidence::Direct);
+        assert_eq!(
+            primary_format(surface),
+            expected_primary,
+            "{} surface retains its primary format",
+            format.name()
+        );
+    }
+}
+
 fn healthy_store() -> FakeStore {
     FakeStore::default()
         .with_database("durable core", 37, StoreSchemaVerdict::Matches)

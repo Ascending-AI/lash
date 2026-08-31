@@ -16,6 +16,7 @@
 use lash_core::{DurableItem, DurablePayload, DurableSurface};
 
 use super::msgpack;
+use super::{PRIMARY_FORMATS, SurfaceRelation, format_surface};
 use crate::formats::DurableFormat;
 
 /// One format observation pulled out of one stored payload.
@@ -58,17 +59,22 @@ pub(super) enum Extraction {
 /// The format a surface's payload primarily carries, used to attribute a
 /// payload that could not be fetched at all.
 pub(super) fn primary_format(surface: DurableSurface) -> DurableFormat {
-    match surface {
-        DurableSurface::ParkedSegment => DurableFormat::LashlangSegmentHandover,
-        DurableSurface::PendingWake => DurableFormat::ProcessWakeDelivery,
-        DurableSurface::SessionCheckpoint => DurableFormat::SessionCheckpointManifest,
-        DurableSurface::SessionExecutionState => DurableFormat::RlmSnapshotEnvelope,
-        DurableSurface::ModuleArtifact => DurableFormat::ModuleArtifact,
-        // A surface this build does not know is not a surface it can attribute;
-        // the manifest row it lands on is the checkpoint manifest, which is the
-        // one every backend has.
-        _ => DurableFormat::SessionCheckpointManifest,
-    }
+    PRIMARY_FORMATS
+        .iter()
+        .find_map(|format| match format_surface(*format) {
+            SurfaceRelation::Walk {
+                surface: primary_surface,
+                primary: true,
+            } if primary_surface == surface => Some(*format),
+            SurfaceRelation::Walk { .. }
+            | SurfaceRelation::CarriedBy(_)
+            | SurfaceRelation::Unwalkable(_)
+            | SurfaceRelation::NotPersisted => None,
+        })
+        // A surface this build does not know is not a surface it can
+        // attribute; the manifest row it lands on is the checkpoint manifest,
+        // which is the one every backend has.
+        .unwrap_or(DurableFormat::SessionCheckpointManifest)
 }
 
 /// Every format observation one item yields.
