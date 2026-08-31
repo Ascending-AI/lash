@@ -789,8 +789,10 @@ async fn run_user_turn(
     record_turn_output_for_model(
         &state,
         &session,
-        &request.turn_id,
-        &request.turn_id,
+        TurnOutputIdentity {
+            turn_id: &request.turn_id,
+            durable_turn_id: &request.turn_id,
+        },
         output,
         turn_state,
         "restate_user_turn.completed",
@@ -1084,8 +1086,10 @@ async fn run_queued_turn(
     record_turn_output_for_model(
         &state,
         &session,
-        &request.turn_id,
-        &turn_output_turn_id,
+        TurnOutputIdentity {
+            turn_id: &request.turn_id,
+            durable_turn_id: &turn_output_turn_id,
+        },
         output,
         turn_state,
         "restate_queued_turn.completed",
@@ -1277,8 +1281,10 @@ pub(crate) async fn record_turn_output(
     record_turn_output_for_model(
         state,
         session,
-        turn_id,
-        turn_id,
+        TurnOutputIdentity {
+            turn_id,
+            durable_turn_id: turn_id,
+        },
         output,
         turn_state,
         trace_name,
@@ -1301,8 +1307,10 @@ pub(crate) async fn record_turn_output_with_durable_turn_id(
     record_turn_output_for_model(
         state,
         session,
-        turn_id,
-        durable_turn_id,
+        TurnOutputIdentity {
+            turn_id,
+            durable_turn_id,
+        },
         output,
         turn_state,
         trace_name,
@@ -1311,11 +1319,15 @@ pub(crate) async fn record_turn_output_with_durable_turn_id(
     .await
 }
 
+struct TurnOutputIdentity<'a> {
+    turn_id: &'a str,
+    durable_turn_id: &'a str,
+}
+
 async fn record_turn_output_for_model(
     state: &AppState,
     session: &lash::LashSession,
-    turn_id: &str,
-    durable_turn_id: &str,
+    identity: TurnOutputIdentity<'_>,
     output: lash::TurnReport,
     turn_state: Arc<Mutex<TurnStreamState>>,
     trace_name: &str,
@@ -1369,7 +1381,7 @@ async fn record_turn_output_for_model(
         let remote_record: lash::remote::llm::RemoteLlmCallRecord = record.into();
         state.publish_for_session_identified(
             &session.session_id(),
-            format!("turn:{turn_id}:model-call:{call_id}"),
+            format!("turn:{}:model-call:{call_id}", identity.turn_id),
             crate::StreamItem::ModelCallRecorded {
                 record: remote_record,
             },
@@ -1380,7 +1392,7 @@ async fn record_turn_output_for_model(
             let message = format!("turn stopped · request {}", evidence.request_id);
             state.push_message_with_id_for_session(
                 &session.session_id(),
-                format!("turn:{turn_id}:cancelled"),
+                format!("turn:{}:cancelled", identity.turn_id),
                 "event",
                 message,
             );
@@ -1389,15 +1401,20 @@ async fn record_turn_output_for_model(
             let _ = stop;
             state.push_message_with_id_for_session(
                 &session.session_id(),
-                format!("turn:{turn_id}:failed"),
+                format!("turn:{}:failed", identity.turn_id),
                 "event",
                 crate::PUBLIC_TURN_FAILURE_MESSAGE,
             );
         }
         _ => {
             if workbench_owns_committed_agent_reply(&output) {
-                commit_assistant_transcript(session, turn_id, assistant_text.clone(), model)
-                    .await?;
+                commit_assistant_transcript(
+                    session,
+                    identity.turn_id,
+                    assistant_text.clone(),
+                    model,
+                )
+                .await?;
             }
             let live_turn_id = if output.assistant_message().is_some() {
                 session
@@ -1413,25 +1430,25 @@ async fn record_turn_output_for_model(
                                     ..
                                 }),
                                 "assistant",
-                            ) if committed_turn_id == durable_turn_id => {
+                            ) if committed_turn_id == identity.durable_turn_id => {
                                 Some(committed_turn_id.clone())
                             }
                             _ => None,
                         }
                     })
-                    .unwrap_or_else(|| durable_turn_id.to_string())
+                    .unwrap_or_else(|| identity.durable_turn_id.to_string())
             } else {
-                turn_id.to_string()
+                identity.turn_id.to_string()
             };
             state.push_assistant_message_for_turn(
                 &session.session_id(),
-                workbench_turn_assistant_message_id(turn_id),
+                workbench_turn_assistant_message_id(identity.turn_id),
                 &live_turn_id,
                 assistant_text,
             );
         }
     }
-    state.publish_turn_done(&session.session_id(), turn_id);
+    state.publish_turn_done(&session.session_id(), identity.turn_id);
     Ok(())
 }
 

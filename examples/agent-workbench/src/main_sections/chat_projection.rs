@@ -154,10 +154,10 @@ fn committed_turn_output_turn_ids(messages: &[ChatMessage]) -> BTreeSet<String> 
                 return None;
             }
 
-            match message.provenance.as_ref() {
-                Some(ChatMessageProvenance::TurnOutput { turn_id }) => Some(turn_id.clone()),
-                None => None,
-            }
+            message
+                .provenance
+                .as_ref()
+                .map(|ChatMessageProvenance::TurnOutput { turn_id }| turn_id.clone())
         })
         .collect()
 }
