@@ -29,6 +29,9 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
+toolbench model='z-ai/glm-5.3-flash' *args:
+  cargo run -p toolbench --locked -- --model "{{model}}" {{args}}
+
 # The slack-clone example is three processes: the platform on `port`, the bot on
 # `port + 1`, and the runtime-attachable HTTP MCP server on `port + 2`. `up`
 # starts them and waits for the bot to register for events.

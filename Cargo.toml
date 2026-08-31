@@ -34,6 +34,7 @@ members = [
     "crates/lash-typescript",
     "examples/agent-service",
     "examples/agent-workbench",
+    "examples/toolbench",
     "examples/docs-snippets",
     "examples/slack-clone",
     "examples/workflow-graph-roundtrip",
