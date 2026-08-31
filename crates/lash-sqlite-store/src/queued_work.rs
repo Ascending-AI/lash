@@ -157,6 +157,7 @@ pub(crate) fn claim_candidate_from_row(
         batch,
         row.claim_fencing_token,
         row.claim_id.clone(),
+        row.claim_token.clone(),
     ))
 }
 
@@ -175,12 +176,12 @@ pub(crate) fn queued_batch_row_from_sql(
         available_at_ms: u64_from_sql("QueuedWorkBatch", "available_at_ms", row.get(8)?)?,
         enqueued_at_ms: u64_from_sql("QueuedWorkBatch", "enqueued_at_ms", row.get(9)?)?,
         claim_fencing_token: u64_from_sql("QueuedWorkBatch", "claim_fencing_token", row.get(10)?)?,
-        claim_id: row.get(16)?,
-        claim_token: row.get(14)?,
+        claim_id: row.get(13)?,
+        claim_token: row.get(11)?,
         claim_session_lease_generation: u64_from_sql(
             "QueuedWorkBatch",
             "claim_session_lease_generation",
-            row.get(15)?,
+            row.get(12)?,
         )?,
     })
 }
@@ -193,8 +194,7 @@ pub(crate) fn load_queued_batch_by_id_conn(
         .query_row(
             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
              FROM queued_work_batches
              WHERE batch_id = ?1",
             params![batch_id],

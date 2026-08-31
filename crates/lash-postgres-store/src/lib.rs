@@ -263,7 +263,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 67 makes session-execution-lease identity all-or-none and removes the
 // unused owner-liveness column. Component-66 databases are rejected at open;
 // there is deliberately no migration arm.
-const SCHEMA_VERSION: i32 = 67;
+// Version 68 constrains queued-work vocabulary and claim correlation while
+// removing its unread owner columns. Component-67 databases are rejected at
+// open; there is deliberately no migration arm.
+const SCHEMA_VERSION: i32 = 68;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

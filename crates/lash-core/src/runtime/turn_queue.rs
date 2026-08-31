@@ -106,30 +106,27 @@ pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
 
 /// Semantic kind of one queued-work row.
 ///
-/// Control and cancellation rows are always claimed alone even when a
-/// producer assigns a merge key accidentally.
+/// Control rows are always claimed alone even when a producer assigns a merge
+/// key accidentally.
 ///
 /// This is also the durable ingress-family discriminator. [`Self::Control`]
 /// holds exactly when the row's payloads are session commands, because
 /// [`QueuedWorkBatchDraft::new`] derives the kind from the payloads and no
 /// setter exists to break the correspondence. Store ordering projections
-/// therefore read `work_kind = 'control'` for the session-command family rather
-/// than hydrating payloads. [`Self::Cancel`] belongs to neither side of that
-/// comparison: cancellation preempts on its own path.
+/// therefore compare `work_kind` with [`Self::Control`]'s stable value for the
+/// session-command family rather than hydrating payloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueuedWorkKind {
     Turn,
     Control,
-    Cancel,
 }
 
 impl QueuedWorkKind {
     /// Reports whether rows of this kind may join an adjacent compatible turn claim.
     ///
-    /// Only [`Self::Turn`] is batchable. Control and cancellation rows remain
-    /// single-row claims even when they carry the same merge key as neighboring
-    /// work.
+    /// Only [`Self::Turn`] is batchable. Control rows remain single-row claims
+    /// even when they carry the same merge key as neighboring work.
     pub fn is_batchable(self) -> bool {
         matches!(self, Self::Turn)
     }
@@ -142,20 +139,18 @@ impl QueuedWorkKind {
         match self {
             Self::Turn => "turn",
             Self::Control => "control",
-            Self::Cancel => "cancel",
         }
     }
 
     /// Parses a persisted queued-work kind without guessing at unknown values.
     ///
-    /// The accepted values are exactly `"turn"`, `"control"`, and `"cancel"`;
-    /// an unrecognized value returns `None` so a store can reject incompatible
+    /// The accepted values are exactly `"turn"` and `"control"`; an
+    /// unrecognized value returns `None` so a store can reject incompatible
     /// durable data instead of assigning unsafe batching semantics.
     pub fn from_wire_str(value: &str) -> Option<Self> {
         match value {
             "turn" => Some(Self::Turn),
             "control" => Some(Self::Control),
-            "cancel" => Some(Self::Cancel),
             _ => None,
         }
     }
@@ -683,6 +678,9 @@ pub struct QueuedWorkClaimData {
     /// durable protocol payload, so it is deliberately omitted from serde.
     #[serde(skip)]
     pub(crate) abandon_restore_claim_id: Option<String>,
+    /// Interrupted predecessor token paired with `abandon_restore_claim_id`.
+    #[serde(skip)]
+    pub(crate) abandon_restore_claim_token: Option<Box<str>>,
 }
 
 /// A shared work claim carrying queued-work batches.
@@ -869,4 +867,36 @@ pub fn process_wake_batch_draft_with_delivery_policy(
 
 pub fn process_wake_source_key(process_id: &str, sequence: u64) -> String {
     format!("process:{process_id}:event:{sequence}:wake")
+}
+
+#[cfg(test)]
+mod wire_tests {
+    use super::{DeliveryPolicy, QueuedWorkKind};
+
+    #[test]
+    fn queued_work_wire_values_match_the_persisted_ingress_encoding() {
+        assert_eq!(QueuedWorkKind::Turn.as_str(), "turn");
+        assert_eq!(QueuedWorkKind::Control.as_str(), "control");
+        assert_eq!(
+            QueuedWorkKind::from_wire_str("turn"),
+            Some(QueuedWorkKind::Turn)
+        );
+        assert_eq!(
+            QueuedWorkKind::from_wire_str("control"),
+            Some(QueuedWorkKind::Control)
+        );
+        assert_eq!(QueuedWorkKind::from_wire_str("cancel"), None);
+    }
+
+    #[test]
+    fn queued_work_delivery_policy_wire_values_match_the_persisted_ingress_encoding() {
+        assert_eq!(
+            DeliveryPolicy::EarliestSafeBoundary.as_str(),
+            "earliest_safe_boundary"
+        );
+        assert_eq!(
+            DeliveryPolicy::AfterCurrentTurnCommit.as_str(),
+            "after_current_turn_commit"
+        );
+    }
 }

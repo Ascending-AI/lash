@@ -82,6 +82,7 @@ mod tests {
         let claim = authority_fields(crate::QueuedWorkClaimData {
             batches: Vec::new(),
             abandon_restore_claim_id: None,
+            abandon_restore_claim_token: None,
         });
         assert_eq!(
             serde_json::to_string(&claim).expect("serialize queued claim"),

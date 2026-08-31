@@ -233,10 +233,6 @@ pub struct PendingWorkOrderingKey {
 /// session-command side is exactly the queued-work rows whose durable
 /// `work_kind` is [`crate::QueuedWorkKind::Control`].
 ///
-/// [`crate::QueuedWorkKind::Cancel`] rows belong to neither field: cancellation
-/// preempts through its own path and must not shift which ingress family drains
-/// first, so a pending cancel leaves both keys untouched.
-///
 /// [`Default`] is deliberately not derived. Both fields are public and both
 /// `None` means "nothing is pending on either side", which is a real answer
 /// about the store — an out-of-tree implementation must not be able to satisfy
@@ -308,6 +304,9 @@ pub struct ClaimCandidate {
     /// Matching identities describe the exact batch composition that already
     /// escaped into that generation's journaled command.
     pub prior_claim_id: Option<String>,
+    /// Durable token paired with `prior_claim_id` by the queued-work claim
+    /// correlation invariant.
+    pub prior_claim_token: Option<String>,
     pub work_class: QueuedWorkClass,
     /// Whether this row is exactly one `ApplyConfigPatch` command and can
     /// therefore share a drain commit with adjacent config patches.
@@ -326,6 +325,7 @@ impl ClaimCandidate {
         batch: &QueuedWorkBatch,
         claim_fencing_token: u64,
         prior_claim_id: Option<String>,
+        prior_claim_token: Option<String>,
     ) -> Self {
         let mut turn_causes = Vec::new();
         let mut input_texts = Vec::new();
@@ -350,6 +350,7 @@ impl ClaimCandidate {
             enqueue_seq: batch.enqueue_seq,
             claim_fencing_token,
             prior_claim_id,
+            prior_claim_token,
             work_class: batch.work_class().unwrap_or(QueuedWorkClass::TurnWork),
             config_patch_command,
             delivery_policy: batch.delivery_policy,

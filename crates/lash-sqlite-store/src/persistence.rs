@@ -195,6 +195,7 @@ fn sqlite_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> S
          )"
         );
     }
+    let earliest_safe_boundary = DeliveryPolicy::EarliestSafeBoundary.as_str();
     format!(
         "queued_work_unfiltered_head AS (
             SELECT enqueue_seq AS head_enqueue_seq,
@@ -224,10 +225,10 @@ fn sqlite_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> S
                   AND (
                        (
                             candidate.enqueue_seq = unfiltered.head_enqueue_seq
-                            AND unfiltered.head_delivery_policy = 'earliest_safe_boundary'
+                            AND unfiltered.head_delivery_policy = '{earliest_safe_boundary}'
                        )
                        OR (
-                            unfiltered.head_delivery_policy <> 'earliest_safe_boundary'
+                            unfiltered.head_delivery_policy <> '{earliest_safe_boundary}'
                             AND unfiltered.head_claim_id IS NOT NULL
                             AND (
                                  candidate.claim_id IS NULL
@@ -238,7 +239,7 @@ fn sqlite_queued_work_head_candidate_cte(boundary: QueuedWorkClaimBoundary) -> S
                 ORDER BY candidate.enqueue_seq ASC
                 LIMIT 1
             ) AS boundary_head
-            WHERE head_delivery_policy = 'earliest_safe_boundary'
+            WHERE head_delivery_policy = '{earliest_safe_boundary}'
          )"
     )
 }
@@ -249,8 +250,7 @@ fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) ->
         "WITH {head_candidate}
          SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                 work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
          FROM queued_work_batches
          CROSS JOIN queued_work_head_candidate
          WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
@@ -1825,7 +1825,6 @@ impl QueuedWorkStore for Store {
                             .take(selected_len)
                             .map(|candidate| candidate.claim_fencing_token),
                     )?;
-                    let liveness_json: Option<&str> = None;
                     for (row, sql_fencing_token) in
                         selected.iter().zip(sql_fencing_tokens.iter().copied())
                     {
@@ -1833,25 +1832,19 @@ impl QueuedWorkStore for Store {
                             .execute(
                                 "UPDATE queued_work_batches
                                  SET claim_id = ?3,
-                                     claim_owner_id = ?4,
-                                     claim_owner_incarnation_id = ?5,
-                                     claim_owner_liveness_json = ?6,
-                                     claim_token = ?7,
-                                     claim_fencing_token = ?9,
-                                     claim_session_lease_generation = ?8
+                                     claim_token = ?4,
+                                     claim_fencing_token = ?6,
+                                     claim_session_lease_generation = ?5
                                  WHERE session_id = ?1
                                    AND batch_id = ?2
                                    AND (
                                         claim_token IS NULL
-                                        OR claim_session_lease_generation <> ?8
+                                        OR claim_session_lease_generation <> ?5
                                    )",
                                 params![
                                     session_id,
                                     row.batch_id,
                                     lease.claim_id,
-                                    owner.owner_id.as_str(),
-                                    owner.incarnation_id.as_str(),
-                                    liveness_json,
                                     lease.lease_token,
                                     sql_session_lease_generation(lease.session_lease_generation,)?,
                                     sql_fencing_token,
@@ -1872,6 +1865,7 @@ impl QueuedWorkStore for Store {
                         data: lash_core::store_backend_support::queued_work_claim_data(
                             selected_batches,
                             candidates[0].prior_claim_id.clone(),
+                            candidates[0].prior_claim_token.clone(),
                         ),
                     })))
                 })(
@@ -1985,7 +1979,6 @@ impl QueuedWorkStore for Store {
                             .take(selected_len)
                             .map(|candidate| candidate.claim_fencing_token),
                     )?;
-                    let liveness_json: Option<&str> = None;
                     for (row, sql_fencing_token) in
                         selected.iter().zip(sql_fencing_tokens.iter().copied())
                     {
@@ -2001,25 +1994,19 @@ impl QueuedWorkStore for Store {
                             .execute(
                                 "UPDATE queued_work_batches
                                  SET claim_id = ?3,
-                                     claim_owner_id = ?4,
-                                     claim_owner_incarnation_id = ?5,
-                                     claim_owner_liveness_json = ?6,
-                                     claim_token = ?7,
-                                     claim_fencing_token = ?9,
-                                     claim_session_lease_generation = ?8
+                                     claim_token = ?4,
+                                     claim_fencing_token = ?6,
+                                     claim_session_lease_generation = ?5
                                  WHERE session_id = ?1
                                    AND batch_id = ?2
                                    AND (
                                         claim_token IS NULL
-                                        OR claim_session_lease_generation <> ?8
+                                        OR claim_session_lease_generation <> ?5
                                    )",
                                 params![
                                     session_id,
                                     row.batch_id,
                                     lease.claim_id,
-                                    owner.owner_id.as_str(),
-                                    owner.incarnation_id.as_str(),
-                                    liveness_json,
                                     lease.lease_token,
                                     sql_session_lease_generation(lease.session_lease_generation,)?,
                                     sql_fencing_token,
@@ -2046,6 +2033,7 @@ impl QueuedWorkStore for Store {
                             data: lash_core::store_backend_support::queued_work_claim_data(
                                 selected_batches,
                                 candidates[0].prior_claim_id.clone(),
+                                candidates[0].prior_claim_token.clone(),
                             ),
                         },
                     )))
@@ -2212,8 +2200,7 @@ impl QueuedWorkStore for Store {
                         let mut sql = "SELECT enqueue_seq, batch_id, session_id, source_key,
                                             delivery_policy, work_kind, authority_json, merge_key,
                                             available_at_ms, enqueued_at_ms, claim_fencing_token,
-                                            claim_owner_id, claim_owner_incarnation_id,
-                                            claim_owner_liveness_json, claim_token,
+                                            claim_token,
                                             claim_session_lease_generation, claim_id
                                      FROM queued_work_batches
                                      WHERE session_id = ? AND available_at_ms <= ?
@@ -2255,8 +2242,7 @@ impl QueuedWorkStore for Store {
                         let mut sql = "SELECT enqueue_seq, batch_id, session_id, source_key,
                                             delivery_policy, work_kind, authority_json, merge_key,
                                             available_at_ms, enqueued_at_ms, claim_fencing_token,
-                                            claim_owner_id, claim_owner_incarnation_id,
-                                            claim_owner_liveness_json, claim_token,
+                                            claim_token,
                                             claim_session_lease_generation, claim_id
                                      FROM queued_work_batches
                                      WHERE session_id = ? AND available_at_ms <= ?
@@ -2331,9 +2317,7 @@ impl QueuedWorkStore for Store {
                                     "SELECT enqueue_seq, batch_id, session_id, source_key,
                                                 delivery_policy, work_kind, authority_json,
                                                 merge_key, available_at_ms, enqueued_at_ms,
-                                                claim_fencing_token, claim_owner_id,
-                                                claim_owner_incarnation_id,
-                                                claim_owner_liveness_json, claim_token,
+                                                claim_fencing_token, claim_token,
                                                 claim_session_lease_generation, claim_id
                                          FROM queued_work_batches
                                          WHERE session_id = ?1 AND available_at_ms <= ?2
@@ -2414,28 +2398,22 @@ impl QueuedWorkStore for Store {
                             .iter()
                             .map(|candidate| candidate.claim_fencing_token),
                     )?;
-                    let owner_liveness_json: Option<&str> = None;
                     for (row, sql_fencing_token) in
                         rows.iter().zip(sql_fencing_tokens.iter().copied())
                     {
                         let changed = tx
                             .execute(
                                 "UPDATE queued_work_batches
-                                 SET claim_id = ?3, claim_owner_id = ?4,
-                                     claim_owner_incarnation_id = ?5,
-                                     claim_owner_liveness_json = ?6, claim_token = ?7,
-                                     claim_fencing_token = ?9,
-                                     claim_session_lease_generation = ?8
+                                 SET claim_id = ?3, claim_token = ?4,
+                                     claim_fencing_token = ?6,
+                                     claim_session_lease_generation = ?5
                                  WHERE session_id = ?1 AND batch_id = ?2
                                    AND (claim_token IS NULL
-                                        OR claim_session_lease_generation <> ?8)",
+                                        OR claim_session_lease_generation <> ?5)",
                                 params![
                                     session_id,
                                     row.batch_id,
                                     lease.claim_id,
-                                    owner.owner_id,
-                                    owner.incarnation_id,
-                                    owner_liveness_json,
                                     lease.lease_token,
                                     sql_session_lease_generation(lease.session_lease_generation)?,
                                     sql_fencing_token,
@@ -2460,6 +2438,7 @@ impl QueuedWorkStore for Store {
                             data: lash_core::store_backend_support::queued_work_claim_data(
                                 batches,
                                 candidates[0].prior_claim_id.clone(),
+                                candidates[0].prior_claim_token.clone(),
                             ),
                         }),
                         already_satisfied_batch_ids,
@@ -2483,18 +2462,24 @@ impl QueuedWorkStore for Store {
         let restore_claim_id =
             lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim)
                 .map(str::to_string);
+        let restore_claim_token =
+            lash_core::store_backend_support::queued_work_abandon_restore_claim_token(claim)
+                .map(str::to_string);
         self.conn
             .write(move |tx| {
                 tx.execute(
                     "UPDATE queued_work_batches
                      SET claim_id = ?4,
-                         claim_owner_id = NULL,
-                         claim_owner_incarnation_id = NULL,
-                         claim_owner_liveness_json = NULL,
-                         claim_token = NULL,
+                         claim_token = ?5,
                          claim_session_lease_generation = 0
                      WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
-                    params![session_id, claim_id, lease_token, restore_claim_id],
+                    params![
+                        session_id,
+                        claim_id,
+                        lease_token,
+                        restore_claim_id,
+                        restore_claim_token
+                    ],
                 )
             })
             .await
@@ -2517,10 +2502,7 @@ impl QueuedWorkStore for Store {
                     changed += tx.execute(
                         "UPDATE queued_work_batches
                          SET claim_id = ?4,
-                             claim_owner_id = NULL,
-                             claim_owner_incarnation_id = NULL,
-                             claim_owner_liveness_json = NULL,
-                             claim_token = NULL,
+                             claim_token = ?5,
                              claim_session_lease_generation = 0
                          WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3",
                         params![
@@ -2528,6 +2510,9 @@ impl QueuedWorkStore for Store {
                             claim.claim_id,
                             claim.lease_token,
                             lash_core::store_backend_support::queued_work_abandon_restore_claim_id(
+                                &claim,
+                            ),
+                            lash_core::store_backend_support::queued_work_abandon_restore_claim_token(
                                 &claim,
                             ),
                         ],
@@ -2555,8 +2540,7 @@ impl QueuedWorkStore for Store {
                         .query_row(
                             "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                                     work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                                    claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                                    claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
                              FROM queued_work_batches
                              WHERE session_id = ?1
                                AND batch_id = ?2
@@ -2638,8 +2622,7 @@ impl QueuedWorkStore for Store {
                             .prepare(
                                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                                         work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                                        claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                                        claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                                        claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
                                  FROM queued_work_batches
                                  WHERE session_id = ?1
                                  ORDER BY enqueue_seq ASC",
@@ -2681,7 +2664,7 @@ impl QueuedWorkStore for Store {
                                     SELECT enqueued_at_ms, enqueue_seq
                                     FROM queued_work_batches AS queued
                                     WHERE session_id = ?1
-                                      AND work_kind = 'control'
+                                      AND work_kind = ?4
                                       AND (claim_token IS NULL OR NOT EXISTS (
                                            SELECT 1 FROM session_execution_leases AS lease
                                            WHERE lease.session_id = ?1
@@ -2716,7 +2699,8 @@ impl QueuedWorkStore for Store {
                                 params![
                                     session_id,
                                     now as i64,
-                                    lash_core::TurnInputState::DeferredNextTurn.as_str()
+                                    lash_core::TurnInputState::DeferredNextTurn.as_str(),
+                                    QueuedWorkKind::Control.as_str()
                                 ],
                                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                             )
@@ -2767,8 +2751,7 @@ impl QueuedWorkStore for Store {
                             .prepare(
                                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                                         work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                                        claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                                        claim_owner_liveness_json, claim_token, claim_session_lease_generation, claim_id
+                                        claim_fencing_token, claim_token, claim_session_lease_generation, claim_id
                                  FROM queued_work_batches
                                  WHERE session_id = ?1
                                    AND (claim_token IS NULL OR NOT EXISTS (
@@ -3616,8 +3599,7 @@ fn sqlite_refusal_for_empty_scan(
             .prepare(&format!(
                 "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
                         work_kind, authority_json, merge_key, available_at_ms, enqueued_at_ms,
-                        claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
-                        claim_owner_liveness_json, claim_token, claim_session_lease_generation,
+                        claim_fencing_token, claim_token, claim_session_lease_generation,
                         claim_id
                  FROM queued_work_batches
                  WHERE {SQLITE_QUEUED_WORK_HEAD_CANDIDATE_PREDICATE}
@@ -3737,31 +3719,24 @@ fn claim_ready_queued_work_sqlite_conn(
             .take(selected_len)
             .map(|candidate| candidate.claim_fencing_token),
     )?;
-    let liveness_json: Option<&str> = None;
     for (row, sql_fencing_token) in selected.iter().zip(sql_fencing_tokens.iter().copied()) {
         let claimed = tx
             .execute(
                 "UPDATE queued_work_batches
                  SET claim_id = ?3,
-                     claim_owner_id = ?4,
-                     claim_owner_incarnation_id = ?5,
-                     claim_owner_liveness_json = ?6,
-                     claim_token = ?7,
-                     claim_fencing_token = ?9,
-                     claim_session_lease_generation = ?8
+                     claim_token = ?4,
+                     claim_fencing_token = ?6,
+                     claim_session_lease_generation = ?5
                  WHERE session_id = ?1
                    AND batch_id = ?2
                    AND (
                         claim_token IS NULL
-                        OR claim_session_lease_generation <> ?8
+                        OR claim_session_lease_generation <> ?5
                    )",
                 params![
                     session_id,
                     row.batch_id,
                     lease.claim_id,
-                    owner.owner_id.as_str(),
-                    owner.incarnation_id.as_str(),
-                    liveness_json,
                     lease.lease_token,
                     sql_session_lease_generation(lease.session_lease_generation)?,
                     sql_fencing_token,
@@ -3782,6 +3757,7 @@ fn claim_ready_queued_work_sqlite_conn(
         data: lash_core::store_backend_support::queued_work_claim_data(
             selected_batches,
             candidates[0].prior_claim_id.clone(),
+            candidates[0].prior_claim_token.clone(),
         ),
     })))
 }

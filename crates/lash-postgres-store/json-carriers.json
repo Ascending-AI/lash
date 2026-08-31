@@ -19,10 +19,6 @@
     "verdict": "deliberately-excluded",
     "reason": "QueuedWorkAuthority belongs to the shared queue protocol and lacks a JsonSchema durability contract; enroll with that protocol as a unit."
   },
-  "lash_queued_work_batches.claim_owner_liveness_json": {
-    "verdict": "not-serialized-struct",
-    "reason": "Reserved compatibility column; current claim writes always bind NULL and projection ignores its value."
-  },
   "lash_queued_work_items.payload_json": {
     "verdict": "deliberately-excluded",
     "reason": "QueuedWorkPayload is a shared runtime sum type; enrolling all command and wake variants is a separate queue-schema cutover."

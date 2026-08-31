@@ -84,10 +84,17 @@ pub mod store_backend_support {
     pub fn queued_work_claim_data(
         batches: Vec<crate::runtime::QueuedWorkBatch>,
         abandon_restore_claim_id: Option<String>,
+        abandon_restore_claim_token: Option<String>,
     ) -> crate::runtime::QueuedWorkClaimData {
+        assert_eq!(
+            abandon_restore_claim_id.is_some(),
+            abandon_restore_claim_token.is_some(),
+            "queued-work predecessor claim identity and token must be paired"
+        );
         crate::runtime::QueuedWorkClaimData {
             batches,
             abandon_restore_claim_id,
+            abandon_restore_claim_token: abandon_restore_claim_token.map(String::into_boxed_str),
         }
     }
 
@@ -97,6 +104,13 @@ pub mod store_backend_support {
         claim: &crate::runtime::QueuedWorkClaim,
     ) -> Option<&str> {
         claim.abandon_restore_claim_id.as_deref()
+    }
+
+    /// Return the interrupted predecessor token paired with its claim identity.
+    pub fn queued_work_abandon_restore_claim_token(
+        claim: &crate::runtime::QueuedWorkClaim,
+    ) -> Option<&str> {
+        claim.abandon_restore_claim_token.as_deref()
     }
 
     /// The one rule deciding whether an active-turn-scoped pending-input row is

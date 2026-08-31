@@ -92,7 +92,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     };
     let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
     restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
-    assert_eq!(PostgresStorage::schema_version(), 67);
+    assert_eq!(PostgresStorage::schema_version(), 68);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -146,6 +146,60 @@ async fn regenerate_postgres_durable_fixture() {
     .expect("write Postgres fixture version");
     std::fs::write(destination.join("fixture.sql"), pg_dump(&database_url))
         .expect("write Postgres fixture dump");
+    drop_fixture_schema(&database_url).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "refreshes only the refusal fixture catalog; preserves its component-v1 checkpoint"]
+async fn regenerate_postgres_prior_component_fixture_catalog() {
+    assert_eq!(
+        std::env::var(REGENERATE_ENV).as_deref(),
+        Ok("1"),
+        "set {REGENERATE_ENV}=1 to acknowledge refreshing the refusal fixture catalog"
+    );
+    let database_url = support::database_url()
+        .expect("set LASH_POSTGRES_DATABASE_URL to an owned throwaway database");
+    let _database_lock = support::SharedDatabaseLock::acquire(&database_url).await;
+    restore_dump_from(&database_url, &prior_component_fixture_dir()).await;
+    let fixture_database_url = fixture_database_url(&database_url);
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&fixture_database_url)
+        .await
+        .expect("connect to refresh refusal fixture catalog");
+    sqlx::raw_sql(
+        "ALTER TABLE lash_queued_work_batches
+             DROP CONSTRAINT IF EXISTS ck_queued_work_batches_work_kind,
+             DROP CONSTRAINT IF EXISTS ck_queued_work_batches_delivery_policy,
+             DROP CONSTRAINT IF EXISTS ck_queued_work_batches_claim_id_token_all_or_none,
+             DROP COLUMN IF EXISTS claim_owner_id,
+             DROP COLUMN IF EXISTS claim_owner_incarnation_id,
+             DROP COLUMN IF EXISTS claim_owner_liveness_json,
+             ADD CONSTRAINT ck_queued_work_batches_work_kind
+                 CHECK (work_kind IN ('turn', 'control')),
+             ADD CONSTRAINT ck_queued_work_batches_delivery_policy
+                 CHECK (delivery_policy IN ('earliest_safe_boundary',
+                                             'after_current_turn_commit')),
+             ADD CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none
+                 CHECK ((claim_id IS NULL AND claim_token IS NULL)
+                     OR (claim_id IS NOT NULL AND claim_token IS NOT NULL));
+         UPDATE lash_schema_versions
+            SET version = 68
+          WHERE component = 'lash-postgres-store';",
+    )
+    .execute(&pool)
+    .await
+    .expect("refresh refusal fixture queued-work catalog");
+    pool.close().await;
+    let storage = PostgresStorage::connect(&fixture_database_url)
+        .await
+        .expect("open the refreshed refusal fixture catalog");
+    storage.pool().close().await;
+    std::fs::write(
+        prior_component_fixture_dir().join("fixture.sql"),
+        pg_dump(&database_url),
+    )
+    .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
 }
 

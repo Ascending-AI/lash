@@ -388,6 +388,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                     &entry.batch,
                     entry.claim_fencing_token,
                     entry.claim_id.clone(),
+                    entry.claim_token.clone(),
                 )
             })
             .collect::<Vec<_>>();
@@ -416,6 +417,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .collect::<Result<Vec<_>, _>>()?;
         let first = &queued[indices[0]];
         let abandon_restore_claim_id = first.claim_id.clone();
+        let abandon_restore_claim_token = first.claim_token.clone();
         let fencing_token = next_fencing_tokens[0];
         let claim_id = crate::store::queued_work::derive_claim_id(
             crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
@@ -447,6 +449,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 data: crate::QueuedWorkClaimData {
                     batches,
                     abandon_restore_claim_id,
+                    abandon_restore_claim_token: abandon_restore_claim_token
+                        .map(String::into_boxed_str),
                 },
             }),
             already_satisfied_batch_ids,
@@ -467,7 +471,10 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                 self.abandoned_queued_work_claim_count
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 entry.claim_id = claim.abandon_restore_claim_id.clone();
-                entry.claim_token = None;
+                entry.claim_token = claim
+                    .abandon_restore_claim_token
+                    .as_deref()
+                    .map(str::to_string);
                 entry.claim_owner = None;
                 entry.claim_session_lease_generation = 0;
             }
@@ -553,8 +560,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                         || live_generation != Some(entry.claim_session_lease_generation))
             })
             .filter_map(|entry| {
-                // `work_kind = 'control'` is what the SQL projections read, and
-                // `Cancel` deliberately matches neither family.
+                // SQL projections compare against the stable `Control` wire value.
                 (entry.batch.kind == crate::QueuedWorkKind::Control).then_some(
                     crate::store::PendingWorkOrderingKey {
                         enqueued_at_ms: entry.batch.enqueued_at_ms,

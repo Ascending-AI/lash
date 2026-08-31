@@ -7355,6 +7355,10 @@ async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         successor_claim.abandon_restore_claim_id.as_deref(),
         Some(claim_a.claim_id.as_str())
     );
+    assert_eq!(
+        successor_claim.abandon_restore_claim_token.as_deref(),
+        Some(claim_a.lease_token.as_str())
+    );
     store
         .abandon_queued_work_claim(&successor_claim)
         .await
