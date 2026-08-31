@@ -934,6 +934,7 @@ fn is_reserved_global_name(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn host_cancellation_is_a_terminal_stop_not_a_program_error() {
@@ -954,47 +955,189 @@ mod tests {
     }
 
     #[test]
-    fn execution_started_map_predeclares_nodes_for_both_dialects() {
+    fn execution_started_inventory_matches_lifecycle_for_both_dialects() {
         block_on(async {
             for (language, source, dialect) in [
-                ("lashlang", "print 1\nfinish 1", SourceDialect::Lashlang),
+                (
+                    "lashlang",
+                    "first = await web.fetch({ url: \"a\" })?\nsecond = await web.fetch({ url: \"b\" })?\nfinish second",
+                    SourceDialect::Lashlang,
+                ),
                 (
                     "typescript",
-                    "console.log(1); finish(1);",
+                    "const first = await web.fetch({ url: 'a' }); const second = await web.fetch({ url: 'b' }); finish(second);",
                     SourceDialect::Typescript,
                 ),
             ] {
-                let program = match dialect {
-                    SourceDialect::Lashlang => lashlang::parse(source).expect("source parses"),
-                    SourceDialect::Typescript => {
-                        lash_typescript::parse(source).expect("source parses")
-                    }
-                };
-                let linked = lashlang::LinkedModule::link_with_dialect(
-                    program,
-                    lash_lashlang_runtime::LashlangSurface::default()
-                        .host_environment(&lash_core::ToolCatalog::default())
-                        .expect("host environment builds"),
-                    match dialect {
-                        SourceDialect::Lashlang => lashlang::CompilationDialect::Lashlang,
-                        SourceDialect::Typescript => lashlang::CompilationDialect::Typescript,
-                    },
-                )
-                .expect("source links");
-
-                let map = trace_main_map(&linked.artifact);
-                let node_kinds_and_labels = map
-                    .nodes
-                    .iter()
-                    .map(|node| (node.kind.as_str(), node.label.as_str()))
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    node_kinds_and_labels,
-                    [("terminal", "result")],
-                    "{language}: execution_started must predeclare the node inventory"
+                let evidence = execute_and_collect_inventory(source, language, dialect).await;
+                assert!(
+                    evidence.declared.len() > 1,
+                    "{language}: regression program must exercise multiple nodes, got {:?}",
+                    evidence.declared
                 );
+                assert_eq!(
+                    evidence.lifecycle_event_count,
+                    evidence.lifecycle.len() * 2,
+                    "{language}: every deterministic node must emit started and completed lifecycle events"
+                );
+
+                let declared_ids = evidence.declared.keys().collect::<Vec<_>>();
+                let lifecycle_ids = evidence.lifecycle.keys().collect::<Vec<_>>();
+                assert_eq!(
+                    declared_ids, lifecycle_ids,
+                    "{language}: execution_started and lifecycle node-id sets must be equal"
+                );
+
+                for (node_id, (node_kind, node_label)) in &evidence.lifecycle {
+                    let (declared_kind, declared_label) = evidence
+                        .declared
+                        .get(node_id)
+                        .expect("lifecycle node is pre-declared");
+                    assert_eq!(
+                        (node_kind, node_label),
+                        (declared_kind, declared_label),
+                        "{language}: lifecycle metadata must match execution_started for {node_id}"
+                    );
+                }
             }
         });
+    }
+
+    #[derive(Debug)]
+    struct InventoryEvidence {
+        declared: BTreeMap<String, (String, String)>,
+        lifecycle: BTreeMap<String, (String, String)>,
+        lifecycle_event_count: usize,
+    }
+
+    #[derive(Default)]
+    struct RecordingTraceSink(Mutex<Vec<TraceLanguageExecution>>);
+
+    impl TraceSink for RecordingTraceSink {
+        fn append(
+            &self,
+            record: &lash_core::facade_support::TraceRecord,
+        ) -> Result<(), lash_core::facade_support::TraceSinkError> {
+            if let lash_core::TraceEvent::LanguageExecution { event, .. } = &record.event {
+                self.0.lock().expect("trace sink lock").push(event.clone());
+            }
+            Ok(())
+        }
+    }
+
+    async fn execute_and_collect_inventory(
+        source: &str,
+        language: &str,
+        dialect: SourceDialect,
+    ) -> InventoryEvidence {
+        let sink = Arc::new(RecordingTraceSink::default());
+        let context =
+            lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                Arc::new(BindingRecordingDeferredProvider {
+                    executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                    observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
+                }),
+                lash_core::ToolCatalog::default(),
+                lash_core::testing::exec_code_invocation(
+                    format!("fig2365-{language}"),
+                    "turn-1",
+                    1,
+                    1,
+                    format!("exec-{language}"),
+                    format!("exec:{language}"),
+                ),
+            );
+        let mut state = RlmExecutionState::for_engine(language);
+        let response = execute_code_with_dialect_and_bounds(
+            &mut state,
+            context,
+            ExecRequest {
+                language: language.to_string(),
+                code: source.to_string(),
+            },
+            lashlang::global_in_memory_lashlang_artifact_store(),
+            LashlangSurface::default(),
+            Some(Arc::new(BindingDeferredResolver {
+                calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            })),
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig {
+                sink: Some(sink.clone()),
+                trace_context: TraceContext::default(),
+            },
+            lashlang::ExecutionBounds::unbounded(),
+            dialect,
+        )
+        .await;
+        assert_eq!(
+            response.error, None,
+            "{language}: regression program executes"
+        );
+
+        let events = sink.0.lock().expect("trace sink lock").clone();
+        let started = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                TraceLanguageExecutionPayload::ExecutionStarted { execution_map } => {
+                    Some(execution_map)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(started.len(), 1, "{language}: one execution_started event");
+
+        let mut declared = BTreeMap::new();
+        for node in &started[0].nodes {
+            assert!(
+                declared
+                    .insert(node.id.clone(), (node.kind.clone(), node.label.clone()))
+                    .is_none(),
+                "{language}: execution_started contains duplicate node id {}",
+                node.id
+            );
+        }
+        let mut lifecycle = BTreeMap::new();
+        let mut lifecycle_event_count = 0;
+        for event in events {
+            let node = match event.payload {
+                TraceLanguageExecutionPayload::NodeStarted {
+                    node_id,
+                    node_kind,
+                    label,
+                    ..
+                }
+                | TraceLanguageExecutionPayload::NodeCompleted {
+                    node_id,
+                    node_kind,
+                    label,
+                    ..
+                }
+                | TraceLanguageExecutionPayload::NodeFailed {
+                    node_id,
+                    node_kind,
+                    label,
+                    ..
+                } => Some((node_id, node_kind, label)),
+                _ => None,
+            };
+            if let Some((node_id, node_kind, label)) = node {
+                lifecycle_event_count += 1;
+                if let Some(previous) = lifecycle.insert(node_id.clone(), (node_kind, label)) {
+                    assert_eq!(
+                        lifecycle.get(&node_id),
+                        Some(&previous),
+                        "{language}: lifecycle metadata changed for {node_id}"
+                    );
+                }
+            }
+        }
+
+        InventoryEvidence {
+            declared,
+            lifecycle,
+            lifecycle_event_count,
+        }
     }
 
     #[test]
