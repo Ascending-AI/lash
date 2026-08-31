@@ -29,7 +29,6 @@ use crate::projection::{flow_to_json_value, format_output_value};
 
 pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
-    language_id: &'static str,
     print_projector: std::sync::Arc<dyn ValueProjector>,
     tool_result_projectors: Vec<crate::RlmToolResultProjector>,
     observations: Mutex<Vec<Observation>>,
@@ -47,7 +46,6 @@ pub(super) struct HostBridge<'run> {
 
 pub(super) struct HostBridgeConfig<'run> {
     pub ctx: RuntimeExecutionContext<'run>,
-    pub language_id: &'static str,
     pub print_projector: std::sync::Arc<dyn ValueProjector>,
     pub tool_result_projectors: Vec<crate::RlmToolResultProjector>,
     pub lashlang_execution_trace: Option<LashlangExecutionTrace>,
@@ -65,7 +63,6 @@ impl<'run> HostBridge<'run> {
     pub(super) fn new(config: HostBridgeConfig<'run>) -> Self {
         Self {
             ctx: config.ctx,
-            language_id: config.language_id,
             print_projector: config.print_projector,
             tool_result_projectors: config.tool_result_projectors,
             observations: Mutex::new(config.initial_observations),
@@ -173,8 +170,8 @@ impl<'run> HostBridge<'run> {
                 })
                 .unwrap_or_else(|| self.ctx.session_id().to_string());
             let mut call_id = format!(
-                "{}:{scope}:resource:{host_operation}:{}:{}",
-                self.language_id, call_site.site.node_id, call_site.occurrence
+                "lashlang:{scope}:resource:{host_operation}:{}:{}",
+                call_site.site.node_id, call_site.occurrence
             );
             if let Some(index) = index {
                 call_id.push_str(&format!(":child:{index}"));
@@ -183,8 +180,7 @@ impl<'run> HostBridge<'run> {
         }
         let index = index.unwrap_or(0);
         format!(
-            "{}:{}:resource:{host_operation}:index:{index}",
-            self.language_id,
+            "lashlang:{}:resource:{host_operation}:index:{index}",
             self.ctx.session_id()
         )
     }

@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use lash_lashlang_runtime::LashlangSurface;
 
-use crate::dialect::SourceDialect;
-
 use super::RlmExecutionState;
 use super::host_bridge::{HostBridge, HostBridgeConfig};
 
@@ -130,7 +128,6 @@ pub(crate) async fn execute_parked_cell_for_tests(
     let linked_module = cached_program.linked_module();
     let bridge = HostBridge::new(HostBridgeConfig {
         ctx,
-        language_id: SourceDialect::Typescript.language_id(),
         print_projector: Arc::new(crate::rlm_support::print_history_projector()),
         tool_result_projectors: Vec::new(),
         lashlang_execution_trace: None,

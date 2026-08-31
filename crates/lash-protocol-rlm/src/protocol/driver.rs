@@ -598,7 +598,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
                 if let Some(outcome) = terminal_outcome {
                     actions.push(DriverAction::AppendEvents(trajectory_events(
-                        self.dialect.language_id(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -635,7 +634,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &ctx,
                     &mut actions,
                     trajectory_events(
-                        self.dialect.language_id(),
                         ctx.turn_id(),
                         ctx.protocol_iteration(),
                         &state,
@@ -654,7 +652,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             }
 
             actions.push(DriverAction::AppendEvents(trajectory_events(
-                self.dialect.language_id(),
                 ctx.turn_id(),
                 ctx.protocol_iteration(),
                 &state,
@@ -676,14 +673,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             self.dialect.as_ref(),
             &ctx,
             &mut actions,
-            trajectory_events(
-                self.dialect.language_id(),
-                ctx.turn_id(),
-                ctx.protocol_iteration(),
-                &state,
-                None,
-                None,
-            ),
+            trajectory_events(ctx.turn_id(), ctx.protocol_iteration(), &state, None, None),
             Vec::new(),
             if state.exec_error.is_some() {
                 AttemptProgress::Stalled
@@ -892,7 +882,7 @@ fn continue_or_stop_after_nonterminal(
     }
 
     if progress == AttemptProgress::Stalled {
-        let attempts = stalled_attempts(ctx, actions, dialect.language_id());
+        let attempts = stalled_attempts(ctx, actions);
         let budget = ctx.no_progress_budget();
         if budget.is_exhausted_by(attempts) {
             actions.push(DriverAction::AppendEvents(vec![
@@ -1147,7 +1137,6 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
 }
 
 fn trajectory_entry(
-    language_id: &str,
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -1156,7 +1145,7 @@ fn trajectory_entry(
 ) -> RlmTrajectoryEntry {
     let error = validation_error.or_else(|| state.exec_error.clone());
     RlmTrajectoryEntry {
-        id: format!("{language_id}_step_{turn_id}_{protocol_iteration}"),
+        id: format!("lashlang_step_{turn_id}_{protocol_iteration}"),
         protocol_iteration,
         code: state.executed_code.clone().unwrap_or_default(),
         output: state.output.clone(),
@@ -1173,7 +1162,6 @@ fn rlm_message_id(turn_id: &str, protocol_iteration: usize, purpose: &str) -> St
 }
 
 fn trajectory_events(
-    language_id: &str,
     turn_id: &str,
     protocol_iteration: usize,
     state: &RlmDriverState,
@@ -1187,7 +1175,6 @@ fn trajectory_events(
         events.push(event);
     }
     events.push(trajectory_event(trajectory_entry(
-        language_id,
         turn_id,
         protocol_iteration,
         state,
@@ -1558,33 +1545,10 @@ mod tests {
             ..RlmDriverState::default()
         };
 
-        let entry = trajectory_entry("lashlang", "turn", 0, &state, None, None);
+        let entry = trajectory_entry("turn", 0, &state, None, None);
         let error = entry.error.expect("captured public error");
 
         assert_eq!(error, raw_error);
-    }
-
-    #[test]
-    fn trajectory_identity_uses_the_source_language() {
-        let lashlang = trajectory_entry(
-            "lashlang",
-            "turn",
-            0,
-            &RlmDriverState::default(),
-            None,
-            None,
-        );
-        let typescript = trajectory_entry(
-            "typescript",
-            "turn",
-            0,
-            &RlmDriverState::default(),
-            None,
-            None,
-        );
-
-        assert_eq!(lashlang.id, "lashlang_step_turn_0");
-        assert_eq!(typescript.id, "typescript_step_turn_0");
     }
 
     #[test]
