@@ -2131,6 +2131,79 @@ test("a failed /api/state is a visibly different render from an empty session", 
   assert.equal(outageRender.session, "unknown");
 });
 
+test("a terminal /api/state refusal renders its canonical error and stops retrying", async () => {
+  const shell = shellModule();
+  const canonical = "session `retired-session` was used and deleted; session ids cannot be reused in this store";
+  const errors = [];
+  const context = {
+    Error,
+    Math,
+    Number,
+    String,
+    Boolean,
+    Set,
+    cleanErrorText(message) { return String(message); },
+    STATE_REQUEST_TIMEOUT_MS: 5000,
+    errors,
+  };
+  const runtime = vm.runInNewContext(
+    `${markedSource("WORKBENCH_PROJECTION_STATE", "WORKBENCH_PROJECTION_STATE")}
+     ${markedSource("WORKBENCH_SHELL_AVAILABILITY", "WORKBENCH_SHELL_AVAILABILITY")}
+     const projectionState = createWorkbenchProjectionState();
+     const shellAvailability = createShellAvailability();
+     let streamGeneration = 0;
+     let fetchCalls = 0;
+     let retryTimers = 0;
+     let renderedModel = null;
+     function clearTimeout() {}
+     function setTimeout() {
+       retryTimers += 1;
+       return retryTimers;
+     }
+     const AbortSignal = { timeout() { return undefined; } };
+     function fetch() {
+       fetchCalls += 1;
+       return Promise.resolve({
+         ok: false,
+         status: 409,
+         async json() { return { error: ${JSON.stringify(canonical)} }; },
+       });
+     }
+     function renderShellStatus() {
+       renderedModel = shellStatusModel(shellAvailability, {});
+     }
+     function renderError(message, options) { errors.push([message, options]); }
+     function applyStateSnapshot() {}
+     function restartEventStreams() {}
+     ${markedSource("WORKBENCH_STATE_FETCH", "WORKBENCH_STATE_FETCH")}
+     ${markedSource("WORKBENCH_STATE_RECOVERY", "WORKBENCH_STATE_RECOVERY")}
+     ({
+       runLoadState: loadState,
+       fetchCalls: () => fetchCalls,
+       retryTimers: () => retryTimers,
+       renderedModel: () => renderedModel,
+       terminalDisposition: () => stateFailureDisposition(new StateSnapshotHttpError(409, "terminal")),
+       transportDisposition: () => stateFailureDisposition(new Error("connection reset")),
+     });`,
+    {
+      ...context,
+      shellStatusModel: shell.shellStatusModel,
+    },
+  );
+  await runtime.runLoadState();
+
+  assert.equal(runtime.fetchCalls(), 1);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0][0], canonical);
+  assert.equal(errors[0][1].retry, false);
+  assert.equal(runtime.retryTimers(), 0, "terminal refusals must not schedule retry backoff");
+  assert.equal(runtime.terminalDisposition(), "terminal");
+  assert.equal(runtime.transportDisposition(), "transport");
+  assert.equal(runtime.renderedModel().phase, "terminal");
+  assert.equal(runtime.renderedModel().banner.text, canonical);
+  assert.doesNotMatch(runtime.renderedModel().banner.text, /unreachable|retrying/);
+});
+
 test("a drop after hydration reconnects over the last known content", () => {
   const shell = shellModule();
   const availability = shell.markShellChannel(

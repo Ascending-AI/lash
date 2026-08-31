@@ -2925,6 +2925,21 @@
       };
     }
 
+    class StateSnapshotHttpError extends Error {
+      constructor(status, message) {
+        super(message);
+        this.name = "StateSnapshotHttpError";
+        this.status = status;
+        this.terminal = status >= 400 && status < 500;
+      }
+    }
+
+    function stateFailureDisposition(error) {
+      return error instanceof StateSnapshotHttpError && error.terminal
+        ? "terminal"
+        : "transport";
+    }
+
     /* `/api/state` has no server revision spanning its live and durable reads,
        so request order is the client authority. A request takes its sequence
        before I/O starts; only the newest request may apply. */
@@ -3093,14 +3108,25 @@
         hydrated: false,
         channels: { state: null, product: null, observation: null },
         established: { state: false, product: false, observation: false },
-        reasons: { state: "", product: "", observation: "" }
+        reasons: { state: "", product: "", observation: "" },
+        terminal: null
       };
     }
 
     function markShellChannel(availability, channel, reachable, reason = "") {
       availability.channels[channel] = reachable;
       if (reachable) availability.established[channel] = true;
+      if (reachable && availability.terminal?.channel === channel) {
+        availability.terminal = null;
+      }
       availability.reasons[channel] = reachable ? "" : (reason || availability.reasons[channel]);
+      return availability;
+    }
+
+    function markShellTerminal(availability, channel, reason) {
+      availability.channels[channel] = false;
+      availability.reasons[channel] = reason;
+      availability.terminal = { channel, reason };
       return availability;
     }
 
@@ -3134,6 +3160,7 @@
     }
 
     function shellPhase(availability) {
+      if (availability.terminal) return "terminal";
       const down = shellChannelDown(availability);
       if (availability.hydrated) {
         if (establishedChannelDown(availability)) return "reconnecting";
@@ -3150,6 +3177,7 @@
       if (phase === "reconnecting") {
         return "reconnecting. this is the last state the workbench reported — it may have moved on since.";
       }
+      if (phase === "terminal") return "the session is unavailable; see the error below.";
       return "the workbench is not answering. this is a connection problem, not an empty session: whatever this session is doing is unknown, not absent.";
     }
 
@@ -3206,6 +3234,16 @@
           hidden: false,
           text: "workbench unreachable — retrying",
           detail: shellReason(availability)
+        };
+        return model;
+      }
+      if (phase === "terminal") {
+        model.pillText = "refused";
+        model.subtitle = "session unavailable";
+        model.banner = {
+          hidden: false,
+          text: shellReason(availability),
+          detail: ""
         };
         return model;
       }
@@ -4695,6 +4733,10 @@
           token.snapshotSequence
         );
       } catch (error) {
+        if (handleTerminalStateFailure(error)) {
+          renderError(error.message, { retry: false });
+          return;
+        }
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();
@@ -5694,6 +5736,7 @@
     }
     // END WORKBENCH_STATE_SNAPSHOT
 
+    // BEGIN WORKBENCH_STATE_FETCH
     /* Every snapshot request is bounded. A backend that accepts the connection
        and then blocks on an unavailable engine is otherwise indistinguishable
        from a slow one, and an unbounded request leaves the shell in its
@@ -5708,10 +5751,11 @@
           const body = await response.json();
           if (typeof body?.error === "string" && body.error.trim()) message = body.error;
         } catch (_) { /* retain the status-bearing fallback */ }
-        throw new Error(message);
+        throw new StateSnapshotHttpError(response.status, message);
       }
       return await response.json();
     }
+    // END WORKBENCH_STATE_FETCH
 
     // BEGIN WORKBENCH_USAGE_PROJECTION
     let settledUsage = {};
@@ -5793,6 +5837,7 @@
     }
     // END WORKBENCH_USAGE_PROJECTION
 
+    // BEGIN WORKBENCH_STATE_RECOVERY
     const SETTLEMENT_STATE_REFRESH_DELAY_MS = 100;
     const SETTLEMENT_STATE_REFRESH_ATTEMPTS = 50;
 
@@ -5813,6 +5858,10 @@
         renderUsage(state.usage);
         renderShellStatus();
       } catch (error) {
+        if (handleTerminalStateFailure(error)) {
+          renderError(error.message, { retry: false });
+          return;
+        }
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();
@@ -5835,6 +5884,10 @@
         markShellChannel(shellAvailability, "state", true);
         renderShellStatus();
       } catch (error) {
+        if (handleTerminalStateFailure(error)) {
+          renderError(error.message, { retry: false });
+          return;
+        }
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();
@@ -5846,6 +5899,14 @@
         return "the workbench did not answer within " + (STATE_REQUEST_TIMEOUT_MS / 1000) + "s";
       }
       return cleanErrorText(error?.message || "the workbench did not answer");
+    }
+
+    function handleTerminalStateFailure(error) {
+      if (stateFailureDisposition(error) !== "terminal") return false;
+      cancelStateRetry();
+      markShellTerminal(shellAvailability, "state", error.message);
+      renderShellStatus();
+      return true;
     }
 
     // BEGIN WORKBENCH_STATE_RETRY
@@ -5915,6 +5976,10 @@
         /* re-attach the streams at the snapshot's cursors */
         restartEventStreams();
       } catch (error) {
+        if (handleTerminalStateFailure(error)) {
+          renderError(error.message, { retry: false });
+          return;
+        }
         markShellChannel(shellAvailability, "state", false, snapshotFailureReason(error));
         renderShellStatus();
         scheduleStateRetry();
@@ -5922,6 +5987,7 @@
       }
     }
     // END WORKBENCH_STATE_RETRY
+    // END WORKBENCH_STATE_RECOVERY
 
     function formatTime(ms) {
       if (!ms) return "";
