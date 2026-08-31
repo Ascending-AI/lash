@@ -52,8 +52,6 @@ pub async fn session_store_factory<F>(
     session_store_factory_claimable_queued_work_peek(make()).await;
     config_commands::session_store_factory_coalesces_config_command_claims(make()).await;
     config_commands::session_store_factory_bounds_config_command_claims(make()).await;
-    config_commands::session_config_settlement_timeout_is_typed(make()).await;
-    config_commands::cancelled_session_config_settlement_is_typed(make()).await;
     session_store_factory_never_used_delete_is_noop(make()).await;
     session_store_factory_rejects_writes_after_delete(make()).await;
     attachment_ownership_isolation(make()).await;
@@ -68,6 +66,16 @@ pub async fn session_store_factory<F>(
     session_store_factory_unbound_vacuum_is_typed_error(backend, unbound_store).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
+}
+
+#[cfg(test)]
+pub(super) async fn session_config_settlement_timeout_is_typed() {
+    config_commands::session_config_settlement_timeout_is_typed().await;
+}
+
+#[cfg(test)]
+pub(super) async fn cancelled_session_config_settlement_is_typed() {
+    config_commands::cancelled_session_config_settlement_is_typed().await;
 }
 
 /// Hold a backend to the read-only session-view contract.
