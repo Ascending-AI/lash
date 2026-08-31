@@ -29,11 +29,13 @@ use lash::messages::{MessageOrigin, MessageRole};
 use lash::persistence::ChronologicalPayload;
 use lash::{
     EmptyQueuedDrainReason, LashCore, LashSession, QueuedTurnDrain, QueuedWorkClaimRefusal,
-    TurnInput,
+    TurnInput, TurnOutcome, TurnStop,
 };
 use tokio::sync::RwLock;
 
-use super::ledger::{Claim, EventLedger, EventRecord, KIND_APP_MENTION, KIND_MESSAGE, Stage};
+use super::ledger::{
+    Claim, EventLedger, EventRecord, KIND_APP_MENTION, KIND_MESSAGE, ProviderFailure, Stage,
+};
 use super::runtime::session_id;
 use super::slack_api::{ChatPostMessageRequest, SlackApi, find_posted_reply};
 use super::threads;
@@ -133,6 +135,13 @@ pub enum Disposition {
         event_id: String,
         channel: String,
         reason: &'static str,
+    },
+    /// A turn reached a terminal provider failure. The typed failure is retained
+    /// in the ledger and surfaced here without reducing it to a string reason.
+    ProviderError {
+        event_id: String,
+        channel: String,
+        failure: ProviderFailure,
     },
     /// A turn provably committed this admission — there is a turn-input
     /// application record for it — and neither the ledger nor the committed
@@ -769,6 +778,21 @@ impl ChannelBot {
                 .await?;
         }
 
+        if matches!(
+            output.result.outcome,
+            TurnOutcome::Stopped(TurnStop::ProviderError)
+        ) && let Some(failure) = provider_failure(&output.result)
+        {
+            self.ledger
+                .advance_provider_error(record.event_id.clone(), record.stage, failure.clone())
+                .await?;
+            return Ok(Disposition::ProviderError {
+                event_id: record.event_id.clone(),
+                channel: record.channel_id.clone(),
+                failure,
+            });
+        }
+
         let Some(reply) = output
             .result
             .assistant_message()
@@ -1126,6 +1150,18 @@ impl ChannelBot {
             registry: Arc::clone(&self.session_locks),
         }
     }
+}
+
+fn provider_failure(report: &lash::TurnReport) -> Option<ProviderFailure> {
+    let issue = report.errors.iter().find(|issue| {
+        issue.terminal_reason == Some(lash::direct::LlmTerminalReason::ProviderError)
+    })?;
+    Some(ProviderFailure {
+        kind: issue.provider_failure_kind.unwrap_or_default(),
+        code: issue.code.clone(),
+        message: issue.message.clone(),
+        retryable: issue.retryable.unwrap_or(false),
+    })
 }
 
 /// One scoped reference to a routed-session lock.

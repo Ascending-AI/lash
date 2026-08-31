@@ -20,6 +20,7 @@
 //! thing being guarded against is concurrency the bot does not control.
 
 use anyhow::Result;
+use lash::provider::ProviderFailureKind;
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::store::SqliteHandle;
@@ -65,16 +66,31 @@ CREATE TABLE IF NOT EXISTS event_admission_boundaries (
     event_id TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
     node_id  TEXT NOT NULL
 );
+
+-- Provider failures are terminal operator evidence, not free-form ledger detail.
+-- Keep them in an additive companion table so existing FIG-1008 rows upgrade
+-- without rewriting their settled state.
+CREATE TABLE IF NOT EXISTS event_provider_failures (
+    event_id   TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL,
+    code       TEXT,
+    message    TEXT NOT NULL,
+    retryable  INTEGER NOT NULL
+);
 ";
 
 /// Columns every read projects, in the order [`read_row`] expects.
 const BASE_COLUMNS: &str =
     "event_id, channel_id, message_ts, kind, stage, input_text, reply_ts, detail, deliveries";
-const COLUMNS: &str = "handled_events.event_id, channel_id, message_ts, kind, stage, input_text, \
-     reply_ts, detail, deliveries, event_routes.thread_ts, event_routes.input_id, \
-     event_routes.fork_node_id, event_admission_boundaries.node_id";
+const COLUMNS: &str = "handled_events.event_id, handled_events.channel_id, handled_events.message_ts, \
+     handled_events.kind, handled_events.stage, handled_events.input_text, handled_events.reply_ts, \
+     handled_events.detail, handled_events.deliveries, event_routes.thread_ts, event_routes.input_id, \
+     event_routes.fork_node_id, event_admission_boundaries.node_id, \
+     event_provider_failures.kind, event_provider_failures.code, \
+     event_provider_failures.message, event_provider_failures.retryable";
 const ROUTE_JOINS: &str = "LEFT JOIN event_routes USING(event_id) \
-     LEFT JOIN event_admission_boundaries USING(event_id)";
+     LEFT JOIN event_admission_boundaries USING(event_id) \
+     LEFT JOIN event_provider_failures USING(event_id)";
 
 /// Event kind for a message that mentions the bot.
 pub const KIND_APP_MENTION: &str = "app_mention";
@@ -93,6 +109,9 @@ pub enum Stage {
     Folded,
     /// Reply posted; `reply_ts` names it. Terminal.
     Replied,
+    /// A turn reached a terminal provider failure. Terminal, with the typed
+    /// failure in [`EventRecord::provider_failure`].
+    ProviderError,
     /// Deliberately not acted on. Terminal.
     Ignored,
 }
@@ -100,7 +119,10 @@ pub enum Stage {
 impl Stage {
     /// Whether the event needs no further work.
     pub fn is_terminal(self) -> bool {
-        matches!(self, Stage::Folded | Stage::Replied | Stage::Ignored)
+        matches!(
+            self,
+            Stage::Folded | Stage::Replied | Stage::ProviderError | Stage::Ignored
+        )
     }
 
     /// Wire/storage name.
@@ -110,6 +132,7 @@ impl Stage {
             Stage::ReplyPending => "reply_pending",
             Stage::Folded => "folded",
             Stage::Replied => "replied",
+            Stage::ProviderError => "provider_error",
             Stage::Ignored => "ignored",
         }
     }
@@ -119,6 +142,7 @@ impl Stage {
             "reply_pending" => Stage::ReplyPending,
             "folded" => Stage::Folded,
             "replied" => Stage::Replied,
+            "provider_error" => Stage::ProviderError,
             "ignored" => Stage::Ignored,
             // An unknown stage is treated as unfinished rather than done: the
             // recovery path is idempotent, so re-running is safe and silently
@@ -126,6 +150,15 @@ impl Stage {
             _ => Stage::Accepted,
         }
     }
+}
+
+/// Typed provider failure retained by the operator-facing event ledger.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderFailure {
+    pub kind: ProviderFailureKind,
+    pub code: Option<String>,
+    pub message: String,
+    pub retryable: bool,
 }
 
 /// One ledger row.
@@ -152,6 +185,8 @@ pub struct EventRecord {
     /// Retained channel boundary captured while a folded top-level admission held
     /// the channel lock. Used only while the root is still queued.
     pub admission_node_id: Option<String>,
+    /// Typed provider failure that terminalized this event, when any.
+    pub provider_failure: Option<ProviderFailure>,
 }
 
 /// The outcome of claiming an event for handling.
@@ -318,9 +353,9 @@ impl EventLedger {
                 let mut statement = connection.prepare(&format!(
                     "SELECT {COLUMNS} FROM handled_events
                      {ROUTE_JOINS}
-                     WHERE channel_id = ?1 AND message_ts <= ?2
-                       AND event_routes.thread_ts IS NULL AND input_text IS NOT NULL
-                     ORDER BY message_ts, first_seen_at"
+                     WHERE handled_events.channel_id = ?1 AND handled_events.message_ts <= ?2
+                       AND event_routes.thread_ts IS NULL AND handled_events.input_text IS NOT NULL
+                     ORDER BY handled_events.message_ts, handled_events.first_seen_at"
                 ))?;
                 Ok(statement
                     .query_map(params![channel_id, message_ts], read_row)?
@@ -342,10 +377,10 @@ impl EventLedger {
                         &format!(
                             "SELECT {COLUMNS} FROM handled_events
                              {ROUTE_JOINS}
-                             WHERE channel_id = ?1 AND message_ts = ?2
+                             WHERE handled_events.channel_id = ?1 AND handled_events.message_ts = ?2
                                AND event_routes.thread_ts IS NULL
-                               AND input_text IS NOT NULL
-                             ORDER BY CASE kind WHEN 'app_mention' THEN 0 ELSE 1 END
+                               AND handled_events.input_text IS NOT NULL
+                             ORDER BY CASE handled_events.kind WHEN 'app_mention' THEN 0 ELSE 1 END
                              LIMIT 1"
                         ),
                         params![channel_id, message_ts],
@@ -375,9 +410,9 @@ impl EventLedger {
                         &format!(
                             "SELECT {COLUMNS} FROM handled_events
                              {ROUTE_JOINS}
-                             WHERE channel_id = ?1 AND message_ts = ?2
+                             WHERE handled_events.channel_id = ?1 AND handled_events.message_ts = ?2
                                AND event_routes.thread_ts IS NULL
-                             ORDER BY CASE kind WHEN 'app_mention' THEN 0 ELSE 1 END
+                             ORDER BY CASE handled_events.kind WHEN 'app_mention' THEN 0 ELSE 1 END
                              LIMIT 1"
                         ),
                         params![channel_id, message_ts],
@@ -419,6 +454,52 @@ impl EventLedger {
                         now_seconds(),
                     ],
                 )?;
+                Ok(updated == 1)
+            })
+            .await
+    }
+
+    /// Terminalize an event with its typed provider failure atomically.
+    pub async fn advance_provider_error(
+        &self,
+        event_id: String,
+        from: Stage,
+        failure: ProviderFailure,
+    ) -> Result<bool> {
+        self.database
+            .call(move |connection| {
+                let transaction = connection.transaction()?;
+                let updated = transaction.execute(
+                    "UPDATE handled_events
+                     SET stage = ?3, updated_at = ?4
+                     WHERE event_id = ?1 AND stage = ?2",
+                    params![
+                        event_id,
+                        from.as_str(),
+                        Stage::ProviderError.as_str(),
+                        now_seconds()
+                    ],
+                )?;
+                if updated == 1 {
+                    transaction.execute(
+                        "INSERT INTO event_provider_failures
+                            (event_id, kind, code, message, retryable)
+                         VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(event_id) DO UPDATE SET
+                            kind = excluded.kind,
+                            code = excluded.code,
+                            message = excluded.message,
+                            retryable = excluded.retryable",
+                        params![
+                            event_id,
+                            failure.kind.code(),
+                            failure.code,
+                            failure.message,
+                            failure.retryable as i64,
+                        ],
+                    )?;
+                }
+                transaction.commit()?;
                 Ok(updated == 1)
             })
             .await
@@ -484,6 +565,7 @@ fn read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         input_id: row.get(10)?,
         fork_node_id: row.get(11)?,
         admission_node_id: row.get(12)?,
+        provider_failure: provider_failure_from_row(row, 13)?,
     })
 }
 
@@ -502,7 +584,41 @@ fn read_base_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRecord> {
         input_id: None,
         fork_node_id: None,
         admission_node_id: None,
+        provider_failure: None,
     })
+}
+
+fn provider_failure_from_row(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> rusqlite::Result<Option<ProviderFailure>> {
+    let kind: Option<String> = row.get(offset)?;
+    let code: Option<String> = row.get(offset + 1)?;
+    let message: Option<String> = row.get(offset + 2)?;
+    let retryable: Option<i64> = row.get(offset + 3)?;
+    Ok(match (kind, message, retryable) {
+        (Some(kind), Some(message), Some(retryable)) => Some(ProviderFailure {
+            kind: parse_provider_failure_kind(&kind),
+            code,
+            message,
+            retryable: retryable != 0,
+        }),
+        _ => None,
+    })
+}
+
+fn parse_provider_failure_kind(raw: &str) -> ProviderFailureKind {
+    match raw {
+        "transport" => ProviderFailureKind::Transport,
+        "timeout" => ProviderFailureKind::Timeout,
+        "http" => ProviderFailureKind::Http,
+        "stream" => ProviderFailureKind::Stream,
+        "auth" => ProviderFailureKind::Auth,
+        "validation" => ProviderFailureKind::Validation,
+        "quota" => ProviderFailureKind::Quota,
+        "unsupported" => ProviderFailureKind::Unsupported,
+        _ => ProviderFailureKind::Unknown,
+    }
 }
 
 fn now_seconds() -> i64 {
