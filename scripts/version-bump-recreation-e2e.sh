@@ -84,10 +84,12 @@ harness health 2>&1 | tee "$artifact_dir/04-health.jsonl" | tee -a "$test_output
 
 python3 - "$artifact_dir" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
 artifacts = Path(sys.argv[1])
+expected_dialect = os.environ.get("LASH_RUNBOOK_DIALECT", "lashlang")
 
 
 def checkpoint(name, filename):
@@ -121,6 +123,10 @@ EXPECTED_REFUSAL_KINDS = {
 }
 
 seeded = checkpoint("seeded_older_deployment", "01-seed.jsonl")
+if seeded.get("dialect") != expected_dialect:
+    fail(
+        f"seeded checkpoint did not record served dialect {expected_dialect!r}: {seeded}"
+    )
 if seeded["recorded_version"] != seeded["expected_version"] - 1:
     fail(f"seed did not record the previous component version: {seeded}")
 for field in ("session_ids", "process_ids", "trigger_process_ids"):

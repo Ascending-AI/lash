@@ -593,6 +593,7 @@ async fn seed(database_url: &str) -> Result<()> {
         .context("create the pre-bump store")?;
     let pool = storage.pool().clone();
     let expected_version = recorded_version(&pool).await?;
+    let dialect = lash_restate_postgres_workers_e2e::runbook_rlm_dialect()?;
 
     create_sessions(&storage).await?;
     let mut turn_ids = Vec::new();
@@ -665,6 +666,7 @@ async fn seed(database_url: &str) -> Result<()> {
 
     emit(json!({
         "checkpoint": "seeded_older_deployment",
+        "dialect": dialect.language_id(),
         "probe_before_rewind": probe_before_rewind,
         "probe_after_rewind": probe_after_rewind,
         "expected_version": expected_version,

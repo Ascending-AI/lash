@@ -582,6 +582,7 @@ async fn provider_hang(
 
     Ok(json!({
         "checkpoint": "provider_hang_shape",
+        "dialect": runbook_dialect().language_id(),
         "backend": backend.name,
         "session_id": session_id,
         "expected_holder_owner_id": holder.owner_id,
@@ -689,6 +690,7 @@ async fn lease_takeover(
 
     Ok(json!({
         "checkpoint": "lease_takeover",
+        "dialect": runbook_dialect().language_id(),
         "backend": backend.name,
         "session_id": session_id,
         "abandoned_owner_id": abandoned_by.owner_id,
@@ -876,6 +878,7 @@ async fn commit_cas_livelock(
 
     Ok(json!({
         "checkpoint": "commit_cas_livelock",
+        "dialect": runbook_dialect().language_id(),
         "backend": backend.name,
         "session_id": session_id,
         "shared_owner_id": shared.owner_id,
@@ -1033,6 +1036,7 @@ async fn direct_turn_recovery(
 
     Ok(json!({
         "checkpoint": "direct_turn_recovery",
+        "dialect": runbook_dialect().language_id(),
         "backend": backend.name,
         "session_id": session_id,
         "abandoned_owner_id": abandoned_by.owner_id,
